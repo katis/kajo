@@ -256,8 +256,9 @@ worker's two hazard words (seq_cst); if one names the object it stores the
 old offset back (revert, release) and skips the object until the next cycle
 (counted). Dekker argument as for the post-store check below: either the
 relocator sees the hazard, or the primitive sees RELOCATING and waits for
-the revert or the switch, then uses the current body. `arrayCopy` is the
-only primitive that needs this (one of 38).
+the revert or the switch, then uses the current body. `arrayCopy`
+(primitive 38, new) is the only primitive that needs this; none of the 28
+existing primitive numbers does. `fragment` calls it every 64th iteration.
 
 ### Entry state encoding
 
@@ -318,7 +319,11 @@ if e2 != e1 || e1 & R != 0 { postStoreSlow(w, o, i, v) }   // one out-of-line ca
 Slow path: loop { wait while the offset word has R (spin, `sched_yield`
 every 64 spins); store `v` into the current body (seq_cst); reload the
 offset (seq_cst); done if unchanged }. Counted per worker: stores redone,
-spin episodes, spin time (max and total). The generational and SATB barrier
+spin episodes, spin time (max and total). In `store_ivar` and `at:put:` the
+check and the generational barrier form one shape: if the check fails, one
+out-of-line call (`storeConflict`) redoes the store and runs the barrier;
+otherwise the inline barrier follows, so nothing of the instruction is live
+after a call (AGENTS.md). The generational and SATB barrier
 work stays as it is and runs only for pointer stores.
 
 **Ordering argument.** Take the single total order S of seq_cst operations.
@@ -446,7 +451,12 @@ SmallInteger payload) and 4 two-slot `FPoint`s of young garbage (96 bytes).
 
 In the app (R5) the same loop runs forever, paced to 500 iterations per
 10 ms per worker (a `delay:` between batches), with keep stores of 256 x
-1024 slots that wrap around; 1 GiB soft limit.
+1024 slots that wrap around; 512 MiB soft limit and cycles from 30 percent
+of it, so that cycles start within the 11 s window (about 40 MB/s is
+promoted). `nil fragmentIters` is defined by the loader (2 000 000, or N
+for a kernel named `fragmentN`, used by the tests). Every 64th iteration
+the worker copies its newest keep chunk into a mirror Array with
+`replaceFrom:to:with:startingAt:` (`arrayCopy`, hazard slots).
 
 **`oldheap`** as before (`oldheapN`). Under `KAJO_RELOC=all` with cycles
 forced back to back it is the lost-store test: the checksum reads every
@@ -496,7 +506,7 @@ frames then max gap. 4 MiB nurseries.
 | R2 | R1 | N = 2 |
 | R3 | R1 | N = 2, relocation 50 |
 | R4 | `oldheap` 256 MiB live on 7 workers, mutating forever | N = 2, relocation `all`, cycles back to back (`force`), 576 MiB |
-| R5 | `fragment` on 7 workers (paced) | N = 2, relocation 50, 1 GiB |
+| R5 | `fragment` on 7 workers (paced) | N = 2, relocation 50, 512 MiB, cycles from 30 percent |
 | R5n | R5 | N = 2, no relocation |
 | R6 | R3 + ~100 us of Point churn on the main thread after each event (C5) | N = 2, relocation 50 |
 
@@ -504,8 +514,11 @@ Reported per scenario: frames, missed, drops, max gap, worst run-loop
 iteration with VM work, GC park and GC enter wait inside it, every pause
 kind's distribution, cycles, fallbacks, relocation activity (bytes moved,
 conflicts, pins, hazards, frees), the main worker's post-store spins (count
-and max), and for R5/R5n the footprint once per second. One run of R4 with
-`--verify` (every verifier), reported separately.
+and max), and for R5/R5n the footprint once per second. One run each of R4
+and R3 with `--verify` (the mark-set verifier at every final mark and the
+relocation verifier at every pause; the scavenge verifier, which builds a
+Swift Set of every young object, is left to the tests), reported
+separately.
 
 ## Choices (where DESIGN.md left one open)
 
