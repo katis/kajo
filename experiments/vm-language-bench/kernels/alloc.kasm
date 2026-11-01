@@ -1,0 +1,85 @@
+; alloc: binary-trees style. Each worker keeps one long-lived tree (depth 12)
+; alive across all GCs, then repeatedly builds a tree of depth 16, walks it
+; to count nodes, and drops it. Checksum = node counts summed (plus the
+; long-lived tree's count checked at the end, which verifies GC survivors).
+class Node Object 2
+
+method Node build: temps=0
+  push_temp 0
+  push_int 0
+  gt
+  jump_if_false leaf
+  push_lit @Node
+  send basicNew 0
+  push_temp 0
+  push_int 1
+  sub
+  send build: 1
+  store_ivar 0
+  push_lit @Node
+  send basicNew 0
+  push_temp 0
+  push_int 1
+  sub
+  send build: 1
+  store_ivar 1
+leaf:
+  return_self
+end
+
+method Node check temps=0
+  push_ivar 0
+  push_nil
+  identical
+  jump_if_false inner
+  push_int 1
+  return_top
+inner:
+  push_ivar 0
+  send check 0
+  push_ivar 1
+  send check 0
+  add
+  push_int 1
+  add
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = longLived, t3 = reps, t4 = sum
+method UndefinedObject run:of: temps=3
+  push_lit @Node
+  send basicNew 0
+  push_int 12
+  send build: 1
+  store_temp 2
+  push_lit 320
+  push_temp 1
+  send // 1
+  store_temp 3
+  push_int 0
+  store_temp 4
+loop:
+  push_temp 3
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 4
+  push_lit @Node
+  send basicNew 0
+  push_int 16
+  send build: 1
+  send check 0
+  add
+  store_temp 4
+  push_temp 3
+  push_int 1
+  sub
+  store_temp 3
+  jump loop
+done:
+  push_temp 4
+  push_temp 2
+  send check 0
+  add
+  return_top
+end
