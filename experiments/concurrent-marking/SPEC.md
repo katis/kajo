@@ -93,6 +93,7 @@ a stopper with the world stopped.
 **Slow path** (out of line, scalars passed):
 
 ```
+if header(o) is young: return                // a holder created after the snapshot
 old = slot(o, i)
 if old is a SmallInteger or 0: return
 if snapshot bit of old is 0: return          // allocated after the snapshot
@@ -100,9 +101,12 @@ if mark[old] != 0: return                    // already marked
 push old onto w.satb                         // 512 oops; hand over when full
 ```
 
-No test of the holder's age: the barrier is holder-agnostic (cheaper than
-loading the holder's header, and required in the literal-protocol test
-mode below).
+The holder test is in the slow path, not the fast path: with nothing young
+at the snapshot, a young holder was created after it, and overwriting its
+slots deletes no snapshot edge. (The first build had no holder test; the
+slow path then ran for every store into a fresh object while marking, 15
+million times in one `alloc` run.) In the literal-protocol test mode below
+young holders exist at the snapshot, so the test is skipped there.
 
 **Slot stores are atomic.** The marker reads slots of snapshot objects
 while mutators write them. Every slot store (`OM.setSlot`) is a relaxed
@@ -330,7 +334,8 @@ From earlier experiments, read in place: `arith`, `fib`, `sends`, `alloc`
 `gclib.kasm`, `gcui.kasm` (`../generational-gc/kernels/`), `lib.kasm`,
 `ui.kasm` (`../ui-thread-scheduling/kernels/`). New in `kernels/`:
 
-**`oldheapN`** (`oldheap.kasm` plus a generated `oldheapMB` answering N):
+**`oldheapN`** (`oldheap.kasm` plus generated methods answering N, the
+iteration count and the replacement interval):
 
 | parameter | value |
 |---|---|
@@ -338,10 +343,10 @@ From earlier experiments, read in place: `arith`, `fib`, `sends`, `alloc`
 | group | Array of 256 nodes, linked in a ring at first; 32 776 bytes of bodies |
 | live size | N x 32 groups in total (N MiB of bodies plus spines), split between workers |
 | spine | per worker, Arrays of 256 groups under one Array |
-| iterations | 16 000 000 in total, split between workers |
+| iterations | N x 250 000 in total, split between workers (every run replaces about twice the live data) |
 | churn | one 2-slot `OHPoint` per iteration, read back and dropped |
 | rewire | every 8th iteration: `(g at: a) at: 1 put: (g at: b)`, pseudo-random g, a, b (LCG) |
-| replace | every 4096th iteration: the oldest group (FIFO per worker) is replaced by a freshly built one |
+| replace | every 4096th iteration (headless; 32 768th in the app, "slowly mutating"): the oldest group (FIFO per worker) is replaced by a freshly built one |
 | old space | soft limit `2 N + 64` MiB, so live data is 33 to 47 percent of it |
 | checksum | churn sum plus, over every node, its link target's payload |
 

@@ -33,14 +33,8 @@ method OHPoint x temps=0
   return_top
 end
 
-method UndefinedObject oldheapIters temps=0
-  push_lit 16000000
-  return_top
-end
-
-method UndefinedObject oldheapReplaceEvery temps=0
-  push_lit 4096
-  return_top
+; Records when a build phase ended (cm-bench reports build and mutate time).
+method UndefinedObject ohBuilt temps=0 prim=37
 end
 
 ; nil ohGroup: s -> a fresh group; node j has payload s + j and links to
@@ -458,6 +452,9 @@ method UndefinedObject run:of: temps=2
   push_temp 1
   send ohBuild:of: 2
   store_temp 2
+  push_nil
+  send ohBuilt 0
+  pop
   push_nil
   push_temp 2
   push_nil
