@@ -368,7 +368,9 @@ func primUI(_ vm: VMRef, _ w: WorkerRef, _ kind: Int, _ value: Oop, _ argc: Int)
     if w.pointee.isMain {
         vm.add(.uiPrims, 1)
         if kind == 0 && w.pointee.currentEventTicks != 0 {
-            vm.pointee.eventLatency.pointee.add(ticksToNs(ticks() &- w.pointee.currentEventTicks))
+            let t = ticks()
+            vm.pointee.eventLatency.pointee.add(ticksToNs(t &- w.pointee.currentEventTicks))
+            vm.pointee.eventLatencyPost.pointee.add(ticksToNs(t &- w.pointee.currentEventPosted))
             w.pointee.currentEventTicks = 0
         }
         guard let h = vm.pointee.uiHook else { return isInt(value) ? value : mkInt(0) }
@@ -412,6 +414,7 @@ func primNextEvent(_ vm: VMRef, _ w: WorkerRef) -> Oop {
     vm.pointee.evq.pointee.head &+= 1
     pthread_mutex_unlock(vm.pointee.eventLock)
     w.pointee.currentEventTicks = e.ticks
+    w.pointee.currentEventPosted = e.posted
     return mkInt((e.kind << 32) | (e.value & 0xFFFF_FFFF))
 }
 

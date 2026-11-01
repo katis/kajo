@@ -148,13 +148,14 @@ func primIoResult(_ vm: VMRef, _ w: WorkerRef, _ handle: Oop) -> Oop {
 
 /// Shell side: enqueue a native event and signal the event Semaphore
 /// (global 1). Any thread; touches no heap memory.
-public func postEvent(_ vm: VMRef, kind: Int64, value: Int64, wake: Bool) {
+public func postEvent(_ vm: VMRef, kind: Int64, value: Int64, wake: Bool, at stamp: UInt64? = nil) {
     pthread_mutex_lock(vm.pointee.eventLock)
     if vm.pointee.evq.pointee.tail &- vm.pointee.evq.pointee.head >= eventCapacity {
         pthread_mutex_unlock(vm.pointee.eventLock)
         return // dropped; the shell counts posted vs handled
     }
-    vm.pointee.events[vm.pointee.evq.pointee.tail & (eventCapacity - 1)] = Event(kind: kind, value: value, ticks: ticks())
+    let t = ticks()
+    vm.pointee.events[vm.pointee.evq.pointee.tail & (eventCapacity - 1)] = Event(kind: kind, value: value, ticks: stamp ?? t, posted: t)
     vm.pointee.evq.pointee.tail &+= 1
     pthread_mutex_unlock(vm.pointee.eventLock)
     signalFromOutside(vm, vm.pointee.globals[0], handle: -1, wake: wake)

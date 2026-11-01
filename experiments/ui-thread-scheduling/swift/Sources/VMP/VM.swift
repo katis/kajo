@@ -56,6 +56,7 @@ public struct Worker {
     public var minPriority: Int = 0
     /// Main worker: the event `nextEvent` last handed out (enqueue ticks).
     public var currentEventTicks: UInt64 = 0
+    public var currentEventPosted: UInt64 = 0
     public var tlab = Tlab()
     public var ws = WorkerSpace()
     public var cache: UnsafeMutablePointer<CacheEntry>
@@ -175,7 +176,10 @@ struct ExtNode {
 public struct Event {
     public var kind: Int64
     public var value: Int64
+    /// When the event happened (due time for synthetic events).
     public var ticks: UInt64
+    /// When the shell enqueued it.
+    public var posted: UInt64
 }
 
 /// Everything the interpreter and GC touch. A plain struct of trivial fields
@@ -255,7 +259,8 @@ public struct VMCore: ~Copyable {
     public let mainBusyRec: Atomic<Int>
 
     // --- samples (ns)
-    public let eventLatency = Samples.make(1 << 20)     // main only
+    public let eventLatency = Samples.make(1 << 20)     // main only, from event time
+    public let eventLatencyPost = Samples.make(1 << 20) // main only, from enqueue
     public let hopLatency = Samples.make(1 << 20)       // main only
     public let mainPerHop = Samples.make(1 << 20)       // main only
     public let gcTtsp = Samples.make(1 << 16)           // under mutex
