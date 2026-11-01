@@ -40,7 +40,11 @@ public struct Worker {
         stack.initialize(repeating: nilObj, count: stackWords)
         let cache = UnsafeMutablePointer<CacheEntry>.allocate(capacity: cacheSize)
         cache.initialize(repeating: CacheEntry(), count: cacheSize)
-        let w = UnsafeMutablePointer<Worker>.allocate(capacity: 1)
+        // Each worker on its own 128-byte cache lines (M2 line size): workers
+        // write their struct on every primitive call, and adjacent mallocs
+        // falsely shared lines (found by the 8-worker sends numbers).
+        let bytes = (MemoryLayout<Worker>.stride + 127) & ~127
+        let w = UnsafeMutableRawPointer.allocate(byteCount: bytes, alignment: 128).bindMemory(to: Worker.self, capacity: 1)
         w.initialize(to: Worker(id: id, stack: stack, stackEnd: stack + stackWords, sp: stack, cache: cache))
         return w
     }
