@@ -92,6 +92,16 @@ Safety:
    handed to other threads outside main-actor context.
  - Timestamp events with the time they happened, never the time they were
    enqueued, or a stall between the two is invisible to every measurement.
+ - Once objects move, host code may not read heap objects outside the VM.
+   Inspection from Swift enters the VM like a primitive does.
+ - Mutators must not set bits in a live object header that other workers
+   read concurrently. Side tables (a byte map beside the entry table) are
+   the pattern for marks set from the hot path.
+ - In a stop-the-world protocol, a worker released from one stop must not be
+   counted as parked for the next. This bug hid until two pauses came close
+   together; the regression test is in experiments/generational-gc.
+ - Blocking on a safepoint mutex at VM entry and exit is not VM work. Keep
+   wait time and work time separate in every measurement.
  - `Atomic` is non-copyable, so a struct holding one inline becomes
    `~Copyable`. There is no clean way to treat a raw object header word as an
    atomic; parallel marking will need its own design.
@@ -102,8 +112,10 @@ Decisions live in `docs/adr/`, one per file, each pointing at the experiment
 that produced its evidence. Current: 0001 Swift for the VM core, 0002
 repository layout, 0003 object table for object representation (proposed,
 pending a device measurement), 0004 Smalltalk UI code on the main thread with
-budgeted preemption (proposed, pending a pause-bounded collector). Read them
-before touching the areas they cover.
+budgeted preemption (proposed, pending a pause-bounded collector), 0005
+generational collection with per-worker nurseries (proposed; full collections
+of old space are still the frame-droppers). Read them before touching the
+areas they cover.
 
 ## Project structure
 
