@@ -48,20 +48,23 @@ private func doReturn(_ om: OM, _ r: Regs, _ v: Oop) -> Regs {
 }
 
 /// After a park point: if a moving operation ran, re-derive pc and lits.
+/// The slow path takes and returns scalars so the hot path never has to
+/// materialise `Regs` in memory.
 @inline(__always)
-private func resync(_ vm: VMRef, _ w: WorkerRef, _ r: Regs) -> Regs {
-    if !w.pointee.moved { return r }
-    return resyncSlow(vm, w, r)
+private func resync(_ vm: VMRef, _ w: WorkerRef, _ r: inout Regs) {
+    if w.pointee.moved {
+        let (pc, lits) = resyncSlow(vm, w, r.hdr)
+        r.pc = pc
+        r.lits = lits
+    }
 }
 
 @inline(never)
-private func resyncSlow(_ vm: VMRef, _ w: WorkerRef, _ r: Regs) -> Regs {
+private func resyncSlow(_ vm: VMRef, _ w: WorkerRef, _ hdr: UnsafeMutablePointer<UInt64>) -> (UnsafePointer<UInt8>, UnsafePointer<UInt64>) {
     w.pointee.moved = false
     let om = vm.pointee.om
-    var o = r
-    o.pc = UnsafePointer(bitPattern: w.pointee.pc).unsafelyUnwrapped // RAW
-    o.lits = UnsafePointer(om.slotsPtr(om.slot(r.hdr[0], mLiterals))) // RAW
-    return o
+    return (UnsafePointer(bitPattern: w.pointee.pc).unsafelyUnwrapped, // RAW
+            UnsafePointer(om.slotsPtr(om.slot(hdr[0], mLiterals)))) // RAW
 }
 
 @inline(__always)
@@ -74,18 +77,21 @@ private func flush(_ w: WorkerRef, _ r: Regs) {
 @inline(__always)
 private func poll(_ vm: VMRef, _ w: WorkerRef, _ r: inout Regs) {
     if vm.pointee.gcRequested.load(ordering: .relaxed) {
-        r = pollSlow(vm, w, r)
+        pollSlow(vm, w, r.sp, r.pc, r.hdr)
+        resync(vm, w, &r)
     }
 }
 
 @inline(never)
-private func pollSlow(_ vm: VMRef, _ w: WorkerRef, _ r: Regs) -> Regs {
-    flush(w, r)
+private func pollSlow(_ vm: VMRef, _ w: WorkerRef, _ sp: UnsafeMutablePointer<UInt64>, _ pc: UnsafePointer<UInt8>,
+                      _ hdr: UnsafeMutablePointer<UInt64>) {
+    w.pointee.sp = sp
+    w.pointee.pc = UInt(bitPattern: pc)
+    w.pointee.hdr = hdr
     safepoint(vm, w)
-    return resync(vm, w, r)
 }
 
-@inline(__always)
+@_transparent
 private func send(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ r0: Regs, _ sel: Oop, _ argc: Int) -> Regs {
     var r = r0
     poll(vm, w, &r)
@@ -102,7 +108,8 @@ private func send(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ r0: Regs, _ sel: Oop,
     if prim != mkInt(0) {
         flush(w, r)
         let res = primitive(vm, w, intVal(prim), r.sp, argc)
-        var out = resync(vm, w, r)
+        var out = r
+        resync(vm, w, &out)
         out.sp = r.sp - argc
         out.sp.pointee = res
         return out

@@ -1,5 +1,5 @@
 ; walk: each worker builds a graph of 2^22 / n WNodes linked in a scattered
-; (LCG) order, then follows `next` around the whole cycle 3 times summing
+; (LCG) order, then follows `next` around the whole cycle 2 times summing
 ; val * hop. Dependent loads that defeat the prefetcher: the worst case for
 ; an object table, where each hop is two dependent loads.
 ; args: t0 = w, t1 = n. temps: t2 = m, t3 = nodes, t4 = reps, t5 = sum
@@ -14,7 +14,7 @@ method UndefinedObject run:of: temps=4
   store_temp 3
   push_int 0
   store_temp 5
-  push_int 3
+  push_int 2
   store_temp 4
 loop:
   push_temp 4

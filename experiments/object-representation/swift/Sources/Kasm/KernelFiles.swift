@@ -5,7 +5,7 @@ import Darwin
 
 public let oldKernels: Set<String> = ["arith", "fib", "sends", "alloc"]
 public let opKernels: Set<String> = ["become", "reshape", "compact", "snapshot"]
-public let allKernels = ["arith", "fib", "sends", "alloc", "ivars", "walk",
+public let allKernels = ["arith", "fib", "sends", "alloc", "ivars", "walk", "walkbuild",
                          "become", "reshape", "compact", "snapshot"]
 
 /// experiments/ directory, derived from this file's path.

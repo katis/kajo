@@ -252,7 +252,7 @@ selects which metric records it), 12 `compact:`, 13 `snapshot`, 14
 |---|---|---|
 | arith, fib, sends, alloc | unchanged from vm-language-bench | 64 MiB |
 | ivars | 4 `Cell`s (4 ivars) per worker; `spin: 1000` round-robin; 32 000 spins in total split between workers; ~12 ivar reads/writes per iteration | 64 MiB |
-| walk | 2^22 `WNode`s (next, val) in total, 2^22/n per worker, node `i` links to node `(1664525 i + 1013904223) mod m` (a full-period LCG, one cycle through all nodes in a scattered order); 3 traversals summing `val * hop` | 1 GiB |
+| walk | 2^22 `WNode`s (next, val) in total, 2^22/n per worker, node `i` links to node `(1664525 i + 1013904223) mod m` (a full-period LCG, one cycle through all nodes in a scattered order); 2 traversals summing `val * hop` | 1 GiB |
 | become | 2^20 objects alternating classes P (2 ivars) and Q (3 ivars); `gc: 1`; 10 000 two-way becomes between a random P and a random Q (always different sizes, so A takes the forwarder path); bulk forward of 100 000 objects (every 10th) to fresh objects; weighted checksum and identity count read through any forwarders; `gc: 2` (A: the cleanup GC); checksum again | 1 GiB |
 | reshape | 2^20 instances of R (2 ivars); `gc: 1`; `R addInstVar`; touch every instance (writes and reads the new ivar); `gc: 2` | 1 GiB |
 | compact | 2^21 `CNode`s allocated, every other kept (linked to the previous kept one), the rest garbage; `gc: 3` (mark, sweep timed); `compact: 4`; checksum via the chain and via the `Big` | 1 GiB |
