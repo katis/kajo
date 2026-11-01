@@ -107,6 +107,7 @@ private func pollSlow(_ vm: VMRef, _ w: WorkerRef, _ sp: UnsafeMutablePointer<UI
     w.pointee.fp = fp
     if vm.pointee.gcRequested.load(ordering: .relaxed) { safepoint(vm, w) }
     if w.pointee.countdown <= 0 {
+        pendingFull(vm, w)
         w.pointee.countdown = w.pointee.pollEvery
         return budgetCheck(vm, w)
     }

@@ -484,9 +484,12 @@ public func backgroundLoop(_ vm: VMRef, _ w: WorkerRef) {
         vm.pointee.sched.pointee.idleWorkers -= 1
         schedUnlock(vm)
         let dt = now() &- t0
-        w.pointee.idleNs &+= dt
         vm.add(.idleNs, dt)
         enterVM(vm, w)
+        // Only inside the VM: while this worker is outside, a stopper may
+        // retire its buffers, a modifying access of the same Worker struct
+        // (ThreadSanitizer: Swift access race).
+        w.pointee.idleNs &+= dt
     }
     leaveVM(vm, w)
 }
@@ -545,6 +548,11 @@ public func runMain(_ vm: VMRef, budgetNs: UInt64, minPriority: Int = 0) -> Turn
 /// report through `stuckHook` (SPEC.md "Stuck report"). Main thread, outside
 /// a turn.
 public func checkStuck(_ vm: VMRef, limitNs: UInt64) {
+    // Inside the VM on the main worker: Process bodies may be moved by a
+    // scavenge, so reading their slots outside the VM races with it.
+    let mw = worker(vm, 0)
+    enterVM(vm, mw)
+    defer { leaveVM(vm, mw) }
     let now = ticks()
     let limit = nsToTicks(limitNs)
     var reports: [(Int64, String, Double)] = []
@@ -612,9 +620,23 @@ public func hostTerminate(_ vm: VMRef, _ p: Oop) {
 }
 
 public func processState(_ vm: VMRef, _ p: Oop) -> Int64 {
+    // Host thread: enter the VM, a scavenge may move the Process's body.
+    let w = hostWorker(vm)
+    enterVM(vm, w)
     schedLock(vm)
-    defer { schedUnlock(vm) }
-    return intVal(vm.pointee.om.slot(p, pState))
+    let st = intVal(vm.pointee.om.slot(p, pState))
+    schedUnlock(vm)
+    leaveVM(vm, w)
+    return st
+}
+
+/// A Process's id, read inside the VM on the host worker.
+public func processId(_ vm: VMRef, _ p: Oop) -> Int64 {
+    let w = hostWorker(vm)
+    enterVM(vm, w)
+    let id = intVal(vm.pointee.om.slot(p, pId))
+    leaveVM(vm, w)
+    return id
 }
 
 /// The host's worker (last registered); use it only from the host thread.

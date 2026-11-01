@@ -513,6 +513,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         let enter = samplesMs(vm.pointee.mainEnterWait, from: sampleStart["enter"] ?? 0)
         line += " main_enter_waits=\(enter.count) main_enter_wait_max_ms=\(f3(enter.max() ?? 0))"
         line += " churn100us=\(churn100us) " + gcSummary(vm, from: gcLogStart)
+        dumpPauses(vm, prefix: "scenario=\(opt.scenario) run=\(opt.run)", from: gcLogStart)
         line += " sched_locks=\(d(.schedLocks)) sched_contended=\(d(.schedContended)) sched_wait_ms=\(f3(Double(d(.schedWaitNs)) / 1e6))"
         line += " idle_ms=\(f2(Double(d(.idleNs)) / 1e6)) rss_mb=\(f2(Double(currentRSS()) / 1048576))"
         print(line)

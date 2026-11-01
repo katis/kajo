@@ -193,8 +193,10 @@ stacks, buffers and logs are still processed, by whoever takes the task.
 7. *Finish*: chunk pool rebuild, nursery tops reset, remembered buffers
    emptied, statistics; the world resumes. If another scavenge promoting as
    much as this one would cross old space's soft limit, a full collection is
-   marked pending and the stopper requests it as its own pause right after
-   resuming (any stop that comes first is upgraded to it). Only if old space
+   marked pending, due 1 ms later (`KAJO_FULL_DELAY_US`); the first worker
+   to pass a budget check (every 1024 polls) after that requests it as its
+   own pause, and any stop that comes first is upgraded to it. The delay
+   lets a main-thread turn run between the two pauses. Only if old space
    is already more than a quarter of the promotion reserve above the soft
    limit does the mark-sweep run inside this pause. (Changed after the first
    scenario runs: a scavenge stacked on a mark-sweep made 9 to 14 ms pauses.)
@@ -263,6 +265,13 @@ block pool rebuild. Promotion TLABs are retired first. Full-collection
 pauses are recorded separately from scavenge pauses. Requested as its own
 pause right after the scavenge that found old space nearly full, so its
 scavenge part is small.
+
+## Host-side readers
+
+With a non-moving heap the shell and the host could read a Process's
+slots outside the VM under the scheduler lock (`processState`,
+`checkStuck`, kernel result ids). Young bodies now move, so these enter the
+VM (on the host or main worker) for the read.
 
 ## Stop protocol fix
 

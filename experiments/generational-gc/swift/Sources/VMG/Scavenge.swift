@@ -50,6 +50,8 @@ struct GCShared {
     /// A scavenge left old space above its soft limit: the next stop (the
     /// stopper requests one right after resuming) is a full collection.
     var fullPending: UnsafeMutablePointer<Atomic<Bool>>
+    /// Ticks after which a pending full collection is requested at a poll.
+    var fullDue: UnsafeMutablePointer<Atomic<UInt64>>
 
     static func make() -> UnsafeMutablePointer<GCShared> {
         func counter() -> UnsafeMutablePointer<Atomic<Int>> {
@@ -69,6 +71,8 @@ struct GCShared {
         let full = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
         let free = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
         for i in 0..<maxPackets { free[i] = i }
+        let due = UnsafeMutablePointer<Atomic<UInt64>>.allocate(capacity: 1)
+        due.initialize(to: Atomic(0))
         let fp = UnsafeMutablePointer<Atomic<Bool>>.allocate(capacity: 1)
         fp.initialize(to: Atomic(false))
         let counts = UnsafeMutablePointer<Int>.allocate(capacity: 2)
@@ -76,7 +80,7 @@ struct GCShared {
         counts[1] = maxPackets
         return boxed(GCShared(taskNext: counter(), sweepNext: counter(), inCopy: counter(), copyEnd: ce, parts: parts,
                               packetLock: lock, packets: packets, packetLen: len, fullList: full, freeList: free,
-                              counts: counts, poolCount: counter(), idle: counter(), fullPending: fp))
+                              counts: counts, poolCount: counter(), idle: counter(), fullPending: fp, fullDue: due))
     }
 }
 
@@ -142,6 +146,7 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
     if case .full = op { needFull = true }
     else if heap.blocksInUse() > heap.softBlocks + (heap.nblocks - heap.softBlocks) / 4 { needFull = true }
     else if generational && heap.blocksInUse() + expect > heap.softBlocks {
+        vm.pointee.gc.pointee.fullDue.pointee.store(ticks() &+ nsToTicks(fullDelayNs), ordering: .relaxed)
         vm.pointee.gc.pointee.fullPending.pointee.store(true, ordering: .relaxed)
     }
     if needFull { vm.pointee.gc.pointee.fullPending.pointee.store(false, ordering: .relaxed) }
@@ -188,6 +193,10 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
 
 private let rootTaskWords = 4096
 let packetWords = 256
+/// Mutator time between a scavenge and the full collection it asked for
+/// (`KAJO_FULL_DELAY_US`, default 1000), so a main-thread turn can run
+/// between the two pauses.
+let fullDelayNs: UInt64 = UInt64(envInt("KAJO_FULL_DELAY_US") ?? 1000) * 1000
 let maxPackets = 1024
 private let remTaskHolders = 256
 private let sweepTaskWords = 1024
@@ -437,7 +446,10 @@ private func drain(_ vm: VMRef, _ w: WorkerRef, _ om: OM) {
     let g = vm.pointee.gc
     var k = 0
     while let o = w.pointee.gcStack.pop() {
-        let h = om.header(o) // claimed by this participant; others only load it
+        // Claimed by this participant. A relaxed atomic load (a plain ldr on
+        // arm64): losers' failed CASes on this header are recorded by
+        // ThreadSanitizer as atomic writes, so a plain load is reported.
+        let h = atomicHeader(om.entry(o)).pointee.load(ordering: .relaxed)
         let n = hdrSlots(h)
         let s = om.slotsPtr(o)
         var i = 0

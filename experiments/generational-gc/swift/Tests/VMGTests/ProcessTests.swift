@@ -20,7 +20,7 @@ func runtime(_ src: String, background: Int, heap: Int = 64 << 20, sliceMs: Doub
 }
 
 func result(_ rt: Runtime, _ p: Oop) -> Int64 {
-    intVal(rt.vm.pointee.results[Int(intVal(rt.vm.pointee.om.slot(p, pId)))])
+    intVal(rt.vm.pointee.results[Int(processId(rt.vm, p))])
 }
 
 func global(_ rt: Runtime, _ i: Int) -> Oop { rt.vm.pointee.globals[i - 1] }

@@ -94,7 +94,7 @@ public func runKernel(_ img: Image, workers n: Int) -> (RunResult, Runtime) {
     var ids: [Int64] = []
     for i in 0..<n {
         let p = spawn(vm, vm.pointee.nilObj, sel, mkInt(Int64(i * 256 + n)))
-        ids.append(intVal(vm.pointee.om.slot(p, pId)))
+        ids.append(processId(vm, p))
     }
     waitAllTerminated(vm)
     let ms = Double(now() - t0) / 1e6
@@ -108,8 +108,24 @@ public func runKernel(_ img: Image, workers n: Int) -> (RunResult, Runtime) {
     return (RunResult(checksum: results.reduce(0, &+), results: results, ms: ms), rt)
 }
 
+/// Old space: `KAJO_HEAP_MB`, default 64 MiB (as in the earlier experiments).
 public func loadKernel(_ kernel: String) throws -> Image {
-    try Image.fromSources(try kernelSources(kernel), heapSize: 64 << 20)
+    try Image.fromSources(try kernelSources(kernel), heapSize: (envInt("KAJO_HEAP_MB") ?? 64) << 20)
+}
+
+/// Append one line per pause to `KAJO_GC_DUMP`, prefixed by `KAJO_TAG`.
+public func dumpPauses(_ vm: VMRef, prefix: String, from: Int = 0) {
+    guard let path = getenv("KAJO_GC_DUMP").map({ String(cString: $0) }), let f = fopen(path, "a") else { return }
+    let tag = getenv("KAJO_TAG").map { String(cString: $0) } ?? ""
+    let recs = vm.pointee.gcLog.pointee.records
+    for r in recs[min(from, recs.count)...] {
+        var l = "\(tag) \(prefix) kind=\(r.full ? "full" : "scav") total=\(r.totalNs) ttsp=\(r.ttspNs) coord=\(r.coordNs)"
+        l += " roots=\(r.critRootsNs) rem=\(r.critRemNs) copy=\(r.critCopyNs) sweep=\(r.critSweepNs) mark=\(r.markNs) mssweep=\(r.msSweepNs)"
+        l += " prep=\(r.prepNs) finish=\(r.finishNs) parts=\(r.participants) young=\(r.youngBytes) promoted=\(r.promotedBytes)"
+        l += " remset=\(r.remSet) entalloc=\(r.entriesAllocated) entfreed=\(r.entriesFreed) busy=\(r.meanBusyNs)\n"
+        fputs(l, f)
+    }
+    fclose(f)
 }
 
 func pctl(_ xs: [Double], _ p: Double) -> Double {
@@ -241,6 +257,7 @@ public func benchLine(kernel: String, workers: Int) throws -> String {
     line += " ms=\((r.ms * 10).rounded() / 10) checksum=\(r.checksum)"
     let slices = rt.workers.reduce(0) { $0 + $1.pointee.slices }
     line += " slices=\(slices) \(gcSummary(vm))"
+    dumpPauses(vm, prefix: "kernel=\(kernel) workers=\(workers) nursery_kb=\(vm.pointee.heap.nurseryBytes / 1024)")
     for m in Metric.allCases {
         let v = vm.metric(m)
         if v == 0 { continue }

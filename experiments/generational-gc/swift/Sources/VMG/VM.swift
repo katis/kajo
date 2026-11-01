@@ -632,9 +632,6 @@ func stopWorld(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, retry: Bool) -> Oop? {
     vm.pointee.gcStw.pointee.add(t2 &- t0)
     pthread_cond_broadcast(vm.pointee.cond)
     pthread_mutex_unlock(vm.pointee.mutex)
-    if case .scavenge = op, vm.pointee.gc.pointee.fullPending.pointee.load(ordering: .relaxed) {
-        stopWorld(vm, w, .full, retry: false)
-    }
     return 0
 }
 
@@ -674,3 +671,12 @@ public func leaveVM(_ vm: VMRef, _ w: WorkerRef) {
     pthread_mutex_unlock(vm.pointee.mutex)
 }
 
+
+/// Poll slow path: request a pending full collection once its delay passed.
+@inline(never)
+func pendingFull(_ vm: VMRef, _ w: WorkerRef) {
+    let g = vm.pointee.gc
+    if g.pointee.fullPending.pointee.load(ordering: .relaxed) && ticks() >= g.pointee.fullDue.pointee.load(ordering: .relaxed) {
+        stopWorld(vm, w, .full, retry: false)
+    }
+}
