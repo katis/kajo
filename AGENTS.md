@@ -83,7 +83,15 @@ Safety:
    cooperative pool.
  - Avoid global mutable state in the VM. Everything hangs off one VM state
    struct reached through a pointer; this also keeps Swift 6 mode free of
-   `nonisolated(unsafe)`.
+   `nonisolated(unsafe)`. But that struct must hold pointers to separately
+   allocated sub-states, one per lock. Writing different fields of a single
+   struct under different locks is reported by ThreadSanitizer as a Swift
+   exclusivity race.
+ - A closure written inside a `@MainActor` method is main-actor code, and
+   Swift 6 traps at runtime when GCD or a VM thread runs it. Build callbacks
+   handed to other threads outside main-actor context.
+ - Timestamp events with the time they happened, never the time they were
+   enqueued, or a stall between the two is invisible to every measurement.
  - `Atomic` is non-copyable, so a struct holding one inline becomes
    `~Copyable`. There is no clean way to treat a raw object header word as an
    atomic; parallel marking will need its own design.
@@ -93,7 +101,9 @@ Safety:
 Decisions live in `docs/adr/`, one per file, each pointing at the experiment
 that produced its evidence. Current: 0001 Swift for the VM core, 0002
 repository layout, 0003 object table for object representation (proposed,
-pending a device measurement). Read them before touching the areas they cover.
+pending a device measurement), 0004 Smalltalk UI code on the main thread with
+budgeted preemption (proposed, pending a pause-bounded collector). Read them
+before touching the areas they cover.
 
 ## Project structure
 
