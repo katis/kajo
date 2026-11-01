@@ -3,6 +3,7 @@
 import Darwin
 import Kasm
 import VMA
+import VMB
 import VMC
 
 let args = CommandLine.arguments
@@ -17,6 +18,7 @@ do {
     let line: String
     switch args[1] {
     case "A": line = try VMA.benchLine(kernel: args[2], workers: n, snapshotDir: snapDir)
+    case "B": line = try VMB.benchLine(kernel: args[2], workers: n, snapshotDir: snapDir)
     case "C": line = try VMC.benchLine(kernel: args[2], workers: n, snapshotDir: snapDir)
     default: fputs("variant must be A, B or C\n", stderr); exit(1)
     }
