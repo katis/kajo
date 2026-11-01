@@ -118,6 +118,25 @@ Safety:
  - `Atomic` is non-copyable, so a struct holding one inline becomes
    `~Copyable`. There is no clean way to treat a raw object header word as an
    atomic; parallel marking will need its own design.
+ - Survivor-space size, not the promotion age, decides whether an age field
+   helps. Size the nursery to the live set per worker at a scavenge; N = 2
+   against N = 4 changed nothing, 4 against 16 MiB changed promotion 15x.
+ - Every invariant that leans on "nothing is young after a scavenge" breaks
+   once survivor spaces exist: the claim bit, the remembered set, and the
+   marking snapshot (survivors must be roots). Write the test before adding
+   the age.
+ - A post-store check needs seq_cst on the store and the following load of
+   the state word; release/acquire lets them reorder and loses the store.
+   The failed-check path must be one out-of-line call that redoes the store
+   and runs the barrier, or register pressure costs more than the check
+   (58 percent before, 1 percent after).
+ - With the object table, concurrent relocation needs one atomic switch per
+   object, a store check, pins for the two raw pointers the interpreter
+   caches, and epoch freeing. Keep raw body pointers out of the interpreter
+   and primitives; every one you add is a pin or a hazard slot.
+ - ThreadSanitizer cannot see that two mappings of the same memory alias.
+   Any protocol built on a double mapping is covered by tests and the
+   ordering argument only; say so where the mapping is created.
 
 ## Decisions
 
@@ -128,8 +147,10 @@ pending a device measurement), 0004 Smalltalk UI code on the main thread with
 budgeted preemption (proposed, pending a pause-bounded collector), 0005
 generational collection with per-worker nurseries (proposed), 0006
 concurrent marking and lazy sweeping of old space (proposed; pauses no longer
-depend on heap size, given old-space headroom). Read them before touching
-the areas they cover.
+depend on heap size, given old-space headroom), 0007 age field with survivor
+spaces and concurrent relocation of old space through the entry table
+(proposed; old-space work is off the frame budget, scavenges remain). Read
+them before touching the areas they cover.
 
 ## Project structure
 
