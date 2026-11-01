@@ -1,0 +1,6 @@
+; Primitives added by the generational-gc experiment (SPEC.md). Loaded after
+; ../../ui-thread-scheduling/kernels/lib.kasm.
+method UndefinedObject scavenge temps=0 prim=35
+end
+method UndefinedObject fullGC temps=0 prim=36
+end

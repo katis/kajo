@@ -1,0 +1,73 @@
+; churn: the generational best case. Per iteration a fresh Point and a fresh
+; 2-slot Array holding it; both are read back and dropped. Nothing survives.
+; Two 24-byte bodies per iteration. 16 000 000 iterations split between
+; workers. Checksum: sum over r = reps..1 of (r + (r + 1)).
+class Point Object 2
+
+method Point x temps=0
+  push_ivar 0
+  return_top
+end
+
+method Point y temps=0
+  push_ivar 1
+  return_top
+end
+
+method Point x:y: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; args: t0 = w, t1 = n. temps: t2 = reps, t3 = sum, t4 = p, t5 = a
+method UndefinedObject run:of: temps=4
+  push_lit 16000000
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_int 0
+  store_temp 3
+loop:
+  push_temp 2
+  push_int 0
+  gt
+  jump_if_false done
+  push_lit @Point
+  send basicNew 0
+  push_temp 2
+  push_temp 2
+  push_int 1
+  add
+  send x:y: 2
+  store_temp 4
+  push_lit @Array
+  push_int 2
+  send new: 1
+  store_temp 5
+  push_temp 5
+  push_int 1
+  push_temp 4
+  send at:put: 2
+  pop
+  push_temp 3
+  push_temp 5
+  push_int 1
+  send at: 1
+  send x 0
+  add
+  push_temp 4
+  send y 0
+  add
+  store_temp 3
+  push_temp 2
+  push_int 1
+  sub
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  return_top
+end

@@ -1,0 +1,94 @@
+; Scenario code added by the generational-gc experiment (SPEC.md
+; "Scenarios"). Loaded after ../../ui-thread-scheduling/kernels/ui.kasm.
+; G3 additionally loads survivors.kasm and a survivalPercent method.
+
+; --- G3: the survivors kernel body forever.
+method UndefinedObject survLoop temps=0
+loop:
+  push_nil
+  push_int 0
+  push_int 8
+  send run:of: 2
+  pop
+  jump loop
+end
+
+; --- G4: allocate and drop t0 UPoints.
+class UPoint Object 2
+
+method UPoint ux:uy: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; t0 = n, t1 = i
+method UndefinedObject churnBatch: temps=1
+  push_int 0
+  store_temp 1
+loop:
+  push_temp 1
+  push_temp 0
+  lt
+  jump_if_false done
+  push_lit @UPoint
+  send basicNew 0
+  push_temp 1
+  push_temp 0
+  send ux:uy: 2
+  pop
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump loop
+done:
+  push_temp 1
+  return_top
+end
+
+; --- G4: the UI Process of uiLoop: plus a churn batch after every event.
+; t0 = spins * 65536 + churn count, t1 = event Semaphore, t2 = handled,
+; t3 = spins, t4 = churn count
+method UndefinedObject uiChurnLoop: temps=4
+  push_temp 0
+  push_lit 65536
+  send // 1
+  store_temp 3
+  push_temp 0
+  push_lit 65536
+  send \\ 1
+  store_temp 4
+  push_nil
+  push_int 1
+  send globalAt: 1
+  store_temp 1
+  push_int 0
+  store_temp 2
+loop:
+  push_temp 1
+  send wait 0
+  pop
+  push_nil
+  send nextEvent 0
+  pop
+  push_nil
+  push_temp 3
+  send spin: 1
+  pop
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  push_nil
+  push_temp 2
+  send setLabel: 1
+  pop
+  push_nil
+  push_temp 4
+  send churnBatch: 1
+  pop
+  jump loop
+end
