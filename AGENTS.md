@@ -102,6 +102,19 @@ Safety:
    together; the regression test is in experiments/generational-gc.
  - Blocking on a safepoint mutex at VM entry and exit is not VM work. Keep
    wait time and work time separate in every measurement.
+ - A slow path called from the interpreter loop must be one out-of-line call
+   with nothing of the current instruction live across it. One extra call
+   site cost 20 percent through register pressure before it did any work.
+ - Collector threads at low QoS land on the efficiency cores when workers
+   are busy and run at a third to a half of their speed. Set their QoS
+   deliberately; it decides whether the collector keeps up.
+ - In a generational heap, take the concurrent-marking snapshot at the end
+   of a scavenge, when nothing is young. A snapshot taken while young
+   objects exist loses old objects reachable only through them. The failing
+   test is in experiments/concurrent-marking.
+ - Concurrent collection needs old-space headroom proportional to the
+   promotion rate. Fallbacks to stop-the-world are a provisioning failure to
+   count and report, never to hide.
  - `Atomic` is non-copyable, so a struct holding one inline becomes
    `~Copyable`. There is no clean way to treat a raw object header word as an
    atomic; parallel marking will need its own design.
@@ -113,9 +126,10 @@ that produced its evidence. Current: 0001 Swift for the VM core, 0002
 repository layout, 0003 object table for object representation (proposed,
 pending a device measurement), 0004 Smalltalk UI code on the main thread with
 budgeted preemption (proposed, pending a pause-bounded collector), 0005
-generational collection with per-worker nurseries (proposed; full collections
-of old space are still the frame-droppers). Read them before touching the
-areas they cover.
+generational collection with per-worker nurseries (proposed), 0006
+concurrent marking and lazy sweeping of old space (proposed; pauses no longer
+depend on heap size, given old-space headroom). Read them before touching
+the areas they cover.
 
 ## Project structure
 
