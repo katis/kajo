@@ -1,0 +1,75 @@
+== clean release builds
+build  rust (release)                  3.3 s
+build  rust (target-cpu=native)        3.3 s
+build  swift (-O, WMO)                 6.1 s
+build  swift (-Ounchecked, excl=unchk)    5.8 s
+build  rust (align32)                  3.3 s
+build  swift (-O, align32)             6.0 s
+== running matrix: kernels=[arith fib sends alloc] workers=[1 8] runs=5
+   run 1/5 done
+   run 2/5 done
+   run 3/5 done
+   run 4/5 done
+   run 5/5 done
+# machine: Apple M2 Max, 8 P-cores + 4 E-cores, no pinning
+
+| kernel | variant          | workers | median ms | min ms | speedup 1->8 | GC cycles | checksum | equal |
+|--------|------------------|--------:|----------:|-------:|-------------:|----------:|----------|:-----:|
+| arith  | rust             |       1 |    3004.1 | 2984.0 |              |         0 | 372800000 |  yes  |
+| arith  | rust             |       8 |     397.9 |  397.6 |        7.55x |         0 | 372800000 |  yes  |
+| arith  | rust-native      |       1 |    3005.1 | 2981.3 |              |         0 | 372800000 |  yes  |
+| arith  | rust-native      |       8 |     404.4 |  402.1 |        7.43x |         0 | 372800000 |  yes  |
+| arith  | swift-O          |       1 |    3629.6 | 3627.6 |              |         0 | 372800000 |  yes  |
+| arith  | swift-O          |       8 |     483.1 |  478.5 |        7.51x |         0 | 372800000 |  yes  |
+| arith  | swift-Ounchecked |       1 |    3049.2 | 3045.0 |              |         0 | 372800000 |  yes  |
+| arith  | swift-Ounchecked |       8 |     413.7 |  404.8 |        7.37x |         0 | 372800000 |  yes  |
+| arith  | rust-align32     |       1 |    2999.2 | 2979.2 |              |         0 | 372800000 |  yes  |
+| arith  | rust-align32     |       8 |     406.9 |  402.6 |        7.37x |         0 | 372800000 |  yes  |
+| arith  | swift-O-align32  |       1 |    3029.5 | 3017.3 |              |         0 | 372800000 |  yes  |
+| arith  | swift-O-align32  |       8 |     410.1 |  402.9 |        7.39x |         0 | 372800000 |  yes  |
+| fib    | rust             |       1 |    1465.6 | 1456.6 |              |         0 | 24682992 |  yes  |
+| fib    | rust             |       8 |     189.7 |  188.5 |        7.73x |         0 | 24682992 |  yes  |
+| fib    | rust-native      |       1 |    1468.6 | 1451.5 |              |         0 | 24682992 |  yes  |
+| fib    | rust-native      |       8 |     189.5 |  188.3 |        7.75x |         0 | 24682992 |  yes  |
+| fib    | swift-O          |       1 |    1924.3 | 1905.7 |              |         0 | 24682992 |  yes  |
+| fib    | swift-O          |       8 |     252.1 |  248.5 |        7.63x |         0 | 24682992 |  yes  |
+| fib    | swift-Ounchecked |       1 |    1543.9 | 1525.4 |              |         0 | 24682992 |  yes  |
+| fib    | swift-Ounchecked |       8 |     201.2 |  198.1 |        7.67x |         0 | 24682992 |  yes  |
+| fib    | rust-align32     |       1 |    1464.2 | 1453.3 |              |         0 | 24682992 |  yes  |
+| fib    | rust-align32     |       8 |     188.4 |  188.0 |        7.77x |         0 | 24682992 |  yes  |
+| fib    | swift-O-align32  |       1 |    1552.7 | 1536.9 |              |         0 | 24682992 |  yes  |
+| fib    | swift-O-align32  |       8 |     203.4 |  201.3 |        7.63x |         0 | 24682992 |  yes  |
+| sends  | rust             |       1 |    2383.7 | 2352.2 |              |         0 | 1066666666666668 |  yes  |
+| sends  | rust             |       8 |     440.4 |  401.6 |        5.41x |         0 | 133333335000001 |  yes  |
+| sends  | rust-native      |       1 |    2365.0 | 2356.9 |              |         0 | 1066666666666668 |  yes  |
+| sends  | rust-native      |       8 |     414.5 |  328.2 |        5.71x |         0 | 133333335000001 |  yes  |
+| sends  | swift-O          |       1 |    2943.6 | 2930.9 |              |         0 | 1066666666666668 |  yes  |
+| sends  | swift-O          |       8 |     521.0 |  494.7 |        5.65x |         0 | 133333335000001 |  yes  |
+| sends  | swift-Ounchecked |       1 |    2554.4 | 2542.0 |              |         0 | 1066666666666668 |  yes  |
+| sends  | swift-Ounchecked |       8 |     446.0 |  407.2 |        5.73x |         0 | 133333335000001 |  yes  |
+| sends  | rust-align32     |       1 |    2381.9 | 2374.9 |              |         0 | 1066666666666668 |  yes  |
+| sends  | rust-align32     |       8 |     397.8 |  381.5 |        5.99x |         0 | 133333335000001 |  yes  |
+| sends  | swift-O-align32  |       1 |    2561.0 | 2548.4 |              |         0 | 1066666666666668 |  yes  |
+| sends  | swift-O-align32  |       8 |     448.2 |  434.2 |        5.71x |         0 | 133333335000001 |  yes  |
+| alloc  | rust             |       1 |    2023.6 | 2014.9 |              |        15 | 41950911 |  yes  |
+| alloc  | rust             |       8 |     468.3 |  463.6 |        4.32x |     20-21 | 42008248 |  yes  |
+| alloc  | rust-native      |       1 |    2019.5 | 2015.6 |              |        15 | 41950911 |  yes  |
+| alloc  | rust-native      |       8 |     479.8 |  463.0 |        4.21x |        20 | 42008248 |  yes  |
+| alloc  | swift-O          |       1 |    2375.5 | 2363.7 |              |        15 | 41950911 |  yes  |
+| alloc  | swift-O          |       8 |     516.1 |  499.0 |        4.60x |     19-20 | 42008248 |  yes  |
+| alloc  | swift-Ounchecked |       1 |    2069.7 | 2064.8 |              |        15 | 41950911 |  yes  |
+| alloc  | swift-Ounchecked |       8 |     492.6 |  486.7 |        4.20x |        20 | 42008248 |  yes  |
+| alloc  | rust-align32     |       1 |    2012.4 | 2000.9 |              |        15 | 41950911 |  yes  |
+| alloc  | rust-align32     |       8 |     477.8 |  464.5 |        4.21x |        20 | 42008248 |  yes  |
+| alloc  | swift-O-align32  |       1 |    2111.4 | 2078.5 |              |        15 | 41950911 |  yes  |
+| alloc  | swift-O-align32  |       8 |     495.0 |  485.2 |        4.27x |        20 | 42008248 |  yes  |
+
+Swift / Rust median ratio (same workers; >1 means Swift slower):
+  arith  w=1: swift-O 1.21, swift-Ounchecked 1.02, swift-O-align32 1.01, rust-native 1.00, swift-O-align32/rust-align32 1.01
+  arith  w=8: swift-O 1.21, swift-Ounchecked 1.04, swift-O-align32 1.03, rust-native 1.02, swift-O-align32/rust-align32 1.01
+  fib    w=1: swift-O 1.31, swift-Ounchecked 1.05, swift-O-align32 1.06, rust-native 1.00, swift-O-align32/rust-align32 1.06
+  fib    w=8: swift-O 1.33, swift-Ounchecked 1.06, swift-O-align32 1.07, rust-native 1.00, swift-O-align32/rust-align32 1.08
+  sends  w=1: swift-O 1.23, swift-Ounchecked 1.07, swift-O-align32 1.07, rust-native 0.99, swift-O-align32/rust-align32 1.08
+  sends  w=8: swift-O 1.18, swift-Ounchecked 1.01, swift-O-align32 1.02, rust-native 0.94, swift-O-align32/rust-align32 1.13
+  alloc  w=1: swift-O 1.17, swift-Ounchecked 1.02, swift-O-align32 1.04, rust-native 1.00, swift-O-align32/rust-align32 1.05
+  alloc  w=8: swift-O 1.10, swift-Ounchecked 1.05, swift-O-align32 1.06, rust-native 1.02, swift-O-align32/rust-align32 1.04
