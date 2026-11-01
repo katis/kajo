@@ -32,6 +32,21 @@ struct GCShared {
     var copyEnd: UnsafeMutablePointer<Atomic<UInt64>>
     /// Worker id of each participant (index = join order). Written under the mutex.
     var parts: UnsafeMutablePointer<Int>
+    /// Work sharing (SPEC.md "Load balance"): packets of up to
+    /// `packetWords` oops exported by busy participants while one is idle.
+    var packetLock: UnsafeMutablePointer<pthread_mutex_t>
+    var packets: UnsafeMutablePointer<UInt64>
+    var packetLen: UnsafeMutablePointer<Int>
+    /// Indices of full packets (`full`), then of free ones (`free`).
+    var fullList: UnsafeMutablePointer<Int>
+    var freeList: UnsafeMutablePointer<Int>
+    /// [0] full packets, [1] free packets. Guarded by `packetLock`; behind
+    /// its own pointer because writing a field of `GCShared` itself would be
+    /// a modifying access of the whole struct, which other participants read
+    /// without the lock (ThreadSanitizer: Swift access race).
+    var counts: UnsafeMutablePointer<Int>
+    var poolCount: UnsafeMutablePointer<Atomic<Int>>
+    var idle: UnsafeMutablePointer<Atomic<Int>>
 
     static func make() -> UnsafeMutablePointer<GCShared> {
         func counter() -> UnsafeMutablePointer<Atomic<Int>> {
@@ -43,7 +58,20 @@ struct GCShared {
         ce.initialize(to: Atomic(0))
         let parts = UnsafeMutablePointer<Int>.allocate(capacity: 64)
         parts.initialize(repeating: -1, count: 64)
-        return boxed(GCShared(taskNext: counter(), sweepNext: counter(), inCopy: counter(), copyEnd: ce, parts: parts))
+        let lock = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+        pthread_mutex_init(lock, nil)
+        let packets = UnsafeMutablePointer<UInt64>.allocate(capacity: maxPackets * packetWords)
+        let len = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
+        len.initialize(repeating: 0, count: maxPackets)
+        let full = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
+        let free = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
+        for i in 0..<maxPackets { free[i] = i }
+        let counts = UnsafeMutablePointer<Int>.allocate(capacity: 2)
+        counts[0] = 0
+        counts[1] = maxPackets
+        return boxed(GCShared(taskNext: counter(), sweepNext: counter(), inCopy: counter(), copyEnd: ce, parts: parts,
+                              packetLock: lock, packets: packets, packetLen: len, fullList: full, freeList: free,
+                              counts: counts, poolCount: counter(), idle: counter()))
     }
 }
 
@@ -76,6 +104,8 @@ public struct GCRecord {
     public var entriesAllocated: UInt64 = 0
     public var entriesFreed: UInt64 = 0
     public var oldBlocks = 0
+    /// Work packets exported for sharing.
+    public var packets: UInt64 = 0
 }
 
 public struct GCLog {
@@ -138,6 +168,8 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
 // MARK: - the scavenge
 
 private let rootTaskWords = 4096
+let packetWords = 256
+let maxPackets = 1024
 private let remTaskHolders = 256
 private let sweepTaskWords = 1024
 
@@ -184,6 +216,7 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64) -
     g.pointee.sweepNext.pointee.store(0, ordering: .relaxed)
     g.pointee.inCopy.pointee.store(0, ordering: .relaxed)
     g.pointee.copyEnd.pointee.store(0, ordering: .relaxed)
+    g.pointee.idle.pointee.store(0, ordering: .relaxed)
     let tp = now()
     // --- parallel phase
     let parts = runParallelPhase(vm, w)
@@ -202,6 +235,7 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64) -
         rec.entriesAllocated &+= s.entriesAllocated
         rec.entriesFreed &+= s.entriesFreed
         rec.remScanned &+= s.remScanned
+        rec.packets &+= s.exported
     }
     for i in 0..<n {
         let x = ws[i]
@@ -274,14 +308,43 @@ func participate(_ vm: VMRef, _ w: WorkerRef) {
         drain(vm, w, om)
         w.pointee.gc.copyNs &+= now() &- b
     }
-    g.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .acquiringAndReleasing)
-    // Copy barrier: every task is taken; wait for the ones still copying.
+    // Tasks are exhausted: help with exported packets until no participant
+    // is copying. Invariants: packets are pushed only by a counted
+    // (`inCopy`) participant; a participant stops being counted only after
+    // finding the pool empty; a taker is counted before it pops; and nobody
+    // re-counts itself once `inCopy` reached 0. So `inCopy == 0` means no
+    // packet is left and no copy is in flight: the copy barrier.
+    let b = now()
+    while takePacket(g, w) { drain(vm, w, om) }
+    w.pointee.gc.copyNs &+= now() &- b
+    g.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
     let wa = now()
     var spins = 0
-    while g.pointee.inCopy.pointee.load(ordering: .acquiring) != 0 {
+    g.pointee.idle.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+    while true {
+        var c = g.pointee.inCopy.pointee.load(ordering: .sequentiallyConsistent)
+        if c == 0 { break }
+        if g.pointee.poolCount.pointee.load(ordering: .sequentiallyConsistent) > 0 {
+            var counted = false
+            while c > 0 {
+                let (ok, cur) = g.pointee.inCopy.pointee.compareExchange(expected: c, desired: c + 1, ordering: .sequentiallyConsistent)
+                if ok { counted = true; break }
+                c = cur
+            }
+            if counted {
+                g.pointee.idle.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+                let t = now()
+                while takePacket(g, w) { drain(vm, w, om) }
+                w.pointee.gc.copyNs &+= now() &- t
+                g.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+                g.pointee.idle.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+                continue
+            }
+        }
         spins &+= 1
         if spins & 63 == 0 { sched_yield() }
     }
+    g.pointee.idle.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
     let ce = now()
     _ = g.pointee.copyEnd.pointee.compareExchange(expected: 0, desired: ce, ordering: .relaxed)
     w.pointee.gc.waitNs = ce &- wa
@@ -330,8 +393,16 @@ private func promote(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ v: Oop, _ ent: Uns
     let dst = w.pointee.promo.cur
     w.pointee.promo.cur = dst &+ UInt(size)
     let src = om.heap &+ UInt(ent[1])
-    UnsafeMutableRawPointer(bitPattern: dst).unsafelyUnwrapped
-        .copyMemory(from: UnsafeRawPointer(bitPattern: src).unsafelyUnwrapped, byteCount: size)
+    if size <= 128 {
+        // Most bodies are a few words: a word loop beats a memmove call.
+        let d = wordPtr(dst), s = wordPtr(src)
+        var i = 0
+        let n = size &>> 3
+        while i < n { d[i] = s[i]; i &+= 1 }
+    } else {
+        UnsafeMutableRawPointer(bitPattern: dst).unsafelyUnwrapped
+            .copyMemory(from: UnsafeRawPointer(bitPattern: src).unsafelyUnwrapped, byteCount: size)
+    }
     ent[1] = UInt64(dst &- om.heap)
     let idx = Int(truncatingIfNeeded: v &>> 4)
     vm.pointee.space.surv[idx &>> 6].bitwiseOr(UInt64(1) &<< UInt64(idx & 63), ordering: .relaxed)
@@ -341,14 +412,61 @@ private func promote(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ v: Oop, _ ent: Uns
 }
 
 /// Scan promoted objects (their new bodies) until the local stack is empty.
+/// Every 32 objects, if a participant is idle and the pool is empty, export
+/// the bottom half of the stack (the shallowest, usually largest, subtrees).
 private func drain(_ vm: VMRef, _ w: WorkerRef, _ om: OM) {
+    let g = vm.pointee.gc
+    var k = 0
     while let o = w.pointee.gcStack.pop() {
         let h = om.header(o) // claimed by this participant; others only load it
         let n = hdrSlots(h)
         let s = om.slotsPtr(o)
         var i = 0
         while i < n { scavWord(vm, w, om, s[i]); i &+= 1 }
+        k &+= 1
+        if k & 1023 == 0 && w.pointee.gcStack.count >= 8
+            && g.pointee.idle.pointee.load(ordering: .relaxed) > 0
+            && g.pointee.poolCount.pointee.load(ordering: .relaxed) == 0 {
+            exportPacket(g, w)
+        }
     }
+}
+
+private func exportPacket(_ g: UnsafeMutablePointer<GCShared>, _ w: WorkerRef) {
+    let n = min(w.pointee.gcStack.count / 2, packetWords)
+    pthread_mutex_lock(g.pointee.packetLock)
+    if g.pointee.counts[1] == 0 { pthread_mutex_unlock(g.pointee.packetLock); return }
+    g.pointee.counts[1] -= 1
+    let pk = g.pointee.freeList[g.pointee.counts[1]]
+    let dst = g.pointee.packets + pk * packetWords
+    let st = w.pointee.gcStack.ptr
+    dst.update(from: st, count: n)
+    (st).update(from: st + n, count: w.pointee.gcStack.count - n)
+    w.pointee.gcStack.count -= n
+    g.pointee.packetLen[pk] = n
+    g.pointee.fullList[g.pointee.counts[0]] = pk
+    g.pointee.counts[0] += 1
+    g.pointee.poolCount.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+    pthread_mutex_unlock(g.pointee.packetLock)
+    w.pointee.gc.exported &+= 1
+}
+
+/// Move one exported packet onto this participant's stack. The caller is
+/// counted in `inCopy`.
+private func takePacket(_ g: UnsafeMutablePointer<GCShared>, _ w: WorkerRef) -> Bool {
+    if g.pointee.poolCount.pointee.load(ordering: .sequentiallyConsistent) == 0 { return false }
+    pthread_mutex_lock(g.pointee.packetLock)
+    if g.pointee.counts[0] == 0 { pthread_mutex_unlock(g.pointee.packetLock); return false }
+    g.pointee.counts[0] -= 1
+    let pk = g.pointee.fullList[g.pointee.counts[0]]
+    let n = g.pointee.packetLen[pk]
+    let src = g.pointee.packets + pk * packetWords
+    for i in 0..<n { w.pointee.gcStack.push(src[i]) }
+    g.pointee.freeList[g.pointee.counts[1]] = pk
+    g.pointee.counts[1] += 1
+    g.pointee.poolCount.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+    pthread_mutex_unlock(g.pointee.packetLock)
+    return true
 }
 
 /// Stopper, after the parallel phase: the pool's unconsumed chunks plus

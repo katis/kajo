@@ -165,6 +165,7 @@ public func gcSummary(_ vm: VMRef, from: Int = 0) -> String {
         o += " brk_prep=" + med { $0.prepNs }
         o += " brk_finish=" + med { $0.finishNs }
         o += " busy_mean=" + med { $0.meanBusyNs }
+        o += " packets_per_scav=" + r1(total(sc) { $0.packets } / Double(sc.count))
         let tot = max(total(sc) { $0.totalNs }, 1)
         func share(_ f: (GCRecord) -> UInt64) -> String { r1(100 * total(sc, f) / tot) }
         o += " share_coord=" + share { $0.coordNs }

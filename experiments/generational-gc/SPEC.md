@@ -202,6 +202,7 @@ h = atomic load (relaxed) of header(v)
 if h & young == 0: return
 if !CAS(header(v), expected: h, desired: h & ~young): return   // claimed by another
 copy objectBytes(h) bytes of the body into this participant's promotion TLAB
+  (a word loop up to 128 bytes, memmove above)
 entry(v).bodyOffset = new offset
 survivor bit of v: atomic OR
 if !bytes(h): push v on the local stack
@@ -235,9 +236,18 @@ worker's remembered buffer. The full collector's root set is unchanged.
 no survivor space. After a scavenge nothing is young, every remembered
 buffer is empty and the nursery is reset to its start.
 
-**Load balance**: tasks are shared, there is no work stealing during the
-drain. A participant that claims the head of a large young structure copies
-all of it. Per-participant busy time is recorded to show the imbalance.
+**Load balance**: tasks are shared through the task index. During the
+drain, every 1024 objects, a participant whose stack holds at least 8 oops
+exports the bottom half (up to 256 oops, the shallowest and usually largest
+subtrees) as a packet to a mutex-guarded pool if another participant is
+idle and the pool is empty. A participant with no task left takes packets
+before declaring itself idle. Termination: packets are pushed only by a
+participant counted in `inCopy`; a participant leaves `inCopy` only after
+finding the pool empty; an idle participant re-enters `inCopy` (CAS from a
+non-zero value, never from 0) before it pops a packet. So `inCopy == 0`
+means no packet is left and no copy is in flight, which is the copy
+barrier. Per-participant busy time is recorded to show the remaining
+imbalance. (Added after the first measurements; see RESULTS.md.)
 
 ## Full collection
 
@@ -340,7 +350,8 @@ ttsp p50/p99/max; main-thread enter waits; event latency.
   see "Remembered set").
 - Claim: CAS clearing the young bit in the header word.
 - Any participant may promote any young object (first to reach it), not
-  only its own nursery's; no work stealing.
+  only its own nursery's; work sharing by exported packets, not stealing
+  deques.
 - Promotion on first survival; no age field, no survivor space.
 - Promotion reserve instead of promotion-failure handling.
 - Entry sweep over young-log words, not whole chunks; all chunks with a free

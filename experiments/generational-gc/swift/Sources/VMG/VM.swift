@@ -170,6 +170,7 @@ public struct GCShare {
     public var entriesAllocated: UInt64 = 0
     public var entriesFreed: UInt64 = 0
     public var remScanned: UInt64 = 0
+    public var exported: UInt64 = 0
     public var copyBusy: UInt64 { rootsNs &+ remNs &+ copyNs }
 }
 
