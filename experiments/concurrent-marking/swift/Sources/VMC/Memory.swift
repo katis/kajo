@@ -306,12 +306,25 @@ func store(_ vm: VMRef, _ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
 @_transparent
 func satbPre(_ vm: VMRef, _ w: WorkerRef, _ o: Oop, _ i: Int) {
     #if !NO_MARK_BARRIER
-    if w.pointee.marking != 0 { satbSlow(vm, w, o, i) }
+    if w.pointee.marking != 0 { satbSlow(w, o, i) }
     #endif
 }
 
+/// store_ivar while marking: SATB record, store, generational barrier.
 @inline(never)
-func satbSlow(_ vm: VMRef, _ w: WorkerRef, _ o: Oop, _ i: Int) {
+func storeWhileMarking(_ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
+    let vm = w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self)
+    satbSlow(w, o, i)
+    let om = vm.pointee.om
+    om.setSlot(o, i, v)
+    barrier(vm, w, om, o, v)
+}
+
+/// Two scalars and the worker: the VM is reached through the worker, so the
+/// interpreter loop keeps fewer values live across this call.
+@inline(never)
+func satbSlow(_ w: WorkerRef, _ o: Oop, _ i: Int) {
+    let vm = w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self)
     w.pointee.satbSlow &+= 1
     if !vm.pointee.cmConfig.satb { return } // test switch
     let om = vm.pointee.om

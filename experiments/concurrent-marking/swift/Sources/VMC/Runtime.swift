@@ -98,6 +98,7 @@ public func cmConfigFromEnv() -> CMConfig {
     if let t = envDouble("KAJO_CM_THRESHOLD") { c.threshold = t / 100 }
     if let m = envInt("KAJO_CM_MARKERS") { c.markers = m }
     if envInt("KAJO_CM_FORCE") == 1 { c.force = true; c.threshold = 0 }
+    if let q = getenv("KAJO_CM_QOS").map({ String(cString: $0) }), q == "high" { c.markerQoS = QOS_CLASS_USER_INITIATED }
     return c
 }
 
@@ -332,6 +333,7 @@ public func benchLine(kernel: String, workers: Int) throws -> String {
 func cmSummary(_ vm: VMRef, _ recs: [GCRecord]) -> String {
     let cfg = vm.pointee.cmConfig
     var o = " gc=\(cfg.concurrent ? "cm" : "stw") markers=\(cfg.markers) force=\(cfg.force ? 1 : 0)"
+    o += " marker_qos=\(cfg.markerQoS == QOS_CLASS_UTILITY ? "utility" : "high")"
     o += " threshold_pct=\(Int((cfg.threshold * 100).rounded()))"
     guard cfg.concurrent else { return o }
     let since = recs.first?.atNs ?? 0
@@ -383,7 +385,8 @@ func cmSummary(_ vm: VMRef, _ recs: [GCRecord]) -> String {
     o += " freed_mb_p50=\(r3(pctl(applied.map { Double($0.freedBytes) / 1048576 }, 0.5)))"
     o += " freed_blocks_p50=\(Int(pctl(applied.map { Double($0.freedBlocks) }, 0.5)))"
     o += " snap_entries_p50=\(Int(pctl(applied.map { Double($0.snapEntries) }, 0.5)))"
-    o += " floating_mb_max=\(r3(done.map { Double($0.floatingBytes) / 1048576 }.max() ?? 0)) missed=\(done.reduce(0) { $0 + $1.missed })"
+    o += " floating_mb_max=\(r3(done.map { Double($0.floatingBytes) / 1048576 }.max() ?? 0)) cm_missed=\(done.reduce(0) { $0 + $1.missed })"
+    o += " cm_verify_runs=\(vm.metric(.cmVerifyRuns))"
     let first = cycles.first?.startNs ?? 0, last = recs.last.map { $0.atNs &+ $0.totalNs } ?? 0
     let markingNs = cycles.reduce(0.0) { $0 + Double(($1.finalNs != 0 ? $1.finalNs : last) &- $1.startNs) }
     if last > since { o += " marking_pct=\(r1(100 * markingNs / Double(last &- since)))" }

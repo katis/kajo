@@ -30,6 +30,9 @@ public struct CMConfig {
     /// Fraction of the soft limit that starts a cycle.
     public var threshold = 0.60
     public var markers = 1
+    /// Marker thread QoS: `QOS_CLASS_UTILITY` (default; usually efficiency
+    /// cores) or `QOS_CLASS_USER_INITIATED` (`KAJO_CM_QOS=high`).
+    public var markerQoS = QOS_CLASS_UTILITY
     /// Marking flag never cleared; a cycle starts at every scavenge while idle.
     public var force = false
     /// Compare mark sets at every final mark.
@@ -385,7 +388,7 @@ func startMarkers(_ vm: VMRef, _ n: Int) -> [pthread_t] {
         ctx.initialize(to: MarkerCtx(vm: vm, m: m))
         var attr = pthread_attr_t()
         pthread_attr_init(&attr)
-        pthread_attr_set_qos_class_np(&attr, QOS_CLASS_UTILITY, 0)
+        pthread_attr_set_qos_class_np(&attr, vm.pointee.cmConfig.markerQoS, 0)
         var tid: pthread_t? = nil
         if pthread_create(&tid, &attr, markerThreadMain, UnsafeMutableRawPointer(ctx)) != 0 { fatal("pthread_create marker") }
         pthread_attr_destroy(&attr)

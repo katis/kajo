@@ -41,6 +41,8 @@ public struct Worker {
     public var marking: UInt8 = 0
     public var satbCount: Int = 0
     public var satbBuf: UnsafeMutablePointer<Oop>
+    /// The VM, for the SATB slow path (one argument fewer at the call site).
+    public var vm: UnsafeMutableRawPointer? = nil
     /// The running Process's stack segment (or a small dummy when idle).
     public var stack: UnsafeMutablePointer<UInt64>
     public var stackEnd: UnsafeMutablePointer<UInt64>
@@ -501,6 +503,8 @@ public func setWorkers(_ vm: VMRef, _ ws: [WorkerRef]) {
     for (i, w) in ws.enumerated() {
         precondition(w.pointee.id == i)
         p[i] = w
+        w.pointee.vm = UnsafeMutableRawPointer(vm)
+        if vm.pointee.cmConfig.force && vm.pointee.cmConfig.concurrent { w.pointee.marking = 1 }
         w.pointee.pollEvery = vm.pointee.pollEvery
         w.pointee.countdown = vm.pointee.pollEvery
         if nb > 0 {

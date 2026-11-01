@@ -353,9 +353,22 @@ private func run(_ vm: VMRef, _ w: WorkerRef, _ start: Regs) {
         case 0x05: // store_ivar (barrier site)
             let n = Int(byte(&r))
             let o = r.fp.pointee, v = r.sp.pointee
-            satbPre(vm, w, o, n)
+            #if !NO_MARK_BARRIER
+            // While marking, one out-of-line call does the SATB record, the
+            // store and the generational barrier, so nothing of this
+            // instruction is live across a call (keeping the SATB call
+            // separate spilled the table and heap bases out of registers
+            // for the whole loop: +20 percent on ivars).
+            if w.pointee.marking != 0 {
+                storeWhileMarking(w, o, n, v)
+            } else {
+                om.setSlot(o, n, v)
+                barrier(vm, w, om, o, v)
+            }
+            #else
             om.setSlot(o, n, v)
             barrier(vm, w, om, o, v)
+            #endif
             r.sp -= 1
         case 0x06: // pop
             r.sp -= 1

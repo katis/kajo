@@ -90,6 +90,16 @@ store slot                              // then the generational barrier as befo
 `w.marking` is a byte in the worker's own `Worker` struct, written only by
 a stopper with the world stopped.
 
+In the interpreter's `store_ivar` the shape is different (changed after
+the first measurement): `if w.marking != 0 { storeWhileMarking(w, o, i, v) }
+else { store; generational barrier }`, one out-of-line call doing the SATB
+record, the store and the generational barrier. With a separate SATB call
+before an inline store, `o` and `v` were live across the call and the
+register allocator moved the object table and heap bases out of registers
+for the whole interpreter loop (+20 percent on `ivars` with the marking flag
+never set). The slow paths take the worker and two scalars; the VM is
+reached through a pointer in the worker.
+
 **Slow path** (out of line, scalars passed):
 
 ```
