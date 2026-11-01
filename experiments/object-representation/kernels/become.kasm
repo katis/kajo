@@ -1,0 +1,220 @@
+; become: 2^20 live objects alternating P (2 ivars) and Q (3 ivars). gc: 1 as
+; a baseline; 10 000 two-way becomes between a random P and a random Q
+; (different sizes, so variant A takes the forwarder path); one bulk
+; becomeForward of 100 000 objects (every 10th) to fresh objects; checksums
+; read through any forwarders; gc: 2 (A's cleanup GC); checksum again.
+; Worker 0 runs this (nil main); the other workers run fib (lib.kasm).
+class Item Object 1
+class P Item 2
+class Q Item 3
+
+method Item id temps=0
+  push_ivar 0
+  return_top
+end
+
+method Item setId: temps=0
+  push_temp 0
+  store_ivar 0
+  return_self
+end
+
+; temps: t0 objs, t1 i, t2 x, t3 j, t4 k, t5 from, t6 to, t7 sum1, t8 cnt, t9 sum2
+method UndefinedObject main temps=10
+  push_nil
+  push_lit 1048576
+  send bigNew: 1
+  store_temp 0
+  push_int 0
+  store_temp 1
+fill:
+  push_temp 1
+  push_lit 1048576
+  lt
+  jump_if_false filled
+  push_temp 0
+  push_temp 1
+  push_int 2
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false mkq
+  push_lit @P
+  jump mk
+mkq:
+  push_lit @Q
+mk:
+  send basicNew 0
+  push_temp 1
+  send setId: 1
+  push_temp 1
+  send put:at: 2
+  pop
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump fill
+filled:
+  push_nil
+  push_int 1
+  send gc: 1
+  pop
+  push_lit 12345
+  store_temp 2
+  push_lit 10000
+  store_temp 4
+bec:
+  push_temp 4
+  push_int 0
+  gt
+  jump_if_false bulk
+  push_temp 2
+  push_lit 1103515245
+  mul
+  push_lit 12345
+  add
+  push_lit 2147483648
+  send \\ 1
+  store_temp 2
+  push_temp 2
+  push_lit 4096
+  send // 1
+  push_lit 524288
+  send \\ 1
+  push_int 2
+  mul
+  store_temp 1
+  push_temp 2
+  push_lit 1103515245
+  mul
+  push_lit 12345
+  add
+  push_lit 2147483648
+  send \\ 1
+  store_temp 2
+  push_temp 2
+  push_lit 4096
+  send // 1
+  push_lit 524288
+  send \\ 1
+  push_int 2
+  mul
+  push_int 1
+  add
+  store_temp 3
+  push_temp 0
+  push_temp 1
+  send get: 1
+  push_temp 0
+  push_temp 3
+  send get: 1
+  send become: 1
+  pop
+  push_temp 4
+  push_int 1
+  sub
+  store_temp 4
+  jump bec
+bulk:
+  push_nil
+  push_lit 100000
+  send bigNew: 1
+  store_temp 5
+  push_nil
+  push_lit 100000
+  send bigNew: 1
+  store_temp 6
+  push_int 0
+  store_temp 4
+pairs:
+  push_temp 4
+  push_lit 100000
+  lt
+  jump_if_false fwd
+  push_temp 5
+  push_temp 0
+  push_temp 4
+  push_int 10
+  mul
+  send get: 1
+  push_temp 4
+  send put:at: 2
+  pop
+  push_temp 6
+  push_lit @P
+  send basicNew 0
+  push_lit 2000000
+  push_temp 4
+  add
+  send setId: 1
+  push_temp 4
+  send put:at: 2
+  pop
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump pairs
+fwd:
+  push_nil
+  push_temp 5
+  send chunks 0
+  push_temp 6
+  send chunks 0
+  send forward:to: 2
+  pop
+  push_nil
+  push_temp 0
+  push_lit 1048576
+  send weighted:n: 2
+  store_temp 7
+  push_int 0
+  store_temp 8
+  push_int 0
+  store_temp 4
+ident:
+  push_temp 4
+  push_lit 100000
+  lt
+  jump_if_false ided
+  push_temp 5
+  push_temp 4
+  send get: 1
+  push_temp 6
+  push_temp 4
+  send get: 1
+  identical
+  jump_if_false noteq
+  push_temp 8
+  push_int 1
+  add
+  store_temp 8
+noteq:
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump ident
+ided:
+  push_nil
+  push_int 2
+  send gc: 1
+  pop
+  push_nil
+  push_temp 0
+  push_lit 1048576
+  send weighted:n: 2
+  store_temp 9
+  push_temp 7
+  push_temp 8
+  add
+  push_temp 7
+  push_temp 9
+  eq
+  jump_if_true same
+  push_lit 1000000000
+  add
+same:
+  return_top
+end

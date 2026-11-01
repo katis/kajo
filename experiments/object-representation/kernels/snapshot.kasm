@@ -1,0 +1,49 @@
+; snapshot: worker 0 builds the walk graph (2^22 nodes), stores it in globals
+; 1 (the Big) and 2 (node count), traverses it once, and saves a snapshot at
+; a safepoint while the other workers run fib. The host then loads the
+; snapshot into a fresh VM at a different base address and sends
+; `reloaded:of:` there, which must answer the same sum.
+
+method UndefinedObject main temps=1
+  push_nil
+  push_int 1
+  push_nil
+  push_lit 4194304
+  send buildGraph: 1
+  send globalAt:put: 2
+  pop
+  push_nil
+  push_int 2
+  push_lit 4194304
+  send globalAt:put: 2
+  pop
+  push_nil
+  send traverseGlobals 0
+  store_temp 0
+  push_nil
+  send snapshot 0
+  pop
+  push_temp 0
+  return_top
+end
+
+method UndefinedObject traverseGlobals temps=0
+  push_nil
+  push_nil
+  push_int 1
+  send globalAt: 1
+  push_int 0
+  send get: 1
+  push_nil
+  push_int 2
+  send globalAt: 1
+  send walk:hops: 2
+  return_top
+end
+
+; entry in the reloaded image (args unused)
+method UndefinedObject reloaded:of: temps=0
+  push_nil
+  send traverseGlobals 0
+  return_top
+end

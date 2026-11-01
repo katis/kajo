@@ -1,0 +1,123 @@
+; reshape: 2^20 live instances of R (2 ivars); gc: 1 baseline; R addInstVar
+; (one stop-the-world operation); touch every instance through the Big (writes
+; then reads the new ivar, through forwarders in A); gc: 2 (A: forwarder-free
+; after it); touch again and compare.
+class R Object 2
+
+method R setA:b: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; t0 = i. Sets c := 3i if c is nil, answers a + b + c.
+method R touch: temps=0
+  push_ivar 2
+  push_nil
+  identical
+  jump_if_false skip
+  push_temp 0
+  push_int 3
+  mul
+  store_ivar 2
+skip:
+  push_ivar 0
+  push_ivar 1
+  add
+  push_ivar 2
+  add
+  return_top
+end
+
+; t0 = big, t1 = n, t2 = i, t3 = sum
+method UndefinedObject touchAll:n: temps=2
+  push_int 0
+  store_temp 2
+  push_int 0
+  store_temp 3
+loop:
+  push_temp 2
+  push_temp 1
+  lt
+  jump_if_false done
+  push_temp 3
+  push_temp 0
+  push_temp 2
+  send get: 1
+  push_temp 2
+  send touch: 1
+  add
+  store_temp 3
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  return_top
+end
+
+; temps: t0 objs, t1 i, t2 sum1, t3 sum2
+method UndefinedObject main temps=4
+  push_nil
+  push_lit 1048576
+  send bigNew: 1
+  store_temp 0
+  push_int 0
+  store_temp 1
+fill:
+  push_temp 1
+  push_lit 1048576
+  lt
+  jump_if_false filled
+  push_temp 0
+  push_lit @R
+  send basicNew 0
+  push_temp 1
+  push_temp 1
+  push_int 2
+  mul
+  send setA:b: 2
+  push_temp 1
+  send put:at: 2
+  pop
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump fill
+filled:
+  push_nil
+  push_int 1
+  send gc: 1
+  pop
+  push_lit @R
+  send addInstVar 0
+  pop
+  push_nil
+  push_temp 0
+  push_lit 1048576
+  send touchAll:n: 2
+  store_temp 2
+  push_nil
+  push_int 2
+  send gc: 1
+  pop
+  push_nil
+  push_temp 0
+  push_lit 1048576
+  send touchAll:n: 2
+  store_temp 3
+  push_temp 2
+  push_temp 2
+  push_temp 3
+  eq
+  jump_if_true same
+  push_lit 1000000000
+  add
+same:
+  return_top
+end

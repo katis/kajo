@@ -1,0 +1,100 @@
+; compact: allocate 2^21 CNodes, keep every other one (in a Big, each kept
+; node linked to the previous kept one), drop the rest. gc: 3 (mark and sweep
+; timed, frees nothing because every block is half live); compact: 4; then
+; checksum through the chain and through the Big.
+class CNode Object 2
+
+method CNode id temps=0
+  push_ivar 0
+  return_top
+end
+
+method CNode prev temps=0
+  push_ivar 1
+  return_top
+end
+
+method CNode setId:prev: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; temps: t0 kept, t1 i, t2 prev, t3 n, t4 s1, t5 p
+method UndefinedObject main temps=6
+  push_nil
+  push_lit 1048576
+  send bigNew: 1
+  store_temp 0
+  push_int 0
+  store_temp 1
+alloc:
+  push_temp 1
+  push_lit 2097152
+  lt
+  jump_if_false built
+  push_lit @CNode
+  send basicNew 0
+  push_temp 1
+  push_temp 2
+  send setId:prev: 2
+  store_temp 3
+  push_temp 1
+  push_int 2
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false skip
+  push_temp 0
+  push_temp 3
+  push_temp 1
+  push_int 2
+  send // 1
+  send put:at: 2
+  pop
+  push_temp 3
+  store_temp 2
+skip:
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump alloc
+built:
+  push_nil
+  push_int 3
+  send gc: 1
+  pop
+  push_nil
+  push_int 4
+  send compact: 1
+  pop
+  push_int 0
+  store_temp 4
+  push_temp 2
+  store_temp 5
+chain:
+  push_temp 5
+  push_nil
+  identical
+  jump_if_true chained
+  push_temp 4
+  push_temp 5
+  send id 0
+  add
+  store_temp 4
+  push_temp 5
+  send prev 0
+  store_temp 5
+  jump chain
+chained:
+  push_temp 4
+  push_nil
+  push_temp 0
+  push_lit 1048576
+  send weighted:n: 2
+  add
+  return_top
+end
