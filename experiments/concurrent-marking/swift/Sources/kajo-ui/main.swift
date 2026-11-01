@@ -145,6 +145,10 @@ final class Controller: NSObject, NSApplicationDelegate {
     var iterParkedNs: UInt64 = 0
     var iterEnterNs: UInt64 = 0
     var buildWaitS = 0.0
+    /// Main-thread time outside turns: checkStuck (enters the VM, takes the
+    /// scheduler lock) and the event timer handler, max over the window.
+    var checkStuckMax: UInt64 = 0
+    var timerHandlerMax: UInt64 = 0
     var iterTurns = 0
     var worstIter: UInt64 = 0
     var worstIterVm: UInt64 = 0
@@ -353,6 +357,11 @@ final class Controller: NSObject, NSApplicationDelegate {
                     if nowT > firstDue { self.timerLate.append(Double(ticksToNs(nowT &- firstDue)) / 1e6) }
                 }
                 var n = 0
+                let hs = now()
+                defer {
+                    let hd = now() &- hs
+                    if self.measuring && hd > self.timerHandlerMax { self.timerHandlerMax = hd }
+                }
                 while self.eventsPosted < due && n < 10_000 {
                     let stamp = startTicks &+ UInt64(self.eventsPosted + 1) &* msTicks
                     if self.native {
@@ -414,7 +423,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         }
         frameRemaining = frameAccountNs
         turn(.tick)
+        let cs = VMC.now()
         checkStuck(vm, limitNs: 300_000_000)
+        let csd = VMC.now() &- cs
+        if measuring && csd > checkStuckMax { checkStuckMax = csd }
     }
 
     // MARK: hooks
@@ -520,6 +532,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         line += " worst_iter_gcpark_ms=\(f3(Double(worstIterParked) / 1e6)) worst_iter_gcenter_ms=\(f3(Double(worstIterEnter) / 1e6)) worst_iter_turns=\(worstIterTurns)"
         line += " max_turn_ms=\(f3(Double(maxTurnNs) / 1e6)) max_turn_kind=\(maxTurnKind) max_turn_gcpark_ms=\(f3(Double(maxTurnParkedNs) / 1e6)) max_turn_gcenter_ms=\(f3(Double(maxTurnEnterWaitNs) / 1e6))"
         line += " turns=\(turns) ui_only_turns=\(turnsUIOnly) vm_main_ms=\(f2(Double(vmMainNs) / 1e6))"
+        line += " checkstuck_max_ms=\(f3(Double(checkStuckMax) / 1e6)) timer_handler_max_ms=\(f3(Double(timerHandlerMax) / 1e6))"
         let ev = samplesMs(vm.pointee.eventLatency, from: sampleStart["event"] ?? 0)
         if !ev.isEmpty {
             line += " events_posted=\(eventsPosted - Int(eventsStart)) events_handled=\(ev.count)"

@@ -16,6 +16,8 @@
 #   Old space 64 MiB; oldheapN: 2 N + 64 MiB.
 # Extras (5 runs, 8 workers, cm): alloc and survivors30 at thresholds 20 30
 #   40 50 percent; alloc and oldheap256 with the marker at QoS user-initiated.
+# Heap (added after the first full run, 5 runs, 8 workers): alloc with a
+#   256 MiB old space, stw, cm, cm with the marker at QoS user-initiated.
 # Scenarios: C0..C6, SRUNS (3) runs x 10 s, median run by missed frames then
 #   max gap. Then C2 and C4 once each with the mark-set verifier on.
 # Every pause and every cycle of every run is appended to bench-raw-pauses.txt.
@@ -30,7 +32,7 @@ HERE=$(pwd)
 RUNS=${RUNS:-5}
 SRUNS=${SRUNS:-3}
 SECONDS_PER=${SECONDS_PER:-10}
-PARTS=${PARTS:-"build kernels extras scenarios verify"}
+PARTS=${PARTS:-"build kernels extras heap scenarios verify"}
 KERNELS=${KERNELS:-"arith fib sends ivars alloc churn survivors5 survivors30 oldheap64 oldheap256 oldheap512"}
 SCENARIOS=${SCENARIOS:-"C0 C1 C2 C3 C4 C5 C6"}
 KRAW=${KRAW:-"$HERE/bench-raw-kernels.txt"}
@@ -103,6 +105,15 @@ if has extras; then
             for t in 20 30 40 50; do one "cm-t$t" O "$O" "$k" 8 "$run" KAJO_GC=cm KAJO_CM_THRESHOLD=$t; done
         done
         for k in alloc oldheap256; do one cm-qoshigh O "$O" "$k" 8 "$run" KAJO_GC=cm KAJO_CM_QOS=high; done
+    done
+fi
+
+if has heap; then
+    echo "== heap: alloc, 8 workers, 256 MiB old space, $RUNS runs"
+    for run in $(seq 1 "$RUNS"); do
+        one stw-h256 O "$O" alloc 8 "$run" KAJO_GC=stw KAJO_HEAP_MB=256
+        one cm-h256 O "$O" alloc 8 "$run" KAJO_GC=cm KAJO_HEAP_MB=256
+        one cm-qoshigh-h256 O "$O" alloc 8 "$run" KAJO_GC=cm KAJO_HEAP_MB=256 KAJO_CM_QOS=high
     done
 fi
 

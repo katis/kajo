@@ -388,7 +388,14 @@ func cmSummary(_ vm: VMRef, _ recs: [GCRecord]) -> String {
     o += " floating_mb_max=\(r3(done.map { Double($0.floatingBytes) / 1048576 }.max() ?? 0)) cm_missed=\(done.reduce(0) { $0 + $1.missed })"
     o += " cm_verify_runs=\(vm.metric(.cmVerifyRuns))"
     let first = cycles.first?.startNs ?? 0, last = recs.last.map { $0.atNs &+ $0.totalNs } ?? 0
-    let markingNs = cycles.reduce(0.0) { $0 + Double(($1.finalNs != 0 ? $1.finalNs : last) &- $1.startNs) }
+    // Aborted cycles end at their fallback; only completed ones and a cycle
+    // still marking at the end are counted (an earlier version counted an
+    // aborted cycle up to the end of the window).
+    let markingNs = cycles.reduce(0.0) { acc, c in
+        if c.finalNs != 0 { return acc + Double(c.finalNs &- c.startNs) }
+        if !c.aborted && c.startNs < last { return acc + Double(last &- c.startNs) }
+        return acc
+    }
     if last > since { o += " marking_pct=\(r1(100 * markingNs / Double(last &- since)))" }
     _ = first
     return o

@@ -225,20 +225,21 @@ if grp:
                       f"{f(pct(head, .5), 1)} / {f(max(head) if head else None, 1)} | "
                       f"{f(pct([int(p['freed']) / 1048576 for p in app], .5), 1)} | {total(key, 'fallbacks')} |")
 
-    extras = sorted({c for (c, b, k, n) in grp if c.startswith('cm-')})
+    extras = sorted({c for (c, b, k, n) in grp if c.startswith('cm-') or c.startswith('stw-')})
     if extras:
         print("\n## 4b. Threshold and marker QoS (8 workers, cm; medians of runs, fallbacks summed)\n")
-        print("| kernel | config | wall ms | cycles | fallbacks (all runs) | fallback pause max | final max | marking ms p50 | marker CPU ms p50 |")
-        print("|---|---|--:|--:|--:|--:|--:|--:|--:|")
+        print("`-h256`: 256 MiB old space instead of 64. `qoshigh`: marker at QoS user-initiated instead of utility.\n")
+        print("| kernel | config | wall ms | cycles | fallbacks (all runs) | stw fulls (median) | full or fallback pause max | final max | marking ms p50 | marker CPU ms p50 |")
+        print("|---|---|--:|--:|--:|--:|--:|--:|--:|--:|")
         for k in ('alloc', 'survivors30', 'oldheap256'):
             for c in ['cm'] + extras:
                 key = (c, 'O', k, 8)
                 if key not in grp:
                     continue
-                fu = ms(recs(key, 'fallback'), 'total')
+                fu = ms(recs(key, 'fallback') + recs(key, 'full'), 'total')
                 done = [p for p in recs(key, 'cycle') if p['done'] == '1' and p['aborted'] == '0']
                 fin = recs(key, 'final')
-                print(f"| {k} | {c} | {f(mfield(key, 'ms'))} | {f(mfield(key, 'cycles'), 0)} | {total(key, 'fallbacks')} | "
+                print(f"| {k} | {c} | {f(mfield(key, 'ms'))} | {f(mfield(key, 'cycles'), 0)} | {total(key, 'fallbacks')} | {f(mfield(key, 'fulls'), 0)} | "
                       f"{f(max(fu) if fu else None, 2)} | {f(max(ms(fin, 'total')) if fin else None, 3)} | "
                       f"{f(pct(ms(done, 'marking'), .5), 1)} | {f(pct(ms(done, 'markcpu'), .5), 1)} |")
 
@@ -304,7 +305,7 @@ if srows:
     keys = ['build_wait_s', 'turns', 'vm_main_ms', 'max_turn_ms', 'max_turn_kind', 'max_turn_gcpark_ms', 'max_turn_gcenter_ms',
             'ev_lat_p50_ms', 'ev_lat_p99_ms', 'ev_lat_max_ms', 'main_enter_waits', 'main_enter_wait_max_ms', 'churn100us',
             'promoted_mb', 'survival_pct', 'markers', 'marker_qos', 'mark_cpu_ms_total', 'sweep_cpu_ms_total', 'marked_mb_p50',
-            'promoted_during_mb_max', 'old_start_mb_p50', 'old_after_mb_p50', 'satb_entries', 'marking_pct', 'old_mb', 'rss_mb']
+            'promoted_during_mb_max', 'old_start_mb_p50', 'old_after_mb_p50', 'satb_entries', 'old_mb', 'rss_mb']
     for sc in sorted(meds):
         m = meds[sc]
         print(f"- **{sc}**: " + ', '.join(f"{k}={m[k]}" for k in keys if k in m))
