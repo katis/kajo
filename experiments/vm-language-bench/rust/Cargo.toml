@@ -1,0 +1,19 @@
+[package]
+name = "kajo-bench"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "kajo"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kajo-bench"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = false
