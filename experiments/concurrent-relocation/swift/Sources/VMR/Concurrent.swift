@@ -155,7 +155,11 @@ public struct CMCycle {
     public var relocEvacuated: UInt64 = 0
     public var relocCpuNs: UInt64 = 0
     public var relocWallNs: UInt64 = 0
-    var reloc0: [UInt64] = []
+    /// Relocation counters at the final mark (moved bytes, objects, skips
+    /// pinned, hazard, no space, evacuated), for per-cycle deltas. A tuple,
+    /// not an Array: records live in raw memory and must stay trivial.
+    var reloc0: (UInt64, UInt64, UInt64, UInt64, UInt64, UInt64) = (0, 0, 0, 0, 0, 0)
+    var relocSelected = false
     public var floatingBytes: UInt64 = 0
     public var missed: UInt64 = 0
     // starting values for deltas
@@ -294,13 +298,16 @@ extension RawBuf {
 /// Scan one marked object; push the snapshot entries it names that this call
 /// marks. Relaxed loads: mutators may be storing into the slots.
 @inline(__always)
-private func traceObject(_ om: OM, _ cm: CMShared, _ o: Oop, _ stack: inout WordStack) -> Int {
+private func traceObject(_ om: OM, _ cm: CMShared, _ o: Oop, _ stack: inout WordStack, live: Bool) -> Int {
     let ent = om.entry(o)
     let h = atomicHeader(ent).pointee.load(ordering: .relaxed)
     let off = om.offsetWord(o).pointee.load(ordering: .relaxed)
     // Live bytes per block, for the relocation set (SPEC.md "Selecting the
-    // relocation set"). Snapshot objects are old: their bodies are in blocks.
-    cm.blockLive[Int(truncatingIfNeeded: off) / blockSize].wrappingAdd(UInt32(truncatingIfNeeded: objectBytes(h)), ordering: .relaxed)
+    // relocation set"), only when relocating. Snapshot objects are old:
+    // their bodies are in blocks.
+    if live {
+        cm.blockLive[Int(truncatingIfNeeded: off) / blockSize].wrappingAdd(UInt32(truncatingIfNeeded: objectBytes(h)), ordering: .relaxed)
+    }
     if hdrIsBytes(h) { return objectBytes(h) }
     let n = hdrSlots(h)
     let s = wordPtr(om.heap &+ UInt(truncatingIfNeeded: off)) + 1
@@ -564,6 +571,7 @@ func markWork(_ vm: VMRef, _ m: MarkerRef, _ cyc: UInt64, limit: Int) -> Int {
     let cm = vm.pointee.cm
     let om = vm.pointee.om
     let nm = cm.markerCount.pointee
+    let live = vm.pointee.cmConfig.relocThreshold > 0
     var traced = 0
     var objs: UInt64 = 0, bytes: UInt64 = 0
     var cpu0 = threadCpuNs()
@@ -590,7 +598,7 @@ func markWork(_ vm: VMRef, _ m: MarkerRef, _ cyc: UInt64, limit: Int) -> Int {
         }
         var k = 0
         while k < 128 && traced < limit, let o = m.pointee.stack.pop() {
-            bytes &+= UInt64(traceObject(om, cm, o, &m.pointee.stack))
+            bytes &+= UInt64(traceObject(om, cm, o, &m.pointee.stack, live: live))
             objs &+= 1
             k &+= 1
             traced &+= 1
@@ -695,7 +703,7 @@ func finalMark(_ vm: VMRef, _ rec: inout GCRecord) {
     }
     var objs: UInt64 = 0, bytes: UInt64 = 0
     while let o = ds.pointee.pop() {
-        bytes &+= UInt64(traceObject(om, cm, o, &ds.pointee))
+        bytes &+= UInt64(traceObject(om, cm, o, &ds.pointee, live: vm.pointee.cmConfig.relocThreshold > 0))
         objs &+= 1
     }
     let tb = now()
@@ -876,14 +884,14 @@ func applySweep(_ vm: VMRef) -> UInt64 {
         c.pointee.snapEntries = m0.pointee.sweepSnapEntries
         c.pointee.sweepCpuNs = m0.pointee.sweepCpu
         c.pointee.sweepWallNs = m0.pointee.sweepEnd &- m0.pointee.sweepStart
-        if !c.pointee.reloc0.isEmpty {
-            let d = relocCounters(vm).enumerated().map { $0.element &- c.pointee.reloc0[$0.offset] }
-            c.pointee.relocMovedBytes = d[0]
-            c.pointee.relocMovedObjects = d[1]
-            c.pointee.relocSkipPinned = d[2]
-            c.pointee.relocSkipHazard = d[3]
-            c.pointee.relocNoSpace = d[4]
-            c.pointee.relocEvacuated = d[5]
+        if c.pointee.relocSelected {
+            let n = relocCounters(vm), b = c.pointee.reloc0
+            c.pointee.relocMovedBytes = n.0 &- b.0
+            c.pointee.relocMovedObjects = n.1 &- b.1
+            c.pointee.relocSkipPinned = n.2 &- b.2
+            c.pointee.relocSkipHazard = n.3 &- b.3
+            c.pointee.relocNoSpace = n.4 &- b.4
+            c.pointee.relocEvacuated = n.5 &- b.5
             c.pointee.relocCpuNs = m0.pointee.relocCpu
             c.pointee.relocWallNs = m0.pointee.relocEnd &- m0.pointee.relocStart
         }

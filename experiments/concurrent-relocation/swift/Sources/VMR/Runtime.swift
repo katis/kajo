@@ -223,7 +223,9 @@ public func dumpPauses(_ vm: VMRef, prefix: String, from: Int = 0) {
         l += " drain=\(r.drainNs) drainent=\(r.drainEntries) drainobj=\(r.drainObjects) filter=\(r.filterNs) filtered=\(r.filtered) verify=\(r.verifyNs)"
         l += " roots=\(r.critRootsNs) rem=\(r.critRemNs) copy=\(r.critCopyNs) sweep=\(r.critSweepNs) mark=\(r.markNs) mssweep=\(r.msSweepNs)"
         l += " prep=\(r.prepNs) finish=\(r.finishNs) parts=\(r.participants) young=\(r.youngBytes) promoted=\(r.promotedBytes)"
-        l += " remset=\(r.remSet) entalloc=\(r.entriesAllocated) entfreed=\(r.entriesFreed) busy=\(r.meanBusyNs)\n"
+        l += " remset=\(r.remSet) entalloc=\(r.entriesAllocated) entfreed=\(r.entriesFreed) busy=\(r.meanBusyNs)"
+        l += " survived=\(r.survivedBytes) overflow=\(r.overflowBytes) survroots=\(r.survRootsNs) survwords=\(r.survRootWords)"
+        l += " select=\(r.selectNs) pin=\(r.pinNs) pins=\(r.framePins) relocblocks=\(r.relocBlocks) pendfreed=\(r.pendingFreed) pendfree=\(r.pendingFreeNs) relocverify=\(r.relocVerifyNs)\n"
         fputs(l, f)
     }
     // One line per concurrent cycle that started in this window.
@@ -234,7 +236,10 @@ public func dumpPauses(_ vm: VMRef, prefix: String, from: Int = 0) {
         l += " drainedobj=\(c.drainedObjects) promoted=\(c.promotedBytes) scavs=\(c.scavenges) satb=\(c.satbEntries) satbbuf=\(c.satbBuffers)"
         l += " sweepcpu=\(c.sweepCpuNs) sweepwall=\(c.sweepWallNs) toapply=\(c.appliedNs != 0 ? c.appliedNs &- c.finalNs : 0)"
         l += " oldstart=\(c.oldBlocksStart) oldfinal=\(c.oldBlocksFinal) oldafter=\(c.oldBlocksAfter) live=\(c.liveBytes) freed=\(c.freedBytes)"
-        l += " freedent=\(c.freedEntries) freedblocks=\(c.freedBlocks) snapent=\(c.snapEntries) floating=\(c.floatingBytes) missed=\(c.missed)\n"
+        l += " freedent=\(c.freedEntries) freedblocks=\(c.freedBlocks) snapent=\(c.snapEntries) floating=\(c.floatingBytes) missed=\(c.missed)"
+        l += " rcand=\(c.relocCandidates) rblocks=\(c.relocBlocks) rcapped=\(c.relocCapped) rplanned=\(c.relocPlannedBytes) rpins=\(c.framePins)"
+        l += " rmoved=\(c.relocMovedBytes) rmovedobj=\(c.relocMovedObjects) rskippin=\(c.relocSkipPinned) rskiphz=\(c.relocSkipHazard)"
+        l += " rnospace=\(c.relocNoSpace) revac=\(c.relocEvacuated) rcpu=\(c.relocCpuNs) rwall=\(c.relocWallNs)\n"
         fputs(l, f)
     }
     fclose(f)

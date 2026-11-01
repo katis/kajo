@@ -34,6 +34,7 @@ func selectRelocation(_ vm: VMRef) {
         c.pointee.relocCapped = capped
         c.pointee.relocPlannedBytes = UInt64(planned)
         c.pointee.reloc0 = relocCounters(vm)
+        c.pointee.relocSelected = true
     }
 }
 
@@ -78,9 +79,9 @@ func endRelocation(_ vm: VMRef) {
 }
 
 /// The per-cycle relocation counters, in the order the cycle record uses.
-func relocCounters(_ vm: VMRef) -> [UInt64] {
-    [vm.metric(.relocMovedBytes), vm.metric(.relocMovedObjects), vm.metric(.relocSkipPinned),
-     vm.metric(.relocSkipHazard), vm.metric(.relocNoSpace), vm.metric(.relocEvacuated)]
+func relocCounters(_ vm: VMRef) -> (UInt64, UInt64, UInt64, UInt64, UInt64, UInt64) {
+    (vm.metric(.relocMovedBytes), vm.metric(.relocMovedObjects), vm.metric(.relocSkipPinned),
+     vm.metric(.relocSkipHazard), vm.metric(.relocNoSpace), vm.metric(.relocEvacuated))
 }
 
 // MARK: - the relocator (marker 0, inside the VM)

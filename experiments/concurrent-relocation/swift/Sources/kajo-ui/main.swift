@@ -201,17 +201,21 @@ final class Controller: NSObject, NSApplicationDelegate {
         do {
             // SPEC.md "Scenarios": 4 MiB nurseries throughout; R4 loads
             // oldheap at 256 MiB live with a 576 MiB soft limit, R5/R5n
-            // fragment with 1 GiB.
+            // fragment with 512 MiB.
             let s = opt.scenario
             let big = oldHeap
             let frag = s.hasPrefix("R5")
             let src = try appSources(oldheap: big ? 256 : nil, fragment: frag)
-            let img = try Image.fromSources(src, heapSize: (big ? 576 : frag ? 1024 : 64) << 20, nurseryBytes: 4 << 20)
+            let img = try Image.fromSources(src, heapSize: (big ? 576 : frag ? 512 : 64) << 20, nurseryBytes: 4 << 20)
             var cfg = cmConfigFromEnv()
             cfg.concurrent = true
             cfg.ageN = s == "R1" ? 1 : 2
             cfg.relocThreshold = ["R0", "R3", "R5", "R6"].contains(s) ? 50 : s == "R4" ? 101 : 0
             if s == "R4" { cfg.force = true; cfg.threshold = 0 }
+            // R5/R5n: cycles from 30 percent of 512 MiB, so the paced
+            // fragment load (about 40 MB/s promoted) starts them early in
+            // the window.
+            if frag { cfg.threshold = 0.30 }
             cfg.verify = opt.verify
             rt = Runtime(img, background: 7, config: cfg)
         } catch {

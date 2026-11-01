@@ -46,7 +46,12 @@ public struct Heap {
         nblocks = (size + reserve) / blockSize
         self.nurseryBytes = nurseryBytes
         let total = nblocks * blockSize + reserve
-        base = mapTwice(total)
+        if getenv("KAJO_SINGLE_MAP") != nil {
+            guard let p = mmap(nil, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0), p != MAP_FAILED else { fatal("mmap") }
+            base = p
+        } else {
+            base = mapTwice(total)
+        }
         used = .allocate(capacity: nblocks)
         used.initialize(repeating: 0, count: nblocks)
         inUse = .allocate(capacity: nblocks)
