@@ -1,0 +1,116 @@
+; Library for the ui-thread-scheduling experiment. Loaded after
+; ../../vm-language-bench/kernels/prelude.kasm. Primitive numbers: SPEC.md
+; "Primitives added".
+
+method UndefinedObject globalAt: temps=0 prim=14
+end
+method UndefinedObject globalAt:put: temps=0 prim=15
+end
+method Object fork:with:priority:main:exit: temps=0 prim=20
+end
+method UndefinedObject yield temps=0 prim=21
+end
+method Semaphore wait temps=0 prim=22
+end
+method Semaphore signal temps=0 prim=23
+end
+method Process terminate temps=0 prim=24
+end
+method UndefinedObject delay:signal: temps=0 prim=25
+end
+method UndefinedObject readFile:signal: temps=0 prim=26
+end
+method UndefinedObject ioResult: temps=0 prim=27
+end
+method UndefinedObject nextEvent temps=0 prim=28
+end
+method UndefinedObject setLabel: temps=0 prim=29
+end
+method UndefinedObject appendLine: temps=0 prim=30
+end
+method UndefinedObject sliderValue temps=0 prim=31
+end
+method UndefinedObject detachFromMain temps=0 prim=32
+end
+method UndefinedObject activeProcess temps=0 prim=33
+end
+method UndefinedObject workerId temps=0 prim=34
+end
+
+; --- Semaphore new (no metaclasses: `nil newSemaphore`)
+method Semaphore init temps=0
+  push_int 0
+  store_ivar 0
+  return_self
+end
+
+method UndefinedObject newSemaphore temps=0
+  push_lit @Semaphore
+  send basicNew 0
+  send init 0
+  return_top
+end
+
+; --- fork conveniences. Priority nil = the forker's.
+method Object fork:with: temps=0
+  push_self
+  push_temp 0
+  push_temp 1
+  push_nil
+  push_false
+  push_nil
+  send fork:with:priority:main:exit: 5
+  return_top
+end
+
+method Object forkMain:with: temps=0
+  push_self
+  push_temp 0
+  push_temp 1
+  push_nil
+  push_true
+  push_nil
+  send fork:with:priority:main:exit: 5
+  return_top
+end
+
+; --- kernel: packed  ->  run: packed // 256 of: packed \\ 256
+method UndefinedObject kernel: temps=0
+  push_self
+  push_temp 0
+  push_lit 256
+  send // 1
+  push_temp 0
+  push_lit 256
+  send \\ 1
+  send run:of: 2
+  return_top
+end
+
+; --- spin: k  k iterations of arithmetic; answers a checksum.
+; t0 = k, t1 = i, t2 = acc
+method UndefinedObject spin: temps=2
+  push_int 0
+  store_temp 1
+  push_int 0
+  store_temp 2
+loop:
+  push_temp 1
+  push_temp 0
+  lt
+  jump_if_false done
+  push_temp 2
+  push_temp 1
+  push_int 3
+  mul
+  add
+  store_temp 2
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump loop
+done:
+  push_temp 2
+  return_top
+end
