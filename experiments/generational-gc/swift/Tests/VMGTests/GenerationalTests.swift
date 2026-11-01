@@ -804,3 +804,22 @@ private func noFailures(_ rt: Runtime) { #expect(rt.vm.metric(.verifyFailures) =
     noFailures(rt)
     rt.stop()
 }
+
+@Test func backToBackStopsDoNotLetReleasedWorkersRun() throws {
+    // A stop requested right after another must wait for every worker again.
+    // The inherited protocol decremented `parked` only when a released worker
+    // woke up, so the second stop could start while workers still ran.
+    let rt = try runtime(pairSrc, background: 7)
+    let vm = rt.vm, nilObj = vm.pointee.nilObj
+    for _ in 0..<7 { spawn(vm, nilObj, rt.symbol("churn:"), mkInt(150_000)) }
+    var stops = 0
+    while liveProcessCount(vm) > 0 && stops < 400 {
+        hostCollect(vm, full: false)
+        hostCollect(vm, full: stops % 8 == 0)
+        stops += 2
+    }
+    waitAllTerminated(vm)
+    rt.stop()
+    #expect(stops >= 20)
+    noFailures(rt)
+}

@@ -1,9 +1,11 @@
-// kajo-ui <S0..S7> [--seconds 10] [--warmup 1] [--out file]
+// kajo-ui <G0..G5> [--seconds 10] [--warmup 1] [--out file]
 //
-// One window, one animated layer, a label, a text view, a slider. The
-// Smalltalk UI Process runs synchronously on the main thread in budgeted
-// turns (SPEC.md "Shell turns and the frame account"); a CADisplayLink
-// records every frame. Prints one key=value line and appends it to --out.
+// Copied from ../ui-thread-scheduling (window, frame measurement, turns and
+// frame account unchanged); the scenarios are this experiment's G0..G5
+// (SPEC.md "Scenarios"). One window, one animated layer, a label, a text
+// view, a slider. The Smalltalk UI Process runs synchronously on the main
+// thread in budgeted turns; a CADisplayLink records every frame. Prints one
+// key=value line and appends it to --out.
 
 import AppKit
 import Darwin
@@ -15,7 +17,7 @@ import VMG
 // MARK: - arguments
 
 struct Options {
-    var scenario = "S0"
+    var scenario = "G0"
     var seconds = 10.0
     var warmup = 1.0
     var out: String? = nil
@@ -25,7 +27,7 @@ struct Options {
 func parseOptions() -> Options {
     var o = Options()
     var args = Array(CommandLine.arguments.dropFirst())
-    if let s = args.first, s.hasPrefix("S") { o.scenario = s; args.removeFirst() }
+    if let s = args.first, s.hasPrefix("G") { o.scenario = s; args.removeFirst() }
     var i = 0
     while i < args.count {
         let a = args[i], v = i + 1 < args.count ? args[i + 1] : ""
@@ -166,6 +168,8 @@ final class Controller: NSObject, NSApplicationDelegate {
     var spin50us = 0
     var spin1ms = 0
     var spin20us = 0
+    var churn100us = 0
+    var gcLogStart = 0
     var rssBefore = 0
     var rssParked = 0
     var parkedProcs = 0
@@ -185,7 +189,10 @@ final class Controller: NSObject, NSApplicationDelegate {
     @MainActor func start() {
         Controller.shared = self
         do {
-            let img = try Image.fromSources(try appSources(), heapSize: 64 << 20)
+            // G1: non-generational (nursery 0); G5: 16 MiB nurseries; else 4 MiB.
+            let nursery = opt.scenario == "G1" ? 0 : opt.scenario == "G5" ? 16 << 20 : 4 << 20
+            let src = try appSources(survivors: opt.scenario == "G3" ? 30 : nil)
+            let img = try Image.fromSources(src, heapSize: 64 << 20, nurseryBytes: nursery)
             rt = Runtime(img, background: 7)
         } catch {
             fputs("load failed: \(error)\n", stderr); exit(1)
@@ -223,6 +230,15 @@ final class Controller: NSObject, NSApplicationDelegate {
         spin50us = max(1, Int(50_000 / best))
         spin1ms = max(1, Int(1_000_000 / best))
         spin20us = max(1, Int(20_000 / best))
+        // G4: Points allocated in ~100 us on the main thread.
+        let m = 50_000
+        var bestc = Double.infinity
+        for _ in 0..<5 {
+            spawn(vm, vm.pointee.nilObj, rt.symbol("churnBatch:"), mkInt(Int64(m)), priority: 2, main: true)
+            let st = runMain(vm, budgetNs: 1_000_000_000)
+            bestc = min(bestc, Double(st.ns) / Double(m))
+        }
+        churn100us = max(1, min(65_535, Int(100_000 / bestc)))
     }
 
     @MainActor func buildWindow() {
@@ -264,29 +280,15 @@ final class Controller: NSObject, NSApplicationDelegate {
     @MainActor func startLoad() {
         let s = opt.scenario
         let nilObj = vm.pointee.nilObj
-        if s == "S1n" {
-            native = true
-            startEvents()
-        } else if s != "S0" && s != "S6" {
+        if s == "G0" { return }
+        if s == "G4" {
+            spawn(vm, nilObj, rt.symbol("uiChurnLoop:"), mkInt(Int64(spin50us * 65536 + churn100us)), priority: uiPriority, main: true)
+        } else {
             spawn(vm, nilObj, rt.symbol("uiLoop:"), mkInt(Int64(spin50us)), priority: uiPriority, main: true)
-            startEvents()
         }
-        switch s {
-        case "S3":
-            spawn(vm, nilObj, rt.symbol("deepSupervisor:"), mkInt(Int64(spin20us)), priority: 1, main: true)
-        case "S4":
-            for _ in 0..<7 { spawn(vm, nilObj, rt.symbol("allocLoop"), nilObj, priority: 1) }
-        case "S5":
-            vm.pointee.globals[1] = hostNewSemaphore(vm)
-            rssBefore = currentRSS()
-            parkedProcs = 10_000
-            for _ in 0..<parkedProcs { spawn(vm, nilObj, rt.symbol("delayLoop:"), mkInt(10), priority: 1) }
-        case "S6":
-            for _ in 0..<1000 { spawn(vm, nilObj, rt.symbol("hopper:"), mkInt(Int64(spin1ms)), priority: 1) }
-        case "S7":
-            vm.pointee.mainBudgetEnabled = false
-        default: break
-        }
+        startEvents()
+        let loop = s == "G3" ? "survLoop" : "allocLoop"
+        for _ in 0..<7 { spawn(vm, nilObj, rt.symbol(loop), nilObj, priority: 1) }
     }
 
     @MainActor func beginMeasure() {
@@ -298,10 +300,7 @@ final class Controller: NSObject, NSApplicationDelegate {
         eventsStart = Double(eventsPosted)
         timerLate = []
         nativeLatency = []
-        if opt.scenario == "S5" { rssParked = currentRSS() }
-        if opt.scenario == "S2" || opt.scenario == "S7" {
-            spawn(vm, vm.pointee.nilObj, rt.symbol("hog"), vm.pointee.nilObj, priority: 1, main: true)
-        }
+        gcLogStart = vm.pointee.gcLog.pointee.count
         turns = 0; turnsUIOnly = 0; vmMainNs = 0; maxTurnNs = 0
         worstIter = 0
         labelUpdates = 0
@@ -460,7 +459,7 @@ final class Controller: NSObject, NSApplicationDelegate {
     @MainActor func startWatchdog() {
         let bits = UInt(bitPattern: vm)
         let killAt = now() + UInt64((opt.warmup + 9.0) * 1e9)
-        let kill = opt.scenario == "S7"
+        let kill = false
         let t = DispatchSource.makeTimerSource(queue: .global(qos: .userInitiated))
         t.schedule(deadline: .now(), repeating: .milliseconds(10))
         t.setEventHandler(handler: watchdogHandler(bits: bits, killAt: killAt, kill: kill))
@@ -511,28 +510,9 @@ final class Controller: NSObject, NSApplicationDelegate {
         line += " label_updates=\(labelUpdates) stuck_reports=\(stuckReports.count + (watchdogReported.load(ordering: .relaxed) ? 1 : 0))"
         line += " spin50us=\(spin50us) spin1ms=\(spin1ms)"
         line += " preemptions=\(d(.preemptions)) gc_count=\(d(.gcCount)) overflows=\(d(.overflows)) forks=\(d(.forks))"
-        let ttsp = samplesMs(vm.pointee.gcTtsp, from: sampleStart["ttsp"] ?? 0)
-        let stw = samplesMs(vm.pointee.gcStw, from: sampleStart["stw"] ?? 0)
-        if !stw.isEmpty {
-            line += " ttsp_p50_ms=\(f3(pct(ttsp, 0.5))) ttsp_p99_ms=\(f3(pct(ttsp, 0.99))) ttsp_max_ms=\(f3(ttsp.max() ?? 0))"
-            line += " stw_p50_ms=\(f3(pct(stw, 0.5))) stw_p99_ms=\(f3(pct(stw, 0.99))) stw_max_ms=\(f3(stw.max() ?? 0))"
-            let enter = samplesMs(vm.pointee.mainEnterWait, from: sampleStart["enter"] ?? 0)
-            line += " main_enter_waits=\(enter.count) main_enter_wait_max_ms=\(f3(enter.max() ?? 0))"
-        }
-        if opt.scenario == "S5" {
-            let sig = Double(d(.extSignals))
-            line += " ext_signals_per_s=\(Int(sig / opt.seconds)) rss_before_mb=\(f2(Double(rssBefore) / 1048576)) rss_parked_mb=\(f2(Double(rssParked) / 1048576))"
-            line += " rss_per_process_kb=\(f2(Double(rssParked - rssBefore) / Double(parkedProcs) / 1024))"
-            let counter = vm.pointee.globals[1]
-            line += " counter_signals=\(intVal(vm.pointee.om.slot(counter, sExcess)))"
-        }
-        if opt.scenario == "S6" {
-            let hop = samplesMs(vm.pointee.hopLatency, from: sampleStart["hop"] ?? 0)
-            let per = samplesMs(vm.pointee.mainPerHop, from: sampleStart["perHop"] ?? 0)
-            line += " hops=\(hop.count) hops_per_s=\(Int(Double(hop.count) / opt.seconds))"
-            line += " hop_lat_p50_ms=\(f3(pct(hop, 0.5))) hop_lat_p99_ms=\(f3(pct(hop, 0.99))) hop_lat_max_ms=\(f3(hop.max() ?? 0))"
-            line += " main_per_hop_p50_us=\(f2(pct(per, 0.5) * 1000)) main_per_hop_p99_us=\(f2(pct(per, 0.99) * 1000))"
-        }
+        let enter = samplesMs(vm.pointee.mainEnterWait, from: sampleStart["enter"] ?? 0)
+        line += " main_enter_waits=\(enter.count) main_enter_wait_max_ms=\(f3(enter.max() ?? 0))"
+        line += " churn100us=\(churn100us) " + gcSummary(vm, from: gcLogStart)
         line += " sched_locks=\(d(.schedLocks)) sched_contended=\(d(.schedContended)) sched_wait_ms=\(f3(Double(d(.schedWaitNs)) / 1e6))"
         line += " idle_ms=\(f2(Double(d(.idleNs)) / 1e6)) rss_mb=\(f2(Double(currentRSS()) / 1048576))"
         print(line)

@@ -558,7 +558,11 @@ private func park(_ vm: VMRef, _ w: WorkerRef) {
         }
         pthread_cond_wait(vm.pointee.cond, vm.pointee.mutex)
     }
-    sync.pointee.parked -= 1
+    // Not `parked -= 1`: the stopper zeroed the count when it released the
+    // world. Decrementing here, whenever this thread gets to run, let a stop
+    // requested right after the previous one count released workers as
+    // still parked and collect while they ran (found when the full
+    // collection got a pause of its own).
     let dt = now() &- t0
     w.pointee.parkedNs &+= dt
     vm.add(.parkedNs, dt)
@@ -614,10 +618,13 @@ func stopWorld(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, retry: Bool) -> Oop? {
             releaseEntries(vm, ws[i])
         }
     }
+    var op = op
+    if case .scavenge = op, vm.pointee.gc.pointee.fullPending.pointee.load(ordering: .relaxed) { op = .full }
     performOp(vm, w, op, requested: t0, stopped: t1)
     let t2 = now()
     vm.pointee.gcRequested.store(false, ordering: .releasing)
     vm.pointee.sync.pointee.epoch += 1
+    vm.pointee.sync.pointee.parked = 0 // every parked worker is released
     vm.add(.stwCount, 1)
     vm.add(.stwNs, t2 &- t0)
     vm.add(.ttspNs, t1 &- t0)
@@ -625,6 +632,9 @@ func stopWorld(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, retry: Bool) -> Oop? {
     vm.pointee.gcStw.pointee.add(t2 &- t0)
     pthread_cond_broadcast(vm.pointee.cond)
     pthread_mutex_unlock(vm.pointee.mutex)
+    if case .scavenge = op, vm.pointee.gc.pointee.fullPending.pointee.load(ordering: .relaxed) {
+        stopWorld(vm, w, .full, retry: false)
+    }
     return 0
 }
 

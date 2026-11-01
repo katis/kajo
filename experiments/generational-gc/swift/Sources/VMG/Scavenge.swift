@@ -47,6 +47,9 @@ struct GCShared {
     var counts: UnsafeMutablePointer<Int>
     var poolCount: UnsafeMutablePointer<Atomic<Int>>
     var idle: UnsafeMutablePointer<Atomic<Int>>
+    /// A scavenge left old space above its soft limit: the next stop (the
+    /// stopper requests one right after resuming) is a full collection.
+    var fullPending: UnsafeMutablePointer<Atomic<Bool>>
 
     static func make() -> UnsafeMutablePointer<GCShared> {
         func counter() -> UnsafeMutablePointer<Atomic<Int>> {
@@ -66,12 +69,14 @@ struct GCShared {
         let full = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
         let free = UnsafeMutablePointer<Int>.allocate(capacity: maxPackets)
         for i in 0..<maxPackets { free[i] = i }
+        let fp = UnsafeMutablePointer<Atomic<Bool>>.allocate(capacity: 1)
+        fp.initialize(to: Atomic(false))
         let counts = UnsafeMutablePointer<Int>.allocate(capacity: 2)
         counts[0] = 0
         counts[1] = maxPackets
         return boxed(GCShared(taskNext: counter(), sweepNext: counter(), inCopy: counter(), copyEnd: ce, parts: parts,
                               packetLock: lock, packets: packets, packetLen: len, fullList: full, freeList: free,
-                              counts: counts, poolCount: counter(), idle: counter()))
+                              counts: counts, poolCount: counter(), idle: counter(), fullPending: fp))
     }
 }
 
@@ -124,8 +129,22 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
     } else if case .scavenge = op {
         return // non-generational: nothing to do
     }
-    let needFull: Bool
-    if case .full = op { needFull = true } else { needFull = vm.pointee.heap.blocksInUse() > vm.pointee.heap.softBlocks }
+    // A scavenge that leaves old space near its soft limit asks for a full
+    // collection in a pause of its own, right after this one (SPEC.md "Full
+    // collection"); only far above the limit (a quarter of the promotion
+    // reserve) does it run here, so the next scavenge cannot exhaust the
+    // reserve.
+    // The request is made one scavenge early: when another scavenge
+    // promoting as much as this one would cross the soft limit.
+    var needFull = false
+    let heap = vm.pointee.heap
+    let expect = Int(rec.promotedBytes) / blockSize + rec.participants
+    if case .full = op { needFull = true }
+    else if heap.blocksInUse() > heap.softBlocks + (heap.nblocks - heap.softBlocks) / 4 { needFull = true }
+    else if generational && heap.blocksInUse() + expect > heap.softBlocks {
+        vm.pointee.gc.pointee.fullPending.pointee.store(true, ordering: .relaxed)
+    }
+    if needFull { vm.pointee.gc.pointee.fullPending.pointee.store(false, ordering: .relaxed) }
     var msNs: UInt64 = 0
     if needFull {
         if let ws = vm.pointee.workers {

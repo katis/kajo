@@ -191,8 +191,13 @@ stacks, buffers and logs are still processed, by whoever takes the task.
 6. *Join*: the stopper closes the phase (no late joiners) and waits under
    the mutex until every joined participant reported done.
 7. *Finish*: chunk pool rebuild, nursery tops reset, remembered buffers
-   emptied, statistics; if old space is above its soft limit, a full
-   mark-sweep runs now in the same pause; the world resumes.
+   emptied, statistics; the world resumes. If another scavenge promoting as
+   much as this one would cross old space's soft limit, a full collection is
+   marked pending and the stopper requests it as its own pause right after
+   resuming (any stop that comes first is upgraded to it). Only if old space
+   is already more than a quarter of the promotion reserve above the soft
+   limit does the mark-sweep run inside this pause. (Changed after the first
+   scenario runs: a scavenge stacked on a mark-sweep made 9 to 14 ms pauses.)
 
 **Scanning a word `v`** (participant):
 
@@ -255,7 +260,17 @@ imbalance. (Added after the first measurements; see RESULTS.md.)
 remembered set are empty), then the existing non-moving mark-sweep of old
 space by the stopper alone, with the bitmap entry sweep above and the
 block pool rebuild. Promotion TLABs are retired first. Full-collection
-pauses are recorded separately from scavenge pauses.
+pauses are recorded separately from scavenge pauses. Requested as its own
+pause right after the scavenge that found old space nearly full, so its
+scavenge part is small.
+
+## Stop protocol fix
+
+The inherited protocol let a parked worker decrement `parked` when it
+woke up after the world was released. A stop requested immediately after
+another (the pending full collection) could then count released, running
+workers as parked. The stopper now zeroes `parked` when it releases the
+world and parked workers do not decrement it.
 
 ## Pause accounting
 
