@@ -1,0 +1,15 @@
+STUCK process=7 method=hog ms=306.72 via=shell
+kajo: stack overflow, Process 8 terminated
+kajo: stack overflow, Process 9 terminated
+kajo: stack overflow, Process 10 terminated
+STUCK process=7 ms=309.14 via=watchdog (main thread held)
+STUCK process=7 method=hog ms=304.47 via=shell
+kajo: stack overflow, Process 8 terminated
+kajo: stack overflow, Process 9 terminated
+kajo: stack overflow, Process 10 terminated
+STUCK process=7 ms=309.79 via=watchdog (main thread held)
+STUCK process=7 method=hog ms=310.00 via=shell
+kajo: stack overflow, Process 8 terminated
+kajo: stack overflow, Process 9 terminated
+kajo: stack overflow, Process 10 terminated
+STUCK process=7 ms=310.68 via=watchdog (main thread held)

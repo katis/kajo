@@ -1,0 +1,76 @@
+# machine: Apple M2 Max, 8 P-cores + 4 E-cores, macOS 27.0.1, no pinning
+# swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+
+## Kernels: median wall ms, ratio to variant B (same session)
+
+| kernel | workers | build | B ms | Pnb ms | P0 ms | P ms | Pnb/B | P0/Pnb | P/P0 | P/B | checksum | equal |
+|---|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|---|:-:|
+| fib | 1 | O | 1550.9 | 1549.4 | 1585.0 | 1583.8 | 0.999 | 1.023 | 0.999 | 1.021 | 24682992 | yes |
+| fib | 1 | align32 | 1552.2 | 1550.8 | 1586.3 | 1587.4 | 0.999 | 1.023 | 1.001 | 1.023 | 24682992 | yes |
+| fib | 8 | O | 202.0 | 201.1 | 216.6 | 205.6 | 0.996 | 1.077 | 0.949 | 1.018 | 24682992 | yes |
+| fib | 8 | align32 | 200.9 | 203.7 | 211.6 | 213.8 | 1.014 | 1.039 | 1.010 | 1.064 | 24682992 | yes |
+| sends | 1 | O | 2474.7 | 2622.2 | 2292.1 | 2287.9 | 1.060 | 0.874 | 0.998 | 0.925 | 1066666666666668 | yes |
+| sends | 1 | align32 | 2643.5 | 2638.7 | 2277.7 | 2272.6 | 0.998 | 0.863 | 0.998 | 0.860 | 1066666666666668 | yes |
+| sends | 8 | O | 326.4 | 352.1 | 305.5 | 311.1 | 1.079 | 0.868 | 1.018 | 0.953 | 133333335000001 | yes |
+| sends | 8 | align32 | 353.3 | 352.8 | 304.4 | 305.2 | 0.999 | 0.863 | 1.003 | 0.864 | 133333335000001 | yes |
+| arith | 1 | O | 3015.8 | 3087.1 | 2753.3 | 2752.9 | 1.024 | 0.892 | 1.000 | 0.913 | 372800000 | yes |
+| arith | 1 | align32 | 3013.8 | 3010.4 | 2742.8 | 2743.1 | 0.999 | 0.911 | 1.000 | 0.910 | 372800000 | yes |
+| arith | 8 | O | 406.2 | 425.6 | 369.4 | 374.7 | 1.048 | 0.868 | 1.014 | 0.922 | 372800000 | yes |
+| arith | 8 | align32 | 403.9 | 407.1 | 367.8 | 372.2 | 1.008 | 0.903 | 1.012 | 0.922 | 372800000 | yes |
+| alloc | 1 | O | 2153.8 | 2133.7 | 1876.5 | 1875.2 | 0.991 | 0.879 | 0.999 | 0.871 | 41950911 | yes |
+| alloc | 1 | align32 | 2168.1 | 2144.1 | 1863.9 | 1866.7 | 0.989 | 0.869 | 1.002 | 0.861 | 41950911 | yes |
+| alloc | 8 | O | 411.4 | 406.1 | 367.0 | 359.2 | 0.987 | 0.904 | 0.979 | 0.873 | 42008248 | yes |
+| alloc | 8 | align32 | 401.3 | 408.8 | 361.9 | 370.4 | 1.019 | 0.885 | 1.023 | 0.923 | 42008248 | yes |
+
+## Kernel side counters (P, O build, medians)
+
+| kernel | workers | slices | preemptions | sched locks | contended | sched wait ms | GCs |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| fib | 1 | 317 | 316 | 638 | 1 | 0.002 | 0 |
+| fib | 8 | 329 | 321 | 704 | 18 | 0.120 | 0 |
+| sends | 1 | 457 | 456 | 920 | 0 | 0.000 | 0 |
+| sends | 8 | 486 | 478 | 1018 | 8 | 0.071 | 0 |
+| arith | 1 | 549 | 548 | 1104 | 0 | 0.000 | 0 |
+| arith | 8 | 575 | 567 | 1198 | 7 | 0.044 | 0 |
+| alloc | 1 | 372 | 371 | 750 | 0 | 0.000 | 15 |
+| alloc | 8 | 483 | 475 | 1012 | 36 | 0.136 | 19 |
+
+clock: mach_absolute_time_ns=5.18752085 clock_gettime_nsec_np_ns=9.5287125 sink=0
+
+## Poll divisor N (arith, 1 worker, 5 ms slices, O build; overhead vs NO_BUDGET)
+
+| N | median ms | runs | overhead |
+|--:|--:|--:|--:|
+| no countdown (NO_BUDGET) | 3082.3 | 5 | - |
+| 64 | 2760.8 | 5 | -10.43% |
+| 256 | 2754.6 | 5 | -10.63% |
+| 1024 | 2752.3 | 5 | -10.71% |
+| 4096 | 2755.0 | 5 | -10.62% |
+# machine: Apple M2 Max, 8 P-cores + 4 E-cores, macOS 27.0.1, no pinning
+# swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+
+## Scenarios: median run of 3 (by missed frames, then max gap)
+
+| id | refresh Hz | frames | drops | missed | gap p50 ms | gap p99 ms | gap max ms | cb late p99 ms | ev lat p50/p99/max ms | ev post-lat p50/p99 ms | worst run-loop iter ms (VM, GC park) | stuck | per-run missed |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|---|---|---|--:|---|
+| S0 | 120.00 | 1200 | 0 | 0 | 8.333 | 8.333 | 8.333 | 0.105 | - | - | 2.546 (0.000, 0.000) | 0 | 0, 0, 0 |
+| S1 | 119.90 | 1199 | 1 | 1 | 8.333 | 8.333 | 16.731 | 5.837 | 0.631 / 4.971 / 7.767 | 0.120 / 0.814 | 8.612 (0.104, 0.000) | 0 | 1, 0, 1 |
+| S1n | 120.00 | 1200 | 0 | 0 | 8.333 | 8.333 | 8.333 | 0.185 | 0.620 / 5.032 / 6.815 (native) | - | 9.122 (0.001, 0.000) | 0 | 0, 0, 0 |
+| S2 | 119.60 | 1196 | 2 | 4 | 8.333 | 8.333 | 26.141 | 7.256 | 2.306 / 8.458 / 24.117 | 0.269 / 1.607 | 26.045 (4.022, 0.000) | 1 | 4, 5, 3 |
+| S3 | 119.60 | 1196 | 3 | 4 | 8.333 | 8.333 | 24.795 | 6.994 | 1.891 / 7.755 / 17.667 | 0.172 / 1.371 | 18.811 (4.003, 0.000) | 0 | 5, 0, 4 |
+| S4 | 119.50 | 1195 | 4 | 5 | 8.333 | 8.333 | 21.123 | 6.502 | 0.637 / 8.472 / 19.070 | 0.055 / 6.867 | 20.821 (1.022, 0.000) | 0 | 5, 0, 7 |
+| S5 | 120.00 | 1200 | 0 | 0 | 8.333 | 8.333 | 8.333 | 2.998 | 0.149 / 2.811 / 14.007 | 0.093 / 0.451 | 15.620 (0.965, 0.000) | 0 | 0, 0, 2 |
+| S6 | 120.00 | 1200 | 0 | 0 | 8.333 | 8.333 | 8.333 | 0.178 | - | - | 4.220 (0.034, 0.000) | 0 | 0, 0, 0 |
+| S7 | 12.00 | 120 | 1 | 1079 | 8.333 | 9.850 | 9001.877 | 0.104 | 8926.059 / 8998.943 / 9000.800 | 5.106 / 9.144 | 9000.812 (8999.947, 0.000) | 1 | 1079, 1079, 1080 |
+
+## Scenario extras (same median runs)
+
+- **S0**: turns=1206, ui_only_turns=0, vm_main_ms=1.11, max_turn_ms=0.014, max_turn_kind=tick, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, preemptions=0, overflows=0, gc_count=0, sched_locks=2412, sched_contended=0, sched_wait_ms=0.000, idle_ms=0.00, rss_mb=95.41
+- **S1**: turns=7688, ui_only_turns=0, vm_main_ms=1346.23, max_turn_ms=1.105, max_turn_kind=event, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=4.968, timer_late_max_ms=7.660, preemptions=16, overflows=0, gc_count=0, sched_locks=35481, sched_contended=0, sched_wait_ms=0.000, idle_ms=0.00, rss_mb=97.47
+- **S1n**: turns=1206, ui_only_turns=0, vm_main_ms=1.09, max_turn_ms=0.012, max_turn_kind=tick, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=5.065, timer_late_max_ms=6.683, preemptions=0, overflows=0, gc_count=0, sched_locks=2412, sched_contended=0, sched_wait_ms=0.000, idle_ms=0.00, rss_mb=96.38
+- **S2**: turns=4957, ui_only_turns=2549, vm_main_ms=5224.96, max_turn_ms=3.088, max_turn_kind=tick, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=8.600, timer_late_max_ms=24.006, preemptions=2411, overflows=0, gc_count=0, sched_locks=32236, sched_contended=0, sched_wait_ms=0.000, idle_ms=0.00, rss_mb=107.16
+- **S3**: turns=5371, ui_only_turns=2967, vm_main_ms=5142.21, max_turn_ms=3.073, max_turn_kind=tick, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=8.062, timer_late_max_ms=17.611, preemptions=2406, overflows=105, gc_count=0, sched_locks=33669, sched_contended=0, sched_wait_ms=0.000, idle_ms=0.00, rss_mb=96.94
+- **S4**: turns=8159, ui_only_turns=359, vm_main_ms=3459.52, max_turn_ms=7.830, max_turn_kind=event, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=6.815, timer_late_max_ms=19.012, preemptions=10589, overflows=0, gc_count=502, ttsp_p50_ms=0.073, ttsp_p99_ms=0.128, ttsp_max_ms=0.141, stw_p50_ms=6.411, stw_p99_ms=7.738, stw_max_ms=8.039, main_enter_waits=17, main_enter_wait_max_ms=7.579, sched_locks=56805, sched_contended=1068, sched_wait_ms=6.277, idle_ms=0.00, rss_mb=203.77
+- **S5**: turns=9866, ui_only_turns=0, vm_main_ms=1161.05, max_turn_ms=1.035, max_turn_kind=event, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=2.700, timer_late_max_ms=13.902, preemptions=1, overflows=0, gc_count=0, ext_signals_per_s=350277, counter_signals=3851422, rss_before_mb=85.52, rss_parked_mb=260.75, rss_per_process_kb=17.94, sched_locks=14010007, sched_contended=2550325, sched_wait_ms=39632.332, idle_ms=0.00, rss_mb=261.45
+- **S6**: turns=62910, ui_only_turns=0, vm_main_ms=98.68, max_turn_ms=0.066, max_turn_kind=wake, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, preemptions=0, overflows=0, gc_count=0, hops=67514, hops_per_s=6751, hop_lat_p50_ms=0.011, hop_lat_p99_ms=0.027, hop_lat_max_ms=4.172, main_per_hop_p50_us=0.96, main_per_hop_p99_us=4.62, sched_locks=334376, sched_contended=1249, sched_wait_ms=5.823, idle_ms=0.00, rss_mb=115.06
+- **S7**: turns=1167, ui_only_turns=2, vm_main_ms=9009.28, max_turn_ms=8999.947, max_turn_kind=event, max_turn_gcpark_ms=0.000, max_turn_gcenter_ms=0.000, timer_late_p99_ms=0.137, timer_late_max_ms=8999.885, preemptions=0, overflows=0, gc_count=0, sched_locks=11508, sched_contended=0, sched_wait_ms=0.000, idle_ms=0.00, rss_mb=96.59
