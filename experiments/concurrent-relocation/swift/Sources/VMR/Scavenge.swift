@@ -127,6 +127,15 @@ public struct GCRecord {
     public var filterNs: UInt64 = 0
     public var filtered: UInt64 = 0
     public var verifyNs: UInt64 = 0
+    /// Final mark: relocation-set selection and frame pinning; any pause:
+    /// pending blocks freed at its start and the relocation verifier.
+    public var selectNs: UInt64 = 0
+    public var pinNs: UInt64 = 0
+    public var framePins: UInt64 = 0
+    public var relocBlocks: UInt64 = 0
+    public var pendingFreed: UInt64 = 0
+    public var pendingFreeNs: UInt64 = 0
+    public var relocVerifyNs: UInt64 = 0
     /// Scavenge part of the pause (initial marks).
     public var scavNs: UInt64 = 0
     public var totalNs: UInt64 = 0
@@ -176,10 +185,17 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
     let cm = vm.pointee.cm
     let g = vm.pointee.gc
     var applyNs: UInt64 = 0
+    // Every pause frees the evacuated blocks still waiting for epochs: every
+    // active worker is parked at a safepoint (SPEC.md "Freeing old blocks").
+    let tpf = now()
+    let pendingFreed = cm.pendingCount.pointee.load(ordering: .relaxed) > 0 ? tryFreePending(vm, atPause: true) : 0
+    let pendingFreeNs = now() &- tpf
     // A finished lazy sweep is published by whichever stop comes first
     // (SPEC.md "Lazy sweep").
     if cmOn && cm.phase.pointee.load(ordering: .acquiring) == CMPhase.swept { applyNs = applySweep(vm) }
     var rec = GCRecord()
+    rec.pendingFreed = UInt64(pendingFreed)
+    rec.pendingFreeNs = pendingFreeNs
     if case .finalMark = op {
         if cmOn && cm.phase.pointee.load(ordering: .relaxed) == CMPhase.marking {
             finalMark(vm, &rec)
@@ -203,6 +219,8 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
     if doScavenge {
         rec = scavenge(vm, w, t0, t1, promoteAll: isFull)
         rec.scavNs = now() &- t1
+        rec.pendingFreed = UInt64(pendingFreed)
+        rec.pendingFreeNs = pendingFreeNs
     } else if case .scavenge = op {
         return // non-generational: nothing to do
     }
@@ -306,6 +324,11 @@ private func fixedMs(_ ns: UInt64) -> String { fixed(Double(ns) / 1e6, 3) }
 
 /// Total, ttsp, coordination (total minus `work`), the log, the verbose line.
 private func finishRecord(_ vm: VMRef, _ rec: inout GCRecord, _ t0: UInt64, _ t1: UInt64, work: UInt64) {
+    if vm.pointee.cmConfig.verify {
+        let tv = now()
+        relocVerify(vm)
+        rec.relocVerifyNs = now() &- tv
+    }
     let t2 = now()
     rec.totalNs = t2 &- t0
     rec.atNs = t0

@@ -2,15 +2,23 @@
 ; kept for the whole run at scattered addresses, the rest dying there, so
 ; old space fills with sparse blocks (SPEC.md "Kernels").
 ;
-; Per iteration i (2 000 000 iterations in total, split between workers):
+; Per iteration i (`nil fragmentIters` in total, split between workers; the
+; loader defines it: 2 000 000 for the benchmark, fewer in tests):
 ;  - a node: an Array of 14 slots, slot 2 = i (120-byte body), stored in the
-;    worker's ring at slot i \\ 32768, replacing (killing) the node stored
-;    32 768 iterations earlier: medium-lived, promoted at N = 2;
-;  - every 20th node is also stored in the worker's keep store and lives to
-;    the end: 5 percent survivors, scattered among the dead ring nodes;
+;    worker's ring at slot i \\ 32768, evicting the node stored 32 768
+;    iterations earlier: medium-lived, promoted at N = 2;
+;  - when i \\ 20 = 0 the evicted node, already old, goes into the worker's
+;    keep store and lives to the end: 5 percent survivors. Keeping it only
+;    after promotion matters: a keeper reachable from the keep store while
+;    young would be copied next to the other keepers (the scavenge copies
+;    remembered holders' referents together) instead of between the ring
+;    nodes that die;
 ;  - 4 FPoints of young garbage;
 ;  - every 4th iteration a SmallInteger store into a pseudo-random kept node
-;    (slot 2 := i): stores into old objects that relocation moves.
+;    (slot 2 := i): stores into old objects that relocation moves;
+;  - every 64th iteration the newest keep chunk (1024 slots) is copied into
+;    the worker's mirror Array with replaceFrom:to:with:startingAt:, the
+;    primitive that holds two raw body pointers under hazard slots.
 ; Rings and keep stores are spines of Arrays of 1024 (an object must fit a
 ; 32 KiB block). Checksum: churn sum + every kept node's payload + every
 ; ring node's payload, read at the end.
@@ -27,6 +35,9 @@ end
 method FPoint x temps=0
   push_ivar 0
   return_top
+end
+
+method Object replaceFrom:to:with:startingAt: temps=0 prim=38
 end
 
 method SmallInteger fmin: temps=0
@@ -116,12 +127,19 @@ method UndefinedObject fkAt:in:put: temps=0
 end
 
 ; nil fragState: w cap: cap -> state Array: 1 ring spine, 2 keep spine,
-; 3 keep count, 4 lcg, 5 keep capacity. t0 = w, t1 = cap, t2 = st
+; 3 keep count, 4 lcg, 5 keep capacity, 6 mirror. t0 = w, t1 = cap, t2 = st
 method UndefinedObject fragState:cap: temps=1
   push_lit @Array
-  push_int 5
+  push_int 6
   send new: 1
   store_temp 2
+  push_temp 2
+  push_int 6
+  push_lit @Array
+  push_lit 1024
+  send new: 1
+  send at:put: 2
+  pop
   push_temp 2
   push_int 1
   push_nil
@@ -160,8 +178,8 @@ method UndefinedObject fragState:cap: temps=1
 end
 
 ; nil fragStep: st i: i -> churn value. t0 = st, t1 = i, t2 = node, t3 = k,
-; t4 = r, t5 = sum
-method UndefinedObject fragStep:i: temps=4
+; t4 = r, t5 = sum, t6 = evicted
+method UndefinedObject fragStep:i: temps=5
   push_lit @Array
   push_int 14
   send new: 1
@@ -171,7 +189,16 @@ method UndefinedObject fragStep:i: temps=4
   push_temp 1
   send at:put: 2
   pop
-  ; ring slot i \\ 32768
+  ; evict ring slot i \\ 32768, store the new node there
+  push_nil
+  push_temp 1
+  push_lit 32768
+  send \\ 1
+  push_temp 0
+  push_int 1
+  send at: 1
+  send fkAt:in: 2
+  store_temp 6
   push_nil
   push_temp 1
   push_lit 32768
@@ -182,13 +209,17 @@ method UndefinedObject fragStep:i: temps=4
   push_temp 2
   send fkAt:in:put: 3
   pop
-  ; every 20th: keep
+  ; every 20th: keep the evicted (old) node
   push_temp 1
   push_int 20
   send \\ 1
   push_int 0
   eq
   jump_if_false nokeep
+  push_temp 6
+  push_nil
+  identical
+  jump_if_true nokeep
   push_temp 0
   push_int 3
   send at: 1
@@ -202,7 +233,7 @@ method UndefinedObject fragStep:i: temps=4
   push_temp 0
   push_int 2
   send at: 1
-  push_temp 2
+  push_temp 6
   send fkAt:in:put: 3
   pop
   push_temp 0
@@ -242,13 +273,6 @@ nokeep:
   send x 0
   add
   store_temp 5
-  ; every 4th: a SmallInteger store into a pseudo-random kept node
-  push_temp 1
-  push_int 4
-  send \\ 1
-  push_int 0
-  eq
-  jump_if_false done
   push_temp 0
   push_int 3
   send at: 1
@@ -256,6 +280,44 @@ nokeep:
   push_temp 3
   push_int 0
   gt
+  jump_if_false done
+  ; every 64th: mirror the newest keep chunk (hazard-slot primitive)
+  push_temp 1
+  push_int 64
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false nocopy
+  push_temp 0
+  push_int 6
+  send at: 1
+  push_int 1
+  push_lit 1024
+  push_temp 0
+  push_int 2
+  send at: 1
+  push_temp 3
+  push_int 1
+  sub
+  push_temp 0
+  push_int 5
+  send at: 1
+  send \\ 1
+  push_lit 1024
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_int 1
+  send replaceFrom:to:with:startingAt: 4
+  pop
+nocopy:
+  ; every 4th: a SmallInteger store into a pseudo-random kept node
+  push_temp 1
+  push_int 4
+  send \\ 1
+  push_int 0
+  eq
   jump_if_false done
   push_temp 0
   push_int 4
@@ -369,7 +431,8 @@ end
 
 ; args: t0 = w, t1 = n. temps: t2 = iters, t3 = st, t4 = i, t5 = sum
 method UndefinedObject run:of: temps=4
-  push_lit 2000000
+  push_nil
+  send fragmentIters 0
   push_temp 1
   send // 1
   store_temp 2

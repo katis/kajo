@@ -41,6 +41,10 @@ public final class Runtime {
         #if NO_MARK_BARRIER
         if cfg.concurrent && img.vm.pointee.heap.nurseryBytes > 0 { fatal("NO_MARK_BARRIER build: concurrent marking unavailable (KAJO_GC=stw)") }
         #endif
+        #if NO_POST_STORE
+        if cfg.relocThreshold > 0 { fatal("NO_POST_STORE build: relocation unavailable (KAJO_RELOC=off)") }
+        #endif
+        if cfg.relocThreshold > 0 && !cfg.concurrent { fatal("relocation needs concurrent marking (KAJO_GC=cm)") }
         vm.pointee.cmConfig = cfg
         if let n = pollEvery ?? envInt("KAJO_POLL_N") { vm.pointee.pollEvery = max(1, n) }
         if let s = sliceMs ?? envDouble("KAJO_SLICE_MS") { vm.pointee.sliceNs = UInt64(s * 1e6) }
@@ -119,15 +123,67 @@ public struct RunResult {
     public var checksum: Int64
     public var results: [Int64]
     public var ms: Double
+    /// Footprint samples (ms since start, old space in use, live bytes of
+    /// the latest sweep), every `KAJO_SAMPLE_MS` (SPEC.md "Kernels").
+    public var footprint: [(Double, Int, UInt64)] = []
+}
+
+/// Samples old space in use and live bytes on its own thread.
+final class FootprintSampler: @unchecked Sendable {
+    let vm: VMRef
+    let intervalNs: UInt64
+    let t0: UInt64
+    var samples: [(Double, Int, UInt64)] = []
+    var stop = false
+    var lock = pthread_mutex_t()
+    var thread: pthread_t? = nil
+
+    init(_ vm: VMRef, intervalMs: Int) {
+        self.vm = vm
+        intervalNs = UInt64(intervalMs) * 1_000_000
+        t0 = now()
+        pthread_mutex_init(&lock, nil)
+    }
+
+    func sample() {
+        let s = (Double(now() &- t0) / 1e6, vm.pointee.heap.blocksInUse() * blockSize, vm.metric(.liveBytes))
+        pthread_mutex_lock(&lock); samples.append(s); pthread_mutex_unlock(&lock)
+    }
+
+    func start() {
+        sample()
+        let ctx = Unmanaged.passRetained(self).toOpaque()
+        pthread_create(&thread, nil, { arg in
+            let me = Unmanaged<FootprintSampler>.fromOpaque(arg).takeRetainedValue()
+            var next = me.t0 &+ me.intervalNs
+            while true {
+                pthread_mutex_lock(&me.lock); let s = me.stop; pthread_mutex_unlock(&me.lock)
+                if s { break }
+                let t = now()
+                if t >= next { me.sample(); next &+= me.intervalNs }
+                usleep(2000)
+            }
+            return nil
+        }, ctx)
+    }
+
+    func finish() -> [(Double, Int, UInt64)] {
+        pthread_mutex_lock(&lock); stop = true; pthread_mutex_unlock(&lock)
+        if let t = thread { pthread_join(t, nil) }
+        sample()
+        return samples
+    }
 }
 
 /// Fork `n` Processes `nil kernel: i * 256 + n` (lib.kasm unpacks it into
 /// `run: i of: n`) on `n` background workers; wall time from the first fork
 /// to the last termination.
-public func runKernel(_ img: Image, workers n: Int) -> (RunResult, Runtime) {
+public func runKernel(_ img: Image, workers n: Int, sampleMs: Int? = nil) -> (RunResult, Runtime) {
     let rt = Runtime(img, background: n)
     let vm = rt.vm
     let sel = rt.symbol("kernel:")
+    let sampler = sampleMs.map { FootprintSampler(vm, intervalMs: $0) }
+    sampler?.start()
     let t0 = now()
     vm.set(.kernelStartAt, t0)
     var ids: [Int64] = []
@@ -137,6 +193,7 @@ public func runKernel(_ img: Image, workers n: Int) -> (RunResult, Runtime) {
     }
     waitAllTerminated(vm)
     let ms = Double(now() - t0) / 1e6
+    let fp = sampler?.finish() ?? []
     rt.stop()
     var results: [Int64] = []
     for id in ids {
@@ -144,14 +201,14 @@ public func runKernel(_ img: Image, workers n: Int) -> (RunResult, Runtime) {
         if !isInt(r) { fatal("kernel returned a non-SmallInteger") }
         results.append(intVal(r))
     }
-    return (RunResult(checksum: results.reduce(0, &+), results: results, ms: ms), rt)
+    return (RunResult(checksum: results.reduce(0, &+), results: results, ms: ms, footprint: fp), rt)
 }
 
 /// Old space: `KAJO_HEAP_MB`, default 64 MiB (as in the earlier
 /// experiments), `2 N + 64` MiB for `oldheapN`, 256 MiB for `fragment`
 /// (SPEC.md "Kernels").
 public func loadKernel(_ kernel: String) throws -> Image {
-    let def = oldheapMB(kernel).map { 2 * $0 + 64 } ?? (kernel == "fragment" ? 256 : 64)
+    let def = oldheapMB(kernel).map { 2 * $0 + 64 } ?? (kernel.hasPrefix("fragment") ? 256 : 64)
     return try Image.fromSources(try kernelSources(kernel), heapSize: (envInt("KAJO_HEAP_MB") ?? def) << 20)
 }
 
@@ -308,7 +365,8 @@ public func currentRSS() -> Int {
 /// One bench line (key=value pairs).
 public func benchLine(kernel: String, workers: Int) throws -> String {
     let img = try loadKernel(kernel)
-    let (r, rt) = runKernel(img, workers: workers)
+    let sampleMs = envInt("KAJO_SAMPLE_MS") ?? (kernel.hasPrefix("fragment") ? 100 : nil)
+    let (r, rt) = runKernel(img, workers: workers, sampleMs: sampleMs)
     let vm = rt.vm
     #if NO_BARRIER
     let build = "nobarrier"
@@ -338,6 +396,11 @@ public func benchLine(kernel: String, workers: Int) throws -> String {
         if v == 0 { continue }
         let name = "\(m)"
         line += name.hasSuffix("Ns") ? " \(name.dropLast(2))_ms=\(Double(v / 1000) / 1000)" : " \(name)=\(v)"
+    }
+    line += relocSummary(vm, rt)
+    if !r.footprint.isEmpty {
+        let mb = 1048576.0
+        line += " footprint=" + r.footprint.map { "\(Int($0.0)):\(fixed(Double($0.1) / mb, 1)):\(fixed(Double($0.2) / mb, 1))" }.joined(separator: ",")
     }
     line += " rss_mb=\(peakRSS() >> 20)"
     return line
@@ -413,5 +476,50 @@ func cmSummary(_ vm: VMRef, _ recs: [GCRecord]) -> String {
     }
     if last > since { o += " marking_pct=\(r1(100 * markingNs / Double(last &- since)))" }
     _ = first
+    return o
+}
+
+/// Relocation and post-store-check summary (SPEC.md "Headless matrix").
+public func relocSummary(_ vm: VMRef, _ rt: Runtime, from: Int = 0, base: [Metric: UInt64] = [:], workerBase: [(UInt64, UInt64, UInt64, UInt64)] = []) -> String {
+    let cfg = vm.pointee.cmConfig
+    var o = " reloc=\(cfg.relocThreshold > 100 ? "all" : cfg.relocThreshold == 0 ? "off" : String(cfg.relocThreshold))"
+    #if NO_POST_STORE
+    o += " poststore=0"
+    #else
+    o += " poststore=1"
+    #endif
+    var redo: UInt64 = 0, spins: UInt64 = 0, spinNs: UInt64 = 0, spinMax: UInt64 = 0, hzw: UInt64 = 0
+    for (i, w) in rt.workers.enumerated() {
+        let b = i < workerBase.count ? workerBase[i] : (0, 0, 0, 0)
+        redo &+= w.pointee.storeRedo &- b.0; spins &+= w.pointee.spinEpisodes &- b.1; spinNs &+= w.pointee.spinNs &- b.2
+        spinMax = max(spinMax, w.pointee.spinMaxNs); hzw &+= w.pointee.hazardWaits &- b.3
+    }
+    o += " stores_redone=\(redo) spin_episodes=\(spins) spin_ms=\(fixed(Double(spinNs) / 1e6, 3)) spin_max_ms=\(fixed(Double(spinMax) / 1e6, 3)) hazard_waits=\(hzw)"
+    let mw = rt.workers[0]
+    o += " main_redo=\(mw.pointee.storeRedo) main_spin_max_ms=\(fixed(Double(mw.pointee.spinMaxNs) / 1e6, 3))"
+    let all = vm.pointee.gcLog.pointee.records
+    let recs = Array(all[min(from, all.count)...])
+    let since = recs.first?.atNs ?? 0
+    let cycles = vm.pointee.cm.log.pointee.records.filter { $0.startNs >= since && $0.relocBlocks > 0 }
+    func ms(_ ns: UInt64) -> Double { Double(ns) / 1e6 }
+    let mb = 1048576.0
+    o += " reloc_cycles=\(cycles.count)"
+    o += " reloc_blocks=\(cycles.reduce(0) { $0 + $1.relocBlocks }) reloc_candidates=\(cycles.reduce(0) { $0 + $1.relocCandidates }) reloc_capped=\(cycles.reduce(0) { $0 + $1.relocCapped })"
+    o += " reloc_planned_mb=\(fixed(Double(cycles.reduce(0) { $0 + $1.relocPlannedBytes }) / mb, 3))"
+    // Totals from the counters (a cycle still relocating at the end has no
+    // applied record), minus `base` (the scenario window's start values).
+    func d(_ m: Metric) -> UInt64 { vm.metric(m) &- (base[m] ?? 0) }
+    o += " reloc_moved_mb=\(fixed(Double(d(.relocMovedBytes)) / mb, 3)) reloc_moved_objs=\(d(.relocMovedObjects))"
+    o += " reloc_skip_pinned=\(d(.relocSkipPinned)) reloc_skip_hazard=\(d(.relocSkipHazard)) reloc_nospace=\(d(.relocNoSpace)) reloc_cas_failed=\(d(.relocCasFail))"
+    o += " reloc_evacuated=\(d(.relocEvacuated)) frame_pins=\(d(.relocPins))"
+    o += " reloc_cpu_ms=\(fixed(cycles.reduce(0.0) { $0 + ms($1.relocCpuNs) }, 3)) reloc_wall_ms_p50=\(fixed(pctl(cycles.map { ms($0.relocWallNs) }, 0.5), 3)) reloc_wall_ms_max=\(fixed(cycles.map { ms($0.relocWallNs) }.max() ?? 0, 3))"
+    let fe = d(.relocFreedEpoch), fp = d(.relocFreedPause)
+    o += " freed_epoch=\(fe) freed_pause=\(fp) free_delay_mean_ms=\(fixed(fe + fp > 0 ? ms(d(.relocFreeDelayNs)) / Double(fe + fp) : 0, 3)) free_delay_max_ms=\(fixed(ms(vm.metric(.relocFreeDelayMaxNs)), 3))"
+    let fin = recs.filter { $0.kind == PauseKind.final && $0.relocBlocks > 0 }
+    o += " final_select_ms_max=\(fixed(fin.map { ms($0.selectNs) }.max() ?? 0, 3)) final_pin_ms_max=\(fixed(fin.map { ms($0.pinNs) }.max() ?? 0, 3))"
+    let pf = recs.filter { $0.pendingFreed > 0 }
+    o += " pause_free_ms_max=\(fixed(pf.map { ms($0.pendingFreeNs) }.max() ?? 0, 3)) reloc_verify_ms_max=\(fixed(recs.map { ms($0.relocVerifyNs) }.max() ?? 0, 3))"
+    let ini = recs.filter { $0.kind == PauseKind.initial }
+    o += " initial_survroots_ms_p50=\(fixed(pctl(ini.map { ms($0.survRootsNs) }, 0.5), 3)) initial_survroots_ms_max=\(fixed(ini.map { ms($0.survRootsNs) }.max() ?? 0, 3))"
     return o
 }

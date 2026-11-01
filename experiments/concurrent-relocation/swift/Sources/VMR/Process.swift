@@ -34,8 +34,8 @@ func schedUnlock(_ vm: VMRef) {
 @inline(__always) private func intSlot(_ vm: VMRef, _ o: Oop, _ i: Int) -> Int {
     Int(intVal(vm.pointee.om.slot(o, i)))
 }
-@inline(__always) private func setInt(_ vm: VMRef, _ o: Oop, _ i: Int, _ v: Int) {
-    vm.pointee.om.setSlot(o, i, mkInt(Int64(v)))
+@inline(__always) private func setInt(_ vm: VMRef, _ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Int) {
+    setSlot(w, vm.pointee.om, o, i, mkInt(Int64(v)))
 }
 @inline(__always) private func rec(_ vm: VMRef, _ p: Oop) -> UnsafeMutablePointer<ProcRec> {
     vm.pointee.recs + intSlot(vm, p, pRec)
@@ -72,7 +72,7 @@ private func appendLocked(_ vm: VMRef, _ w: WorkerRef, _ headSlot: UnsafeMutable
 private func makeReadyLocked(_ vm: VMRef, _ w: WorkerRef, _ p: Oop, fromBlocked: Bool) -> Bool {
     let main = isMainAffine(vm, p)
     let q = qIndex(main, intSlot(vm, p, pPriority))
-    setInt(vm, p, pState, Int(stReady))
+    setInt(vm, w, p, pState, Int(stReady))
     let r = rec(vm, p)
     if fromBlocked && r.pointee.runnableSince == 0 { r.pointee.runnableSince = ticks() }
     appendLocked(vm, w, vm.pointee.ready + q, vm.pointee.ready + 2 * priorities + q, p)
@@ -95,7 +95,7 @@ private func dequeueLocked(_ vm: VMRef, main: Bool, minPriority: Int, for w: Wor
             vm.pointee.ready[q] = next == nilObj ? 0 : next
             if next == nilObj { vm.pointee.ready[2 * priorities + q] = 0 }
             store(vm, w, head, pNext, nilObj) // SATB site: dequeue
-            setInt(vm, head, pState, Int(stRunning))
+            setInt(vm, w, head, pState, Int(stRunning))
             rec(vm, head).pointee.runningOn = w.pointee.id
             return head
         }
@@ -147,10 +147,10 @@ func createProcess(_ vm: VMRef, _ w: WorkerRef, _ recv: Oop, _ sel: Oop, _ arg: 
     if argc > 1 { fatal("fork: method takes more than one argument") }
     let p = alloc(vm, w, ciProcess, processSlots, false)
     let base = UnsafeMutablePointer<UInt64>.allocate(capacity: stackWords) // not initialised (SPEC.md)
-    buildBottomFrame(vm, p, base, recv, method, argc == 1 ? [arg] : [])
+    buildBottomFrame(vm, w, p, base, recv, method, argc == 1 ? [arg] : [])
     let prio = max(0, min(priorities - 1, priority))
-    setInt(vm, p, pPriority, prio)
-    setInt(vm, p, pAffinity, main ? 1 : 0)
+    setInt(vm, w, p, pPriority, prio)
+    setInt(vm, w, p, pAffinity, main ? 1 : 0)
     store(vm, w, p, pExitSem, exitSem) // barrier site: exit Semaphore (p is young here; kept for safety)
     schedLock(vm)
     var idx = vm.pointee.sched.pointee.recFree
@@ -162,10 +162,10 @@ func createProcess(_ vm: VMRef, _ w: WorkerRef, _ recv: Oop, _ sel: Oop, _ arg: 
         vm.pointee.sched.pointee.recHwm += 1
     }
     vm.pointee.recs[idx] = ProcRec(process: p, base: base, end: base + stackWords)
-    setInt(vm, p, pRec, idx)
+    setInt(vm, w, p, pRec, idx)
     let id = vm.pointee.sched.pointee.nextProcessId
     vm.pointee.sched.pointee.nextProcessId += 1
-    om.setSlot(p, pId, mkInt(id))
+    setSlot(w, om, p, pId, mkInt(id))
     vm.pointee.sched.pointee.liveProcesses += 1
     let needMain = makeReadyLocked(vm, w, p, fromBlocked: true)
     schedUnlock(vm)
@@ -184,7 +184,7 @@ private func finishLocked(_ vm: VMRef, _ w: WorkerRef, _ p: Oop, _ result: Oop) 
     let id = Int(intVal(om.slot(p, pId)))
     if id < resultCapacity { vm.pointee.results[id] = result }
     store(vm, w, p, pResult, result) // barrier site: Process result
-    setInt(vm, p, pState, Int(stTerminated))
+    setInt(vm, w, p, pState, Int(stTerminated))
     // The record's stack is gone: point the saved sp below the base so no
     // stale reader scans it (records are only scanned while live anyway).
     let idx = intSlot(vm, p, pRec)
@@ -217,10 +217,10 @@ func terminateStopped(_ vm: VMRef, _ w: WorkerRef, _ p: Oop, _ result: Oop, deta
 private func saveCurrent(_ vm: VMRef, _ w: WorkerRef, sp: UnsafeMutablePointer<UInt64>, pc: UInt) {
     let om = vm.pointee.om
     let p = w.pointee.current
-    om.setSlot(p, pSp, tagAddr(UnsafePointer(sp)))
-    om.setSlot(p, pPc, mkInt(Int64(Int(bitPattern: pc))))
-    om.setSlot(p, pFp, tagAddr(UnsafePointer(w.pointee.fp)))
-    om.setSlot(p, pHdr, tagAddr(UnsafePointer(w.pointee.hdr)))
+    setSlot(w, om, p, pSp, tagAddr(UnsafePointer(sp)))
+    setSlot(w, om, p, pPc, mkInt(Int64(Int(bitPattern: pc))))
+    setSlot(w, om, p, pFp, tagAddr(UnsafePointer(w.pointee.fp)))
+    setSlot(w, om, p, pHdr, tagAddr(UnsafePointer(w.pointee.hdr)))
     detach(vm, w)
 }
 
@@ -285,7 +285,7 @@ func primWait(_ vm: VMRef, _ w: WorkerRef, _ sem: Oop, _ argc: Int) -> Oop {
     schedLock(vm)
     let excess = intSlot(vm, sem, sExcess)
     if excess > 0 {
-        setInt(vm, sem, sExcess, excess - 1)
+        setInt(vm, w, sem, sExcess, excess - 1)
         schedUnlock(vm)
         return sem
     }
@@ -293,7 +293,7 @@ func primWait(_ vm: VMRef, _ w: WorkerRef, _ sem: Oop, _ argc: Int) -> Oop {
     let r = rec(vm, p)
     r.pointee.runnableSince = 0
     suspendAfterPrim(vm, w, argc, sem)
-    setInt(vm, p, pState, Int(stWaiting))
+    setInt(vm, w, p, pState, Int(stWaiting))
     store(vm, w, p, pWaitingOn, sem) // barrier site: Process waitingOn
     let nilObj = vm.pointee.nilObj
     store(vm, w, p, pNext, nilObj) // SATB site: waiter link cleared
@@ -315,7 +315,7 @@ private func signalLocked(_ vm: VMRef, _ w: WorkerRef, _ sem: Oop) -> Bool {
     let nilObj = vm.pointee.nilObj
     let first = om.slot(sem, sFirst)
     if first == nilObj {
-        setInt(vm, sem, sExcess, intSlot(vm, sem, sExcess) + 1)
+        setInt(vm, w, sem, sExcess, intSlot(vm, sem, sExcess) + 1)
         return false
     }
     let next = om.slot(first, pNext)
@@ -391,7 +391,7 @@ func primUI(_ vm: VMRef, _ w: WorkerRef, _ kind: Int, _ value: Oop, _ argc: Int)
     r.pointee.hopStart = ticks()
     r.pointee.runnableSince = r.pointee.hopStart
     saveCurrent(vm, w, sp: w.pointee.sp, pc: w.pointee.pc &- 3) // pc at the send
-    setInt(vm, p, pAffinity, 1)
+    setInt(vm, w, p, pAffinity, 1)
     _ = makeReadyLocked(vm, w, p, fromBlocked: false)
     schedUnlock(vm)
     w.pointee.leave = Leave.blocked
@@ -405,7 +405,7 @@ func primDetach(_ vm: VMRef, _ w: WorkerRef, _ argc: Int) -> Oop {
     schedLock(vm)
     rec(vm, p).pointee.runnableSince = 0
     suspendAfterPrim(vm, w, argc, vm.pointee.nilObj)
-    setInt(vm, p, pAffinity, 0)
+    setInt(vm, w, p, pAffinity, 0)
     _ = makeReadyLocked(vm, w, p, fromBlocked: false)
     schedUnlock(vm)
     vm.add(.detaches, 1)
@@ -667,7 +667,7 @@ public func hostNewSemaphore(_ vm: VMRef) -> Oop {
     let w = hostWorker(vm)
     enterVM(vm, w)
     let s = alloc(vm, w, ciSemaphore, semaphoreSlots, false)
-    vm.pointee.om.setSlot(s, sExcess, mkInt(0))
+    setSlot(w, vm.pointee.om, s, sExcess, mkInt(0))
     leaveVM(vm, w)
     return s
 }

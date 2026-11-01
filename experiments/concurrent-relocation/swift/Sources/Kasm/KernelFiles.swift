@@ -64,7 +64,13 @@ public func kernelSources(_ kernel: String) throws -> [String] {
     case "arith", "fib", "sends", "alloc": file = [try readTextFile("\(langKernelsDir)/\(kernel).kasm")]
     case "ivars": file = [try readTextFile("\(orepKernelsDir)/ivars.kasm")]
     case "churn": file = [try readTextFile("\(ggcKernelsDir)/churn.kasm")]
-    case "storeheavy", "fragment": file = [try readTextFile("\(crKernelsDir)/\(kernel).kasm")]
+    case "storeheavy": file = [try readTextFile("\(crKernelsDir)/storeheavy.kasm")]
+    case let k where k.hasPrefix("fragment"):
+        // fragment (2 000 000 iterations) or fragmentN (N iterations).
+        let iters = k == "fragment" ? 2_000_000 : Int(k.dropFirst("fragment".count)) ?? 0
+        if iters <= 0 { throw KasmError("bad kernel \(k)") }
+        file = [try readTextFile("\(crKernelsDir)/fragment.kasm"),
+                "method UndefinedObject fragmentIters temps=0\n  push_lit \(iters)\n  return_top\nend\n"]
     case let k where k.hasPrefix("survivors"):
         guard let p = Int(k.dropFirst("survivors".count)), p >= 0, p <= 100 else { throw KasmError("bad kernel \(k)") }
         file = [try readTextFile("\(ggcKernelsDir)/survivors.kasm"), survivalPercentSource(p)]
@@ -89,6 +95,9 @@ public func appSources(survivors: Int? = nil, oldheap: Int? = nil, fragment: Boo
     if let mb = oldheap {
         s += [try readTextFile("\(cmKernelsDir)/oldheap.kasm"), oldheapSizeSource(mb, replaceEvery: 32768)]
     }
-    if fragment { s += [try readTextFile("\(crKernelsDir)/fragment.kasm")] }
+    if fragment {
+        s += [try readTextFile("\(crKernelsDir)/fragment.kasm"),
+              "method UndefinedObject fragmentIters temps=0\n  push_lit 2000000\n  return_top\nend\n"]
+    }
     return s
 }

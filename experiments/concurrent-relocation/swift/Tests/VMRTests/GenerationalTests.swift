@@ -289,7 +289,7 @@ private func noFailures(_ rt: Runtime) { #expect(rt.vm.metric(.verifyFailures) =
     let w = rt.workers.last!
     enterVM(vm, w)
     let young = alloc(vm, w, try rt.img.classIndex("Pair"), 2, false)
-    vm.pointee.om.setSlot(global(rt, 8), 0, young)
+    vm.pointee.om.setSlotRaw(global(rt, 8), 0, young)
     leaveVM(vm, w)
     hostCollect(vm, full: false)
     #expect(vm.metric(.verifyFailures) > 0)

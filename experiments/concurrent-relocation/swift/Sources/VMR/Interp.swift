@@ -108,6 +108,7 @@ private func pollSlow(_ vm: VMRef, _ w: WorkerRef, _ sp: UnsafeMutablePointer<UI
     w.pointee.fp = fp
     if vm.pointee.gcRequested.load(ordering: .relaxed) { safepoint(vm, w) }
     if w.pointee.countdown <= 0 {
+        advanceEpoch(vm, w) // every pollEvery polls (SPEC.md "Freeing old blocks")
         pendingFull(vm, w)
         w.pointee.countdown = w.pointee.pollEvery
         return budgetCheck(vm, w)
@@ -183,8 +184,7 @@ private func primitive(_ vm: VMRef, _ w: WorkerRef, _ prim: Int64, _ sp: UnsafeM
             return om.slot(recv, j)
         } else {
             satbPre(vm, w, recv, j) // barrier site: at:put: (SATB)
-            om.setSlot(recv, j, arg(1))
-            barrier(vm, w, om, recv, arg(1)) // barrier site: at:put:
+            setSlotAndBarrier(vm, w, om, recv, j, arg(1)) // post-store check, barrier site: at:put:
             return arg(1)
         }
     case 3, 4:
@@ -232,6 +232,8 @@ private func primitive(_ vm: VMRef, _ w: WorkerRef, _ prim: Int64, _ sp: UnsafeM
     case 34: return mkInt(Int64(w.pointee.id))
     case 35: stopWorld(vm, w, .scavenge, retry: true); return vm.pointee.nilObj
     case 36: stopWorld(vm, w, .full, retry: true); return vm.pointee.nilObj
+    case 38: // replaceFrom:to:with:startingAt: (pointer slots), hazard slots 0 and 1
+        return primArrayCopy(vm, w, recv, arg(0), arg(1), arg(2), arg(3))
     case 37: // ohBuilt: record when a build phase ended (latest wins)
         let t = now()
         var cur = vm.metric(.buildDoneAt)
@@ -262,7 +264,7 @@ func resumeCurrent(_ vm: VMRef, _ w: WorkerRef) {
 
 /// Build a Process's bottom frame `recv sel: arg` on its fresh stack and
 /// save it as the Process's registers. `base[0]` is an unused nil word.
-func buildBottomFrame(_ vm: VMRef, _ p: Oop, _ base: UnsafeMutablePointer<UInt64>, _ recv: Oop, _ method: Oop, _ args: [Oop]) {
+func buildBottomFrame(_ vm: VMRef, _ w: WorkerRef, _ p: Oop, _ base: UnsafeMutablePointer<UInt64>, _ recv: Oop, _ method: Oop, _ args: [Oop]) {
     let om = vm.pointee.om
     let nilObj = vm.pointee.nilObj
     base[0] = nilObj
@@ -278,10 +280,10 @@ func buildBottomFrame(_ vm: VMRef, _ p: Oop, _ base: UnsafeMutablePointer<UInt64
     hdr[2] = hostFP
     hdr[3] = mkInt(0)
     sp = hdr + 3
-    om.setSlot(p, pSp, tagAddr(UnsafePointer(sp)))
-    om.setSlot(p, pPc, tagAddr(UnsafePointer(om.bytesPtr(om.slot(method, mBytecodes)))))
-    om.setSlot(p, pFp, tagAddr(UnsafePointer(fp)))
-    om.setSlot(p, pHdr, tagAddr(UnsafePointer(hdr)))
+    setSlot(w, om, p, pSp, tagAddr(UnsafePointer(sp)))
+    setSlot(w, om, p, pPc, tagAddr(UnsafePointer(om.bytesPtr(om.slot(method, mBytecodes))))) // RAW: bytecodes are pinned
+    setSlot(w, om, p, pFp, tagAddr(UnsafePointer(fp)))
+    setSlot(w, om, p, pHdr, tagAddr(UnsafePointer(hdr)))
 }
 
 let hostFP: UInt64 = 1 // mkInt(0)
@@ -362,12 +364,10 @@ private func run(_ vm: VMRef, _ w: WorkerRef, _ start: Regs) {
             if w.pointee.marking != 0 {
                 storeWhileMarking(w, o, n, v)
             } else {
-                om.setSlot(o, n, v)
-                barrier(vm, w, om, o, v)
+                setSlotAndBarrier(vm, w, om, o, n, v) // post-store check, barrier site
             }
             #else
-            om.setSlot(o, n, v)
-            barrier(vm, w, om, o, v)
+            setSlotAndBarrier(vm, w, om, o, n, v) // post-store check, barrier site
             #endif
             r.sp -= 1
         case 0x06: // pop
@@ -460,4 +460,35 @@ private func run(_ vm: VMRef, _ w: WorkerRef, _ start: Regs) {
             fatal("bad opcode")
         }
     }
+}
+
+/// `dst replaceFrom: a to: b with: src startingAt: c`. Keeps raw pointers to
+/// both bodies across the loop, so both are published in hazard slots first
+/// (SPEC.md "Hazard slots"); the stores then need no post-store check. The
+/// SATB and generational barriers run per slot as for `at:put:`.
+@inline(never)
+func primArrayCopy(_ vm: VMRef, _ w: WorkerRef, _ dst: Oop, _ a: Oop, _ b: Oop, _ src: Oop, _ c: Oop) -> Oop {
+    let om = vm.pointee.om
+    if isInt(dst) || isInt(src) || !isInt(a) || !isInt(b) || !isInt(c) { fatal("replaceFrom: bad arguments") }
+    let hd = om.header(dst), hs = om.header(src)
+    if hdrIsBytes(hd) || hdrIsBytes(hs) { fatal("replaceFrom: bytes") }
+    let start = Int(intVal(a)) - 1, stop = Int(intVal(b)) - 1, from = Int(intVal(c)) - 1
+    let n = stop - start + 1
+    if n <= 0 { return dst }
+    if start < 0 || stop >= hdrSlots(hd) || from < 0 || from + n > hdrSlots(hs) { fatal("replaceFrom: out of bounds") }
+    let dp = hazardAcquire(w, om, 0, dst) + 1
+    let sp = hazardAcquire(w, om, 1, src) + 1
+    let backwards = dst == src && start > from
+    var k = 0
+    while k < n {
+        let j = backwards ? n - 1 - k : k
+        let v = atomicWord(sp + from + j).pointee.load(ordering: .relaxed)
+        satbPre(vm, w, dst, start + j)
+        atomicWord(dp + start + j).pointee.store(v, ordering: .relaxed)
+        barrier(vm, w, om, dst, v)
+        k += 1
+    }
+    hazardRelease(w, 1)
+    hazardRelease(w, 0)
+    return dst
 }

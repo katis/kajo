@@ -1,9 +1,11 @@
-// kajo-ui <C0..C6> [--seconds 10] [--warmup 1] [--out file] [--verify]
+// kajo-ui <R0..R6|R5n> [--seconds 10] [--warmup 1] [--out file] [--verify]
 //
-// Copied from ../generational-gc (window, frame measurement, turns and
-// frame account unchanged); the scenarios are this experiment's C0..C6
-// (SPEC.md "Scenarios"). C3, C4 and C6 first wait until the 256 MiB old
-// heap is built, then warm up. `--verify` turns on the mark-set verifier. One window, one animated layer, a label, a text
+// Copied from ../concurrent-marking (window, frame measurement, turns and
+// frame account unchanged); the scenarios are this experiment's R0..R6 and
+// R5n (SPEC.md "Scenarios"). R4 first waits until the 256 MiB old heap is
+// built, then warms up. `--verify` turns on every verifier (mark sets at
+// each final mark, relocation at every pause). Footprint (old space in use,
+// live bytes) is sampled once per second. One window, one animated layer, a label, a text
 // view, a slider. The Smalltalk UI Process runs synchronously on the main
 // thread in budgeted turns; a CADisplayLink records every frame. Prints one
 // key=value line and appends it to --out.
@@ -18,7 +20,7 @@ import VMR
 // MARK: - arguments
 
 struct Options {
-    var scenario = "C0"
+    var scenario = "R0"
     var seconds = 10.0
     var warmup = 1.0
     var out: String? = nil
@@ -29,7 +31,7 @@ struct Options {
 func parseOptions() -> Options {
     var o = Options()
     var args = Array(CommandLine.arguments.dropFirst())
-    if let s = args.first, s.hasPrefix("C") { o.scenario = s; args.removeFirst() }
+    if let s = args.first, s.hasPrefix("R") { o.scenario = s; args.removeFirst() }
     var i = 0
     while i < args.count {
         let a = args[i], v = i + 1 < args.count ? args[i + 1] : ""
@@ -197,15 +199,19 @@ final class Controller: NSObject, NSApplicationDelegate {
     @MainActor func start() {
         Controller.shared = self
         do {
-            // SPEC.md "Scenarios": 4 MiB nurseries throughout; C3/C4/C6 load
-            // oldheap at 256 MiB live with a 576 MiB soft limit.
+            // SPEC.md "Scenarios": 4 MiB nurseries throughout; R4 loads
+            // oldheap at 256 MiB live with a 576 MiB soft limit, R5/R5n
+            // fragment with 1 GiB.
             let s = opt.scenario
             let big = oldHeap
-            let src = try appSources(oldheap: big ? 256 : nil)
-            let img = try Image.fromSources(src, heapSize: (big ? 576 : 64) << 20, nurseryBytes: 4 << 20)
+            let frag = s.hasPrefix("R5")
+            let src = try appSources(oldheap: big ? 256 : nil, fragment: frag)
+            let img = try Image.fromSources(src, heapSize: (big ? 576 : frag ? 1024 : 64) << 20, nurseryBytes: 4 << 20)
             var cfg = cmConfigFromEnv()
-            cfg.concurrent = !(s == "C1" || s == "C3")
-            cfg.markers = s == "C6" ? 2 : 1
+            cfg.concurrent = true
+            cfg.ageN = s == "R1" ? 1 : 2
+            cfg.relocThreshold = ["R0", "R3", "R5", "R6"].contains(s) ? 50 : s == "R4" ? 101 : 0
+            if s == "R4" { cfg.force = true; cfg.threshold = 0 }
             cfg.verify = opt.verify
             rt = Runtime(img, background: 7, config: cfg)
         } catch {
@@ -301,13 +307,13 @@ final class Controller: NSObject, NSApplicationDelegate {
         w.makeKeyAndOrderFront(nil)
     }
 
-    var oldHeap: Bool { ["C3", "C4", "C6"].contains(opt.scenario) }
+    var oldHeap: Bool { opt.scenario == "R4" }
 
     @MainActor func startLoad() {
         let s = opt.scenario
         let nilObj = vm.pointee.nilObj
-        if s == "C0" { return }
-        if s == "C5" {
+        if s == "R0" { return }
+        if s == "R6" {
             spawn(vm, nilObj, rt.symbol("uiChurnLoop:"), mkInt(Int64(spin50us * 65536 + churn100us)), priority: uiPriority, main: true)
         } else {
             spawn(vm, nilObj, rt.symbol("uiLoop:"), mkInt(Int64(spin50us)), priority: uiPriority, main: true)
@@ -316,14 +322,34 @@ final class Controller: NSObject, NSApplicationDelegate {
         if oldHeap {
             hostNewArrayInGlobal(vm, 7, global: 12)
             for w in 1...7 { spawn(vm, nilObj, rt.symbol("ohLoop:"), mkInt(Int64(w)), priority: 1) }
+        } else if s.hasPrefix("R5") {
+            for w in 1...7 { spawn(vm, nilObj, rt.symbol("fragLoop:"), mkInt(Int64(w)), priority: 1) }
         } else {
             for _ in 0..<7 { spawn(vm, nilObj, rt.symbol("allocLoop"), nilObj, priority: 1) }
         }
     }
 
+    var footprint: [(Double, Int, UInt64)] = []
+    var footprintTimer: DispatchSourceTimer?
+    var workerBase: [(UInt64, UInt64, UInt64, UInt64)] = []
+
     @MainActor func beginMeasure() {
         measuring = true
         for m in Metric.allCases { metricsAtStart[m] = vm.metric(m) }
+        // Read on the main thread while the workers run (a benign race on
+        // aligned counters): the window's starting values.
+        workerBase = rt.workers.map { ($0.pointee.storeRedo, $0.pointee.spinEpisodes, $0.pointee.spinNs, $0.pointee.hazardWaits) }
+        let mStart = CACurrentMediaTime()
+        let ft = DispatchSource.makeTimerSource(queue: .main)
+        ft.schedule(deadline: .now(), repeating: .seconds(1))
+        ft.setEventHandler { [unowned self] in
+            MainActor.assumeIsolated {
+                self.footprint.append(((CACurrentMediaTime() - mStart) * 1000, self.vm.pointee.heap.blocksInUse() * blockSize,
+                                       self.vm.metric(.liveBytes)))
+            }
+        }
+        ft.resume()
+        footprintTimer = ft
         sampleStart = ["event": vm.pointee.eventLatency.pointee.count, "eventPost": vm.pointee.eventLatencyPost.pointee.count, "hop": vm.pointee.hopLatency.pointee.count,
                        "perHop": vm.pointee.mainPerHop.pointee.count, "ttsp": vm.pointee.gcTtsp.pointee.count,
                        "stw": vm.pointee.gcStw.pointee.count, "enter": vm.pointee.mainEnterWait.pointee.count]
@@ -551,7 +577,11 @@ final class Controller: NSObject, NSApplicationDelegate {
         line += " preemptions=\(d(.preemptions)) gc_count=\(d(.gcCount)) overflows=\(d(.overflows)) forks=\(d(.forks))"
         let enter = samplesMs(vm.pointee.mainEnterWait, from: sampleStart["enter"] ?? 0)
         line += " main_enter_waits=\(enter.count) main_enter_wait_max_ms=\(f3(enter.max() ?? 0))"
+        footprintTimer?.cancel()
         line += " churn100us=\(churn100us) " + gcSummary(vm, from: gcLogStart)
+        line += relocSummary(vm, rt, from: gcLogStart, base: metricsAtStart, workerBase: workerBase)
+        let mb = 1048576.0
+        line += " footprint=" + footprint.map { "\(Int($0.0)):\(f2(Double($0.1) / mb)):\(f2(Double($0.2) / mb))" }.joined(separator: ",")
         dumpPauses(vm, prefix: "scenario=\(opt.scenario) run=\(opt.run)", from: gcLogStart)
         line += " sched_locks=\(d(.schedLocks)) sched_contended=\(d(.schedContended)) sched_wait_ms=\(f3(Double(d(.schedWaitNs)) / 1e6))"
         line += " idle_ms=\(f2(Double(d(.idleNs)) / 1e6)) rss_mb=\(f2(Double(currentRSS()) / 1048576))"

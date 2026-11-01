@@ -34,15 +34,26 @@ public struct OM {
     @inline(__always) func entry(_ o: Oop) -> UnsafeMutablePointer<UInt64> { wordPtr(table &+ UInt(truncatingIfNeeded: o)) }
     /// The entry's offset word as an atomic (SPEC.md "Entry state encoding").
     @inline(__always) func offsetWord(_ o: Oop) -> UnsafeMutablePointer<Atomic<UInt64>> { atomicWord(entry(o) + 1) }
-    @inline(__always) func body(_ o: Oop) -> UnsafeMutablePointer<UInt64> { wordPtr(heap &+ UInt(truncatingIfNeeded: entry(o)[1])) }
+    /// The body, through the entry's offset word (a relaxed atomic load, a
+    /// plain `ldr`: the relocator switches it concurrently). While the entry
+    /// is RELOCATING the offset carries `relocBit` and the address lands in
+    /// the heap's alias mapping, at the old body (SPEC.md "Entry state
+    /// encoding"): no read barrier.
+    @inline(__always) func body(_ o: Oop) -> UnsafeMutablePointer<UInt64> {
+        wordPtr(heap &+ UInt(truncatingIfNeeded: offsetWord(o).pointee.load(ordering: .relaxed)))
+    }
     @inline(__always) public func header(_ o: Oop) -> UInt64 { entry(o).pointee }
     @inline(__always) func setHeader(_ o: Oop, _ h: UInt64) { entry(o).pointee = h }
-    @inline(__always) public func slot(_ o: Oop, _ i: Int) -> Oop { body(o)[1 &+ i] }
-    /// Raw slot store: no barrier. A relaxed atomic store (a plain `str` on
-    /// arm64), because a marker may be reading the slot (SPEC.md "SATB
-    /// barrier"). VM code storing an oop over a pointer, or storing one that
-    /// may be young, uses `store`.
-    @inline(__always) public func setSlot(_ o: Oop, _ i: Int, _ v: Oop) {
+    /// Relaxed atomic slot load (a plain `ldr`): the relocator writes new
+    /// bodies with relaxed atomic stores.
+    @inline(__always) public func slot(_ o: Oop, _ i: Int) -> Oop {
+        atomicWord(body(o) + (1 &+ i)).pointee.load(ordering: .relaxed)
+    }
+    /// Raw slot store: no barrier and no post-store check. A relaxed atomic
+    /// store (a plain `str`). Only for objects nobody else can see yet (image
+    /// boot) and in tests as "a store without the post-store check". Every
+    /// other store uses `setSlot(w, ...)` or `store`.
+    @inline(__always) public func setSlotRaw(_ o: Oop, _ i: Int, _ v: Oop) {
         atomicWord(body(o) + (1 &+ i)).pointee.store(v, ordering: .relaxed)
     }
     /// Relaxed atomic slot load, for readers that run beside mutators (markers).
@@ -161,7 +172,7 @@ private func initObject(_ om: OM, _ w: WorkerRef, _ free: UInt64, _ cur: UInt, _
     let ent = om.entry(e)
     w.pointee.tlab.cur = cur &+ UInt(size)
     ent[0] = makeHeader(cls, slots, bytes) | w.pointee.youngMark
-    ent[1] = UInt64(cur &- om.heap)
+    om.offsetWord(e).pointee.store(UInt64(cur &- om.heap), ordering: .relaxed)
     let p = wordPtr(cur)
     p[0] = backref(e &>> 4, size)
     let n = (size &- 8) / 8
@@ -297,8 +308,113 @@ func retireBoot(_ vm: VMRef, _ w: WorkerRef) {
 func store(_ vm: VMRef, _ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
     satbPre(vm, w, o, i)
     let om = vm.pointee.om
-    om.setSlot(o, i, v)
+    setSlot(w, om, o, i, v)
     barrier(vm, w, om, o, v)
+}
+
+// MARK: - post-store check (SPEC.md "Copy protocol")
+
+/// Store `v` into slot `i` of `o`, then check that the object did not start
+/// relocating or move meanwhile; if it did, redo the store into the current
+/// body. Every store into a heap object goes through here (SmallIntegers
+/// included); `NO_POST_STORE` compiles the check out.
+@_transparent
+func setSlot(_ w: WorkerRef, _ om: OM, _ o: Oop, _ i: Int, _ v: Oop) {
+    #if NO_POST_STORE
+    om.setSlotRaw(o, i, v)
+    #else
+    let ow = om.offsetWord(o)
+    let e1 = ow.pointee.load(ordering: .relaxed)
+    atomicWord(wordPtr(om.heap &+ UInt(truncatingIfNeeded: e1)) + (1 &+ i)).pointee.store(v, ordering: .sequentiallyConsistent)
+    let e2 = ow.pointee.load(ordering: .sequentiallyConsistent)
+    if e2 != e1 || e1 & relocBit != 0 { postStoreSlow(w, o, i, v) }
+    #endif
+}
+
+/// The interpreter's store: post-store check, then the generational
+/// barrier. When the check fails, one out-of-line call does the redo and the
+/// barrier, so nothing of the instruction is live after a call (a separate
+/// slow-path call before the inline barrier spilled the table and heap bases
+/// for the whole loop, as the SATB call did in the previous experiment).
+@_transparent
+func setSlotAndBarrier(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ o: Oop, _ i: Int, _ v: Oop) {
+    #if NO_POST_STORE
+    om.setSlotRaw(o, i, v)
+    barrier(vm, w, om, o, v)
+    #else
+    let ow = om.offsetWord(o)
+    let e1 = ow.pointee.load(ordering: .relaxed)
+    atomicWord(wordPtr(om.heap &+ UInt(truncatingIfNeeded: e1)) + (1 &+ i)).pointee.store(v, ordering: .sequentiallyConsistent)
+    let e2 = ow.pointee.load(ordering: .sequentiallyConsistent)
+    if e2 != e1 || e1 & relocBit != 0 {
+        storeConflict(w, o, i, v)
+    } else {
+        barrier(vm, w, om, o, v)
+    }
+    #endif
+}
+
+/// Redo after a failed post-store check, then the generational barrier.
+@inline(never)
+func storeConflict(_ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
+    let vm = w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self)
+    postStoreSlow(w, o, i, v)
+    barrier(vm, w, vm.pointee.om, o, v)
+}
+
+/// The object was RELOCATING or moved: wait for the switch (or revert),
+/// store into the current body, repeat until the offset is stable. Counted
+/// per worker (SPEC.md "Copy protocol").
+@inline(never)
+func postStoreSlow(_ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
+    let vm = w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self)
+    let om = vm.pointee.om
+    let ow = om.offsetWord(o)
+    w.pointee.storeRedo &+= 1
+    var spins = 0
+    var t0: UInt64 = 0
+    while true {
+        var e = ow.pointee.load(ordering: .acquiring)
+        while e & relocBit != 0 {
+            if spins == 0 { t0 = now() }
+            spins &+= 1
+            if spins & 63 == 0 { sched_yield() }
+            e = ow.pointee.load(ordering: .acquiring)
+        }
+        atomicWord(wordPtr(om.heap &+ UInt(truncatingIfNeeded: e)) + (1 &+ i)).pointee.store(v, ordering: .sequentiallyConsistent)
+        if ow.pointee.load(ordering: .sequentiallyConsistent) == e { break }
+    }
+    if spins > 0 {
+        let dt = now() &- t0
+        w.pointee.spinEpisodes &+= 1
+        w.pointee.spinNs &+= dt
+        if dt > w.pointee.spinMaxNs { w.pointee.spinMaxNs = dt }
+    }
+}
+
+// MARK: - hazard slots (SPEC.md "Hazard slots")
+
+/// Publish `o` in hazard slot `k`, then wait until it is not RELOCATING;
+/// answers its body, valid until `hazardRelease`.
+@inline(never)
+func hazardAcquire(_ w: WorkerRef, _ om: OM, _ k: Int, _ o: Oop) -> UnsafeMutablePointer<UInt64> {
+    w.pointee.hz[k].store(o, ordering: .sequentiallyConsistent)
+    var e = om.offsetWord(o).pointee.load(ordering: .sequentiallyConsistent)
+    if e & relocBit != 0 {
+        w.pointee.hazardWaits &+= 1
+        var spins = 0
+        while e & relocBit != 0 {
+            spins &+= 1
+            if spins & 63 == 0 { sched_yield() }
+            e = om.offsetWord(o).pointee.load(ordering: .sequentiallyConsistent)
+        }
+    }
+    return wordPtr(om.heap &+ UInt(truncatingIfNeeded: e))
+}
+
+@inline(__always)
+func hazardRelease(_ w: WorkerRef, _ k: Int) {
+    w.pointee.hz[k].store(0, ordering: .releasing)
 }
 
 // MARK: - SATB barrier (SPEC.md "SATB barrier")
@@ -317,9 +433,7 @@ func satbPre(_ vm: VMRef, _ w: WorkerRef, _ o: Oop, _ i: Int) {
 func storeWhileMarking(_ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
     let vm = w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self)
     satbSlow(w, o, i)
-    let om = vm.pointee.om
-    om.setSlot(o, i, v)
-    barrier(vm, w, om, o, v)
+    setSlotAndBarrier(vm, w, vm.pointee.om, o, i, v)
 }
 
 /// Two scalars and the worker: the VM is reached through the worker, so the

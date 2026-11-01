@@ -259,6 +259,10 @@ public enum Metric: Int, CaseIterable {
     case remSetTotal, entriesAllocated, entriesFreed, entrySweepNs, fullEntriesFreed
     case barrierSlow, verifyFailures, verifyRuns
     case cmCycles, cmFallbacks, cmAborts, cmVerifyRuns, cmMissed, cmFloatingBytes
+    // relocation (SPEC.md "Part 2"); the first six are per-cycle deltas too
+    case relocMovedBytes, relocMovedObjects, relocSkipPinned, relocSkipHazard, relocNoSpace, relocEvacuated
+    case relocCasFail, relocFreedEpoch, relocFreedPause, relocFreeDelayNs, relocFreeDelayMaxNs, relocPins
+    case relocVerifyRuns
     /// oldheap: latest end of a build phase (`nil ohBuilt`, now() clock) and the kernel start.
     case buildDoneAt, kernelStartAt
 }
@@ -615,6 +619,7 @@ func rootRanges(_ vm: VMRef) -> [(UnsafeMutablePointer<Oop>, Int)] {
 /// Called at a poll when `gcRequested` was seen set. Regs already flushed.
 @inline(never)
 func safepoint(_ vm: VMRef, _ w: WorkerRef) {
+    advanceEpoch(vm, w)
     retireTlab(vm, w)
     pthread_mutex_lock(vm.pointee.mutex)
     park(vm, w)
@@ -748,6 +753,12 @@ public func enterVM(_ vm: VMRef, _ w: WorkerRef) -> UInt64 {
     }
     vm.pointee.sync.pointee.active += 1
     pthread_mutex_unlock(vm.pointee.mutex)
+    // Epoch (SPEC.md "Freeing old blocks: epochs"): first "busy, unknown"
+    // (0, seq_cst), then the current epoch. A relocator that read the
+    // quiescent value before the 0 incremented the epoch before this load,
+    // so this worker sees every switch it made.
+    w.pointee.hz[hzEpoch].store(0, ordering: .sequentiallyConsistent)
+    w.pointee.hz[hzEpoch].store(vm.pointee.cm.epoch.pointee.load(ordering: .sequentiallyConsistent), ordering: .releasing)
     return waited
 }
 
@@ -759,6 +770,7 @@ public func enterVM(_ vm: VMRef, _ w: WorkerRef) -> UInt64 {
 /// completely empty blocks. A stop retires all TLABs instead.
 @discardableResult
 public func leaveVM(_ vm: VMRef, _ w: WorkerRef) -> UInt64 {
+    quiesce(w) // holds no body pointer from here on
     var waited: UInt64 = 0
     if pthread_mutex_trylock(vm.pointee.mutex) != 0 {
         let t0 = now()

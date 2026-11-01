@@ -99,6 +99,19 @@ public struct Marker {
     var sweepCpu: UInt64 = 0
     var sweepStart: UInt64 = 0
     var sweepEnd: UInt64 = 0
+    /// Relocator: to-space buffer, CPU and wall time of the current pass.
+    var tlab = Tlab()
+    var relocCpu: UInt64 = 0
+    var relocStart: UInt64 = 0
+    var relocEnd: UInt64 = 0
+}
+
+/// Evacuated blocks waiting for every worker's epoch (SPEC.md "Freeing old
+/// blocks: epochs"). Touched by the relocator inside the VM and by stoppers.
+struct RelocPending {
+    var blocks = RawBuf<UInt32>(capacity: 256)
+    var epochs = RawBuf<UInt64>(capacity: 256)
+    var times = RawBuf<UInt64>(capacity: 256)
 }
 
 public typealias MarkerRef = UnsafeMutablePointer<Marker>
@@ -128,6 +141,21 @@ public struct CMCycle {
     public var liveBytes: UInt64 = 0
     public var freedBlocks = 0
     public var aborted = false
+    // relocation (SPEC.md "Selecting the relocation set")
+    public var relocCandidates = 0
+    public var relocBlocks = 0
+    public var relocCapped = 0
+    public var relocPlannedBytes: UInt64 = 0
+    public var framePins = 0
+    public var relocMovedBytes: UInt64 = 0
+    public var relocMovedObjects: UInt64 = 0
+    public var relocSkipPinned: UInt64 = 0
+    public var relocSkipHazard: UInt64 = 0
+    public var relocNoSpace: UInt64 = 0
+    public var relocEvacuated: UInt64 = 0
+    public var relocCpuNs: UInt64 = 0
+    public var relocWallNs: UInt64 = 0
+    var reloc0: [UInt64] = []
     public var floatingBytes: UInt64 = 0
     public var missed: UInt64 = 0
     // starting values for deltas
@@ -168,6 +196,15 @@ public struct CMShared {
     /// Stopper's drain stack (final mark, verifier).
     var drain: UnsafeMutablePointer<WordStack>
     public var log: UnsafeMutablePointer<CMLog>
+    /// Relocation (SPEC.md "Part 2"): live bytes per block (marking), the
+    /// selected blocks, the frame-pinned oops, the pending-free list and
+    /// its length, the global epoch.
+    public var blockLive: UnsafeMutablePointer<Atomic<UInt32>>
+    var relocList: UnsafeMutablePointer<RawBuf<UInt32>>
+    var pinList: UnsafeMutablePointer<RawBuf<Oop>>
+    var pending: UnsafeMutablePointer<RelocPending>
+    var pendingCount: UnsafeMutablePointer<Atomic<Int>>
+    public var epoch: UnsafeMutablePointer<Atomic<UInt64>>
 
     static func make(nblocks: Int) -> CMShared {
         func zmap(_ bytes: Int) -> UnsafeMutableRawPointer {
@@ -195,7 +232,10 @@ public struct CMShared {
                         snapBlocks: zmap(nblocks).bindMemory(to: UInt8.self, capacity: nblocks),
                         sweepLive: zmap(nblocks).bindMemory(to: UInt8.self, capacity: nblocks),
                         lock: lock, cond: cond, q: boxed(CMQueue()), markers: ms, markerCount: boxed(0),
-                        drain: boxed(WordStack(capacity: 1 << 16)), log: boxed(CMLog()))
+                        drain: boxed(WordStack(capacity: 1 << 16)), log: boxed(CMLog()),
+                        blockLive: zmap(nblocks * 4).bindMemory(to: Atomic<UInt32>.self, capacity: nblocks),
+                        relocList: boxed(RawBuf<UInt32>(capacity: 1024)), pinList: boxed(RawBuf<Oop>(capacity: 256)),
+                        pending: boxed(RelocPending()), pendingCount: atom(0), epoch: atom(UInt64(1)))
     }
 
     @inline(__always) func inSnap(_ v: Oop) -> Bool {
@@ -257,9 +297,13 @@ extension RawBuf {
 private func traceObject(_ om: OM, _ cm: CMShared, _ o: Oop, _ stack: inout WordStack) -> Int {
     let ent = om.entry(o)
     let h = atomicHeader(ent).pointee.load(ordering: .relaxed)
+    let off = om.offsetWord(o).pointee.load(ordering: .relaxed)
+    // Live bytes per block, for the relocation set (SPEC.md "Selecting the
+    // relocation set"). Snapshot objects are old: their bodies are in blocks.
+    cm.blockLive[Int(truncatingIfNeeded: off) / blockSize].wrappingAdd(UInt32(truncatingIfNeeded: objectBytes(h)), ordering: .relaxed)
     if hdrIsBytes(h) { return objectBytes(h) }
     let n = hdrSlots(h)
-    let s = wordPtr(om.heap &+ UInt(truncatingIfNeeded: ent[1])) + 1
+    let s = wordPtr(om.heap &+ UInt(truncatingIfNeeded: off)) + 1
     var i = 0
     while i < n {
         let v = atomicWord(s + i).pointee.load(ordering: .relaxed)
@@ -304,7 +348,10 @@ func initialMark(_ vm: VMRef, _ rec: inout GCRecord, literal: Bool) {
         }
     }
     cm.snapWords.pointee = words
-    for b in 0..<heap.nblocks { cm.snapBlocks[b] = heap.inUse[b] ? 1 : 0 }
+    for b in 0..<heap.nblocks {
+        cm.snapBlocks[b] = heap.inUse[b] ? 1 : 0
+        cm.blockLive[b].store(0, ordering: .relaxed)
+    }
     let tb = now()
     // 3. Flip.
     let cyc = cm.cycle.pointee.load(ordering: .relaxed) &+ 1
@@ -457,6 +504,10 @@ private func markerLoop(_ vm: VMRef, _ m: MarkerRef) {
     let cm = vm.pointee.cm
     var sweptCycle: UInt64 = 0
     var lastCycle: UInt64 = 0
+    // Read once: outside the VM a stopper may be modifying this Marker
+    // record (draining its stack), a Swift access race for any field read.
+    let first = m.pointee.id == 0
+    var lastFreeTry: UInt64 = 0
     while true {
         // Outside the VM: wait for something to do.
         pthread_mutex_lock(cm.lock)
@@ -465,7 +516,10 @@ private func markerLoop(_ vm: VMRef, _ m: MarkerRef) {
             let ph = cm.phase.pointee.load(ordering: .acquiring)
             let cyc = cm.cycle.pointee.load(ordering: .relaxed)
             if ph == CMPhase.marking && (cm.q.pointee.items.count > 0 || cyc != lastCycle) { work = 1; break }
-            if ph == CMPhase.sweeping && m.pointee.id == 0 && cyc != sweptCycle { work = 2; break }
+            if ph == CMPhase.sweeping && first && cyc != sweptCycle { work = 2; break }
+            // Evacuated blocks waiting for epochs: retry every millisecond.
+            if first && cm.pendingCount.pointee.load(ordering: .relaxed) > 0
+                && now() &- lastFreeTry > 1_000_000 { work = 3; break }
             cm.q.pointee.waiting += 1
             var ts = timespec(tv_sec: 0, tv_nsec: 1_000_000)
             pthread_cond_timedwait_relative_np(cm.cond, cm.lock, &ts)
@@ -481,13 +535,16 @@ private func markerLoop(_ vm: VMRef, _ m: MarkerRef) {
         } else if work == 2 && cmPhase(vm) == CMPhase.sweeping {
             sweptCycle = cyc
             sweepWork(vm, m, cyc)
+        } else if work == 3 {
+            lastFreeTry = now()
+            tryFreePending(vm, atPause: false)
         }
         leaveVM(vm, m.pointee.w)
     }
 }
 
 /// Mutex not held. Park through a stop like a worker, without joining it.
-private func markerSafepoint(_ vm: VMRef, _ m: MarkerRef) {
+func markerSafepoint(_ vm: VMRef, _ m: MarkerRef) {
     pthread_mutex_lock(vm.pointee.mutex)
     if vm.pointee.gcRequested.load(ordering: .acquiring) {
         let sync = vm.pointee.sync
@@ -692,7 +749,17 @@ func finalMark(_ vm: VMRef, _ rec: inout GCRecord) {
         c.pointee.floatingBytes = floating
         c.pointee.missed = missed
     }
-    // 5. Sweep.
+    // 5. Relocation set and frame pins (SPEC.md "Part 2").
+    if vm.pointee.cmConfig.relocThreshold > 0 {
+        let te = now()
+        selectRelocation(vm)
+        let tf = now()
+        rec.framePins = UInt64(pinFrames(vm))
+        rec.selectNs = tf &- te
+        rec.pinNs = now() &- tf
+        rec.relocBlocks = UInt64(cm.relocList.pointee.count)
+    }
+    // 6. Sweep (relocation first).
     pthread_mutex_lock(cm.lock)
     cm.phase.pointee.store(CMPhase.sweeping, ordering: .releasing)
     pthread_cond_broadcast(cm.cond)
@@ -704,6 +771,9 @@ func finalMark(_ vm: VMRef, _ rec: inout GCRecord) {
 /// Answers false if the cycle was aborted while sweeping.
 @discardableResult
 func sweepWork(_ vm: VMRef, _ m: MarkerRef, _ cyc: UInt64) -> Bool {
+    if vm.pointee.cm.relocList.pointee.count > 0 && !vm.pointee.cmConfig.manualReloc {
+        if !relocPass(vm, m, cyc) { return false }
+    }
     let cm = vm.pointee.cm
     let om = vm.pointee.om
     let heap = vm.pointee.heap
@@ -778,8 +848,11 @@ func applySweep(_ vm: VMRef) -> UInt64 {
     let cm = vm.pointee.cm
     let heap = vm.pointee.heap
     var freedBlocks = 0
-    for b in 0..<heap.nblocks where cm.snapBlocks[b] != 0 {
-        if cm.sweepLive[b] == 0 && heap.inUse[b] {
+    for b in 0..<heap.nblocks {
+        // Evacuated blocks were freed by the relocator and left the snapshot
+        // block map; a block can be reused as to-space within the cycle, so
+        // the sweep-live map is cleared everywhere.
+        if cm.snapBlocks[b] != 0 && cm.sweepLive[b] == 0 && heap.inUse[b] {
             heap.inUse[b] = false
             heap.used[b] = 0
             freedBlocks += 1
@@ -787,6 +860,7 @@ func applySweep(_ vm: VMRef) -> UInt64 {
         cm.snapBlocks[b] = 0
         cm.sweepLive[b] = 0
     }
+    endRelocation(vm)
     heap.rebuildFreeList()
     if cm.markerCount.pointee == 0 { fatal("apply without a sweeper") }
     let m0 = cm.markers[0]
@@ -802,6 +876,17 @@ func applySweep(_ vm: VMRef) -> UInt64 {
         c.pointee.snapEntries = m0.pointee.sweepSnapEntries
         c.pointee.sweepCpuNs = m0.pointee.sweepCpu
         c.pointee.sweepWallNs = m0.pointee.sweepEnd &- m0.pointee.sweepStart
+        if !c.pointee.reloc0.isEmpty {
+            let d = relocCounters(vm).enumerated().map { $0.element &- c.pointee.reloc0[$0.offset] }
+            c.pointee.relocMovedBytes = d[0]
+            c.pointee.relocMovedObjects = d[1]
+            c.pointee.relocSkipPinned = d[2]
+            c.pointee.relocSkipHazard = d[3]
+            c.pointee.relocNoSpace = d[4]
+            c.pointee.relocEvacuated = d[5]
+            c.pointee.relocCpuNs = m0.pointee.relocCpu
+            c.pointee.relocWallNs = m0.pointee.relocEnd &- m0.pointee.relocStart
+        }
     }
     vm.set(.liveBytes, m0.pointee.sweepLiveBytes)
     cm.phase.pointee.store(CMPhase.idle, ordering: .releasing)
@@ -850,6 +935,7 @@ func abortCycle(_ vm: VMRef) {
     UnsafeMutableRawPointer(cm.mark).initializeMemory(as: UInt8.self, repeating: 0, count: entries)
     let heap = vm.pointee.heap
     for b in 0..<heap.nblocks { cm.snapBlocks[b] = 0; cm.sweepLive[b] = 0 }
+    endRelocation(vm)
     for k in 0..<cm.markerCount.pointee { cm.markers[k].pointee.stack.count = 0 }
     if cm.markerCount.pointee > 0 { cm.markers[0].pointee.freedChunks.count = 0 }
     if let c = cm.log.pointee.current { c.pointee.aborted = true }

@@ -33,6 +33,7 @@ public struct Heap {
     /// Scratch for sweeps: set for blocks that hold a live object.
     var live: UnsafeMutablePointer<Bool>
     var freeList: UnsafeMutablePointer<UInt32>
+    var freeCap: Int
     var freeCount: UnsafeMutablePointer<Atomic<Int>>
     var freeNext: UnsafeMutablePointer<Atomic<Int>>
     /// Blocks in use (taken since the last rebuild plus the live ones).
@@ -45,17 +46,16 @@ public struct Heap {
         nblocks = (size + reserve) / blockSize
         self.nurseryBytes = nurseryBytes
         let total = nblocks * blockSize + reserve
-        guard let p = mmap(nil, total, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0), p != MAP_FAILED else {
-            fatal("mmap failed")
-        }
-        base = p
+        base = mapTwice(total)
         used = .allocate(capacity: nblocks)
         used.initialize(repeating: 0, count: nblocks)
         inUse = .allocate(capacity: nblocks)
         inUse.initialize(repeating: false, count: nblocks)
         live = .allocate(capacity: nblocks)
         live.initialize(repeating: false, count: nblocks)
-        freeList = .allocate(capacity: nblocks)
+        // Room for blocks appended outside pauses (SPEC.md "Freeing old blocks").
+        freeCap = 2 * nblocks
+        freeList = .allocate(capacity: freeCap)
         for i in 0..<nblocks { freeList[i] = UInt32(i) }
         freeCount = .allocate(capacity: 1)
         freeCount.initialize(to: Atomic(nblocks))
@@ -93,14 +93,51 @@ public struct Heap {
     /// limit is in use (mutator allocation); promotion passes false.
     func takeBlock(soft: Bool) -> UInt32? {
         if soft && taken.pointee.load(ordering: .relaxed) >= softBlocks { return nil }
-        let i = freeNext.pointee.wrappingAdd(1, ordering: .relaxed).oldValue
-        if i < freeCount.pointee.load(ordering: .relaxed) {
-            let b = freeList[i]
-            inUse[Int(b)] = true
-            taken.pointee.wrappingAdd(1, ordering: .relaxed)
-            return b
+        // A CAS on the take index bounded by the count (acquire: the
+        // relocator appends freed blocks outside pauses, SPEC.md "Freeing
+        // old blocks: epochs").
+        var i = freeNext.pointee.load(ordering: .relaxed)
+        while true {
+            if i >= freeCount.pointee.load(ordering: .acquiring) { return nil }
+            let (ok, cur) = freeNext.pointee.compareExchange(expected: i, desired: i &+ 1, ordering: .relaxed)
+            if ok { break }
+            i = cur
         }
-        return nil
+        let b = freeList[i]
+        inUse[Int(b)] = true
+        taken.pointee.wrappingAdd(1, ordering: .relaxed)
+        return b
+    }
+
+    /// Relocator, outside a pause (one appender at a time; pauses rebuild
+    /// the list): a freed block becomes takeable. False when the list is
+    /// full (the block then waits for a pause).
+    func appendFree(_ b: Int) -> Bool {
+        let c = freeCount.pointee.load(ordering: .relaxed)
+        if c >= freeCap { return false }
+        used[b] = 0
+        inUse[b] = false
+        taken.pointee.wrappingSubtract(1, ordering: .relaxed)
+        freeList[c] = UInt32(b)
+        freeCount.pointee.store(c &+ 1, ordering: .releasing)
+        return true
+    }
+
+    /// World stopped: free one block (it is added by the next rebuild, or
+    /// appended now).
+    func freeAtPause(_ b: Int) {
+        if !appendFree(b) {
+            used[b] = 0
+            inUse[b] = false
+        }
+    }
+
+    /// Whether block `b` is in the unconsumed part of the free list (verifier).
+    func freeListContains(_ b: Int) -> Int {
+        let lo = min(freeNext.pointee.load(ordering: .relaxed), freeCount.pointee.load(ordering: .relaxed))
+        var n = 0
+        for i in lo..<freeCount.pointee.load(ordering: .relaxed) where Int(freeList[i]) == b { n += 1 }
+        return n
     }
 
     /// Point the TLAB at a fresh block. Returns false if none is available.
@@ -162,4 +199,33 @@ public struct Heap {
         taken.pointee.store(inuse, ordering: .relaxed)
         return nfree
     }
+}
+
+/// The heap's alias distance (SPEC.md "Entry state encoding"): every body is
+/// also addressable at `address + relocBit`, so an offset word holding
+/// `off + relocBit` (RELOCATING) still leads to the old body.
+public let relocBit: UInt64 = 1 << 32
+
+/// Reserve `relocBit + bytes` of address space and map one memory object of
+/// `bytes` at its start and again at `+ relocBit`. Pages are zero-filled on
+/// demand, as with the anonymous mmap this replaces.
+private func mapTwice(_ bytes: Int) -> UnsafeMutableRawPointer {
+    precondition(UInt64(bytes) < relocBit, "heap larger than the alias distance")
+    let task = mach_task_self_
+    var addr: mach_vm_address_t = 0
+    let span = mach_vm_size_t(bytes)
+    var kr = mach_vm_allocate(task, &addr, mach_vm_size_t(relocBit) + span, VM_FLAGS_ANYWHERE)
+    if kr != KERN_SUCCESS { fatal("mach_vm_allocate: \(kr)") }
+    var size = memory_object_size_t(span)
+    var entry: mach_port_t = 0
+    kr = mach_make_memory_entry_64(task, &size, 0, MAP_MEM_NAMED_CREATE | VM_PROT_READ | VM_PROT_WRITE, &entry,
+                                   mach_port_t(MACH_PORT_NULL))
+    if kr != KERN_SUCCESS || size < span { fatal("mach_make_memory_entry_64: \(kr)") }
+    for at in [addr, addr + mach_vm_address_t(relocBit)] {
+        var a = at
+        kr = mach_vm_map(task, &a, span, 0, VM_FLAGS_FIXED | VM_FLAGS_OVERWRITE, entry, 0, 0,
+                         VM_PROT_READ | VM_PROT_WRITE, VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_NONE)
+        if kr != KERN_SUCCESS || a != at { fatal("mach_vm_map: \(kr)") }
+    }
+    return UnsafeMutableRawPointer(bitPattern: UInt(addr)).unsafelyUnwrapped
 }
