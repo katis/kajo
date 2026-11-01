@@ -1,0 +1,10 @@
+# Reference clones are read-only inspiration, never committed
+references/*
+!references/MANIFEST.md
+
+# Build outputs
+target/
+.build/
+*.xcuserstate
+DerivedData/
+.DS_Store
