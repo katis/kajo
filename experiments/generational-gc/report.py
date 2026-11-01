@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Tables for RESULTS.md from bench.sh's raw files: kernels, pauses, scenarios."""
-import sys, os, statistics as st, collections
+import sys, os, gzip, statistics as st, collections
 
 KRAW, SRAW, PRAW = sys.argv[1:4]
 KERNELS = ['arith', 'fib', 'sends', 'ivars', 'alloc', 'churn', 'survivors5', 'survivors30']
@@ -15,9 +15,14 @@ def kv(line):
     return d
 
 def parse(path):
+    """Reads `path`, or `path.gz` if only that exists (the committed pause dump)."""
     rows = []
-    if not os.path.exists(path): return rows
-    for line in open(path):
+    if not os.path.exists(path):
+        if not os.path.exists(path + '.gz'): return rows
+        f = gzip.open(path + '.gz', 'rt')
+    else:
+        f = open(path)
+    for line in f:
         if line.startswith('#'):
             print(line.strip()); continue
         if line.strip(): rows.append(kv(line))

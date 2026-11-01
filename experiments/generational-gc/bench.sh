@@ -40,11 +40,11 @@ has() { [[ " $PARTS " == *" $1 "* ]]; }
 
 if has build; then
     echo "== builds"
-    swift build -c release --package-path "$S" --product ggc-bench
-    swift build -c release --package-path "$S" --product kajo-ui
-    swift build -c release --package-path "$S" --product ggc-bench --scratch-path "$S/.build/nobar" -Xswiftc -DNO_BARRIER
-    swift build -c release --package-path "$S" --product ggc-bench --scratch-path "$S/.build/align" "${ALIGN[@]}"
-    swift build -c release --package-path "$S" --product ggc-bench --scratch-path "$S/.build/nobar-align" -Xswiftc -DNO_BARRIER "${ALIGN[@]}"
+    swift build -c release --package-path "$S" --product ggc-bench > /dev/null
+    swift build -c release --package-path "$S" --product kajo-ui > /dev/null
+    swift build -c release --package-path "$S" --product ggc-bench --scratch-path "$S/.build/nobar" -Xswiftc -DNO_BARRIER > /dev/null
+    swift build -c release --package-path "$S" --product ggc-bench --scratch-path "$S/.build/align" "${ALIGN[@]}" > /dev/null
+    swift build -c release --package-path "$S" --product ggc-bench --scratch-path "$S/.build/nobar-align" -Xswiftc -DNO_BARRIER "${ALIGN[@]}" > /dev/null
 fi
 
 # name|build|nursery KiB|binary
