@@ -8,4 +8,4 @@ references them.
 | Directory | Question | Outcome |
 |---|---|---|
 | `vm-language-bench/` | Rust or Swift for the VM core? | Swift. See `docs/adr/0001-swift-for-the-vm-core.md` |
-| `object-representation/` | Direct pointers with forwarders, an object table, or heap offsets? | see RESULTS.md |
+| `object-representation/` | Direct pointers with forwarders, an object table, or heap offsets? | Object table, proposed. See `docs/adr/0003-object-representation.md` |

@@ -55,8 +55,13 @@ Performance:
    `truncatingIfNeeded:`, `unsafelyUnwrapped`. Everywhere else keep the
    default trapping arithmetic and bounds checks; they are a safety net.
  - Runtime exclusivity enforcement cost nothing measurable. Leave it on.
- - 1 to 8 worker scaling was 7.5x on compute kernels. Allocation scaled 4.3x
-   because marking is single threaded; parallel marking is future work.
+ - Pad every per-worker state struct to its own 128-byte cache lines. The
+   first experiment's "allocation scales only 4.3x" was partly false sharing
+   between adjacent worker structs; padded, compute kernels scale 7.4 to
+   7.7x and allocation 5.3x, the rest being single threaded marking.
+ - Pass interpreter registers as scalars into slow paths. Passing the
+   register struct by memory spilled all of them on every send.
+ - `@inline(__always)` did not inline the send path; `@_transparent` did.
  - Clean release builds take about twice as long as the Rust equivalent.
  - The VM module cross compiled for iOS without changes. `just ios-check`.
 
@@ -82,6 +87,13 @@ Safety:
  - `Atomic` is non-copyable, so a struct holding one inline becomes
    `~Copyable`. There is no clean way to treat a raw object header word as an
    atomic; parallel marking will need its own design.
+
+## Decisions
+
+Decisions live in `docs/adr/`, one per file, each pointing at the experiment
+that produced its evidence. Current: 0001 Swift for the VM core, 0002
+repository layout, 0003 object table for object representation (proposed,
+pending a device measurement). Read them before touching the areas they cover.
 
 ## Project structure
 
