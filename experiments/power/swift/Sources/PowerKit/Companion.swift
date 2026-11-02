@@ -29,6 +29,8 @@ public final class Companion: @unchecked Sendable {
     private var count: UInt64 = 0
     private var lateNs: UInt64 = 0
     private var qosSeen: qos_class_t = QOS_CLASS_UNSPECIFIED
+    private var counts = ThreadCounts()
+    private var counts0 = ThreadCounts()
 
     public init(_ mode: Mode, qos: qos_class_t = QOS_CLASS_USER_INITIATED) {
         self.mode = mode
@@ -48,6 +50,8 @@ public final class Companion: @unchecked Sendable {
 
     private func loop() {
         qosSeen = qos_class_self()
+        let me = ThreadCPU.selfId()
+        counts0 = ThreadCounts.of(me)
         let t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
         started.store(true, ordering: .releasing)
@@ -76,6 +80,7 @@ public final class Companion: @unchecked Sendable {
         }
         count = n
         cpuNs = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) &- c0
+        counts = ThreadCounts.delta(counts0, ThreadCounts.of(me))
         wallNs = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) &- t0
     }
 
@@ -93,6 +98,8 @@ public final class Companion: @unchecked Sendable {
         public var count: UInt64
         public var lateNs: UInt64
         public var qos: qos_class_t
+        /// Per core type, from PROC_PIDTHREADCOUNTS (its own thread).
+        public var counts: ThreadCounts
     }
 
     /// Stop, join, and report what the companion did.
@@ -100,7 +107,7 @@ public final class Companion: @unchecked Sendable {
     public func finish() -> Report {
         stop.store(true, ordering: .relaxed)
         if let t = tid { pthread_join(t, nil); tid = nil }
-        return Report(cpuNs: cpuNs, wallNs: wallNs, count: count, lateNs: lateNs, qos: qosSeen)
+        return Report(cpuNs: cpuNs, wallNs: wallNs, count: count, lateNs: lateNs, qos: qosSeen, counts: counts)
     }
 
     /// key=value fields (leading space) for a report.
@@ -112,5 +119,6 @@ public final class Companion: @unchecked Sendable {
         return " comp=\(c.name) comp_qos=\(q) comp_cpu_ms=\((Double(r.cpuNs) / 1e5).rounded() / 10)"
             + " comp_wall_ms=\((Double(r.wallNs) / 1e5).rounded() / 10) comp_count=\(r.count)"
             + " comp_rate_hz=\(rate.rounded()) comp_late_mean_us=\(r.count > 0 ? (Double(r.lateNs) / Double(r.count) / 100).rounded() / 10 : 0)"
+            + r.counts.fields("comp")
     }
 }

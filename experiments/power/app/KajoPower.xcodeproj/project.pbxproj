@@ -1,0 +1,368 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		80909C5F93507A276A626A33 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46CCEFF93F1692BD7A1A9F25 /* App.swift */; };
+		882FEBADA5F821E256DA3707 /* PowerAll in Frameworks */ = {isa = PBXBuildFile; productRef = 70EE8B89D8E1D48380726A0A /* PowerAll */; };
+		EB12FC9064945BD37C35EC4B /* Power.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DE18A9E2F840C86770F6DE0 /* Power.swift */; };
+		FBD07E4043ABDD5375420016 /* Part1.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC01EB3AA04D81A38B0CA0F8 /* Part1.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		0DE18A9E2F840C86770F6DE0 /* Power.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Power.swift; sourceTree = "<group>"; };
+		46CCEFF93F1692BD7A1A9F25 /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		7C665DD85D46BE2E82EAC845 /* KajoPower.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = KajoPower.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DE596D690EE406AE99CB948D /* swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = swift; path = ../swift; sourceTree = SOURCE_ROOT; };
+		EC01EB3AA04D81A38B0CA0F8 /* Part1.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Part1.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		D4BDA03849529C6DDE4F3E93 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				882FEBADA5F821E256DA3707 /* PowerAll in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		47E7FD072D41F839A51993E0 = {
+			isa = PBXGroup;
+			children = (
+				67894C61949D2D86C623D196 /* Packages */,
+				E2B4FAB9DD40B0D5CE5B9519 /* Sources */,
+				7E985D2165694412BF9D0A70 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		67894C61949D2D86C623D196 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				DE596D690EE406AE99CB948D /* swift */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		7E985D2165694412BF9D0A70 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7C665DD85D46BE2E82EAC845 /* KajoPower.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		E2B4FAB9DD40B0D5CE5B9519 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				46CCEFF93F1692BD7A1A9F25 /* App.swift */,
+				EC01EB3AA04D81A38B0CA0F8 /* Part1.swift */,
+				0DE18A9E2F840C86770F6DE0 /* Power.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D44454430060E4E87AA94F06 /* KajoPower */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 501246E1324C1D332682D3DF /* Build configuration list for PBXNativeTarget "KajoPower" */;
+			buildPhases = (
+				10B159CA49469714C4814CC9 /* Sources */,
+				D4BDA03849529C6DDE4F3E93 /* Frameworks */,
+				0E39A4360D8AB6A0A71F9F90 /* Bundle kernels */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = KajoPower;
+			packageProductDependencies = (
+				70EE8B89D8E1D48380726A0A /* PowerAll */,
+			);
+			productName = KajoPower;
+			productReference = 7C665DD85D46BE2E82EAC845 /* KajoPower.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9EA63BE0A2ACB9C56771244F /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					D44454430060E4E87AA94F06 = {
+						DevelopmentTeam = BDN6M642M2;
+						ProvisioningStyle = Automatic;
+					};
+				};
+			};
+			buildConfigurationList = 8F5AD350E77926009DC4F133 /* Build configuration list for PBXProject "KajoPower" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 47E7FD072D41F839A51993E0;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				073594A970F01AA789ACB660 /* XCLocalSwiftPackageReference "../swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 7E985D2165694412BF9D0A70 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D44454430060E4E87AA94F06 /* KajoPower */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		0E39A4360D8AB6A0A71F9F90 /* Bundle kernels */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Bundle kernels";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "set -e\nEXP=\"$SRCROOT/../..\"\nDST=\"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/experiments\"\nrm -rf \"$DST\"\nfor e in vm-language-bench object-representation entry-locality ui-thread-scheduling generational-gc concurrent-marking concurrent-relocation concurrent-young power; do\n  mkdir -p \"$DST/$e/kernels\"\n  cp -L \"$EXP/$e/kernels/\"*.kasm \"$DST/$e/kernels/\"\ndone\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		10B159CA49469714C4814CC9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				80909C5F93507A276A626A33 /* App.swift in Sources */,
+				FBD07E4043ABDD5375420016 /* Part1.swift in Sources */,
+				EB12FC9064945BD37C35EC4B /* Power.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		212730CE31774A62E081DA50 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.katajamaki.kajo.power;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		4490D25F5409016ACAB32926 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = BDN6M642M2;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+		802CAD4B4B1424475F1BC6B3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = BDN6M642M2;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		AF0DDA5C7D12BEFE9F3D3805 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.katajamaki.kajo.power;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		501246E1324C1D332682D3DF /* Build configuration list for PBXNativeTarget "KajoPower" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF0DDA5C7D12BEFE9F3D3805 /* Debug */,
+				212730CE31774A62E081DA50 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		8F5AD350E77926009DC4F133 /* Build configuration list for PBXProject "KajoPower" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4490D25F5409016ACAB32926 /* Debug */,
+				802CAD4B4B1424475F1BC6B3 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		073594A970F01AA789ACB660 /* XCLocalSwiftPackageReference "../swift" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../swift;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		70EE8B89D8E1D48380726A0A /* PowerAll */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PowerAll;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 9EA63BE0A2ACB9C56771244F /* Project object */;
+}

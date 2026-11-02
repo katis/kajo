@@ -125,3 +125,22 @@ private func burn(ms: Double) -> UInt64 {
         #expect(r.usage.cpuNs > 0)
     }
 }
+
+@Suite(.serialized) struct ThreadCountsTests {
+    @Test func perThreadCountsSeeASpinner() {
+        let before = ThreadCPU.snapshot()
+        let c = Companion(.spin)
+        let mid = ThreadCPU.snapshot()
+        let tid = ThreadCPU.newThreads(before, mid)[0]
+        let a = ThreadCounts.of(tid)
+        usleep(300_000)
+        let b = ThreadCounts.of(tid)
+        c.finish()
+        #expect(a.ok && b.ok)
+        let d = ThreadCounts.delta(a, b)
+        let cpu = d.p.cpuNs + d.e.cpuNs
+        #expect(cpu >= 200_000_000 && cpu <= 400_000_000)
+        #expect(d.p.cycles + d.e.cycles > 0)
+        #expect(d.fields("x").contains("x_tc_ok=1"))
+    }
+}
