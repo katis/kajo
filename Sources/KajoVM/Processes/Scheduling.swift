@@ -45,7 +45,7 @@ func makeReadyLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, fromBlocked:
     setIntSlot(om, p, ProcessLayout.state, Int(ProcessState.ready.rawValue))
     let r = unsafe records(vm, intSlot(om, p, ProcessLayout.record))
     if unsafe fromBlocked && r.pointee.runnableSince == 0 { unsafe r.pointee.runnableSince = ticks() }
-    om.store(p, ProcessLayout.next, nilObject)  // nil: never young
+    unsafe clearingStore(w, p, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
     let tail = unsafe Oop(raw: vm.pointee.queues[queueCount + q])
     if tail == .none {
         unsafe vm.pointee.queues[q] = p.raw
@@ -71,7 +71,7 @@ func dequeueLocked(_ vm: VMPointer, main: Bool, minPriority: Int, for w: WorkerP
             let next = om.load(head, ProcessLayout.next)
             unsafe vm.pointee.queues[q] = next == nilObject ? 0 : next.raw
             if next == nilObject { unsafe vm.pointee.queues[queueCount + q] = 0 }
-            om.store(head, ProcessLayout.next, nilObject)  // nil: never young
+            unsafe clearingStore(w, head, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
             setIntSlot(om, head, ProcessLayout.state, Int(ProcessState.running.rawValue))
             unsafe records(vm, intSlot(om, head, ProcessLayout.record)).pointee.runningOn = w.pointee.index
             return head
@@ -99,7 +99,7 @@ private func unlinkLocked(_ vm: VMPointer, _ w: WorkerPointer, head: inout Oop, 
         if cur == p {
             if prev == .none { head = next } else { unsafe barrierStore(w, prev, ProcessLayout.next, next, .unlinkLink) }
             if tail == p { tail = prev == .none ? nilObject : prev }
-            om.store(p, ProcessLayout.next, nilObject)  // nil: never young
+            unsafe clearingStore(w, p, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
             return
         }
         prev = cur
@@ -181,7 +181,7 @@ private func finishLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, _ resul
     unsafe barrierStore(w, p, ProcessLayout.result, result, .processResult)
     setIntSlot(om, p, ProcessLayout.state, Int(ProcessState.terminated.rawValue))
     setIntSlot(om, p, ProcessLayout.record, -1)
-    om.store(p, ProcessLayout.waitingOn, nilObject)  // nil: never young
+    unsafe clearingStore(w, p, ProcessLayout.waitingOn, nilObject)  // a deletion: the SATB barrier sees it
     unsafe records(vm, ri).pointee = ProcessRecord(nextFree: vm.pointee.sched.pointee.recordFree)
     unsafe vm.pointee.sched.pointee.recordFree = ri
     unsafe vm.pointee.sched.pointee.liveProcesses -= 1
@@ -333,9 +333,9 @@ func signalLocked(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop) -> Bool {
     }
     let next = om.load(first, ProcessLayout.next)
     unsafe barrierStore(w, sem, SemaphoreLayout.firstWaiter, next, .firstWaiterOnSignal)
-    if next == nilObject { om.store(sem, SemaphoreLayout.lastWaiter, nilObject) }  // nil: never young
-    om.store(first, ProcessLayout.next, nilObject)
-    om.store(first, ProcessLayout.waitingOn, nilObject)
+    if next == nilObject { unsafe clearingStore(w, sem, SemaphoreLayout.lastWaiter, nilObject) }  // a deletion: the SATB barrier sees it
+    unsafe clearingStore(w, first, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
+    unsafe clearingStore(w, first, ProcessLayout.waitingOn, nilObject)  // a deletion: the SATB barrier sees it
     return unsafe makeReadyLocked(vm, w, first, fromBlocked: true)
 }
 
@@ -371,7 +371,7 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     unsafe suspendAfterPrimitiveLocked(vm, w, argc: argc, result: sem)
     setIntSlot(om, p, ProcessLayout.state, Int(ProcessState.waiting.rawValue))
     unsafe barrierStore(w, p, ProcessLayout.waitingOn, sem, .waitingOn)
-    om.store(p, ProcessLayout.next, nilObject)  // nil: never young
+    unsafe clearingStore(w, p, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
     let last = om.load(sem, SemaphoreLayout.lastWaiter)
     if last == nilObject {
         unsafe barrierStore(w, sem, SemaphoreLayout.firstWaiter, p, .firstWaiterOnWait)

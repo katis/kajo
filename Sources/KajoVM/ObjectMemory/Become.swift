@@ -96,6 +96,7 @@ extension ObjectMemory {
         for f in from {
             setHeaderWord(f.raw, 0)
             runs.add(f.raw, self)
+            oldMap.remove(f.entryIndex)
         }
         lockPools()
         unsafe runs.finish(into: &pools.pointee.entryRuns)

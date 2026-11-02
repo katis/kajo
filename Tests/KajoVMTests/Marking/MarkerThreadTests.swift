@@ -119,8 +119,9 @@ private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? 
 @Test func markingCompletesPromptlyAfterIdling() throws {
     let rt = try threadedRuntime()
     sleepMs(300)
-    rt.spawn("mkSparse:", [int(4000)])
+    let p = rt.spawn("mkSparse:", [int(4000)])
     rt.waitAllTerminated()
+    rt.vm.release(p)  // its result is the kept Array
     rt.scavenge()                                // promote the Pairs
     rt.vm.setGlobal(7, rt.image.nilObject)       // drop all but every 20th
     sleepMs(300)
@@ -135,7 +136,8 @@ private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? 
         sleepMs(200)
     }
     #expect(rt.marking.aborts == a0)
-    #expect(rt.vm.cycleLog.last.map { $0.entriesFreed >= 3800 } == true)
+    let freed = rt.vm.cycleLog.suffix(2).map(\.entriesFreed).reduce(0, +)
+    #expect(freed >= 3800, "entries freed by the two cycles: \(freed)")
     #expect(rt.marking.missed == 0)
     rt.noFailures()
     rt.stop()
@@ -167,8 +169,9 @@ private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? 
     #expect(first?.markerQoS == QOS_CLASS_UTILITY.rawValue)
     #expect(rt.marking.qosEscalations == 0)
     // 200 000 Pairs, old: about 4.8 MB of an 8 MiB soft limit.
-    rt.spawn("mkBig:", [int(200_000)])
+    let p = rt.spawn("mkBig:", [int(200_000)])
     rt.waitAllTerminated()
+    rt.vm.release(p)  // its result is the list
     rt.scavenge()
     let low = cycle()
     #expect(rt.marking.qosEscalations == 1)

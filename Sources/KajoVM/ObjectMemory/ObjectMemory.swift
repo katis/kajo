@@ -1,4 +1,5 @@
 import Darwin
+import Synchronization
 
 /// The object memory: oops, entries, the block heap, allocation, and the
 /// stop-the-world operations on them (docs/modules/object-memory.md).
@@ -32,9 +33,11 @@ import Darwin
         let tableBytes = config.entryCapacity * 16
         let table: UnsafeMutableRawPointer
         let marks: UnsafeMutableRawPointer
+        let oldMap: EntryBitmap
         do {
             unsafe table = try VirtualMemory.reserve(tableBytes)
             unsafe marks = try VirtualMemory.reserve(config.entryCapacity)
+            oldMap = try EntryBitmap(entries: UInt64(config.entryCapacity))
         } catch {
             heap.release()
             throw error
@@ -50,7 +53,7 @@ import Darwin
         let shared = UnsafeMutablePointer<MemoryShared>.allocate(capacity: 1)
         unsafe shared.initialize(to: MemoryShared(
             config: config, heap: heap, entryCapacity: UInt64(config.entryCapacity), tableBytes: tableBytes,
-            marks: marks.bindMemory(to: UInt8.self, capacity: config.entryCapacity), poolLock: poolLock,
+            marks: marks.bindMemory(to: UInt8.self, capacity: config.entryCapacity), oldMap: oldMap, poolLock: poolLock,
             pools: pools, gc: gc, finalization: fin))
         unsafe self.table = table
         unsafe self.heapBase = heap.base
@@ -76,6 +79,7 @@ import Darwin
         s.heap.release()
         unsafe VirtualMemory.release(table, s.tableBytes)
         unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.marks), Int(s.entryCapacity))
+        s.oldMap.release()
         unsafe shared.deinitialize(count: 1)
         unsafe shared.deallocate()
     }
@@ -148,13 +152,22 @@ import Darwin
     }
 
     /// Every store into a slot goes through here: module 4's barrier and
-    /// module 6's post-store check hook in at this one place.
+    /// module 6's post-store check hook in at this one place. A relaxed
+    /// atomic store (a plain `str` on arm64): module 5's marker reads slots
+    /// of old objects with relaxed atomic loads while mutators store.
     @inline(__always)
     func store(_ o: Oop, _ i: Int, _ v: Oop) {
         assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
         assert(v.isSmallInteger || isUsedReference(v))
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i &<< 3
-        unsafe heapBase.storeBytes(of: v.raw, toByteOffset: off, as: UInt64.self)
+        unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v.raw, ordering: .relaxed)
+    }
+
+    /// A slot as the concurrent marker reads it: a relaxed atomic load.
+    @inline(__always)
+    func loadAtomic(bodyOffset s: UInt64, _ i: Int) -> UInt64 {
+        let off = Int(truncatingIfNeeded: s) &+ 8 &+ i &<< 3
+        return unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.load(ordering: .relaxed)
     }
 
     @inline(__always)
@@ -247,7 +260,12 @@ extension ObjectMemory: @unchecked Sendable {}
     let entryCapacity: UInt64
     let tableBytes: Int
     /// Mark bytes, one per entry, beside the table. Never set in headers.
+    /// Module 1's collector at a stop and module 5's marker between stops
+    /// use the same map, one at a time; outside a collection every byte is
+    /// zero.
     let marks: UnsafeMutablePointer<UInt8>
+    /// One bit per entry: set while it holds an old object (OldMap.swift).
+    let oldMap: EntryBitmap
     let poolLock: os_unfair_lock_t
     /// Guarded by `poolLock`.
     let pools: UnsafeMutablePointer<Pools>
@@ -283,8 +301,16 @@ extension ObjectMemory: @unchecked Sendable {}
     var softLimitBlocks: Int
     /// Promotion refills that found no block (the reserve was too small).
     var reserveExhausted: UInt64 = 0
+    /// Module 5: free-entry runs a lazy sweep produced, published at the
+    /// next pause; the stamp of each block's last refill and the stamp
+    /// given now (the current marking cycle's).
+    var pendingRuns = RawArray<UInt64>()
+    var blockStamps: UnsafeMutablePointer<UInt32>
+    var stampNow: UInt32 = 0
 
     init(blockCount: Int, softLimit: Int) {
+        unsafe blockStamps = .allocate(capacity: blockCount)
+        unsafe blockStamps.initialize(repeating: 0, count: blockCount)
         softLimitBlocks = Swift.min(softLimit, blockCount)
         var b = blockCount - 1
         while b >= 0 { freeBlocks.append(UInt32(b)); b -= 1 }
@@ -300,6 +326,8 @@ extension ObjectMemory: @unchecked Sendable {}
     mutating func free() {
         freeBlocks.free()
         entryRuns.free()
+        pendingRuns.free()
+        unsafe blockStamps.deallocate()
         unsafe contexts.free()
         unsafe stashes.free()
     }
@@ -338,6 +366,11 @@ extension ObjectMemory: @unchecked Sendable {}
     /// everything. The argument is the operation's extra roots, or nil when
     /// it was given none (the hook gathers the stop's roots itself).
     var beforeOldSpaceOperation: (([Oop]?) -> Void)? = nil
+    /// Module 5: the snapshot of a pending lazy sweep (OldMap.swift).
+    var pendingDead: EntryBitmap? = nil
+    /// Module 5: a concurrent marking cycle owns the mark map (marks are set
+    /// between stops; the heap verifier allows them).
+    var markingActive = false
 
     mutating func free() {
         roots.free()

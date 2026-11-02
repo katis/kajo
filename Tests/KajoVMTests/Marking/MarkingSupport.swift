@@ -246,13 +246,17 @@ extension Runtime {
     func runInt(_ selector: String, args: [Oop]) -> Int64 {
         let p = spawn(selector, args)
         while vm.liveProcessCount > 0 { _ = vm.runOneSlice(worker: 1) }
+        defer { vm.release(p) }
         return result(p)
     }
 
-    /// Spawn `nil selector` and run one slice of it on worker 1.
+    /// Spawn `nil selector` and run one slice of it on worker 1. The
+    /// Process is released: a terminated Process's `result` slot holds
+    /// what the method answered, and a rooted one would keep it alive.
     func run(_ selector: String) {
-        spawn(selector)
+        let p = spawn(selector)
         runOn(1)
+        vm.release(p)
     }
 
     var phase: MarkingPhase { vm.markingPhase }

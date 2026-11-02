@@ -246,10 +246,16 @@ extension ObjectMemory {
             unsafe pools.pointee.stashes[i].pointee.count = 0
         }
         unsafe pools.pointee.entryRuns.removeAll()
+        // A lazy sweep's pending runs too (module 5): free in the table.
+        unsafe pools.pointee.pendingRuns.removeAll()
         unlockPools()
         var live = RawArray<Bool>(repeating: false, count: heap.blockCount)
         var runs = RunBuilder(chunk: UInt64(config.entryChunk))
         var swept: UInt64 = 0
+        // The old map is rebuilt on the way: nothing is young here (the
+        // hook promoted everything), so it is the live entries.
+        let old = oldMap
+        var bits: UInt64 = 0
         var e: UInt64 = 1
         while e < hw {
             let raw = e &<< 4
@@ -259,13 +265,19 @@ extension ObjectMemory {
             } else if markByte(e) != 0 {
                 setMark(e, 0)
                 live[BlockHeap.block(ofOffset: s)] = true
+                if headerWord(raw) & Header.youngBit == 0 { bits |= 1 &<< (e & 63) }
             } else {
                 setHeaderWord(raw, 0)
                 runs.add(raw, self)
                 swept &+= 1
             }
+            if e & 63 == 63 {
+                old.setWord(Int(truncatingIfNeeded: e &>> 6), bits)
+                bits = 0
+            }
             e &+= 1
         }
+        if hw & 63 != 0 { old.setWord(Int(truncatingIfNeeded: hw &>> 6), bits) }
         lockPools()
         unsafe runs.finish(into: &pools.pointee.entryRuns)
         unlockPools()

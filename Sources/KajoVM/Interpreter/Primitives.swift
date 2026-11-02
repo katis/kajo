@@ -66,7 +66,13 @@ private func slotIndex(_ m: Machine, _ o: Oop, _ i: Oop) -> Int? {
 private func primAt(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard c.argc == 1, indexable(m, c.receiver), let i = slotIndex(m, c.receiver, c.arg0) else { return .none }
     if m.om.isBytes(c.receiver) { return Oop(smallInteger: Int64(m.om.loadByte(c.receiver, i))) }
-    return m.om.load(c.receiver, i)
+    let v = m.om.load(c.receiver, i)
+    // Module 5: while marking, a weak slot's referent is recorded (the
+    // keep-alive read barrier; the slow path checks the format).
+    if unsafe barrierWord(m.state.pointee.safepointFlag).pointee.load(ordering: .relaxed) != 0 {
+        unsafe weakReadBarrier(m.state, c.receiver, i, v)
+    }
+    return v
 }
 
 private func primAtPut(_ m: Machine, _ c: PrimitiveCall) -> Oop {

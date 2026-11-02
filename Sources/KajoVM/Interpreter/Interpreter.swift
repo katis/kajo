@@ -12,8 +12,7 @@ import Synchronization
 
     init(image: Image) {
         self.image = image
-        let flag = UnsafeMutablePointer<Atomic<UInt32>>.allocate(capacity: 1)
-        unsafe flag.initialize(to: Atomic(0))
+        let flag = makeFlagLine()
         // A worker of no VM: its polls only honour the test switch below.
         let w = unsafe Worker.make(image: image, vm: nil, index: 0, isMain: true, flag: flag, pollEvery: 1024, seed: 1)
         unsafe state = w.pointer(to: \Worker.interp)!
@@ -23,8 +22,7 @@ import Synchronization
     func destroy() {
         let flag = unsafe state.pointee.safepointFlag
         unsafe Worker.destroy(workerOf(state))
-        unsafe flag.deinitialize(count: 1)
-        unsafe flag.deallocate()
+        unsafe freeFlagLine(flag)
     }
 
     var machine: Machine { unsafe Machine(state: state) }

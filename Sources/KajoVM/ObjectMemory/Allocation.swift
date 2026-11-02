@@ -117,6 +117,7 @@ extension ObjectMemory {
         unsafe c.pointee.top = off &+ bytes
         unsafe c.pointee.freeEntry = stateWord(e) & EntryState.nextMask
         initializeObject(e, at: off, header: header.raw, bytes: bytes, fill: fill.raw)
+        oldMap.insert(e &>> 4)
         unsafe c.pointee.counters.allocations &+= 1
         unsafe c.pointee.counters.allocatedBytes &+= bytes
         return Oop(raw: e)
@@ -193,6 +194,7 @@ extension ObjectMemory {
             }
             _ = unsafe pools.pointee.freeBlocks.popLast()
             heap.setInUse(b, true)
+            unsafe pools.pointee.blockStamps[b] = pools.pointee.stampNow
             if !wasInUse { unsafe pools.pointee.blocksInUse += 1 }
             if used &+ bytes <= UInt64(BlockHeap.blockBytes) {
                 unsafe c.pointee.top = start &+ used

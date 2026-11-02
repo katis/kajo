@@ -108,11 +108,20 @@ extension Machine {
 /// one (the request is taken here, so it runs once).
 func youngPause(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext, full: Bool) {
     guard let n = unsafe vm.pointee.nursery else { return }
-    if unsafe full || n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) {
+    if full {
+        unsafe noteFullCollection(vm, .entries)
+        unsafe fullCollection(vm, stop)
+    } else if unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) {
+        unsafe noteFullCollection(vm, .softLimit)
         unsafe fullCollection(vm, stop)
     } else {
         unsafe markStop(vm, .scavenge)
-        unsafe scavenge(vm, w, roots: stop.roots(), promoteAll: false, timeToSafepointNs: stop.timeToSafepointNs)
+        let roots = stop.roots()
+        // Module 5: a finished sweep is applied first; at the end a marking
+        // cycle may start (its initial mark rides on this scavenge).
+        let before = unsafe beforeScavenge(vm)
+        unsafe scavenge(vm, w, roots: roots, promoteAll: false, timeToSafepointNs: stop.timeToSafepointNs)
+        unsafe afterScavenge(vm, roots: roots, literalBefore: before)
     }
 }
 
@@ -142,6 +151,7 @@ func runDueFullCollection(_ vm: VMPointer, _ w: WorkerPointer) {
     unsafe stopWorld(vm, w, retry: true) { stop in
         guard let n = unsafe vm.pointee.nursery,
               unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) else { return }
+        unsafe noteFullCollection(vm, .softLimit)
         unsafe fullCollection(vm, stop)
     }
     unsafe w.pointee.interp.counters.collectionsTriggered &+= 1
@@ -195,6 +205,8 @@ private func promoteAllForOldSpace(_ vm: VMPointer, _ extra: [Oop]?) {
     let stopper = unsafe sp.pointee.stopper
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     precondition(requested && stopper >= 0, "kajo: an old-space operation outside a stop")
+    // Module 5: a marking cycle is abandoned, a sweep finished and applied.
+    unsafe markingBeforeOldSpaceOperation(vm)
     let roots = unsafe extra ?? gatherRoots(vm, [])
     unsafe scavenge(vm, vm.worker(stopper), roots: roots, promoteAll: true)
 }

@@ -68,7 +68,8 @@ private func parkLocked(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer)
     while unsafe sp.pointee.epoch == epoch {
         // Module 4: join the stop's parallel phase (a scavenge) while it is
         // open. Still parked: the stop verifier counts returns, not this.
-        if unsafe sp.pointee.phaseOpen && sp.pointee.phaseSeq != seen {
+        // Module 5's marker (outside the worker table) never joins.
+        if unsafe sp.pointee.phaseOpen && sp.pointee.phaseSeq != seen && w.pointee.index < vm.pointee.workerCount {
             seen = unsafe sp.pointee.phaseSeq
             unsafe sp.pointee.parts[sp.pointee.joined] = w.pointee.index
             unsafe sp.pointee.joined += 1

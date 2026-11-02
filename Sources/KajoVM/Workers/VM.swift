@@ -19,8 +19,8 @@ import Synchronization
         if !config.stress.isEmpty { config.pollEvery = 1 }
         let om = image.om
         let workerCount = config.backgroundWorkers + 2
-        let flag = UnsafeMutablePointer<Atomic<UInt32>>.allocate(capacity: 1)
-        unsafe flag.initialize(to: Atomic(0))
+        // The safepoint flag and (word 2) module 5's barrier word, one line.
+        let flag = makeFlagLine()
         let workers = UnsafeMutablePointer<WorkerPointer>.allocate(capacity: workerCount)
         let shared = UnsafeMutableRawPointer.allocate(byteCount: 128 * workerCount, alignment: 128)
         for i in 0..<workerCount {
@@ -53,6 +53,7 @@ import Synchronization
                                             pollEvery: config.pollEvery, seed: seed &+ UInt64(i) &* 0x9E37_79B9)
         }
         unsafe NurseryShared.install(state)
+        unsafe MarkingShared.install(state)
     }
 
     var config: VMConfig { unsafe state.pointee.config }
@@ -87,6 +88,7 @@ import Synchronization
             unsafe w.pointee.thread = t
             unsafe pthread_attr_destroy(&attr)
         }
+        unsafe startMarkerThread(state)
     }
 
     /// Stop and join the background workers (each finishes its slice).
@@ -102,6 +104,7 @@ import Synchronization
                 unsafe state.worker(i).pointee.thread = nil
             }
         }
+        unsafe stopMarkerThread(state)
     }
 
     /// Release the VM (after `shutdown`). Stacks of live Processes are
@@ -117,6 +120,7 @@ import Synchronization
             node = unsafe n.pointee.next
             unsafe n.deallocate()
         }
+        unsafe MarkingShared.uninstall(state)
         unsafe NurseryShared.uninstall(state)
         for i in unsafe 0..<s.workerCount { unsafe Worker.destroy(s.workers[i]) }
         unsafe s.workers.deallocate()
@@ -124,8 +128,7 @@ import Synchronization
             unsafe (s.workerShared + 128 * i).assumingMemoryBound(to: WorkerShared.self).deinitialize(count: 1)
         }
         unsafe s.workerShared.deallocate()
-        unsafe s.flag.deinitialize(count: 1)
-        unsafe s.flag.deallocate()
+        unsafe freeFlagLine(s.flag)
         unsafe s.safepoint.pointee.stops.deallocate()
         unsafe s.safepoint.pointee.parts.deallocate()
         unsafe unbox(s.safepoint)

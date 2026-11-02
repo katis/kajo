@@ -20,6 +20,9 @@ struct VMConfig: Sendable {
     var stress: VMStress = []
     /// Module 4: the nurseries (`bytes` 0: none, every object old).
     var nursery = NurseryConfig()
+    /// Module 5: concurrent marking of old space (needs a nursery; off: the
+    /// stop-the-world oracle).
+    var marking = MarkingConfig()
     /// Injected yields and sleeps, seeded (docs/VERIFICATION.md layer 5).
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).

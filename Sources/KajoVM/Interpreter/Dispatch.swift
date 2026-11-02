@@ -49,7 +49,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
                 r = unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 2, .invalidSlotAccess, 0, rcv)
                 continue
             }
-            unsafe storeWithBarrier(s, om, Oop(raw: rcv), n, Oop(raw: r.sp.pointee), .storeIvar)
+            unsafe storeWithBarrier(s, flag, om, Oop(raw: rcv), n, Oop(raw: r.sp.pointee), .storeIvar)
             unsafe r.sp -= 1
         case .pop?:
             unsafe r.sp -= 1

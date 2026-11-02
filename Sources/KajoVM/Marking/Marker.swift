@@ -1,0 +1,277 @@
+import Darwin
+import Synchronization
+
+// The marker (docs/modules/concurrent-marking.md "The cycle"): one thread,
+// a VM participant. It enters the VM to work, polls the safepoint flag
+// every 128 traced objects and between queue items, parks without taking
+// scavenge work, and leaves the VM to wait, untimed, when it has nothing
+// to do. Only snapshot entries are ever marked or read: nothing young, no
+// header a mutator may be writing.
+
+/// Mark `v` grey if it is an unmarked snapshot entry: set its mark byte and
+/// push it. One marker participant at a time writes mark bytes (the marker
+/// between stops, the stopper in one), so a relaxed load and store do; the
+/// barrier reads them relaxed.
+@inline(__always)
+func greyIfCandidate(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ v: UInt64) {
+    if v & Oop.objectTagMask != 0 || v == 0 { return }
+    let e = v &>> 4
+    if unsafe !mk.pointee.snapshot.contains(e) { return }
+    let mb = om.markAtomic(e)
+    if mb.pointee.load(ordering: .relaxed) != 0 { return }
+    mb.pointee.store(1, ordering: .relaxed)
+    unsafe m.pointee.stack.append(v)
+}
+
+/// An ephemeron's key that leaves it unresolved: an unmarked snapshot
+/// entry. A key that is not a snapshot entry is live by construction.
+@inline(__always)
+func isUnmarkedSnapshotEntry(_ mk: MarkingPointer, _ om: ObjectMemory, _ v: UInt64) -> Bool {
+    if v & Oop.objectTagMask != 0 || v == 0 { return false }
+    let e = v &>> 4
+    return unsafe mk.pointee.snapshot.contains(e) && om.markAtomic(e).pointee.load(ordering: .relaxed) == 0
+}
+
+/// Scan a marked snapshot object: every slot of an ordinary one (relaxed
+/// atomic loads: mutators store concurrently), the named slots of a weak
+/// one (listed for the final mark), an unfired ephemeron only once its key
+/// is marked (else listed). Its header is stable: old, a snapshot entry.
+@inline(__always)
+func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ o: UInt64) {
+    let h = om.headerWord(o)
+    unsafe m.pointee.markedObjects &+= 1
+    unsafe m.pointee.markedBytes &+= Header(raw: h).bodyBytes
+    if h & Header.bytesBit != 0 { return }
+    let s = om.stateWord(o)
+    var n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
+    let f = om.classFormat(h & Header.classMask)
+    if _slowPath(f.isSpecial) {
+        if f.isWeak {
+            unsafe m.pointee.weak.append(o)
+            n = Swift.min(n, f.namedSlots)
+        } else if h & Header.firedBit == 0 && n > 0 {
+            if unsafe isUnmarkedSnapshotEntry(mk, om, om.loadAtomic(bodyOffset: s, 0)) {
+                unsafe m.pointee.ephemerons.append(o)
+                return
+            }
+        }
+    }
+    var i = 0
+    while i < n {
+        unsafe greyIfCandidate(mk, om, m, om.loadAtomic(bodyOffset: s, i))
+        i &+= 1
+    }
+}
+
+/// Every slot of `o`, strongly (a fired ephemeron's, a survivor's at the
+/// initial mark).
+@inline(__always)
+func greySlots(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ o: UInt64) {
+    let h = om.headerWord(o)
+    if h & Header.bytesBit != 0 { return }
+    let s = om.stateWord(o)
+    let n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
+    var i = 0
+    while i < n {
+        unsafe greyIfCandidate(mk, om, m, om.loadAtomic(bodyOffset: s, i))
+        i &+= 1
+    }
+}
+
+/// Trace until the stack is empty, with no poll (the final mark, world
+/// stopped).
+func drainStack(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>) {
+    while let o = unsafe m.pointee.stack.popLast() { unsafe traceObject(mk, om, m, o) }
+}
+
+/// One queue item onto the stack: a grey packet's oops as they are, an
+/// SATB buffer's entries marked first.
+func takeItem(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ it: MarkItem) {
+    var k = 0
+    while k < it.count {
+        let v = unsafe it.words[k]
+        if it.grey { unsafe m.pointee.stack.append(v) } else { unsafe greyIfCandidate(mk, om, m, v) }
+        k &+= 1
+    }
+}
+
+/// Pop one queue item (marking lock), or nil.
+func popItem(_ mk: MarkingPointer) -> MarkItem? {
+    unsafe pthread_mutex_lock(mk.pointee.lock)
+    defer { unsafe pthread_mutex_unlock(mk.pointee.lock) }
+    return unsafe mk.pointee.queue.pointee.items.popLast()
+}
+
+func returnBuffer(_ mk: MarkingPointer, _ words: UnsafeMutablePointer<UInt64>) {
+    unsafe pthread_mutex_lock(mk.pointee.lock)
+    unsafe mk.pointee.queue.pointee.free.append(words)
+    unsafe pthread_mutex_unlock(mk.pointee.lock)
+}
+
+enum MarkOutcome {
+    /// The stack and the queue are empty.
+    case done
+    /// The limit was reached (manual mode).
+    case limit
+    /// The cycle was abandoned while the marker was parked.
+    case abandoned
+}
+
+/// The marker's poll: park for a requested stop (never joining a
+/// scavenge), take the QoS the policy asks for. False when the cycle
+/// `cycle` is no longer the one marking, or the VM is shutting down.
+@inline(never)
+func markerPoll(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64, phase: MarkingPhase) -> Bool {
+    let mw = unsafe mk.pointee.markerWorker
+    if unsafe vm.pointee.flag.pointee.load(ordering: .relaxed) != 0 { unsafe park(vm, mw) }
+    unsafe applyWantedQoS(mk)
+    return unsafe mk.cycleNow == cycle && mk.phaseNow == phase && !mk.pointee.stopping.pointee.load(ordering: .relaxed)
+}
+
+/// Trace up to `limit` objects of the current cycle, inside the VM as the
+/// marker worker.
+func markSome(_ vm: VMPointer, _ mk: MarkingPointer, limit: Int) -> MarkOutcome {
+    let om = unsafe mk.pointee.om
+    let m = unsafe mk.pointee.marker
+    let mw = unsafe mk.pointee.markerWorker
+    let cycle = unsafe mk.cycleNow
+    if unsafe mk.phaseNow != .marking { return .done }
+    var n = 0
+    while true {
+        if let o = unsafe m.pointee.stack.popLast() {
+            unsafe traceObject(mk, om, m, o)
+            n &+= 1
+            if n & 127 == 0, unsafe !markerPoll(vm, mk, cycle: cycle, phase: .marking) {
+                unsafe dropMarkerWork(mk)
+                return .abandoned
+            }
+            if n >= limit { return .limit }
+            continue
+        }
+        unsafe perturb(vm, mw)  // between queue items
+        if unsafe !markerPoll(vm, mk, cycle: cycle, phase: .marking) {
+            unsafe dropMarkerWork(mk)
+            return .abandoned
+        }
+        guard let it = unsafe popItem(mk) else { return .done }
+        unsafe takeItem(mk, om, m, it)
+        unsafe returnBuffer(mk, it.words)
+    }
+}
+
+/// The marker's own lists, after an abandoned cycle.
+func dropMarkerWork(_ mk: MarkingPointer) {
+    let m = unsafe mk.pointee.marker
+    unsafe m.pointee.stack.removeAll()
+    unsafe m.pointee.weak.removeAll()
+    unsafe m.pointee.ephemerons.removeAll()
+}
+
+/// Mark the current cycle to the end and request its final mark (the
+/// marker is the stopper). Inside the VM as the marker worker.
+func markCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
+    let m = unsafe mk.pointee.marker
+    let mw = unsafe mk.pointee.markerWorker
+    let cycle = unsafe mk.cycleNow
+    let w0 = nanoseconds(), c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+    let outcome = unsafe markSome(vm, mk, limit: .max)
+    unsafe m.pointee.markCpuNs &+= clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) &- c0
+    unsafe m.pointee.markWallNs &+= nanoseconds() &- w0
+    if outcome != .done { return }
+    unsafe perturb(vm, mw)  // before the final-mark request
+    unsafe m.pointee.qos = qos_class_self().rawValue
+    unsafe stopWorld(vm, mw, retry: true) { stop in unsafe runFinalMark(vm, mk, stop, cycle: cycle) }
+}
+
+// MARK: - QoS
+
+/// Set the marker thread's QoS to what the policy asks for (utility, or
+/// user-initiated while headroom is low). Only on the marker thread.
+func applyWantedQoS(_ mk: MarkingPointer) {
+    // Every marker-participant path runs on the marker thread when there
+    // is one (the manual entry points refuse to run otherwise).
+    guard unsafe mk.pointee.config.markerThread else { return }
+    let m = unsafe mk.pointee.marker
+    let want = unsafe mk.pointee.wantUserInitiated.pointee.load(ordering: .relaxed)
+    let target = want ? QOS_CLASS_USER_INITIATED : QOS_CLASS_UTILITY
+    if unsafe m.pointee.qos == target.rawValue { return }
+    unsafe pthread_set_qos_class_self_np(target, 0)
+    unsafe m.pointee.qos = qos_class_self().rawValue
+    if want { unsafe m.pointee.escalations &+= 1 } else { unsafe m.pointee.lowerings &+= 1 }
+}
+
+// MARK: - the thread
+
+/// The marker thread: wait (untimed) until a cycle needs marking or
+/// sweeping, then do it inside the VM. Every transition the wait depends on
+/// changes under the marking lock and broadcasts its condition: the initial
+/// mark (phase marking, a new cycle), the final mark (phase sweeping), and
+/// shutdown. Everything else (aborts, the sweep's end, the apply) only
+/// makes the conditions false. The audit is in the module doc.
+func markerLoop(_ vm: VMPointer, _ mk: MarkingPointer) {
+    let m = unsafe mk.pointee.marker
+    let mw = unsafe mk.pointee.markerWorker
+    unsafe mk.pointee.machThread.pointee.store(pthread_mach_thread_np(pthread_self()), ordering: .relaxed)
+    unsafe m.pointee.qos = qos_class_self().rawValue
+    unsafe pthread_mutex_lock(mk.pointee.lock)
+    while true {
+        let q = unsafe mk.pointee.queue
+        if unsafe q.pointee.shutdown { break }
+        let phase = unsafe mk.phaseNow, cycle = unsafe mk.cycleNow
+        let mark = unsafe phase == .marking && m.pointee.markedCycle != cycle
+        let sweep = unsafe phase == .sweeping && m.pointee.sweptCycle != cycle
+        if !mark && !sweep {
+            unsafe q.pointee.waiting += 1
+            unsafe pthread_cond_wait(mk.pointee.cond, mk.pointee.lock)
+            unsafe q.pointee.waiting -= 1
+            unsafe mk.pointee.markerWaits.pointee.wrappingAdd(1, ordering: .relaxed)
+            continue
+        }
+        unsafe pthread_mutex_unlock(mk.pointee.lock)
+        unsafe enterVM(vm, mw)
+        unsafe applyWantedQoS(mk)
+        if mark { unsafe markCycle(vm, mk) }
+        if unsafe mk.phaseNow == .sweeping && m.pointee.sweptCycle != mk.cycleNow {
+            if unsafe sweepCycle(vm, mk, inPause: false) && !mk.pointee.config.stress.contains(.sweepNeverApplies) {
+                unsafe stopWorld(vm, mw, retry: true) { _ in
+                    unsafe markStop(vm, .apply)
+                    unsafe applyInStop(vm, mk)
+                }
+            }
+        }
+        unsafe applyWantedQoS(mk)
+        unsafe leaveVM(vm, mw)
+        unsafe pthread_mutex_lock(mk.pointee.lock)
+    }
+    unsafe pthread_mutex_unlock(mk.pointee.lock)
+}
+
+/// Start the marker thread at utility QoS (VM.start).
+func startMarkerThread(_ vm: VMPointer) {
+    guard let mk = unsafe vm.pointee.marking, unsafe mk.pointee.config.markerThread else { return }
+    var attr = pthread_attr_t()
+    unsafe pthread_attr_init(&attr)
+    unsafe pthread_attr_set_qos_class_np(&attr, QOS_CLASS_UTILITY, 0)
+    var t: pthread_t? = nil
+    let rc = unsafe pthread_create(&t, &attr, { arg in
+        let vm = unsafe arg.assumingMemoryBound(to: VMState.self)
+        unsafe markerLoop(vm, vm.pointee.marking.unsafelyUnwrapped)
+        return nil
+    }, UnsafeMutableRawPointer(vm))
+    precondition(rc == 0, "pthread_create failed: \(rc)")
+    unsafe mk.pointee.thread.pointee.thread = t
+    unsafe pthread_attr_destroy(&attr)
+}
+
+/// Stop and join the marker thread (VM.shutdown, after the workers). A
+/// cycle in progress is left where the marker's next poll finds it.
+func stopMarkerThread(_ vm: VMPointer) {
+    guard let mk = unsafe vm.pointee.marking, let t = unsafe mk.pointee.thread.pointee.thread else { return }
+    unsafe mk.pointee.stopping.pointee.store(true, ordering: .relaxed)
+    unsafe pthread_mutex_lock(mk.pointee.lock)
+    unsafe mk.pointee.queue.pointee.shutdown = true
+    unsafe pthread_cond_broadcast(mk.pointee.cond)
+    unsafe pthread_mutex_unlock(mk.pointee.lock)
+    unsafe pthread_join(t, nil)
+    unsafe mk.pointee.thread.pointee.thread = nil
+}

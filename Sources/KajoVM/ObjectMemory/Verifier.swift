@@ -108,13 +108,27 @@ extension ObjectMemory {
             }
         }
 
+        // The old map (module 5's snapshot source): exactly the used
+        // entries with an old header, nothing at or above the high water.
+        let old = oldMap
         var e: UInt64 = 1
+        while e < hw {
+            let raw = e &<< 4
+            let isOld = !EntryState.isFree(stateWord(raw)) && headerWord(raw) & Header.youngBit == 0
+            if old.contains(e) != isOld { out.fail("entry \(e): old map says \(old.contains(e)), the entry is \(isOld ? "old" : "not old")") }
+            e &+= 1
+        }
+        let hwWord = Int(truncatingIfNeeded: hw &>> 6)
+        if hwWord < old.wordCount && old.word(hwWord) &>> (hw & 63) != 0 { out.fail("the old map has bits at or above the high water") }
+
+        let marking = unsafe gc.pointee.markingActive
+        e = 1
         while e < hw {
             defer { e &+= 1 }
             let raw = e &<< 4
             let s = stateWord(raw)
             let hd = Header(raw: headerWord(raw))
-            if markByte(e) != 0 { out.fail("entry \(e) has its mark set outside a collection") }
+            if markByte(e) != 0 && !marking { out.fail("entry \(e) has its mark set outside a collection") }
             if EntryState.isFree(s) {
                 if hd.raw != 0 { out.fail("free entry \(e) has header 0x\(String(hd.raw, radix: 16))") }
                 continue
@@ -165,7 +179,9 @@ extension ObjectMemory {
                 continue
             }
             if seen[Int(e)] != 1 { out.fail("entry \(e): offset \(s) is not the start of a body in block \(b)'s walk") }
-            if hd.isBytes { continue }
+            // Module 5: a lazy sweep will free it; its slots may name
+            // entries that sweep already freed.
+            if hd.isBytes || isPendingDead(e) { continue }
             for i in 0..<hd.count {
                 let v = Oop(raw: h.word(atOffset: s &+ 8 &+ i &<< 3))
                 if !isValidReferenceOrInteger(v, highWater: hw) { out.fail("entry \(e) slot \(i) holds \(v)") }
@@ -222,6 +238,8 @@ extension ObjectMemory {
             let st = unsafe stashes[i].pointee
             for k in unsafe st.next..<st.count { unsafe stashed.append((UInt64(st.base.unsafelyUnwrapped[k]), "stash \(i)")) }
         }
+        let pending = unsafe pools.pointee.pendingRuns
+        for i in 0..<pending.count { heads.append((pending[i], "pending run \(i)")) }
         let pool = unsafe pools.pointee.freeBlocks.toArray()
         unlockPools()
 

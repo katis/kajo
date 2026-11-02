@@ -57,6 +57,8 @@ import Synchronization
     var hooks = unsafe VMHooks()
     /// Module 4: the nurseries, nil when they are off.
     var nursery: NurseryPointer? = nil
+    /// Module 5: concurrent marking, nil when it is off (or no nursery).
+    var marking: MarkingPointer? = nil
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -105,6 +107,9 @@ enum StopKind: UInt8, Sendable {
     case other
     case scavenge
     case full
+    /// Module 5: a final mark, and a sweep's apply in a stop of its own.
+    case finalMark
+    case apply
 }
 
 struct StopRecord: Sendable {

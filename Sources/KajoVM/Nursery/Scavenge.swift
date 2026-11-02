@@ -477,6 +477,19 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
 
     // MARK: entry sweep
 
+    /// Accumulate promoted entry `e` into the old map's word being built;
+    /// flush the previous word when `e` is in another.
+    @inline(__always)
+    func noteOld(_ e: UInt64, _ word: inout Int, _ bits: inout UInt64) {
+        let w = Int(truncatingIfNeeded: e &>> 6)
+        if w != word {
+            if word >= 0 { unsafe om.oldMap.insert(word: word, bits: bits) }
+            word = w
+            bits = 0
+        }
+        bits |= 1 &<< (e & 63)
+    }
+
     /// Free the entries of nursery `k`'s young objects that died: the ones
     /// handed out of its stash since the last scavenge and the survivors of
     /// the last one. A dead entry is young without this scavenge's tag; it
@@ -487,6 +500,10 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         let a = unsafe n.alloc(k)
         var st = unsafe a.pointee.stash
         var swept: UInt64 = 0, freed: UInt64 = 0
+        // Module 5: promoted entries join the old map, one `fetch_or` per
+        // word of them (entries come in runs), outside the copy loop.
+        var oldWord = -1
+        var oldBits: UInt64 = 0
         if let base = unsafe st.base {
             var j = 0
             let taken = unsafe st.next
@@ -495,7 +512,9 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
                 let e = unsafe base[i]
                 let raw = UInt64(e) &<< 4
                 let h = unsafe om.headerWord(raw)
-                if unsafe h & Header.youngBit != 0 && h & tag == 0 {
+                if h & Header.youngBit == 0 {
+                    unsafe noteOld(UInt64(e), &oldWord, &oldBits)
+                } else if unsafe h & tag == 0 {
                     unsafe om.setStateWord(raw, EntryState.free(next: 0))
                     unsafe om.setHeaderWord(raw, 0)
                     unsafe base[j] = e
@@ -515,13 +534,16 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             let e = log[i]
             let raw = UInt64(e) &<< 4
             let h = unsafe om.headerWord(raw)
-            if unsafe h & Header.youngBit != 0 && h & tag == 0 {
+            if h & Header.youngBit == 0 {
+                unsafe noteOld(UInt64(e), &oldWord, &oldBits)
+            } else if unsafe h & tag == 0 {
                 unsafe om.setStateWord(raw, EntryState.free(next: 0))
                 unsafe om.setHeaderWord(raw, 0)
                 unsafe st.append(e)
                 freed &+= 1
             }
         }
+        if oldWord >= 0 { unsafe om.oldMap.insert(word: oldWord, bits: oldBits) }
         swept &+= UInt64(log.count)
         unsafe a.pointee.survLog.removeAll()
         unsafe a.pointee.stash = st

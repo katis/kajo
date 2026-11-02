@@ -58,7 +58,9 @@ private func checkRemembered(_ n: NurseryPointer, _ out: inout Issues) {
         let raw = e &<< 4
         let marker = unsafe n.remMarker(raw).pointee.load(ordering: .relaxed)
         if marker != 0 && inBuffer[Int(e)] == 0 { out.fail("entry \(e) is marked remembered but in no buffer") }
-        if EntryState.isFree(om.stateWord(raw)) { continue }
+        // Module 5: a pending-dead entry (a lazy sweep will free it) left
+        // the remembered set at the final mark and may name anything.
+        if EntryState.isFree(om.stateWord(raw)) || om.isPendingDead(e) { continue }
         let h = Header(raw: om.headerWord(raw))
         if h.isYoung || h.isBytes { continue }
         for i in 0..<Int(h.count) {
@@ -97,7 +99,7 @@ func verifyBeforeScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>) -> Scave
     while e < hw {
         defer { e &+= 1 }
         let raw = e &<< 4
-        if EntryState.isFree(om.stateWord(raw)) { continue }
+        if EntryState.isFree(om.stateWord(raw)) || om.isPendingDead(e) { continue }
         let h = Header(raw: om.headerWord(raw))
         if h.isYoung { continue }
         let strong = strongSlots(om, h)
@@ -207,7 +209,7 @@ func verifyAfterScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>, expected 
             continue
         }
         let h = Header(raw: om.headerWord(raw))
-        if h.isBytes { continue }
+        if h.isBytes || om.isPendingDead(e) { continue }
         for i in 0..<Int(h.count) {
             let v = om.load(Oop(raw: raw), i)
             if !om.isValidReferenceOrInteger(v, highWater: hw) { out.fail("entry \(e) slot \(i) names \(v), a freed entry") }

@@ -1,18 +1,32 @@
 import Synchronization
 
 // The write barrier (docs/modules/nursery.md "Barrier"), in
-// experiments/concurrent-young's shape so modules 5 to 7 change nothing in
-// the interpreter: after the store, if the value is a reference whose
-// header is young and the holder's young and nursery bits differ from the
-// value's, one out-of-line call. The common case (an old value) loads only
-// the value's header: `tbnz` on the tag, `ldr` of the header, `tbz` on the
-// young bit.
+// experiments/concurrent-young's shape: first one relaxed load of the
+// VM-wide barrier word (module 5, docs/modules/concurrent-marking.md);
+// nonzero sends the whole store to one out-of-line `storeWithBarriers`
+// (the SATB record, the store, this barrier). Zero: the store, then, if
+// the value is a reference whose header is young and the holder's young
+// and nursery bits differ from the value's, one out-of-line call. The
+// common case (an old value) loads only the value's header: `tbnz` on the
+// tag, `ldr` of the header, `tbz` on the young bit.
 
-/// Store `v` into slot `i` of `o` and run the barrier. Every store of an
+/// Store `v` into slot `i` of `o` and run the barriers. Every store of an
 /// oop that may be young into a heap object goes through here (the sites
 /// are `BarrierSite`).
 @_transparent
 func storeWithBarrier(_ s: StatePointer, _ om: ObjectMemory, _ o: Oop, _ i: Int, _ v: Oop, _ site: BarrierSite) {
+    unsafe storeWithBarrier(s, s.pointee.safepointFlag, om, o, i, v, site)
+}
+
+/// The same with the flag line in hand (the interpreter keeps it in a
+/// register for its polls).
+@_transparent
+func storeWithBarrier(_ s: StatePointer, _ flag: UnsafeMutablePointer<Atomic<UInt32>>, _ om: ObjectMemory, _ o: Oop,
+                      _ i: Int, _ v: Oop, _ site: BarrierSite) {
+    if unsafe barrierWord(flag).pointee.load(ordering: .relaxed) != 0 {
+        unsafe storeWithBarriers(s, o.raw, i, v.raw, site.rawValue)
+        return
+    }
     om.store(o, i, v)
     if v.raw & 1 == 0 {
         let hv = om.headerWord(v.raw)
@@ -61,4 +75,17 @@ extension Machine {
 @inline(__always)
 func barrierStore(_ w: WorkerPointer, _ o: Oop, _ i: Int, _ v: Oop, _ site: BarrierSite) {
     unsafe storeWithBarrier(w.pointer(to: \Worker.interp)!, w.pointee.interp.om, o, i, v, site)
+}
+
+/// A VM store of nil (or another old value) over a pointer slot: no
+/// insertion barrier is needed, but the overwritten value is a deletion
+/// the SATB barrier must see (module 5).
+@inline(__always)
+func clearingStore(_ w: WorkerPointer, _ o: Oop, _ i: Int, _ v: Oop) {
+    let s = unsafe w.pointer(to: \Worker.interp)!
+    if unsafe barrierWord(s.pointee.safepointFlag).pointee.load(ordering: .relaxed) != 0 {
+        unsafe storeWithBarriers(s, o.raw, i, v.raw, 0)
+        return
+    }
+    unsafe w.pointee.interp.om.store(o, i, v)
 }

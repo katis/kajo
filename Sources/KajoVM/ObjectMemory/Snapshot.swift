@@ -269,6 +269,7 @@ extension ObjectMemory {
             }
             e &+= 1
         }
+        rebuildOldMap()
         let all = issues.list + verifyHeap()
         guard all.isEmpty else { throw .invariant(all) }
         var runs = RunBuilder(chunk: UInt64(config.entryChunk))
