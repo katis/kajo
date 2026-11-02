@@ -10,6 +10,7 @@
 #           collector, local and offload with a user-initiated marker).
 #   Part C  D0..D5, SRUNS runs x 10 s after 1 s warm-up.
 #   Part A2 walk/walkbuild x A B x 1..6 workers, 3 runs (added, see below).
+#   C2 Part C again after a cool-down; O a run-order check (both added).
 #   Every matrix starts and ends with DRIFT runs of its first kernel.
 #
 # One kernel or scenario per launch. Each result line is streamed by
@@ -29,7 +30,7 @@ BUNDLE=dev.katajamaki.kajo.devicebench
 RUNS=${RUNS:-5}
 SRUNS=${SRUNS:-3}
 DRIFT=${DRIFT:-3}
-PARTS=${PARTS:-"build A A2 B Q C pull report"}
+PARTS=${PARTS:-"build A A2 B Q C C2 O pull report"}
 SCRATCH=${SCRATCH:-"${TMPDIR:-/tmp}/kajo-device-measurement"}
 DD="$SCRATCH/DerivedData"
 APP="$DD/Build/Products/Release-iphoneos/KajoDeviceBench.app"
@@ -165,6 +166,47 @@ if has C; then
         echo "   run $run/$SRUNS done"
     done
     for i in $(seq 1 "$DRIFT"); do launch "$O" drift-end part=C scenario=D2 run=$i out=part-c.txt; done
+fi
+
+# Wait until the phone reports thermal state nominal (a 1 s hello run per
+# minute, logged to results/cooldown.txt), at most COOL_MAX minutes.
+cooldown() {
+    local i
+    for i in $(seq 1 "${COOL_MAX:-30}"); do
+        launch "$R/cooldown.txt" cooldown part=hello run=$i out=cooldown.txt
+        tail -1 "$R/cooldown.txt" | grep -q 'thermal_end=nominal' && return 0
+        sleep 60
+    done
+}
+
+if has C2; then
+    # Not in DESIGN.md: Part C again after the phone has cooled to nominal
+    # (the first pass ran right after Part B at thermal state serious).
+    echo "== cool down, then Part C again"
+    cooldown
+    O="$R/part-c-cool.txt"
+    for run in $(seq 1 "$SRUNS"); do
+        for s in $SCENARIOS; do launch "$O" matrix part=C scenario="$s" run="$run" out=part-c-cool.txt; sleep 1; done
+        echo "   run $run/$SRUNS done"
+    done
+fi
+
+if has O; then
+    # Not in DESIGN.md: at 1 worker the matrix showed stw 10 to 18 percent
+    # slower than adr7 even on kernels that never collect. stw always ran
+    # first after the previous kernel's 6-worker offload run. Here adr7 and
+    # stw alternate in both orders after a cool-down.
+    echo "== order check: stw against adr7 at 1 worker"
+    cooldown
+    O="$R/part-b-order.txt"
+    for run in 1 2 3; do
+        for k in fib ivars alloc; do
+            bone "$O" order-ab adr7 "$k" 1 "$run"; bone "$O" order-ab stw "$k" 1 "$run"
+            bone "$O" order-ba stw "$k" 1 "$run"; bone "$O" order-ba adr7 "$k" 1 "$run"
+            bone "$O" order-6 offload "$k" 6 "$run"; bone "$O" order-after6 stw "$k" 1 "$run"
+            bone "$O" order-6 offload "$k" 6 "$run"; bone "$O" order-after6 adr7 "$k" 1 "$run"
+        done
+    done
 fi
 
 if has pull; then

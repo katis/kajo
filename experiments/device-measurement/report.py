@@ -235,7 +235,12 @@ def bgroup(rows):
     for r in rows:
         if r.get('tag') not in ('matrix', 'qos'):
             continue
-        g.setdefault((r.get('kernel'), int(num(r, 'workers')), r.get('qcfg', r.get('cfg'))), []).append(r)
+        c = r.get('cfg')
+        if r.get('env_KAJO_YC_QOS') == 'utility':
+            c += '_ycu'
+        if r.get('env_KAJO_CM_QOS') == 'high':
+            c += '_cmh'
+        g.setdefault((r.get('kernel'), int(num(r, 'workers')), c), []).append(r)
     return g
 
 
@@ -343,53 +348,77 @@ if q:
 
 # ---------------------------------------------------------------- Part C
 
-c = parse('part-c.txt')
 SC = ['D0', 'D1', 'D2', 'D3', 'D4', 'D5']
+
+
+def partc(c, title):
+    if c:
+        m = [r for r in ok(c) if r.get('tag') == 'matrix']
+        P('\n## %s (median run by missed120, then max gap; 10 s at 120 Hz)\n' % title)
+        P('| id | Mac id | young | delivered Hz | frames | missed120 | max gap ms | cb late p99 ms | **main stopped because another worker allocated, ms** | main own n / ms / max | main acks other n / ms | main old-space stops (n, ms) | stw pauses (kind n p50/max ms) | thermal start/end | peak footprint MB |')
+        P('|---|---|---|--:|--:|--:|--:|--:|--:|---|---|---|---|---|--:|')
+        for s in SC:
+            rs = [r for r in m if r.get('scenario') == s]
+            if not rs:
+                continue
+            rs.sort(key=lambda r: (num(r, 'missed120'), num(r, 'gap_max_ms')))
+            r = rs[len(rs) // 2]
+            kinds = []
+            for k in ('scav', 'initial', 'final', 'apply', 'fallback', 'full'):
+                if ('main_stw_' + k) in r:
+                    kinds.append('%s %d, %s' % (k, num(r, 'main_stw_' + k), f(num(r, 'main_stw_' + k + '_ms'), 2)))
+            stw = []
+            for k in ('scav', 'initial', 'final', 'apply', 'fallback'):
+                if ('stw_%s_n' % k) in r:
+                    stw.append('%s %d %s/%s' % (k, num(r, 'stw_%s_n' % k), f(num(r, 'stw_%s_p50_ms' % k), 2), f(num(r, 'stw_%s_max_ms' % k), 2)))
+            P('| %s | %s | %s | %s | %d | %d | %s | %s | **%s** | %d / %s / %s | %d / %s | %s | %s | %s/%s | %s |' % (
+                s, r.get('mac_scenario'), r.get('young', '?'), f(num(r, 'refresh_hz'), 0), num(r, 'frames'), num(r, 'missed120'),
+                f(num(r, 'gap_max_ms'), 2), f(num(r, 'cb_late_p99_ms'), 2), f(num(r, 'main_stopped_for_others_ms'), 2),
+                num(r, 'main_own_collections', num(r, 'main_own_flips')), f(num(r, 'main_own_ms'), 2), f(num(r, 'main_own_max_ms'), 3),
+                num(r, 'main_acks_other'), f(num(r, 'main_acks_other_ms'), 2), '; '.join(kinds) or '-', '; '.join(stw) or '-',
+                r.get('thermal_start'), r.get('thermal_end'), f(num(r, 'footprint_peak_mb'), 0)))
+        P('\n### All runs: missed120 / max gap ms / main stopped for others ms / thermal end\n')
+        for s in SC:
+            rs = [r for r in m if r.get('scenario') == s]
+            if rs:
+                P('- %s: %s' % (s, ', '.join('%d / %s / %s / %s' % (num(r, 'missed120'), f(num(r, 'gap_max_ms'), 1),
+                                                                    f(num(r, 'main_stopped_for_others_ms'), 1), r.get('thermal_end')) for r in rs)))
+        P('\n### Collector activity in the scenarios (median run)\n')
+        P('| id | collections | own pause p50/p99/max ms | hs latency p50/p99/max ms | coll waits n / ms | collector busy % | fallbacks | promoted MB | vm_main_ms | worst iter ms |')
+        P('|---|--:|---|---|---|--:|--:|--:|--:|--:|')
+        for s in SC:
+            rs = [r for r in m if r.get('scenario') == s]
+            if not rs:
+                continue
+            rs.sort(key=lambda r: (num(r, 'missed120'), num(r, 'gap_max_ms')))
+            r = rs[len(rs) // 2]
+            P('| %s | %d | %s/%s/%s | %s/%s/%s | %d / %s | %s | %d | %s | %s | %s |' % (
+                s, num(r, 'yc_count'), f(num(r, 'own_pause_p50'), 3), f(num(r, 'own_pause_p99'), 3), f(num(r, 'own_pause_max'), 3),
+                f(num(r, 'hs_lat_p50'), 3), f(num(r, 'hs_lat_p99'), 3), f(num(r, 'hs_lat_max'), 3),
+                num(r, 'coll_waits'), f(num(r, 'coll_wait_ms'), 1), f(num(r, 'collector_busy_pct'), 1), num(r, 'fallbacks'),
+                f(num(r, 'yc_promoted_mb'), 1), f(num(r, 'vm_main_ms'), 1), f(num(r, 'worst_iter_ms'), 2)))
+
+
+
+
+c = parse('part-c.txt')
 if c:
-    m = [r for r in ok(c) if r.get('tag') == 'matrix']
-    P('\n## Part C: scenarios (median run by missed120, then max gap; 10 s at 120 Hz)\n')
-    P('| id | Mac id | young | delivered Hz | frames | missed120 | max gap ms | cb late p99 ms | **main stopped because another worker allocated, ms** | main own n / ms / max | main acks other n / ms | main old-space stops (n, ms) | stw pauses (kind n p50/max ms) | thermal start/end | peak footprint MB |')
-    P('|---|---|---|--:|--:|--:|--:|--:|--:|---|---|---|---|---|--:|')
-    for s in SC:
-        rs = [r for r in m if r.get('scenario') == s]
-        if not rs:
-            continue
-        rs.sort(key=lambda r: (num(r, 'missed120'), num(r, 'gap_max_ms')))
-        r = rs[len(rs) // 2]
-        kinds = []
-        for k in ('scav', 'initial', 'final', 'apply', 'fallback', 'full'):
-            if ('main_stw_' + k) in r:
-                kinds.append('%s %d, %s' % (k, num(r, 'main_stw_' + k), f(num(r, 'main_stw_' + k + '_ms'), 2)))
-        stw = []
-        for k in ('scav', 'initial', 'final', 'apply', 'fallback'):
-            if ('stw_%s_n' % k) in r:
-                stw.append('%s %d %s/%s' % (k, num(r, 'stw_%s_n' % k), f(num(r, 'stw_%s_p50_ms' % k), 2), f(num(r, 'stw_%s_max_ms' % k), 2)))
-        P('| %s | %s | %s | %s | %d | %d | %s | %s | **%s** | %d / %s / %s | %d / %s | %s | %s | %s/%s | %s |' % (
-            s, r.get('mac_scenario'), r.get('young', '?'), f(num(r, 'refresh_hz'), 0), num(r, 'frames'), num(r, 'missed120'),
-            f(num(r, 'gap_max_ms'), 2), f(num(r, 'cb_late_p99_ms'), 2), f(num(r, 'main_stopped_for_others_ms'), 2),
-            num(r, 'main_own_collections', num(r, 'main_own_flips')), f(num(r, 'main_own_ms'), 2), f(num(r, 'main_own_max_ms'), 3),
-            num(r, 'main_acks_other'), f(num(r, 'main_acks_other_ms'), 2), '; '.join(kinds) or '-', '; '.join(stw) or '-',
-            r.get('thermal_start'), r.get('thermal_end'), f(num(r, 'footprint_peak_mb'), 0)))
-    P('\n### All runs: missed120 / max gap ms / main stopped for others ms / thermal end\n')
-    for s in SC:
-        rs = [r for r in m if r.get('scenario') == s]
-        if rs:
-            P('- %s: %s' % (s, ', '.join('%d / %s / %s / %s' % (num(r, 'missed120'), f(num(r, 'gap_max_ms'), 1),
-                                                                f(num(r, 'main_stopped_for_others_ms'), 1), r.get('thermal_end')) for r in rs)))
-    P('\n### Collector activity in the scenarios (median run)\n')
-    P('| id | collections | own pause p50/p99/max ms | hs latency p50/p99/max ms | coll waits n / ms | collector busy % | fallbacks | promoted MB | vm_main_ms | worst iter ms |')
-    P('|---|--:|---|---|---|--:|--:|--:|--:|--:|')
-    for s in SC:
-        rs = [r for r in m if r.get('scenario') == s]
-        if not rs:
-            continue
-        rs.sort(key=lambda r: (num(r, 'missed120'), num(r, 'gap_max_ms')))
-        r = rs[len(rs) // 2]
-        P('| %s | %d | %s/%s/%s | %s/%s/%s | %d / %s | %s | %d | %s | %s | %s |' % (
-            s, num(r, 'yc_count'), f(num(r, 'own_pause_p50'), 3), f(num(r, 'own_pause_p99'), 3), f(num(r, 'own_pause_max'), 3),
-            f(num(r, 'hs_lat_p50'), 3), f(num(r, 'hs_lat_p99'), 3), f(num(r, 'hs_lat_max'), 3),
-            num(r, 'coll_waits'), f(num(r, 'coll_wait_ms'), 1), f(num(r, 'collector_busy_pct'), 1), num(r, 'fallbacks'),
-            f(num(r, 'yc_promoted_mb'), 1), f(num(r, 'vm_main_ms'), 1), f(num(r, 'worst_iter_ms'), 2)))
+    partc(c, 'Part C: scenarios, first pass (right after Part B, thermal serious)')
+c2 = parse('part-c-cool.txt')
+if c2:
+    partc(c2, 'Part C again after cooling to nominal')
+
+o = parse('part-b-order.txt')
+if o:
+    P('\n## Run-order check: 1 worker, stw against adr7 (median ms of 3)\n')
+    P('| kernel | adr7 first: adr7 / stw | stw first: stw / adr7 | right after a 6-worker offload run: stw / adr7 |')
+    P('|---|---|---|---|')
+    for k in ('fib', 'ivars', 'alloc'):
+        def mm(tag, cfg):
+            v = [num(r, 'ms') for r in ok(o) if r.get('tag') == tag and r.get('kernel') == k and r.get('cfg') == cfg and r.get('workers') == '1']
+            return f(median(v)) if v else '-'
+        P('| %s | %s / %s | %s / %s | %s / %s |' % (k, mm('order-ab', 'adr7'), mm('order-ab', 'stw'), mm('order-ba', 'stw'),
+          mm('order-ba', 'adr7'), mm('order-after6', 'stw'), mm('order-after6', 'adr7')))
 
 # ---------------------------------------------------------------- drift, thermal
 
@@ -404,5 +433,8 @@ thermal(a, 'Part A')
 thermal(b, 'Part B')
 thermal(q, 'Part B QoS')
 thermal(c, 'Part C')
+thermal(c2, 'Part C after cool-down')
+thermal(parse('cooldown.txt'), 'cool-down probes')
+thermal(o, 'run-order check')
 
 print('\n'.join(out))
