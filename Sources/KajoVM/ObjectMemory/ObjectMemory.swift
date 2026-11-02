@@ -165,6 +165,27 @@ import Darwin
         unsafe heapBase.storeBytes(of: v, toByteOffset: off, as: UInt8.self)
     }
 
+    // MARK: - body bases (the interpreter's two cached pointers)
+
+    /// The address of a byte object's first byte. Only the interpreter may
+    /// hold it, for the running method's bytecodes, and only until the next
+    /// call that can pause: a compaction moves the body. Re-derive after.
+    @inline(__always)
+    func bytesBase(_ o: Oop) -> UnsafePointer<UInt8> {
+        assert(isUsedReference(o) && header(o).isBytes)
+        let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8
+        return unsafe UnsafePointer(heapBase.advanced(by: off).assumingMemoryBound(to: UInt8.self))
+    }
+
+    /// The address of a pointer object's first slot, under the same rule as
+    /// `bytesBase`: the running method's literal frame only.
+    @inline(__always)
+    func slotsBase(_ o: Oop) -> UnsafePointer<UInt64> {
+        assert(isUsedReference(o) && !header(o).isBytes)
+        let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8
+        return unsafe UnsafePointer(heapBase.advanced(by: off).assumingMemoryBound(to: UInt64.self))
+    }
+
     /// An object reference to an entry in use (bounds and state checked).
     func isUsedReference(_ o: Oop) -> Bool {
         o.isObject && o.entryIndex < highWater && !EntryState.isFree(stateWord(o.raw))

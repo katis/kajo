@@ -2,13 +2,14 @@ import Testing
 @testable import KajoVM
 
 func makeImage(heapBlocks: Int = 256, entries: Int = 1 << 18, stress: StressFlags = [],
-               limits: LoaderLimits = LoaderLimits()) throws -> Image {
+               limits: LoaderLimits = LoaderLimits(), verify: Bool = true) throws -> Image {
     var c = ObjectMemoryConfig()
     c.heapBytes = heapBlocks * BlockHeap.blockBytes
     c.entryCapacity = entries
     c.entryChunk = 256
     c.stress = stress
     c.onVerifyFailure = .trap
+    c.verify = verify
     return try Image(memory: ObjectMemory(c), limits: limits)
 }
 

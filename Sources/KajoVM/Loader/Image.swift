@@ -29,6 +29,9 @@ final class Image {
     /// the class's method dictionary.
     private var methods: [UInt64: [(selector: Oop, method: Oop)]] = [:]
     private var methodKeys: Set<String> = []
+    private var methodNames: [Oop: String] = [:]
+    /// Loads so far; an interpreter flushes its lookup cache when it changes.
+    private(set) var loads = 0
 
     /// Boot: nil, true, false, the well-known classes, the special selectors,
     /// the globals (SPEC-SHARED "Boot / allocation order", steps 1 to 3).
@@ -71,6 +74,8 @@ final class Image {
     func symbolName(_ s: Oop) -> String? { symbolNames[s] }
     func classIndex(named name: String) -> UInt64? { classesByName[name] }
     func className(_ index: UInt64) -> String? { classNames[index] }
+    /// `Class>>selector` of a loaded method.
+    func methodName(_ method: Oop) -> String? { methodNames[method] }
 
     /// The method `selector` finds from instances of class `index`, through
     /// the superclass chain; nil when there is none.
@@ -161,10 +166,12 @@ final class Image {
                 temporaryRoots.append(om.addRoot(meth))
                 methods[cls, default: []].append((sel, meth))
                 methodKeys.insert("\(cls) \(m.selector)")
+                methodNames[meth] = "\(m.className)>>\(m.selector)"
                 if !touched.contains(cls) { touched.append(cls) }
             }
         }
         for cls in touched.sorted() { try installMethodDictionary(cls) }
+        loads += 1
     }
 
     private func literalValue(_ l: Literal) -> Oop {
