@@ -1,0 +1,37 @@
+; Edge cases for the fuzz corpus: forward and backward jumps, every literal
+; kind, a primitive with a body, a deep superclass chain.
+class A Object 1
+class B A 2
+class C B 3
+method C deep temps=1
+  push_ivar 2
+  store_temp 0
+top:
+  push_temp 0
+  push_int -128
+  ge
+  jump_if_false out
+  push_temp 0
+  push_int 127
+  sub
+  store_temp 0
+  jump top
+out:
+  push_lit #deep
+  push_lit @C
+  push_lit nil
+  push_lit true
+  push_lit false
+  push_lit -4611686018427387904
+  pop
+  pop
+  pop
+  pop
+  pop
+  pop
+  return_self
+end
+method Object at: temps=0 prim=1
+  push_nil
+  return_top
+end

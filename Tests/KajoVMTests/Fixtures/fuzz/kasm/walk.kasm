@@ -1,0 +1,381 @@
+; Fixture copied from experiments/vm-language-bench/kernels/prelude.kasm (2026-11-02).
+; Primitives shared by every kernel. Loaded before the kernel file.
+method Object at: temps=0 prim=1
+end
+method Object at:put: temps=0 prim=2
+end
+method Class basicNew: temps=0 prim=3
+end
+method Class new: temps=0 prim=3
+end
+method Class basicNew temps=0 prim=4
+end
+method Object class temps=0 prim=5
+end
+method SmallInteger // temps=0 prim=6
+end
+method SmallInteger \\ temps=0 prim=7
+end
+; Fixture copied from experiments/object-representation/kernels/lib.kasm (2026-11-02).
+; Shared library for the object-representation kernels. Loaded after
+; ../vm-language-bench/kernels/prelude.kasm and before the kernel file.
+
+; --- primitives added by this experiment (SPEC.md "Kernels and parameters")
+method Object become: temps=0 prim=8
+end
+method UndefinedObject forward:to: temps=0 prim=9
+end
+method Class addInstVar temps=0 prim=10
+end
+method UndefinedObject gc: temps=0 prim=11
+end
+method UndefinedObject compact: temps=0 prim=12
+end
+method UndefinedObject snapshot temps=0 prim=13
+end
+method UndefinedObject globalAt: temps=0 prim=14
+end
+method UndefinedObject globalAt:put: temps=0 prim=15
+end
+method UndefinedObject stopRequested temps=0 prim=16
+end
+method UndefinedObject stopOthers temps=0 prim=17
+end
+
+; --- Big: a 0-based array of n elements, stored as an Array of 2048-slot
+; Arrays (no object may span a 32 KiB block).
+class Big Object 1
+
+; nil bigNew: n. t0 = n, t1 = nchunks, t2 = chunks, t3 = i
+method UndefinedObject bigNew: temps=3
+  push_temp 0
+  push_lit 2047
+  add
+  push_lit 2048
+  send // 1
+  store_temp 1
+  push_lit @Array
+  push_temp 1
+  send new: 1
+  store_temp 2
+  push_int 1
+  store_temp 3
+loop:
+  push_temp 3
+  push_temp 1
+  le
+  jump_if_false done
+  push_temp 2
+  push_temp 3
+  push_lit @Array
+  push_lit 2048
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump loop
+done:
+  push_lit @Big
+  send basicNew 0
+  push_temp 2
+  send setChunks: 1
+  return_top
+end
+
+method Big setChunks: temps=0
+  push_temp 0
+  store_ivar 0
+  return_self
+end
+
+method Big chunks temps=0
+  push_ivar 0
+  return_top
+end
+
+method Big get: temps=0
+  push_ivar 0
+  push_temp 0
+  push_lit 2048
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  return_top
+end
+
+; t0 = value, t1 = index
+method Big put:at: temps=0
+  push_ivar 0
+  push_temp 1
+  push_lit 2048
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 1
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  push_temp 0
+  send at:put: 2
+  return_top
+end
+
+; --- walk graph: m WNodes, node i links to node (1664525 i + 1013904223) mod m,
+; a full-period LCG for power-of-two m, so following next from any node
+; visits every node once in a scattered order.
+class WNode Object 2
+
+method WNode next temps=0
+  push_ivar 0
+  return_top
+end
+
+method WNode val temps=0
+  push_ivar 1
+  return_top
+end
+
+method WNode setNext:val: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; nil buildGraph: m -> a Big of m linked WNodes. t0 = m, t1 = nodes, t2 = i
+method UndefinedObject buildGraph: temps=2
+  push_nil
+  push_temp 0
+  send bigNew: 1
+  store_temp 1
+  push_int 0
+  store_temp 2
+alloc:
+  push_temp 2
+  push_temp 0
+  lt
+  jump_if_false link0
+  push_temp 1
+  push_lit @WNode
+  send basicNew 0
+  push_temp 2
+  send put:at: 2
+  pop
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump alloc
+link0:
+  push_int 0
+  store_temp 2
+link:
+  push_temp 2
+  push_temp 0
+  lt
+  jump_if_false done
+  push_temp 1
+  push_temp 2
+  send get: 1
+  push_temp 1
+  push_lit 1664525
+  push_temp 2
+  mul
+  push_lit 1013904223
+  add
+  push_temp 0
+  send \\ 1
+  send get: 1
+  push_temp 2
+  push_lit 1024
+  send \\ 1
+  push_int 1
+  add
+  send setNext:val: 2
+  pop
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump link
+done:
+  push_temp 1
+  return_top
+end
+
+; nil walk: p hops: m -> sum over hops k = 1..m of (val * k). t2 = k, t3 = sum
+method UndefinedObject walk:hops: temps=2
+  push_int 0
+  store_temp 3
+  push_int 1
+  store_temp 2
+loop:
+  push_temp 2
+  push_temp 1
+  le
+  jump_if_false done
+  push_temp 3
+  push_temp 0
+  send val 0
+  push_temp 2
+  mul
+  add
+  store_temp 3
+  push_temp 0
+  send next 0
+  store_temp 0
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  return_top
+end
+
+; --- helpers for the stop-the-world kernels
+
+; weighted checksum: sum over i < n of (big get: i) id * (i \\ 1000 + 1).
+; t0 = big, t1 = n, t2 = i, t3 = sum
+method UndefinedObject weighted:n: temps=2
+  push_int 0
+  store_temp 2
+  push_int 0
+  store_temp 3
+loop:
+  push_temp 2
+  push_temp 1
+  lt
+  jump_if_false done
+  push_temp 3
+  push_temp 0
+  push_temp 2
+  send get: 1
+  send id 0
+  push_temp 2
+  push_lit 1000
+  send \\ 1
+  push_int 1
+  add
+  mul
+  add
+  store_temp 3
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  return_top
+end
+
+method SmallInteger fibx temps=0
+  push_self
+  push_int 2
+  lt
+  jump_if_false rec
+  push_self
+  return_top
+rec:
+  push_self
+  push_int 1
+  sub
+  send fibx 0
+  push_self
+  push_int 2
+  sub
+  send fibx 0
+  add
+  return_top
+end
+
+; Background load for the stop-the-world kernels: fib until worker 0 says stop.
+method UndefinedObject fibUntilStopped temps=0
+loop:
+  push_nil
+  send stopRequested 0
+  jump_if_true done
+  push_int 27
+  send fibx 0
+  pop
+  jump loop
+done:
+  push_int 0
+  return_top
+end
+
+; Entry (opRun:of:) for the stop-the-world kernels: worker 0 runs `nil main`, the others
+; run fib until it finishes.
+method UndefinedObject opRun:of: temps=0
+  push_temp 0
+  push_int 0
+  eq
+  jump_if_false other
+  push_nil
+  send main 0
+  push_nil
+  send stopOthers 0
+  pop
+  return_top
+other:
+  push_nil
+  send fibUntilStopped 0
+  return_top
+end
+; Fixture copied from experiments/object-representation/kernels/walk.kasm (2026-11-02).
+; walk: each worker builds a graph of 2^22 / n WNodes linked in a scattered
+; (LCG) order, then follows `next` around the whole cycle 2 times summing
+; val * hop. Dependent loads that defeat the prefetcher: the worst case for
+; an object table, where each hop is two dependent loads.
+; args: t0 = w, t1 = n. temps: t2 = m, t3 = nodes, t4 = reps, t5 = sum
+method UndefinedObject run:of: temps=4
+  push_lit 4194304
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  push_temp 2
+  send buildGraph: 1
+  store_temp 3
+  push_int 0
+  store_temp 5
+  push_int 2
+  store_temp 4
+loop:
+  push_temp 4
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 5
+  push_nil
+  push_temp 3
+  push_int 0
+  send get: 1
+  push_temp 2
+  send walk:hops: 2
+  add
+  store_temp 5
+  push_temp 4
+  push_int 1
+  sub
+  store_temp 4
+  jump loop
+done:
+  push_temp 5
+  return_top
+end

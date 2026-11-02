@@ -31,3 +31,7 @@ ios-check:
 # Release disassembly: no retain/release on the object memory's allocation and store paths
 arc-check:
     scripts/check-hot-path-arc.sh
+
+# Fuzz a loader (kasm or snapshot) for SECONDS: libFuzzer if the toolchain has it, else replay and mutate
+fuzz TARGET SECONDS="60":
+    scripts/fuzz.sh {{TARGET}} {{SECONDS}}
