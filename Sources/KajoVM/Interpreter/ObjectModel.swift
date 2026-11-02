@@ -1,5 +1,6 @@
 /// The object model v0 (experiments/vm-language-bench SPEC-SHARED.md
-/// "Well-known class indices"), plus Message for `doesNotUnderstand:`.
+/// "Well-known class indices"), plus Message for `doesNotUnderstand:` and
+/// (module 3) Process and Semaphore.
 /// There are no metaclasses: every class object is an instance of Class.
 enum WellKnown {
     static let smallInteger: UInt64 = 1
@@ -14,14 +15,18 @@ enum WellKnown {
     static let methodDict: UInt64 = 10
     static let object: UInt64 = 11
     static let message: UInt64 = 12
-    static let firstUserClass: UInt64 = 13
+    /// Module 3's (Processes/ProcessLayout.swift). Sealed like the
+    /// structural classes: their slots are the scheduler's.
+    static let process: UInt64 = 13
+    static let semaphore: UInt64 = 14
+    static let firstUserClass: UInt64 = 15
 
     /// Name, index and instance size, in index order.
     static let classes: [(name: String, index: UInt64)] = [
         ("SmallInteger", smallInteger), ("UndefinedObject", undefinedObject), ("True", trueClass),
         ("False", falseClass), ("Class", classClass), ("Method", method), ("Array", array),
         ("ByteArray", byteArray), ("Symbol", symbol), ("MethodDict", methodDict), ("Object", object),
-        ("Message", message),
+        ("Message", message), ("Process", process), ("Semaphore", semaphore),
     ]
 
     static func instSize(_ index: UInt64) -> Int {
@@ -30,6 +35,8 @@ enum WellKnown {
         case method: MethodLayout.size
         case symbol: 1
         case message: MessageLayout.size
+        case process: ProcessLayout.size
+        case semaphore: SemaphoreLayout.size
         default: 0
         }
     }

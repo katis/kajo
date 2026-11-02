@@ -145,12 +145,12 @@ func theLoaderRejects(_ files: [(String, String)], _ kind: LoadError.Kind?) thro
 
 @Test func tooManyClassesAndMethodsAreRejected() throws {
     var limits = LoaderLimits()
-    limits.maxClassIndex = 20
+    limits.maxClassIndex = 22
     limits.maxMethodsPerClass = 4
     let img = try makeImage(limits: limits)
     defer { img.destroy() }
     let classes = (0..<8).map { "class C\($0) Object 0\n" }.joined()
-    #expect(loadError(img, [("a", classes)]) == nil)                          // 13 + 8 = 21 indices: 0...20
+    #expect(loadError(img, [("a", classes)]) == nil)                          // 15 + 8 = 23 indices: 0...22
     #expect(loadError(img, [("b", "class D Object 0\n")]) == .tooManyClasses)
     let methods = (0..<4).map { "method C0 m\($0) temps=0\n return_self\nend\n" }.joined()
     #expect(loadError(img, [("c", methods)]) == nil)

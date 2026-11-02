@@ -271,10 +271,13 @@ final class Image {
     }
 
     /// Class, Method and MethodDict: the objects the interpreter trusts the
-    /// shape of. No primitive reads, writes, creates or exchanges their
-    /// instances, and no method of theirs touches an instance variable.
+    /// shape of; and (module 3) Process and Semaphore, whose slots belong
+    /// to the scheduler. No primitive reads, writes, creates or exchanges
+    /// their instances (the scheduler's own primitives excepted), and no
+    /// method of theirs touches an instance variable.
     static func isStructural(_ cls: UInt64) -> Bool {
         cls == WellKnown.classClass || cls == WellKnown.method || cls == WellKnown.methodDict
+            || cls == WellKnown.process || cls == WellKnown.semaphore
     }
 }
 
