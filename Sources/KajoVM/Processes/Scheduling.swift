@@ -142,7 +142,7 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
     setIntSlot(om, p, ProcessLayout.fp, 0)
     setIntSlot(om, p, ProcessLayout.hdr, 0)
     om.store(p, ProcessLayout.exitSemaphore, exit == .none ? nilObject : exit)
-    schedLock(vm)
+    unsafe schedLock(vm)
     var ri = unsafe vm.pointee.sched.pointee.recordFree
     if ri >= 0 {
         unsafe vm.pointee.sched.pointee.recordFree = records(vm, ri).pointee.nextFree
@@ -150,7 +150,7 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
         ri = unsafe vm.pointee.sched.pointee.recordHighWater
         unsafe vm.pointee.sched.pointee.recordHighWater += 1
     } else {
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         unsafe base.deallocate()
         return .none
     }
@@ -161,7 +161,7 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
     om.store(p, ProcessLayout.id, Oop(smallInteger: id))
     unsafe vm.pointee.sched.pointee.liveProcesses += 1
     let needMain = unsafe makeReadyLocked(vm, p, fromBlocked: true)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe vm.count(.forks)
     unsafe wake(vm, w, needMain)
     return p
@@ -186,17 +186,17 @@ private func finishLocked(_ vm: VMPointer, _ p: Oop, _ result: Oop) -> (UnsafeMu
     if unsafe vm.pointee.sched.pointee.liveProcesses == 0 { unsafe pthread_cond_broadcast(vm.pointee.doneCond) }
     let sem = om.load(p, ProcessLayout.exitSemaphore)
     let needMain = unsafe sem != nilObject ? signalLocked(vm, sem) : false
-    return (base, needMain)
+    return unsafe (base, needMain)
 }
 
 /// The Process `w` runs has ended (returned, failed, or terminated): it
 /// leaves the worker and terminates.
 func terminateCurrent(_ vm: VMPointer, _ w: WorkerPointer, result: Oop) {
     let p = unsafe w.pointee.current
-    schedLock(vm)
+    unsafe schedLock(vm)
     unsafe detachLocked(vm, w)
     let (base, needMain) = unsafe finishLocked(vm, p, result)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe base?.deallocate()
     unsafe vm.count(.terminations)
     unsafe wake(vm, w, needMain)
@@ -206,9 +206,9 @@ func terminateCurrent(_ vm: VMPointer, _ w: WorkerPointer, result: Oop) {
 /// waiting, at its next budget check if it runs on a worker, never twice.
 func terminateProcess(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     let om = unsafe vm.pointee.om
-    schedLock(vm)
+    unsafe schedLock(vm)
     if intSlot(om, p, ProcessLayout.state) == Int(ProcessState.terminated.rawValue) {
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         return
     }
     let ri = intSlot(om, p, ProcessLayout.record)
@@ -220,13 +220,13 @@ func terminateProcess(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
         if unsafe r.pointee.runningOn >= 0 {
             unsafe vm.shared(r.pointee.runningOn).pointee.attention.store(ri + 1, ordering: .relaxed)
         }
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         unsafe vm.count(.terminateRequests)
         return
     }
     unsafe unlinkLocked(vm, p)
     let (base, needMain) = unsafe finishLocked(vm, p, vm.pointee.nilObject)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe base?.deallocate()
     unsafe vm.count(.terminations)
     unsafe wake(vm, w, needMain)
@@ -292,9 +292,9 @@ func suspendLocked(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int) {
 func finishSuspend(_ vm: VMPointer, _ w: WorkerPointer, _ reason: LeaveReason) {
     if unsafe vm.pointee.config.testSwitches.publishBeforeClearing {
         unsafe perturbWindow(vm, w)
-        schedLock(vm)
+        unsafe schedLock(vm)
         unsafe detachLocked(vm, w, unconditionally: true)
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
     }
     unsafe w.pointee.leave = reason
     unsafe w.pointee.interp.exit = .suspended
@@ -339,9 +339,9 @@ func signalLocked(_ vm: VMPointer, _ sem: Oop) -> Bool {
 
 func signalSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop) {
     unsafe perturb(vm, w)
-    schedLock(vm)
+    unsafe schedLock(vm)
     let needMain = unsafe signalLocked(vm, sem)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe vm.count(.signals)
     unsafe wake(vm, w, needMain)
 }
@@ -353,15 +353,15 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     unsafe perturb(vm, w)
-    schedLock(vm)
+    unsafe schedLock(vm)
     let excess = intSlot(om, sem, SemaphoreLayout.excessSignals)
     if excess > 0 {
         setIntSlot(om, sem, SemaphoreLayout.excessSignals, excess - 1)
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         return false
     }
     if unsafe terminatePendingLocked(vm, w) {
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         return true
     }
     let p = unsafe w.pointee.current
@@ -373,7 +373,7 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     let last = om.load(sem, SemaphoreLayout.lastWaiter)
     if last == nilObject { om.store(sem, SemaphoreLayout.firstWaiter, p) } else { om.store(last, ProcessLayout.next, p) }
     om.store(sem, SemaphoreLayout.lastWaiter, p)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe finishSuspend(vm, w, .suspended)
     unsafe vm.count(.waits)
     return true
@@ -384,9 +384,9 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
 func requeueCurrent(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int, affinity: Int? = nil,
                     result: (argc: Int, value: Oop)? = nil, reason: LeaveReason, hop: Bool = false) {
     let om = unsafe vm.pointee.om
-    schedLock(vm)
+    unsafe schedLock(vm)
     if unsafe terminatePendingLocked(vm, w) {
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         return
     }
     let p = unsafe w.pointee.current
@@ -403,7 +403,7 @@ func requeueCurrent(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int, affin
     }
     if let affinity { setIntSlot(om, p, ProcessLayout.affinity, affinity) }
     let needMain = unsafe makeReadyLocked(vm, p, fromBlocked: false)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe finishSuspend(vm, w, reason)
     unsafe wake(vm, w, needMain)
 }

@@ -110,13 +110,13 @@ public enum Headless {
         let stops = vm.stops
         let pauses = stops.map(\.pauseNs).sorted()
         func pct(_ q: Double) -> String {
-            pauses.isEmpty ? "-" : String(format: "%.3f", Double(pauses[min(pauses.count - 1, Int(Double(pauses.count) * q))]) / 1e6)
+            unsafe pauses.isEmpty ? "-" : String(format: "%.3f", Double(pauses[min(pauses.count - 1, Int(Double(pauses.count) * q))]) / 1e6)
         }
         let worst = stops.max { $0.pauseNs < $1.pauseNs }
         let qos = (1...n).map { "\(vm.workerQoS($0).rawValue)" }.joined(separator: ",")
         let report: [(String, String)] = [
             ("qos", qos), ("stops", "\(stops.count)"), ("pauseP50ms", pct(0.5)), ("pauseP99ms", pct(0.99)),
-            ("pauseMaxMs", pauses.last.map { String(format: "%.3f", Double($0) / 1e6) } ?? "-"),
+            ("pauseMaxMs", pauses.last.map { unsafe String(format: "%.3f", Double($0) / 1e6) } ?? "-"),
             ("slowestParticipant", worst.map { "\($0.slowest)" } ?? "-"),
         ]
         return Outcome(checksum: checksum, milliseconds: ms, counters: [

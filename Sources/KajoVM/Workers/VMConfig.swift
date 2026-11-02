@@ -90,7 +90,7 @@ struct VMTestSwitches: Sendable {
 /// C-convention hooks the shell sets before any worker starts, so no
 /// closure built in `@MainActor` context ever runs on a VM thread
 /// (AGENTS.md). `context` is passed back to every hook.
-struct VMHooks: @unchecked Sendable {
+@unsafe struct VMHooks: @unchecked Sendable {
     var context: UnsafeMutableRawPointer? = nil
     /// A main-affine Process became ready: schedule a turn. Any thread.
     var wakeMain: (@convention(c) (UnsafeMutableRawPointer?) -> Void)? = nil
@@ -105,8 +105,8 @@ struct VMHooks: @unchecked Sendable {
          stuck: (@convention(c) (UnsafeMutableRawPointer?, Int64, UnsafePointer<CChar>, Double) -> Void)? = nil,
          shell: (@convention(c) (UnsafeMutableRawPointer?, Int64, Int64) -> Int64)? = nil) {
         unsafe self.context = context
-        self.wakeMain = wakeMain
-        self.stuck = stuck
-        self.shell = shell
+        unsafe self.wakeMain = unsafe wakeMain
+        unsafe self.stuck = unsafe stuck
+        unsafe self.shell = unsafe shell
     }
 }

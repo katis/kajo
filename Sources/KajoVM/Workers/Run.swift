@@ -90,31 +90,31 @@ func backgroundLoop(_ vm: VMPointer, _ w: WorkerPointer) {
     unsafe enterVM(vm, w)
     while true {
         if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }
-        schedLock(vm)
+        unsafe schedLock(vm)
         let p = unsafe dequeueLocked(vm, main: false, minPriority: 0, for: w)
         if p != .none {
-            schedUnlock(vm)
+            unsafe schedUnlock(vm)
             let slice = unsafe vm.pointee.config.sliceNs
             unsafe w.pointee.deadline = slice == 0 ? .max : ticks() &+ nsToTicks(slice)
             unsafe runSlice(vm, w, p)
             continue
         }
         if unsafe vm.pointee.sched.pointee.shutdown {
-            schedUnlock(vm)
+            unsafe schedUnlock(vm)
             break
         }
         unsafe vm.pointee.sched.pointee.idleWorkers += 1
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         unsafe leaveVM(vm, w)
         let t0 = nanoseconds()
-        schedLock(vm)
+        unsafe schedLock(vm)
         while unsafe !vm.pointee.sched.pointee.shutdown && !anyReadyLocked(vm, main: false) && !externalPending(vm) {
             unsafe vm.count(.idleWaits)
             unsafe pthread_cond_wait(vm.pointee.schedCond, vm.pointee.schedLock)
             unsafe vm.count(.idleWakeups)
         }
         unsafe vm.pointee.sched.pointee.idleWorkers -= 1
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         unsafe vm.count(.idleNs, nanoseconds() &- t0)
         unsafe enterVM(vm, w)
     }
@@ -155,7 +155,7 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }
     unsafe w.pointee.deadline = ticks() &+ nsToTicks(budgetNs)
     while unsafe ticks() < w.pointee.deadline {
-        schedLock(vm)
+        unsafe schedLock(vm)
         let p = unsafe dequeueLocked(vm, main: true, minPriority: minPriority, for: w)
         var hopStart: UInt64 = 0
         if p != .none {
@@ -164,7 +164,7 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
             unsafe r.pointee.hopStart = 0
             if hopStart != 0 { unsafe vm.pointee.sched.pointee.hopLatencies.append(ticksToNs(ticks() &- hopStart)) }
         }
-        schedUnlock(vm)
+        unsafe schedUnlock(vm)
         if p == .none { break }
         unsafe runSlice(vm, w, p)
         st.slices += 1
@@ -187,9 +187,9 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
 func runOneSliceOn(_ vm: VMPointer, _ w: WorkerPointer, budgetNs: UInt64) -> Bool {
     unsafe enterVM(vm, w)
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }
-    schedLock(vm)
+    unsafe schedLock(vm)
     let p = unsafe dequeueLocked(vm, main: w.pointee.isMain, minPriority: 0, for: w)
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     if p != .none {
         unsafe w.pointee.deadline = budgetNs == .max ? .max : ticks() &+ nsToTicks(budgetNs)
         unsafe runSlice(vm, w, p)
@@ -206,7 +206,7 @@ func checkStuckProcesses(_ vm: VMPointer, limitNs: UInt64) {
     unsafe enterVM(vm, w)
     let now = ticks(), limit = nsToTicks(limitNs)
     var reports: [(Int64, String, Double)] = []
-    schedLock(vm)
+    unsafe schedLock(vm)
     for prio in 0..<Priority.count {
         var p = unsafe Oop(raw: vm.pointee.queues[queueIndex(main: true, priority: prio)])
         while unsafe p != .none && p != vm.pointee.nilObject {
@@ -219,16 +219,16 @@ func checkStuckProcesses(_ vm: VMPointer, limitNs: UInt64) {
                     let method = unsafe Oop(raw: base[hdr + Frame.method])
                     name = image.symbolName(om.load(method, MethodLayout.selector)) ?? "?"
                 }
-                reports.append((om.load(p, ProcessLayout.id).smallIntegerValue, name,
+                unsafe reports.append((om.load(p, ProcessLayout.id).smallIntegerValue, name,
                                 Double(ticksToNs(now &- r.pointee.runnableSince)) / 1e6))
             }
             p = om.load(p, ProcessLayout.next)
         }
     }
-    schedUnlock(vm)
+    unsafe schedUnlock(vm)
     unsafe leaveVM(vm, w)
     for (id, name, ms) in reports {
         unsafe vm.count(.stuckReports)
-        if let h = unsafe vm.pointee.hooks.stuck { unsafe name.withCString { unsafe h(vm.pointee.hooks.context, id, $0, ms) } }
+        if let h = unsafe vm.pointee.hooks.stuck { name.withCString { unsafe h(vm.pointee.hooks.context, id, $0, ms) } }
     }
 }

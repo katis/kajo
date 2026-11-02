@@ -53,7 +53,7 @@ enum LeaveReason: UInt8, Sendable {
     var rng: UInt64
     var thread: pthread_t? = nil
 
-    static let bytes = (MemoryLayout<Worker>.size + 127) & ~127
+    static let bytes = unsafe (MemoryLayout<Worker>.size + 127) & ~127
 }
 
 typealias WorkerPointer = UnsafeMutablePointer<Worker>
@@ -69,8 +69,8 @@ extension Worker {
     /// allocation context. `flag` is the safepoint flag its polls read.
     static func make(image: Image, vm: UnsafeMutablePointer<VMState>?, index: Int, isMain: Bool,
                      flag: UnsafeMutablePointer<Atomic<UInt32>>, pollEvery: Int, seed: UInt64) -> WorkerPointer {
-        precondition(MemoryLayout<Worker>.offset(of: \Worker.interp) == 0, "the interpreter state is the worker's first field")
-        let raw = UnsafeMutableRawPointer.allocate(byteCount: Worker.bytes, alignment: 128)
+        unsafe precondition(MemoryLayout<Worker>.offset(of: \Worker.interp) == 0, "the interpreter state is the worker's first field")
+        let raw = unsafe UnsafeMutableRawPointer.allocate(byteCount: Worker.bytes, alignment: 128)
         let special = UnsafeMutablePointer<UInt64>.allocate(capacity: image.specialSelectors.count)
         for (i, s) in image.specialSelectors.enumerated() { unsafe special[i] = s.raw }
         let cache = unsafe UnsafeMutablePointer<CacheEntry>.allocate(capacity: InterpreterState.cacheEntries)

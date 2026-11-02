@@ -51,7 +51,7 @@ import Synchronization
     let errorsLock: UnsafeMutablePointer<pthread_mutex_t>
 
     let counters: UnsafeMutablePointer<Atomic<UInt64>>
-    var hooks = VMHooks()
+    var hooks = unsafe VMHooks()
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -64,7 +64,7 @@ struct WorkerShared: ~Copyable {
 }
 
 /// Guarded by the safepoint mutex.
-struct SafepointState {
+@unsafe struct SafepointState {
     /// Workers inside the VM.
     var active = 0
     /// Active workers waiting at a safepoint for the current stop.
@@ -106,7 +106,7 @@ struct SchedulerState {
 
 /// A Process's native record (fixed table, free list under the scheduler
 /// lock). The Process oop is a root while the record is live.
-struct ProcessRecord {
+@unsafe struct ProcessRecord {
     var process = Oop.none
     var base: UnsafeMutablePointer<UInt64>? = nil
     var end: UnsafeMutablePointer<UInt64>? = nil

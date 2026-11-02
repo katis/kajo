@@ -35,9 +35,9 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
     if unsafe line.pointee.attention.load(ordering: .relaxed) != 0 {
         let ri = unsafe line.pointee.attention.exchange(0, ordering: .acquiring) &- 1
         if unsafe ri == w.pointee.record {
-            schedLock(vm)
+            unsafe schedLock(vm)
             let kill = unsafe terminatePendingLocked(vm, w)
-            schedUnlock(vm)
+            unsafe schedUnlock(vm)
             if kill { return true }
         }
     }

@@ -36,8 +36,8 @@ import Synchronization
         unsafe pendingSlots.initialize(repeating: 0, count: config.pendingCapacity)
         let pendingNext = UnsafeMutablePointer<Int>.allocate(capacity: config.pendingCapacity)
         unsafe pendingNext.initialize(repeating: -1, count: config.pendingCapacity)
-        let stops = UnsafeMutablePointer<StopRecord>.allocate(capacity: SafepointState.stopLog)
-        let raw = UnsafeMutableRawPointer.allocate(byteCount: MemoryLayout<VMState>.stride, alignment: 128)
+        let stops = unsafe UnsafeMutablePointer<StopRecord>.allocate(capacity: SafepointState.stopLog)
+        let raw = unsafe UnsafeMutableRawPointer.allocate(byteCount: MemoryLayout<VMState>.stride, alignment: 128)
         unsafe state = raw.bindMemory(to: VMState.self, capacity: 1)
         unsafe state.initialize(to: VMState(
             om: om, image: image, config: config, nilObject: image.nilObject, workers: workers, workerCount: workerCount,
@@ -135,8 +135,8 @@ import Synchronization
         unsafe s.pendingNext.deallocate()
         unsafe s.counters.deinitialize(count: Counter.allCases.count)
         unsafe s.counters.deallocate()
-        for m in unsafe [s.safepointLock, s.schedLock, s.pendingLock, s.hostLock, s.errorsLock] { unsafe freeMutex(m) }
-        for c in unsafe [s.safepointCond, s.schedCond, s.doneCond] { unsafe freeCond(c) }
+        for unsafe m in unsafe [s.safepointLock, s.schedLock, s.pendingLock, s.hostLock, s.errorsLock] { unsafe freeMutex(m) }
+        for unsafe c in unsafe [s.safepointCond, s.schedCond, s.doneCond] { unsafe freeCond(c) }
         unsafe state.deinitialize(count: 1)
         unsafe UnsafeMutableRawPointer(state).deallocate()
     }
@@ -164,7 +164,7 @@ import Synchronization
 
     /// The host no longer needs `o` (a Process, Semaphore or Array it got).
     func release(_ o: Oop) {
-        host { _ in
+        unsafe host { _ in
             if let h = hostRoots.removeValue(forKey: o) { image.om.removeRoot(h) }
         }
     }
@@ -178,7 +178,7 @@ import Synchronization
         let cls = receiver.isSmallInteger ? WellKnown.smallInteger : image.om.classIndex(of: receiver)
         guard let method = image.lookup(cls, sel),
               image.om.load(method, MethodLayout.argc).smallIntegerValue == Int64(arguments.count) else { return nil }
-        return host { w in
+        return unsafe host { w in
             let temp = ([receiver, exit] + arguments).filter(\.isObject).map { image.om.addRoot($0) }
             let p = unsafe createProcess(state, w, receiver: receiver, method: method, args: arguments,
                                          priority: priority, main: main, exit: exit)
@@ -190,7 +190,7 @@ import Synchronization
     }
 
     func state(of p: Oop) -> ProcessState {
-        host { _ in
+        unsafe host { _ in
             unsafe schedLock(state)
             let v = image.om.load(p, ProcessLayout.state).smallIntegerValue
             unsafe schedUnlock(state)
@@ -201,7 +201,7 @@ import Synchronization
     /// What a terminated Process answered (nil if it failed or was
     /// terminated; then `error(of:)` may say why).
     func result(of p: Oop) -> Oop {
-        host { _ in
+        unsafe host { _ in
             unsafe schedLock(state)
             let v = image.om.load(p, ProcessLayout.result)
             unsafe schedUnlock(state)
@@ -211,13 +211,13 @@ import Synchronization
 
     /// The VMError that terminated `p`, if one did.
     func error(of p: Oop) -> VMError? {
-        let id = host { _ in image.om.load(p, ProcessLayout.id).smallIntegerValue }
+        let id = unsafe host { _ in image.om.load(p, ProcessLayout.id).smallIntegerValue }
         unsafe pthread_mutex_lock(state.pointee.errorsLock)
         defer { unsafe pthread_mutex_unlock(state.pointee.errorsLock) }
         return unsafe state.pointee.errors.pointee.byProcess[id]
     }
 
-    var liveProcessCount: Int { schedRead { unsafe $0.liveProcesses } }
+    var liveProcessCount: Int { schedRead { $0.liveProcesses } }
 
     var liveRecordCount: Int {
         schedRead { s in
@@ -225,8 +225,8 @@ import Synchronization
         }
     }
 
-    var idleWorkerCount: Int { schedRead { unsafe $0.idleWorkers } }
-    var hopLatencies: [UInt64] { schedRead { unsafe $0.hopLatencies } }
+    var idleWorkerCount: Int { schedRead { $0.idleWorkers } }
+    var hopLatencies: [UInt64] { schedRead { $0.hopLatencies } }
 
     private func schedRead<T>(_ body: (SchedulerState) -> T) -> T {
         unsafe pthread_mutex_lock(state.pointee.schedLock)
@@ -252,8 +252,8 @@ import Synchronization
 
     /// A new Semaphore with no signals, rooted for the host.
     func newSemaphore() -> Oop {
-        host { w in
-            let s = machine(w).allocate(WellKnown.semaphore, slots: SemaphoreLayout.size)
+        unsafe host { w in
+            let s = unsafe machine(w).allocate(WellKnown.semaphore, slots: SemaphoreLayout.size)
             precondition(s != .none, "heap full")
             image.om.store(s, SemaphoreLayout.excessSignals, Oop(smallInteger: 0))
             keep(s)
@@ -263,8 +263,8 @@ import Synchronization
 
     /// A new Array of nils, rooted for the host.
     func newArray(_ n: Int) -> Oop {
-        host { w in
-            let a = machine(w).allocate(WellKnown.array, slots: n)
+        unsafe host { w in
+            let a = unsafe machine(w).allocate(WellKnown.array, slots: n)
             precondition(a != .none, "heap full")
             keep(a)
             return a
@@ -272,7 +272,7 @@ import Synchronization
     }
 
     func excessSignals(_ sem: Oop) -> Int64 {
-        host { _ in
+        unsafe host { _ in
             unsafe schedLock(state)
             defer { unsafe schedUnlock(state) }
             return image.om.load(sem, SemaphoreLayout.excessSignals).smallIntegerValue
@@ -280,7 +280,7 @@ import Synchronization
     }
 
     func waiterCount(_ sem: Oop) -> Int {
-        host { _ in
+        unsafe host { _ in
             let om = image.om
             unsafe schedLock(state)
             defer { unsafe schedUnlock(state) }
@@ -294,9 +294,9 @@ import Synchronization
         }
     }
 
-    func signal(_ sem: Oop) { host { w in unsafe signalSemaphore(state, w, sem) } }
+    func signal(_ sem: Oop) { unsafe host { w in unsafe signalSemaphore(state, w, sem) } }
 
-    func terminate(_ p: Oop) { host { w in unsafe terminateProcess(state, w, p) } }
+    func terminate(_ p: Oop) { unsafe host { w in unsafe terminateProcess(state, w, p) } }
 
     /// Terminate every live Process (running ones at their next budget check).
     func terminateAll() {
@@ -310,13 +310,13 @@ import Synchronization
 
     /// Run `body` with the world stopped.
     func withWorldStopped(_ body: () -> Void) {
-        host { w in unsafe stopWorld(state, w, retry: true) { _ in body() } }
+        unsafe host { w in _ = unsafe stopWorld(state, w, retry: true) { _ in body() } }
     }
 
     /// Run `body` with the world stopped, given the object memory and (if
     /// asked) every root outside it.
     func withWorldStopped(roots: Bool, _ body: (ObjectMemory, [Oop]) -> Void) {
-        host { w in unsafe stopWorld(state, w, retry: true) { stop in body(image.om, roots ? stop.roots() : []) } }
+        unsafe host { w in _ = unsafe stopWorld(state, w, retry: true) { stop in body(image.om, roots ? stop.roots() : []) } }
     }
 
     /// Read the heap from the host: with the world stopped.
@@ -326,9 +326,9 @@ import Synchronization
         return r!
     }
 
-    func collect() { host { w in machine(w).collect() } }
-    func compact() { host { w in machine(w).compact() } }
-    func become(_ a: Oop, _ b: Oop) -> Bool { host { w in machine(w).become(a, b) } }
+    func collect() { unsafe host { w in unsafe machine(w).collect() } }
+    func compact() { unsafe host { w in unsafe machine(w).compact() } }
+    func become(_ a: Oop, _ b: Oop) -> Bool { unsafe host { w in unsafe machine(w).become(a, b) } }
 
     func global(_ i: Int) -> Oop { inspect { $0.load(image.globals, i - 1) } }
     func setGlobal(_ i: Int, _ v: Oop) { withWorldStopped { image.om.store(image.globals, i - 1, v) } }
@@ -367,7 +367,7 @@ import Synchronization
             if port == 0 { return 0 }
             var info = thread_extended_info()
             var count = mach_msg_type_number_t(MemoryLayout<thread_extended_info>.size / MemoryLayout<integer_t>.size)
-            let kr = unsafe withUnsafeMutablePointer(to: &info) {
+            let kr = withUnsafeMutablePointer(to: &info) {
                 unsafe $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
                     unsafe thread_info(port, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &count)
                 }
