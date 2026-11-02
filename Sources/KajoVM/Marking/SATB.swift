@@ -50,7 +50,7 @@ func satbPushIfCandidate(_ mk: MarkingPointer, _ om: ObjectMemory, _ w: WorkerPo
     if v & Oop.objectTagMask != 0 || v == 0 { return }
     let e = v &>> 4
     if unsafe !mk.pointee.snapshot.contains(e) { return }
-    if om.markAtomic(e).pointee.load(ordering: .relaxed) != 0 { return }
+    if om.markRelaxed(e) != 0 { return }
     let b = unsafe mk.buffer(w.pointee.index)
     if unsafe b.pointee.count == SATBBuffer.capacity { unsafe handOver(mk, w, b) }
     unsafe b.pointee.words[b.pointee.count] = v
@@ -77,7 +77,7 @@ func handOver(_ mk: MarkingPointer, _ w: WorkerPointer, _ b: UnsafeMutablePointe
 /// An empty 512-oop buffer. The marking lock is held.
 func takeBufferLocked(_ q: UnsafeMutablePointer<MarkQueue>) -> UnsafeMutablePointer<UInt64> {
     if let p = unsafe q.pointee.free.popLast() { return unsafe p }
-    let p = UnsafeMutablePointer<UInt64>.allocate(capacity: SATBBuffer.capacity)
+    let p = unsafe UnsafeMutablePointer<UInt64>.allocate(capacity: SATBBuffer.capacity)
     unsafe q.pointee.allocated.append(p)
     return unsafe p
 }

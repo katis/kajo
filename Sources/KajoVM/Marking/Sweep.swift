@@ -41,13 +41,13 @@ func sweepCycle(_ vm: VMPointer, _ mk: MarkingPointer, inPause: Bool) -> Bool {
                 bits &= bits &- 1
                 let e = UInt64(w) &<< 6 | b
                 let raw = e &<< 4
-                if om.markAtomic(e).pointee.load(ordering: .relaxed) != 0 {
+                if om.markRelaxed(e) != 0 {
                     live |= 1 &<< b
                     unsafe m.pointee.sweepLive[BlockHeap.block(ofOffset: om.stateWord(raw))] = 1
                 } else {
                     bytes &+= Header(raw: om.headerWord(raw)).bodyBytes
                     om.setHeaderWord(raw, 0)
-                    om.setStateWord(raw, EntryState.free(next: m.pointee.runHead))
+                    unsafe om.setStateWord(raw, EntryState.free(next: m.pointee.runHead))
                     unsafe m.pointee.runHead = raw
                     unsafe m.pointee.runLength &+= 1
                     if unsafe m.pointee.runLength == chunk { unsafe flushRun(om, m) }
@@ -61,7 +61,7 @@ func sweepCycle(_ vm: VMPointer, _ mk: MarkingPointer, inPause: Bool) -> Bool {
             while live != 0 {
                 let b = UInt64(live.trailingZeroBitCount)
                 live &= live &- 1
-                om.markAtomic(UInt64(w) &<< 6 | b).pointee.store(0, ordering: .relaxed)
+                om.setMarkRelaxed(UInt64(w) &<< 6 | b, 0)
             }
             if dead != 0 { old.remove(word: w, bits: dead) }
         }

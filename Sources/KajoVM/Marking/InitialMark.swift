@@ -191,7 +191,7 @@ private func queueGreyStack(_ mk: MarkingPointer) {
     while unsafe m.pointee.stack.count > 0 {
         let p = unsafe takeBufferLocked(q)
         var n = 0
-        while n < SATBBuffer.capacity, let v = unsafe m.pointee.stack.popLast() {
+        while unsafe n < SATBBuffer.capacity, let v = unsafe m.pointee.stack.popLast() {
             unsafe p[n] = v
             n &+= 1
         }

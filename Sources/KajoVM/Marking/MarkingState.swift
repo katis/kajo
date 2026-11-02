@@ -242,7 +242,7 @@ struct MarkingLog {
 }
 
 /// Host side: written by `start` and `shutdown` only.
-struct MarkerThread {
+@unsafe struct MarkerThread {
     var thread: pthread_t? = nil
 }
 
@@ -250,7 +250,7 @@ typealias MarkingPointer = UnsafeMutablePointer<MarkingShared>
 
 extension UnsafeMutablePointer where Pointee == MarkingShared {
     @inline(__always)
-    var phaseNow: MarkingPhase { MarkingPhase(rawValue: unsafe pointee.phase.pointee.load(ordering: .acquiring)).unsafelyUnwrapped }
+    var phaseNow: MarkingPhase { unsafe MarkingPhase(rawValue: pointee.phase.pointee.load(ordering: .acquiring)).unsafelyUnwrapped }
 
     @inline(__always)
     func setPhase(_ p: MarkingPhase) { unsafe pointee.phase.pointee.store(p.rawValue, ordering: .releasing) }

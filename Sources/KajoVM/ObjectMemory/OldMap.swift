@@ -106,6 +106,16 @@ extension ObjectMemory {
             .assumingMemoryBound(to: Atomic<UInt8>.self)
     }
 
+    /// A mark byte read with a relaxed atomic load (module 5's marker and
+    /// barrier, between stops).
+    @inline(__always)
+    func markRelaxed(_ index: UInt64) -> UInt8 { unsafe markAtomic(index).pointee.load(ordering: .relaxed) }
+
+    /// A mark byte written with a relaxed atomic store (one marker
+    /// participant at a time writes marks).
+    @inline(__always)
+    func setMarkRelaxed(_ index: UInt64, _ v: UInt8) { unsafe markAtomic(index).pointee.store(v, ordering: .relaxed) }
+
     // MARK: - pending runs and block stamps (module 5's lazy sweep)
 
     /// A run of free entries (state words already free and linked) that a
@@ -132,20 +142,6 @@ extension ObjectMemory {
         lockPools()
         unsafe pools.pointee.stampNow = stamp
         unlockPools()
-    }
-
-    /// The stamp of block `b`'s last refill. World stopped.
-    func blockStamp(_ b: Int) -> UInt32 {
-        lockPools()
-        defer { unlockPools() }
-        return unsafe pools.pointee.blockStamps[b]
-    }
-
-    /// Free block `b`: no live body is left in it. World stopped, contexts
-    /// retired; `rebuildBlockPool` puts it in the pool.
-    func freeBlock(_ b: Int) {
-        heap.setInUse(b, false)
-        heap.setUsed(b, 0)
     }
 
     /// A concurrent marking cycle owns the mark map from its initial mark to

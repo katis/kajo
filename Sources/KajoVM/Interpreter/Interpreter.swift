@@ -12,7 +12,7 @@ import Synchronization
 
     init(image: Image) {
         self.image = image
-        let flag = makeFlagLine()
+        let flag = unsafe makeFlagLine()
         // A worker of no VM: its polls only honour the test switch below.
         let w = unsafe Worker.make(image: image, vm: nil, index: 0, isMain: true, flag: flag, pollEvery: 1024, seed: 1)
         unsafe state = w.pointer(to: \Worker.interp)!

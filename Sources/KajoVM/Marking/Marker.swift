@@ -17,9 +17,8 @@ func greyIfCandidate(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutabl
     if v & Oop.objectTagMask != 0 || v == 0 { return }
     let e = v &>> 4
     if unsafe !mk.pointee.snapshot.contains(e) { return }
-    let mb = om.markAtomic(e)
-    if mb.pointee.load(ordering: .relaxed) != 0 { return }
-    mb.pointee.store(1, ordering: .relaxed)
+    if om.markRelaxed(e) != 0 { return }
+    om.setMarkRelaxed(e, 1)
     unsafe m.pointee.stack.append(v)
 }
 
@@ -29,7 +28,7 @@ func greyIfCandidate(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutabl
 func isUnmarkedSnapshotEntry(_ mk: MarkingPointer, _ om: ObjectMemory, _ v: UInt64) -> Bool {
     if v & Oop.objectTagMask != 0 || v == 0 { return false }
     let e = v &>> 4
-    return unsafe mk.pointee.snapshot.contains(e) && om.markAtomic(e).pointee.load(ordering: .relaxed) == 0
+    return unsafe mk.pointee.snapshot.contains(e) && om.markRelaxed(e) == 0
 }
 
 /// Scan a marked snapshot object: every slot of an ordinary one (relaxed
@@ -88,9 +87,9 @@ func drainStack(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePoin
 /// SATB buffer's entries marked first.
 func takeItem(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ it: MarkItem) {
     var k = 0
-    while k < it.count {
+    while unsafe k < it.count {
         let v = unsafe it.words[k]
-        if it.grey { unsafe m.pointee.stack.append(v) } else { unsafe greyIfCandidate(mk, om, m, v) }
+        if unsafe it.grey { unsafe m.pointee.stack.append(v) } else { unsafe greyIfCandidate(mk, om, m, v) }
         k &+= 1
     }
 }
@@ -195,7 +194,7 @@ func applyWantedQoS(_ mk: MarkingPointer) {
     let want = unsafe mk.pointee.wantUserInitiated.pointee.load(ordering: .relaxed)
     let target = want ? QOS_CLASS_USER_INITIATED : QOS_CLASS_UTILITY
     if unsafe m.pointee.qos == target.rawValue { return }
-    unsafe pthread_set_qos_class_self_np(target, 0)
+    pthread_set_qos_class_self_np(target, 0)
     unsafe m.pointee.qos = qos_class_self().rawValue
     if want { unsafe m.pointee.escalations &+= 1 } else { unsafe m.pointee.lowerings &+= 1 }
 }

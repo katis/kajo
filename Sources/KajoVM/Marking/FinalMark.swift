@@ -32,7 +32,7 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     }
     while let it = unsafe popItem(mk) {
         unsafe takeItem(mk, om, m, it)
-        drained &+= UInt64(it.count)
+        drained &+= unsafe UInt64(it.count)
         unsafe returnBuffer(mk, it.words)
     }
     drained &+= unsafe UInt64(m.pointee.stack.count)

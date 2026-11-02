@@ -109,7 +109,7 @@ extension Machine {
 func youngPause(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext, full: Bool) {
     guard let n = unsafe vm.pointee.nursery else { return }
     if full {
-        unsafe noteFullCollection(vm, .entries)
+        unsafe noteFullCollection(vm, vm.pointee.om.config.stress.contains(.collectAtEveryAllocation) ? .other : .entries)
         unsafe fullCollection(vm, stop)
     } else if unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) {
         unsafe noteFullCollection(vm, .softLimit)

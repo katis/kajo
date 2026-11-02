@@ -25,6 +25,18 @@ public enum Headless {
         public var age = 2
         /// Module 4's stress flags: `tinynursery`, `promoteall`, `scavenge`.
         public var nurseryStress = ""
+        /// Module 5: `cm` (concurrent marking, the default with a nursery)
+        /// or `stw` (module 1's full collections only: the oracle).
+        public var gc = "cm"
+        /// Module 5's stress flags: `cycle`, `alwayson`, `neverapply`.
+        public var markingStress = ""
+        /// Cycle trigger: occupancy floor (fraction of the soft limit) and
+        /// the predictor's safety factor (0: off).
+        public var floor = 0.6
+        public var safetyFactor = 2.0
+        /// The marker is raised to user-initiated below this headroom (0:
+        /// always utility, above 1: always user-initiated).
+        public var escalateBelow = 0.25
 
         public init() {}
     }
@@ -69,6 +81,13 @@ public enum Headless {
         vc.nursery.survivorBytes = options.survivorKB << 10
         vc.nursery.age = options.age
         vc.nursery.stress = NurseryStress(parsing: options.nurseryStress)
+        guard options.gc == "cm" || options.gc == "stw" else { return failed(.unsupported("--gc: cm or stw")) }
+        vc.marking.enabled = options.gc == "cm"
+        vc.marking.stress = MarkingStress(parsing: options.markingStress)
+        vc.marking.floor = options.floor
+        vc.marking.safetyFactor = options.safetyFactor
+        vc.marking.escalateBelow = options.escalateBelow
+
         if let problem = vc.nursery.validate(workers: options.workers + 2) { return failed(.unsupported("nursery: \(problem)")) }
         var config = ObjectMemoryConfig()
         config.heapBytes = options.heapMiB << 20
@@ -133,6 +152,7 @@ public enum Headless {
             ("slowestParticipant", worst.map { "\($0.slowest)" } ?? "-"),
         ]
         report += nurseryReport(vm, stops: stops, ms: ms)
+        report += markingReport(vm, stops: stops)
         return Outcome(checksum: checksum, milliseconds: ms, counters: [
             ("sends", c.sends), ("cacheMisses", c.cacheMisses), ("cacheFlushes", c.cacheFlushes),
             ("primitiveCalls", c.primitiveCalls), ("primitiveFailures", c.primitiveFailures),
@@ -182,5 +202,51 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
         ("copyMBsPerParticipant", rate), ("sweepP50ms", sweepP50), ("ttspP50ms", ttspP50), ("youngAllocations", "\(c.youngAllocations)"),
         ("largeAllocations", "\(c.largeAllocations)"), ("barrierSlow", "\(c.barrierSlowCalls)"),
         ("remHolders", "\(c.rememberedHolders)"), ("entriesFreed", "\(c.entriesFreed)"),
+    ]
+}
+
+/// Module 5's line: cycles and what started them, fallbacks (a provisioning
+/// failure, by the phase they found) and aborts, the final mark's pause
+/// (p50, p99, max, its time to safepoint), the initial mark's addition to
+/// its scavenge, the apply, marker CPU and wall time per cycle, floating
+/// garbage, the SATB volume, the QoS the marker ran at per cycle and its
+/// escalations, the promotion rate and predicted time to fill at the last
+/// trigger decision, and the verifier.
+func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
+    guard vm.hasMarking else { return [("gc", "stw")] }
+    let c = vm.markingCounters
+    let log = vm.cycleLog
+    func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
+    func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
+    func pct(_ xs: [UInt64], _ q: Double) -> String {
+        let s = xs.sorted()
+        return s.isEmpty ? "-" : ms(s[min(s.count - 1, Int(Double(s.count) * q))])
+    }
+    let finals = stops.filter { $0.kind == .finalMark }.map(\.pauseNs)
+    let ttsp = stops.filter { $0.kind == .finalMark }.map(\.timeToSafepointNs)
+    let done = log.filter(\.completed)
+    let im = log.map { $0.snapshotNs &+ $0.rootsNs &+ $0.survivorsNs }
+    let mean = { (xs: [UInt64]) -> String in xs.isEmpty ? "-" : ms(xs.reduce(0, &+) / UInt64(xs.count)) }
+    var qos: [UInt32: Int] = [:]
+    for r in done { qos[r.markerQoS, default: 0] += 1 }
+    let qosList = qos.keys.sorted().map { "\($0)x\(qos[$0]!)" }.joined(separator: ",")
+    return [
+        ("gc", "cm"), ("cycles", "\(c.cycles)"), ("cyclesDone", "\(c.cyclesCompleted)"),
+        ("byFloor", "\(c.cyclesByFloor)"), ("byPredictor", "\(c.cyclesByPredictor)"), ("forced", "\(c.cyclesForced)"),
+        ("fallbacks", "\(c.fallbacks)"), ("fallbacksIdle", "\(c.fallbacksIdle)"), ("fallbacksMarking", "\(c.fallbacksMarking)"),
+        ("fallbacksSweeping", "\(c.fallbacksSweeping)"), ("fallbacksVerifier", "\(c.fallbacksVerifier)"),
+        ("aborts", "\(c.aborts)"), ("sweepsInPause", "\(c.sweepsFinishedInPause)"),
+        ("finalP50ms", pct(finals, 0.5)), ("finalP99ms", pct(finals, 0.99)), ("finalMaxMs", finals.max().map(ms) ?? "-"),
+        ("finalTtspP50ms", pct(ttsp, 0.5)), ("finalDrainP50ms", pct(done.map(\.drainNs), 0.5)),
+        ("imAddP50ms", pct(im, 0.5)), ("imAddMaxMs", im.max().map(ms) ?? "-"),
+        ("applyP50ms", pct(done.map(\.applyNs), 0.5)), ("applyStops", "\(stops.filter { $0.kind == .apply }.count)"),
+        ("markCpuMsPerCycle", mean(done.map(\.markCpuNs))), ("markWallMsPerCycle", mean(done.map(\.markWallNs))),
+        ("sweepMsPerCycle", mean(done.map(\.sweepNs))), ("cycleMsMean", mean(done.map(\.durationNs))),
+        ("markedMBPerCycle", done.isEmpty ? "-" : f(Double(done.map(\.markedBytes).reduce(0, &+)) / Double(done.count) / 1e6)),
+        ("freedMB", f(Double(done.map(\.bytesFreed).reduce(0, &+)) / 1e6)),
+        ("floatingMB", f(Double(c.floatingBytes) / 1e6)), ("satbPushed", "\(c.satbPushed)"), ("satbBuffers", "\(c.satbBuffers)"),
+        ("markerQoS", qosList.isEmpty ? "-" : qosList), ("qosEscalations", "\(c.qosEscalations)"), ("qosLowerings", "\(c.qosLowerings)"),
+        ("promotionMBs", f(c.lastPromotionBytesPerSecond / 1e6)), ("predictedFillMs", ms(c.lastPredictedFillNs)),
+        ("markVerifies", "\(c.verifierRuns)"), ("missed", "\(c.missed)"),
     ]
 }

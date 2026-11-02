@@ -20,7 +20,7 @@ import Synchronization
         let om = image.om
         let workerCount = config.backgroundWorkers + 2
         // The safepoint flag and (word 2) module 5's barrier word, one line.
-        let flag = makeFlagLine()
+        let flag = unsafe makeFlagLine()
         let workers = UnsafeMutablePointer<WorkerPointer>.allocate(capacity: workerCount)
         let shared = UnsafeMutableRawPointer.allocate(byteCount: 128 * workerCount, alignment: 128)
         for i in 0..<workerCount {

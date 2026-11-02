@@ -29,15 +29,20 @@ extension MarkingShared {
         let count = unsafe vm.pointee.workerCount
         let snapshot: EntryBitmap
         do { snapshot = try EntryBitmap(entries: om.entryCapacity) } catch { preconditionFailure("marking: \(error)") }
+        // Buffers move between workers and the queue: every one is in
+        // `allocated` and freed from there only.
+        var queue = unsafe MarkQueue()
         let satb = UnsafeMutablePointer<UnsafeMutablePointer<SATBBuffer>>.allocate(capacity: count)
         for k in 0..<count {
-            unsafe satb[k] = lined(SATBBuffer(words: .allocate(capacity: SATBBuffer.capacity)))
+            let words = unsafe UnsafeMutablePointer<UInt64>.allocate(capacity: SATBBuffer.capacity)
+            unsafe queue.allocated.append(words)
+            unsafe satb[k] = lined(SATBBuffer(words: words))
         }
         let markerWorker = unsafe Worker.make(image: vm.pointee.image, vm: vm, index: count, isMain: false,
                                               flag: vm.pointee.flag, pollEvery: vm.pointee.config.pollEvery,
                                               seed: (vm.pointee.config.perturb?.seed ?? 0x5EED) &* 0x9E37_79B9 | 1)
         let mk = unsafe lined(MarkingShared(
-            config: config, om: om, workerCount: count, snapshot: snapshot, satb: satb, queue: lined(MarkQueue()),
+            config: config, om: om, workerCount: count, snapshot: snapshot, satb: satb, queue: lined(queue),
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
             log: lined(MarkingLog()), phase: boxed(Atomic<UInt8>(0)), cycle: boxed(Atomic<UInt64>(0)),
             wantUserInitiated: boxed(Atomic<Bool>(false)), markerWaits: boxed(Atomic<UInt64>(0)),
@@ -51,10 +56,7 @@ extension MarkingShared {
         guard let mk = unsafe vm.pointee.marking else { return }
         let s = unsafe mk.pointee
         unsafe s.barrier.pointee.store(0, ordering: .relaxed)
-        for k in unsafe 0..<s.workerCount {
-            unsafe s.satb[k].pointee.words.deallocate()
-            unsafe unlined(s.satb[k])
-        }
+        for k in unsafe 0..<s.workerCount { unsafe unlined(s.satb[k]) }
         unsafe s.satb.deallocate()
         while let p = unsafe s.queue.pointee.allocated.popLast() { unsafe p.deallocate() }
         unsafe s.queue.pointee.items.free()
@@ -77,7 +79,7 @@ extension MarkingShared {
         unsafe unbox(s.machThread)
         unsafe freeMutex(s.lock)
         unsafe freeCond(s.cond)
-        s.snapshot.release()
+        unsafe s.snapshot.release()
         unsafe unlined(mk)
         unsafe vm.pointee.marking = nil
     }
@@ -137,7 +139,7 @@ extension VM {
     /// while a cycle runs.
     func startCycle(scavenge doScavenge: Bool = true) {
         guard let mk = unsafe state.pointee.marking else { return }
-        unsafe host { w in
+        _ = unsafe host { w in
             unsafe stopWorld(state, w, retry: true) { stop in unsafe startCycleInStop(state, mk, w, stop, scavenge: doScavenge) }
         }
     }
@@ -153,7 +155,7 @@ extension VM {
     /// marker. Answers how many were traced.
     @discardableResult
     func markStep(_ objects: Int) -> Int {
-        let mk = manualMarker()
+        let mk = unsafe manualMarker()
         let mw = unsafe mk.pointee.markerWorker
         unsafe enterVM(state, mw)
         let m = unsafe mk.pointee.marker
@@ -166,7 +168,7 @@ extension VM {
 
     /// Manual mode: the final mark, requested as the marker would.
     func finalMark() {
-        let mk = manualMarker()
+        let mk = unsafe manualMarker()
         let mw = unsafe mk.pointee.markerWorker
         unsafe enterVM(state, mw)
         let cycle = unsafe mk.cycleNow
@@ -177,7 +179,7 @@ extension VM {
     /// Manual mode: the lazy sweep to its end (phase swept; the next pause
     /// applies it).
     func sweep() {
-        let mk = manualMarker()
+        let mk = unsafe manualMarker()
         let mw = unsafe mk.pointee.markerWorker
         unsafe enterVM(state, mw)
         if unsafe mk.phaseNow == .sweeping { _ = unsafe sweepCycle(state, mk, inPause: false) }
@@ -193,7 +195,7 @@ extension VM {
     /// Test corruption: set `o`'s mark byte by hand.
     func corruptMark(_ o: Oop) {
         guard unsafe state.pointee.marking != nil else { return }
-        withWorldStopped { image.om.markAtomic(o.entryIndex).pointee.store(1, ordering: .relaxed) }
+        withWorldStopped { image.om.setMarkRelaxed(o.entryIndex, 1) }
     }
 
     /// The marker thread's CPU time so far (0 without one).

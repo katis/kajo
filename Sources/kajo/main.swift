@@ -5,6 +5,8 @@ let usage = """
 usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress every,tiny,oneblock,preempt,stop,tinynursery,promoteall,scavenge]
                 [--slice-ms 5] [--nursery KiB] [--survivor KiB] [--age N] [--verify]
+                [--gc cm|stw] [--stress cycle,alwayson,neverapply] [--floor 0.6]
+                [--safety 2] [--escalate-below 0.25]
        kajo version
 
 Loads the files in order into a fresh image, runs one Process per worker
@@ -43,11 +45,16 @@ case "run":
             options.stress = v.filter { ["every", "tiny", "oneblock", "all"].contains($0) }.joined(separator: ",")
             options.vmStress = v.filter { ["preempt", "stop"].contains($0) }.joined(separator: ",")
             options.nurseryStress = v.filter { ["tinynursery", "promoteall", "scavenge"].contains($0) }.joined(separator: ",")
+            options.markingStress = v.filter { ["cycle", "alwayson", "neverapply"].contains($0) }.joined(separator: ",")
         case "--nursery": options.nurseryKB = Int(value()) ?? -1
         case "--survivor": options.survivorKB = Int(value()) ?? -1
         case "--age": options.age = Int(value()) ?? 0
         case "--slice-ms": options.sliceMs = Double(value()) ?? 5
         case "--verify": options.verify = true
+        case "--gc": options.gc = value()
+        case "--floor": options.floor = Double(value()) ?? 0.6
+        case "--safety": options.safetyFactor = Double(value()) ?? 2
+        case "--escalate-below": options.escalateBelow = Double(value()) ?? 0.25
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }

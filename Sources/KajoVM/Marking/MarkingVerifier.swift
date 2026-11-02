@@ -65,7 +65,7 @@ func verifyFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext)
     var e: UInt64 = 1
     while e < hw {
         defer { e &+= 1 }
-        let marked = om.markAtomic(e).pointee.load(ordering: .relaxed) != 0
+        let marked = om.markRelaxed(e) != 0
         if !snap.contains(e) {
             if marked { out.fail("entry \(e) is marked but not a snapshot entry") }
             continue
