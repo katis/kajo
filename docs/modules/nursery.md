@@ -345,6 +345,238 @@ no block.
 All fail outside a VM. (The experiments' `oldheap.kasm` used 37 for a
 no-op timing hook; the fixture copy makes it a plain method.)
 
+## Measurements
+
+All on the M2 Max (8 P + 4 E cores), macOS 27, Swift 6.4, release builds,
+2026-11-02 23:13 to 23:31, after `pkill -x yes` (none left). Load average
+(1 min) 3 to 7, falling from a ThreadSanitizer run; Firefox, Warp and this
+agent the busiest other processes at 3 to 9 percent of a core. Kernels
+through `kajo run`.
+
+### Barrier and allocator, interleaved against module 3
+
+Module 3's `kajo` built from `a1ab495` in a worktree (`swift build -c
+release --product kajo`), this module's from `.build/bench` (`swift build
+-c release --product kajo --scratch-path .build/bench`), one worker,
+default options (1 GiB heap, 5 ms slices, 4 MiB nurseries, N = 2), run
+alternately with module 4 without a nursery (`--nursery 0`) as a third
+column, five runs each, medians (min to max), ms:
+
+| kernel | module 3 | module 4 | ratio | module 4, no nursery | what it measures |
+|---|--:|--:|--:|--:|---|
+| ivars | 2075.6 (2074.2 to 2078.8) | 1925.7 (1921.5 to 1928.6) | **0.928** | 1926.6 (1918.2 to 1928.2) | the barrier on SmallInteger stores (`store_ivar`, never young) |
+| churn | 2109.4 (2103.9 to 2174.9) | 2050.4 (2040.1 to 2059.4) | **0.972** | 2090.0 (2082.7 to 2091.9) | eden allocation, nothing survives (244 scavenges) |
+| alloc | 2495.7 (2487.8 to 2508.4) | 2697.7 (2686.6 to 2701.3) | 1.081 | 2421.0 (2409.3 to 2424.3) | allocation plus copying: trees survive (320 scavenges, 662 MB copied) |
+| fib | 1688.3 (1686.0 to 1692.5) | 1653.2 (1645.6 to 1654.1) | 0.979 | 1646.3 | no stores, no allocation: code placement alone |
+
+- **Barrier**: module 4 is 7 percent *faster* than module 3 on ivars, and
+  equal with and without a nursery: the barrier's fast path (four
+  instructions, one a reload) is below the code-placement effect, which
+  moves fib by 2 percent in the same direction. The brief's bound (at most
+  3 percent) holds; the experiment's 2 percent on this kernel is not
+  visible here.
+- **Allocator**: churn, all eden allocation and scavenges of dead objects,
+  is 2.8 percent faster than module 1's bump in module 3 and 1.9 percent
+  faster than module 4's own old path. alloc is 8 percent slower at 4 MiB
+  because its depth-16 trees survive and are copied (twice at N = 2: 167
+  MB into survivor spaces, 495 MB promoted, one full collection), as the
+  experiment found (1.13x); at 16 MiB it takes 2427 ms (0.97x).
+
+### Headless matrix
+
+`matrix.sh` (below): the six kernels, 1 and 8 workers, nurseries 1, 4 and 16
+MiB, N = 1 and 2, five runs per cell, `--slice-ms 0`, old space 64 MiB
+(oldheap64 192, fragment 256, as the experiments). Medians of the five runs
+(the pause columns are the median of each run's p50 and p99 and the max of
+the maxima); "slowest" is the worker that parked last in the run with the
+longest scavenge (-1: none had to, one worker); promoted MB/s over the run;
+copy MB/s per participant is bytes copied over participants' busy time.
+Every checksum is the experiments' published one.
+
+| kernel | w | nursery KiB | N | ms | checksum | scavenges | p50 | p99 | max | slowest | promoted MB/s | survived MB | overflow MB | fulls | copy MB/s/participant | load |
+|---|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| churn | 1 | 1024 | 1 | 2021.4 | 256000032000000 | 976 | 0.019 | 0.029 | 0.096 | -1 | 0 | 0.0 | 0.0 | 0 | 375 | 3.1 |
+| churn | 1 | 1024 | 2 | 2020.8 | 256000032000000 | 976 | 0.019 | 0.027 | 0.097 | -1 | 0 | 0.0 | 0.0 | 0 | 416 | 3.0 |
+| churn | 1 | 4096 | 1 | 2017.9 | 256000032000000 | 244 | 0.074 | 0.095 | 0.203 | -1 | 0 | 0.0 | 0.0 | 0 | 313 | 3.0 |
+| churn | 1 | 4096 | 2 | 2018.7 | 256000032000000 | 244 | 0.074 | 0.096 | 0.112 | -1 | 0 | 0.0 | 0.0 | 0 | 273 | 2.8 |
+| churn | 1 | 16384 | 1 | 2022.3 | 256000032000000 | 61 | 0.301 | 0.372 | 0.561 | -1 | 0 | 0.0 | 0.0 | 0 | 126 | 2.8 |
+| churn | 1 | 16384 | 2 | 2023.7 | 256000032000000 | 61 | 0.303 | 0.396 | 0.502 | -1 | 0 | 0.0 | 0.0 | 0 | 100 | 2.7 |
+| churn | 8 | 1024 | 1 | 287.5 | 32000032000000 | 123 | 0.196 | 0.264 | 0.332 | 8 | 0 | 0.0 | 0.0 | 0 | 288 | 2.7 |
+| churn | 8 | 1024 | 2 | 289.0 | 32000032000000 | 124 | 0.198 | 0.275 | 0.295 | 3 | 0 | 0.1 | 0.0 | 0 | 260 | 2.8 |
+| churn | 8 | 4096 | 1 | 273.4 | 32000032000000 | 30 | 0.348 | 0.531 | 0.598 | -1 | 0 | 0.0 | 0.0 | 0 | 138 | 2.8 |
+| churn | 8 | 4096 | 2 | 276.9 | 32000032000000 | 31 | 0.347 | 0.528 | 0.544 | 6 | 0 | 0.0 | 0.0 | 0 | 100 | 2.8 |
+| churn | 8 | 16384 | 1 | 275.2 | 32000032000000 | 7 | 0.984 | 1.762 | 2.389 | 2 | 0 | 0.0 | 0.0 | 0 | 95 | 3.5 |
+| churn | 8 | 16384 | 2 | 274.8 | 32000032000000 | 7 | 0.995 | 1.667 | 1.750 | 2 | 0 | 0.0 | 0.0 | 0 | 80 | 3.5 |
+| survivors5 | 1 | 1024 | 1 | 1311.1 | 6399993600000 | 497 | 0.080 | 0.130 | 0.210 | -1 | 20 | 0.0 | 0.0 | 0 | 856 | 3.5 |
+| survivors5 | 1 | 1024 | 2 | 1319.4 | 6399993600000 | 497 | 0.096 | 0.169 | 0.300 | -1 | 20 | 21.3 | 4.8 | 0 | 1235 | 3.4 |
+| survivors5 | 1 | 4096 | 1 | 1296.9 | 6399993600000 | 124 | 0.205 | 0.356 | 0.660 | -1 | 20 | 0.0 | 0.0 | 0 | 1624 | 3.3 |
+| survivors5 | 1 | 4096 | 2 | 1303.0 | 6399993600000 | 124 | 0.269 | 0.456 | 0.693 | -1 | 20 | 24.4 | 1.7 | 0 | 2089 | 2.9 |
+| survivors5 | 1 | 16384 | 1 | 1300.6 | 6399993600000 | 31 | 0.855 | 1.371 | 1.751 | -1 | 20 | 0.0 | 0.0 | 0 | 1494 | 2.9 |
+| survivors5 | 1 | 16384 | 2 | 1302.3 | 6399993600000 | 31 | 1.232 | 2.129 | 2.428 | -1 | 19 | 26.1 | 0.0 | 0 | 1756 | 2.9 |
+| survivors5 | 8 | 1024 | 1 | 197.0 | 799993600000 | 64 | 0.407 | 0.653 | 0.688 | 7 | 141 | 0.0 | 0.0 | 0 | 359 | 3.7 |
+| survivors5 | 8 | 1024 | 2 | 201.4 | 799993600000 | 65 | 0.454 | 0.583 | 0.696 | 4 | 136 | 21.0 | 6.7 | 0 | 501 | 3.7 |
+| survivors5 | 8 | 4096 | 1 | 185.6 | 799993600000 | 16 | 0.754 | 1.058 | 1.153 | 5 | 149 | 0.0 | 0.0 | 0 | 626 | 3.7 |
+| survivors5 | 8 | 4096 | 2 | 189.4 | 799993600000 | 16 | 0.966 | 1.225 | 3.830 | -1 | 140 | 24.2 | 2.7 | 0 | 783 | 4.0 |
+| survivors5 | 8 | 16384 | 1 | 183.8 | 799993600000 | 3 | 2.627 | 2.815 | 3.991 | 7 | 127 | 0.0 | 0.0 | 0 | 662 | 4.0 |
+| survivors5 | 8 | 16384 | 2 | 187.6 | 799993600000 | 3 | 3.500 | 4.197 | 4.389 | 8 | 76 | 23.1 | 0.0 | 0 | 716 | 4.0 |
+| survivors30 | 1 | 1024 | 1 | 1870.8 | 38399861600000 | 540 | 0.152 | 0.198 | 0.315 | -1 | 83 | 0.0 | 0.0 | 4 | 2148 | 3.9 |
+| survivors30 | 1 | 1024 | 2 | 1905.3 | 38399861600000 | 540 | 0.208 | 0.267 | 0.480 | -1 | 81 | 70.5 | 84.0 | 4 | 2251 | 3.7 |
+| survivors30 | 1 | 4096 | 1 | 1857.3 | 38399861600000 | 136 | 0.485 | 0.728 | 1.062 | -1 | 83 | 0.0 | 0.0 | 4 | 2743 | 3.5 |
+| survivors30 | 1 | 4096 | 2 | 1887.7 | 38399861600000 | 136 | 0.695 | 0.894 | 1.382 | -1 | 81 | 70.3 | 83.4 | 4 | 2778 | 3.1 |
+| survivors30 | 1 | 16384 | 1 | 1885.8 | 38399861600000 | 35 | 2.290 | 3.375 | 3.802 | -1 | 80 | 0.0 | 0.0 | 4 | 2388 | 2.8 |
+| survivors30 | 1 | 16384 | 2 | 1906.0 | 38399861600000 | 35 | 2.999 | 4.403 | 5.212 | -1 | 78 | 69.2 | 82.2 | 4 | 2577 | 2.9 |
+| survivors30 | 8 | 1024 | 1 | 317.9 | 4799861600000 | 84 | 0.536 | 0.689 | 0.751 | 7 | 494 | 0.0 | 0.0 | 4 | 921 | 3.2 |
+| survivors30 | 8 | 1024 | 2 | 315.7 | 4799861600000 | 82 | 0.638 | 0.828 | 0.848 | 4 | 495 | 76.4 | 80.9 | 4 | 1033 | 3.2 |
+| survivors30 | 8 | 4096 | 1 | 297.0 | 4799861600000 | 20 | 1.319 | 1.549 | 1.678 | 7 | 511 | 0.0 | 0.0 | 4 | 1215 | 3.2 |
+| survivors30 | 8 | 4096 | 2 | 307.8 | 4799861600000 | 20 | 1.711 | 2.430 | 2.521 | 4 | 478 | 72.1 | 79.6 | 4 | 1245 | 3.6 |
+| survivors30 | 8 | 16384 | 1 | 313.5 | 4799861600000 | 6 | 5.302 | 5.956 | 6.051 | 4 | 467 | 0.0 | 0.0 | 4 | 1128 | 3.6 |
+| survivors30 | 8 | 16384 | 2 | 299.9 | 4799861600000 | 5 | 7.327 | 7.399 | 7.513 | 7 | 433 | 67.1 | 79.5 | 2 | 1124 | 3.6 |
+| alloc | 1 | 1024 | 1 | 2927.2 | 41950911 | 1295 | 0.337 | 0.406 | 0.673 | -1 | 344 | 0.0 | 0.0 | 30 | 2381 | 3.3 |
+| alloc | 1 | 1024 | 2 | 3009.1 | 41950911 | 1295 | 0.396 | 0.471 | 0.589 | -1 | 334 | 167.8 | 838.9 | 30 | 2372 | 3.1 |
+| alloc | 1 | 4096 | 1 | 2942.1 | 41950911 | 335 | 1.347 | 1.577 | 1.959 | -1 | 342 | 0.0 | 0.0 | 30 | 2370 | 2.7 |
+| alloc | 1 | 4096 | 2 | 2873.9 | 41950911 | 331 | 1.299 | 1.448 | 1.585 | -1 | 273 | 167.8 | 779.5 | 22 | 2360 | 2.6 |
+| alloc | 1 | 16384 | 1 | 2472.4 | 41950911 | 83 | 1.635 | 1.859 | 2.051 | -1 | 102 | 0.0 | 0.0 | 6 | 2284 | 2.5 |
+| alloc | 1 | 16384 | 2 | 2447.0 | 41950911 | 81 | 1.648 | 1.870 | 2.339 | -1 | 29 | 167.8 | 68.9 | 2 | 2276 | 2.5 |
+| alloc | 8 | 1024 | 1 | 833.6 | 42008248 | 227 | 0.836 | 1.199 | 1.335 | 8 | 1208 | 0.0 | 0.0 | 38 | 1366 | 3.1 |
+| alloc | 8 | 1024 | 2 | 881.2 | 42008248 | 236 | 0.922 | 1.250 | 1.343 | 2 | 1143 | 205.7 | 802.1 | 38 | 1322 | 3.1 |
+| alloc | 8 | 4096 | 1 | 747.7 | 42008248 | 63 | 3.184 | 3.904 | 4.386 | 3 | 1320 | 0.0 | 0.0 | 32 | 1224 | 3.6 |
+| alloc | 8 | 4096 | 2 | 595.8 | 42008248 | 51 | 2.405 | 3.992 | 4.596 | 8 | 913 | 167.7 | 476.6 | 16 | 1207 | 3.9 |
+| alloc | 8 | 16384 | 1 | 472.1 | 42008248 | 15 | 3.946 | 4.890 | 4.965 | 7 | 512 | 0.0 | 0.0 | 8 | 1160 | 3.9 |
+| alloc | 8 | 16384 | 2 | 338.1 | 42008248 | 10 | 3.386 | 4.248 | 4.655 | 7 | 56 | 158.6 | 17.6 | 0 | 1146 | 4.7 |
+| oldheap64 | 1 | 1024 | 1 | 2376.6 | 134190197274785 | 736 | 0.057 | 0.175 | 0.242 | -1 | 82 | 0.0 | 0.0 | 0 | 4888 | 4.4 |
+| oldheap64 | 1 | 1024 | 2 | 2377.2 | 134190197274785 | 736 | 0.077 | 0.189 | 0.206 | -1 | 82 | 96.4 | 98.6 | 0 | 5411 | 4.0 |
+| oldheap64 | 1 | 4096 | 1 | 2361.4 | 134190197274785 | 184 | 0.226 | 0.658 | 0.702 | -1 | 83 | 0.0 | 0.0 | 0 | 4934 | 3.8 |
+| oldheap64 | 1 | 4096 | 2 | 2384.6 | 134190197274785 | 184 | 0.306 | 0.750 | 0.795 | -1 | 82 | 96.5 | 98.6 | 0 | 5446 | 3.6 |
+| oldheap64 | 1 | 16384 | 1 | 2375.1 | 134190197274785 | 46 | 0.958 | 2.706 | 2.766 | -1 | 82 | 0.0 | 0.0 | 0 | 4862 | 3.4 |
+| oldheap64 | 1 | 16384 | 2 | 2422.5 | 134190197274785 | 46 | 1.294 | 3.071 | 3.104 | -1 | 80 | 96.5 | 98.6 | 0 | 5284 | 3.2 |
+| oldheap64 | 8 | 1024 | 1 | 350.6 | 18609257457078 | 95 | 0.339 | 0.980 | 1.022 | 2 | 556 | 0.0 | 0.0 | 0 | 1768 | 3.1 |
+| oldheap64 | 8 | 1024 | 2 | 356.7 | 18609257457078 | 95 | 0.399 | 0.983 | 1.059 | 8 | 544 | 89.4 | 105.5 | 0 | 2548 | 3.2 |
+| oldheap64 | 8 | 4096 | 1 | 333.6 | 18609257457078 | 23 | 0.847 | 2.464 | 2.509 | 4 | 576 | 0.0 | 0.0 | 0 | 1720 | 3.2 |
+| oldheap64 | 8 | 4096 | 2 | 340.4 | 18609257457078 | 23 | 0.984 | 2.391 | 2.566 | 4 | 552 | 94.0 | 98.2 | 0 | 2370 | 3.6 |
+| oldheap64 | 8 | 16384 | 1 | 326.6 | 18609257457078 | 5 | 2.719 | 5.801 | 5.987 | 4 | 511 | 0.0 | 0.0 | 0 | 1807 | 3.6 |
+| oldheap64 | 8 | 16384 | 2 | 329.6 | 18609257457078 | 5 | 3.040 | 5.297 | 5.679 | 8 | 438 | 82.2 | 84.5 | 0 | 2426 | 3.6 |
+| fragment | 1 | 1024 | 1 | 2962.1 | 2212269504696 | 549 | 0.107 | 0.163 | 0.371 | -1 | 81 | 0.0 | 0.0 | 0 | 4489 | 3.4 |
+| fragment | 1 | 1024 | 2 | 3013.7 | 2212269504696 | 549 | 0.132 | 0.215 | 0.354 | -1 | 80 | 71.9 | 167.9 | 0 | 4596 | 3.5 |
+| fragment | 1 | 4096 | 1 | 2951.6 | 2212269504696 | 137 | 0.445 | 0.698 | 0.790 | -1 | 81 | 0.0 | 0.0 | 0 | 4261 | 3.3 |
+| fragment | 1 | 4096 | 2 | 2978.1 | 2212269504696 | 137 | 0.545 | 0.817 | 0.921 | -1 | 80 | 71.8 | 167.6 | 0 | 4485 | 3.9 |
+| fragment | 1 | 16384 | 1 | 2917.7 | 2212269504696 | 34 | 1.243 | 1.587 | 1.877 | -1 | 48 | 0.0 | 0.0 | 0 | 3894 | 3.9 |
+| fragment | 1 | 16384 | 2 | 2901.1 | 2212269504696 | 34 | 1.189 | 1.614 | 2.288 | -1 | 24 | 71.3 | 67.6 | 0 | 4314 | 3.5 |
+| fragment | 8 | 1024 | 1 | 399.7 | 329790469548 | 70 | 0.546 | 0.691 | 0.737 | 3 | 600 | 0.0 | 0.0 | 0 | 1381 | 3.3 |
+| fragment | 8 | 1024 | 2 | 406.2 | 329790469548 | 70 | 0.626 | 0.832 | 0.844 | 6 | 587 | 73.4 | 166.4 | 0 | 1545 | 3.7 |
+| fragment | 8 | 4096 | 1 | 389.6 | 329790469548 | 17 | 1.754 | 2.005 | 2.033 | 5 | 603 | 0.0 | 0.0 | 0 | 1270 | 3.7 |
+| fragment | 8 | 4096 | 2 | 393.6 | 329790469548 | 17 | 2.179 | 2.450 | 2.847 | 8 | 588 | 71.3 | 164.3 | 0 | 1335 | 4.0 |
+| fragment | 8 | 16384 | 1 | 372.9 | 329790469548 | 4 | 3.815 | 3.887 | 4.095 | 1 | 350 | 0.0 | 0.0 | 0 | 1340 | 4.0 |
+| fragment | 8 | 16384 | 2 | 375.7 | 329790469548 | 4 | 4.455 | 5.352 | 6.015 | 4 | 176 | 67.1 | 63.6 | 0 | 1251 | 4.0 |
+
+
+Against the experiments:
+
+- **churn at 8 workers**: p99 0.26 ms at 1 MiB, **0.53 ms at 4 MiB**
+  (expected under 0.4; the experiment had 0.32), 1.67 at 16 MiB. Nothing
+  is copied: the pause is the time to safepoint (0.09 ms p50) and the entry
+  sweep, which **reads every entry allocated since the last scavenge**: 0.073
+  ms of a 0.074 ms pause on one worker (131 000 entries per 4 MiB nursery),
+  0.19 ms p50 of 0.35 on eight, where eight sweeps share the memory
+  bandwidth. The experiment's chunk bitmaps swept 64 entries per word read
+  (0.019 ms at 8 workers). A finding against the stash design (Deviations):
+  the bitmap would win back about 0.17 ms per churn scavenge at 8 workers,
+  behind the same module boundary.
+- **survivors30 at 4 MiB, 8 workers**: p99 1.55 ms at N = 1 and 2.43 at
+  N = 2 (expected near 2; the experiment 2.26 at N = 1, 4.86 at N = 2 in
+  concurrent-relocation): close.
+- **alloc at 4 MiB, 8 workers**: N = 1 promotes 1320 MB/s, N = 2 913 MB/s
+  (477 MB of it overflow) and 16 full collections against 32; at 16 MiB
+  N = 2 promotes 56 MB/s. Most trees promote at N = 1 and far fewer at
+  N = 2, and survivor-space size, not N, is the lever (ADR 0007).
+- **Copy rate per participant** halves from one participant to eight
+  (alloc 2.3 GB/s to 1.2; oldheap64 4.9 to 1.8), as ADR 0005 recorded.
+- **Survivor overflow** dominates promotion at N = 2 in the survivor
+  kernels at 1 and 4 MiB (survivors30: 80 MB overflow against 70 MB
+  survived), as in concurrent-relocation.
+- **Full collections**: survivors30 needs 4 (64 MiB old space), alloc 16 to
+  38 at 1 and 4 MiB and 0 at 16 MiB with N = 2; oldheap64 and fragment
+  none.
+
+### Randomized programs
+
+- In the suite: 100 seeds per configuration, eleven configurations (10, and
+  2 under `stopEveryPoll` and `scavengeEveryAllocation`, under
+  ThreadSanitizer). No failure.
+- `just soak` (1000 seeds per configuration): seeds 1 to 1000, all eleven,
+  no failure, 25 s. `just soak 2000 1001`: seeds 1001 to 3000, no failure,
+  49 s.
+- No seed failed. The generator found one bug before any seed was recorded
+  (the stop-at-every-poll livelock under ThreadSanitizer, in Deviations);
+  the configuration under ThreadSanitizer is its regression test.
+
+### Idle
+
+`idleWorkersCostNothing`: 0 ns of CPU on every one of ten workers and 0
+condition-variable returns, in debug, under load and under
+ThreadSanitizer. No thread was added and `grep -rn "timedwait\|asyncAfter"
+Sources/KajoVM` still finds only the Delay primitive.
+
+### Gates (final code)
+
+`swift test`: 184 tests green (60 s). Under load (12 `yes`, load average
+44): green. `swift test --sanitize=thread`: green, no ThreadSanitizer
+report (285 s). `just test-release`, `just golden` (arith 2568, fib 1659,
+sends 2546, alloc 2694, ivars 1923, walk 3900 ms, all ok), `just
+ios-check` clean, `just arc-check` zero retain and release, one jump
+table; a clean build has no warning; `just fuzz snapshot 20` (191 452
+inputs, libFuzzer, no crash) on the regenerated version 2 seed.
+
+### Commands
+
+`git worktree add $SCRATCH/m3 a1ab495 && (cd $SCRATCH/m3 && swift build -c
+release --product kajo)`; `swift build -c release --product kajo
+--scratch-path .build/bench`; then, with no `yes` running:
+
+```zsh
+#!/bin/zsh
+# Interleaved A/B: module 3 (a1ab495) against module 4, five runs each.
+K=/Users/katis/code/kajo/Tests/KajoVMTests/Fixtures/kernels
+M3=$SCRATCH/m3/.build/release/kajo
+M4=/Users/katis/code/kajo/.build/bench/release/kajo
+for kernel in ${=KERNELS:-ivars alloc churn}; do
+  files=($K/prelude.kasm $K/lib.kasm $K/$kernel.kasm)
+  for r in 1 2 3 4 5; do
+    a=$($M3 run $files --workers 1 | tr ' ' '\n' | grep -E '^(ms|checksum)=' | tr '\n' ' ')
+    b=$($M4 run $files --workers 1 | tr ' ' '\n' | grep -E '^(ms|checksum|scavenges)=' | tr '\n' ' ')
+    c=$($M4 run $files --workers 1 --nursery 0 | tr ' ' '\n' | grep -E '^(ms|checksum)=' | tr '\n' ' ')
+    echo "$kernel run=$r m3: $a | m4: $b | m4-nonursery: $c | load=$(sysctl -n vm.loadavg)"
+  done
+done
+```
+
+```zsh
+#!/bin/zsh
+# The headless matrix (docs/modules/nursery.md "Measurements"): module 4's
+# kajo, five runs per cell, one key=value line each.
+K=/Users/katis/code/kajo/Tests/KajoVMTests/Fixtures/kernels
+M4=/Users/katis/code/kajo/.build/bench/release/kajo
+RUNS=${RUNS:-5}
+for kernel in ${=KERNELS:-churn survivors5 survivors30 alloc oldheap64 fragment}; do
+  case $kernel in
+    churn) files=($K/churn.kasm); heap=64 ;;
+    survivors5) files=($K/survivors.kasm $K/survivors5.kasm); heap=64 ;;
+    survivors30) files=($K/survivors.kasm $K/survivors30.kasm); heap=64 ;;
+    alloc) files=($K/alloc.kasm); heap=64 ;;
+    oldheap64) files=($K/oldheap.kasm $K/oldheap64.kasm); heap=192 ;;
+    fragment) files=($K/fragment.kasm $K/fragmentIters.kasm); heap=256 ;;
+  esac
+  for w in 1 8; do for nur in 1024 4096 16384; do for age in 1 2; do for r in $(seq $RUNS); do
+    line=$($M4 run $K/prelude.kasm $K/lib.kasm $files --workers $w --heap $heap --nursery $nur --age $age --slice-ms 0 2>&1)
+    echo "kernel=$kernel workers=$w nursery=$nur age=$age run=$r load=$(sysctl -n vm.loadavg | awk '{print $2}') $line"
+  done; done; done; done
+done
+```
+
+The table is the medians of the five lines per cell (a small Python
+aggregation of the key=value lines). The churn sweep figures come from
+three more runs of `kajo run prelude lib churn --workers 1|8 --heap 64
+--slice-ms 0` with the report's `sweepP50ms` and `ttspP50ms`.
+
 ## Changes to modules 1 to 3
 
 Module 1 (`ObjectMemory/`):
@@ -428,7 +660,11 @@ Module 3 (`Workers/`, `Processes/`):
   path one load and one store (as module 1's list pop does), touches only
   what was allocated since the last scavenge, and keeps module 1's
   one-owner rule checkable. A run log needed contiguous runs, which the
-  module 1 run builder and become-forward do not keep.
+  module 1 run builder and become-forward do not keep. Measured cost: the
+  sweep reads each young entry, about 0.07 ms per 4 MiB nursery of
+  24-byte objects, which is nearly all of a churn scavenge and makes churn's
+  8-worker p99 0.53 ms against the brief's 0.4 (the experiment's bitmaps:
+  0.32). A finding, not fixed here.
 - **The promotion reserve is twice the nurseries plus a third**, not equal
   to their sum: a scavenge that leaves old space past its soft limit may be
   followed by another before the full collection it requested runs, and a
@@ -557,6 +793,10 @@ the no-nursery oracle's; each configuration checks that its stress happened.
   The main worker still copies in a scavenge.
 - Nursery sizing from observed survival; per-worker sizes; the 16-worker
   limit of the 4-bit nursery index.
+- Chunk bitmaps for the entry sweep: the stash sweep reads every young
+  entry and is most of a churn scavenge's pause (Measurements); the
+  experiment's bitmaps swept 64 entries per word. Behind the module
+  boundary (`sweepNursery`, `EntryStash`).
 - Card marking (whole holders are rescanned: the survivors kernels spend a
   large share of every pause on remembered holders).
 - Ephemerons in the scavenge (v0 treats them as strong) and the concurrent

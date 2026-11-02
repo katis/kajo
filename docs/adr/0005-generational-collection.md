@@ -87,3 +87,39 @@ Kajo's collector is generational.
   regression test for it.
 - Next experiment: concurrent marking of old space with the same write
   barrier, measured against the same window.
+
+## Built (module 4, 2026-11-02)
+
+`Sources/KajoVM/Nursery/` (docs/modules/nursery.md) builds this decision:
+one nursery per worker (eden plus two survivor halves, beyond the block
+range), a parallel stop-the-world scavenge in which the stopper and every
+parked worker take part (claim by one CAS on the header, copy, update the
+entry; no reference changes), a barrier in concurrent-young's shape on
+every store of an oop into a heap object (18 tagged sites, VM stores
+included) with a 16-bit marker per entry beside the table and per-worker
+buffers, a promotion reserve beyond old space's soft limit, and full
+collections in pauses of their own. Dead young entries go back to
+per-nursery entry stashes rather than the experiment's chunk bitmaps.
+
+Headless numbers (M2 Max, release, medians of five runs; every checksum
+the experiments'):
+
+| kernel, 8 workers | 1 MiB p99 | 4 MiB p99 | 16 MiB p99 | 4 MiB max |
+|---|--:|--:|--:|--:|
+| churn | 0.26 ms | 0.53 ms | 1.67 ms | 0.60 ms |
+| survivors5 (N = 1) | 0.65 ms | 1.06 ms | 2.82 ms | 1.15 ms |
+| survivors30 (N = 1) | 0.69 ms | 1.55 ms | 5.96 ms | 1.68 ms |
+| alloc (N = 1) | 1.20 ms | 3.90 ms | 4.89 ms | 4.39 ms |
+
+- The barrier's fast path is four instructions when the value is old; it
+  did not show against code placement (ivars 0.93x module 3).
+- Eden allocation is no slower than module 1's bump (churn 0.97x module 3).
+- churn's pauses are the entry sweep plus time to safepoint: the stash
+  sweep reads every young entry (0.07 ms per 4 MiB nursery), where the
+  experiment's bitmaps read one word per 64. Its 4 MiB p99 is 0.53 ms
+  against the experiment's 0.32.
+- Copy rate per participant still halves from one participant to eight.
+- Two findings outside the collector: a stop longer than a 5 ms slice
+  livelocked a stop-at-every-poll program (a slice's first budget check
+  no longer preempts), and the main worker copies in the scavenges it is
+  parked in (ADR 0008 takes it off the pause).

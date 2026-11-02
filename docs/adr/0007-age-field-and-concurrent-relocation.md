@@ -149,3 +149,32 @@ the same with or without relocation.
   relocation policy that avoids hot blocks; concurrent or parallel root and
   survivor scanning through the scheduler; nursery and survivor sizing from
   observed survival; large objects outside the nursery.
+
+## Built: the age field (module 4, 2026-11-02)
+
+The age half is built in `Sources/KajoVM/Nursery/` (docs/modules/
+nursery.md): age in header bits 57..59, claim tags in 62..63 alternating
+per scavenge, the decision (survive with age + 1 and the winner's nursery
+index, or promote with every young bit cleared) written by the claiming
+CAS, survivors in the copying participant's survivor-to, overflow
+promotion when it is full, remembered holders carried while they name a
+survivor, promoted holders of survivors remembered, and promote-all before
+every old-space operation. Every rule that "nothing is young after a
+scavenge" used to cover has a test that fails with the rule switched off
+(carried holders, promoted holders, the alternating tag).
+
+Headless matrix (M2 Max, release, medians of five, 8 workers):
+
+| kernel | nursery | N = 1 promoted MB/s | N = 2 promoted MB/s | N = 2 survived / overflow MB | p99 N = 1 / N = 2 |
+|---|---|--:|--:|---|---|
+| alloc | 4 MiB | 1320 | 913 | 168 / 477 | 3.90 / 3.99 ms |
+| alloc | 16 MiB | 512 | 56 | 159 / 18 | 4.89 / 4.25 ms |
+| survivors30 | 4 MiB | 511 | 478 | 72 / 80 | 1.55 / 2.43 ms |
+| oldheap64 | 4 MiB | 576 | 552 | 94 / 98 | 2.46 / 2.39 ms |
+| fragment | 4 MiB | 603 | 588 | 71 / 164 | 2.01 / 2.45 ms |
+
+As the experiment found: at 4 MiB survivor overflow carries most of what
+N = 2 still promotes, a 16 MiB nursery is what cuts promotion (alloc 913
+to 56 MB/s), and copying survivors lengthens tails (survivors30 p99 1.55
+to 2.43 ms). Full collections on alloc at 4 MiB fell from 32 to 16 per run.
+Relocation (Part 2) is module 6.
