@@ -1,5 +1,6 @@
-// The memory model the explorer runs the protocol under.
-// docs/models/relocation.md "Memory model" is the prose version of this file.
+// The memory model every model in this package runs its protocol under.
+// docs/models/relocation.md "Memory model" is the prose version of this file;
+// docs/models/young-collection.md records the one extension (below).
 //
 // One shared array of words, read and written atomically: the model is
 // multicopy atomic (a store, once it leaves its thread, is seen by every
@@ -30,6 +31,12 @@
 // in program order at the instant of their step, which also gives address
 // dependencies for free), non-multicopy-atomic visibility (POWER, the C++
 // abstract machine), and speculation. See the doc's "Limits".
+//
+// Extension for the young-collection model: `sequentiallyConsistent`. With
+// it every store is performed on shared memory at the instant of its step
+// (no buffer, nothing to drain), so every execution is an interleaving of
+// atomic steps. A protocol that fails with it fails for a reason the
+// relaxations are not part of.
 
 /// The C++ / Swift `Atomic` orderings the protocol uses.
 public enum Order: UInt8, Hashable, Sendable, CustomStringConvertible {
@@ -45,39 +52,68 @@ public enum Order: UInt8, Hashable, Sendable, CustomStringConvertible {
     }
 }
 
-struct BufferedStore: Hashable {
-    var address: Int
-    var value: Int
-    var order: Order
+public struct BufferedStore: Hashable, Sendable {
+    public var address: Int
+    public var value: Int
+    public var order: Order
+
+    @inlinable
+    public init(address: Int, value: Int, order: Order) {
+        self.address = address
+        self.value = value
+        self.order = order
+    }
 }
 
-struct Memory: Hashable {
-    var words: [Int]
-    var buffers: [[BufferedStore]]
+/// `@inlinable` throughout: each model's module inlines these into its
+/// steps (cross-module calls cost the relocation model 19 percent).
+public struct Memory: Hashable, Sendable {
+    public var words: [Int]
+    public var buffers: [[BufferedStore]]
+    /// No store buffers: stores reach shared memory at once.
+    public let sequentiallyConsistent: Bool
 
-    init(words: [Int], threads: Int) {
+    @inlinable
+    public init(words: [Int], threads: Int, sequentiallyConsistent: Bool = false) {
         self.words = words
         self.buffers = Array(repeating: [], count: threads)
+        self.sequentiallyConsistent = sequentiallyConsistent
     }
 
-    func isDrained(_ t: Int) -> Bool { buffers[t].isEmpty }
+    @inlinable
+    public func isDrained(_ t: Int) -> Bool { buffers[t].isEmpty }
+
+    /// A seq_cst read-modify-write (or a fence followed by plain accesses):
+    /// enabled only with the thread's buffer empty, then performed on shared
+    /// memory. Answers the old value, or nil when not enabled yet.
+    @inlinable
+    public mutating func readModifyWrite(_ t: Int, _ address: Int, _ f: (Int) -> Int) -> Int? {
+        guard isDrained(t) else { return nil }
+        let old = words[address]
+        words[address] = f(old)
+        return old
+    }
 
     /// The value thread `t` reads at `address`, or nil when the load is not
     /// enabled yet (a seq_cst load behind a buffered seq_cst store).
-    func load(_ t: Int, _ address: Int, _ order: Order) -> Int? {
+    @inlinable
+    public func load(_ t: Int, _ address: Int, _ order: Order) -> Int? {
         let buffer = buffers[t]
         if order == .seqCst && buffer.contains(where: { $0.order == .seqCst }) { return nil }
         if let forwarded = buffer.last(where: { $0.address == address }) { return forwarded.value }
         return words[address]
     }
 
-    mutating func store(_ t: Int, _ address: Int, _ value: Int, _ order: Order) {
+    @inlinable
+    public mutating func store(_ t: Int, _ address: Int, _ value: Int, _ order: Order) {
         precondition(order != .acquire, "no acquire stores")
+        if sequentiallyConsistent { words[address] = value; return }
         buffers[t].append(BufferedStore(address: address, value: value, order: order))
     }
 
     /// Indices of thread `t`'s buffered stores that may drain next.
-    func drainable(_ t: Int) -> [Int] {
+    @inlinable
+    public func drainable(_ t: Int) -> [Int] {
         let buffer = buffers[t]
         var result: [Int] = []
         for i in buffer.indices {
@@ -90,7 +126,8 @@ struct Memory: Hashable {
     }
 
     /// Make thread `t`'s buffered store `i` visible to every thread.
-    mutating func drain(_ t: Int, _ i: Int) -> BufferedStore {
+    @inlinable
+    public mutating func drain(_ t: Int, _ i: Int) -> BufferedStore {
         let entry = buffers[t].remove(at: i)
         words[entry.address] = entry.value
         return entry

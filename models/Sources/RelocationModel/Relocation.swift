@@ -24,11 +24,6 @@ public enum Claim: Int, Hashable, Sendable, CaseIterable, CustomStringConvertibl
     }
 }
 
-public struct Violation: Hashable, Sendable {
-    public var claim: Claim
-    public var message: String
-}
-
 // MARK: - layout of shared memory
 
 /// Where each shared word lives, and how to print addresses and values.
@@ -144,14 +139,6 @@ public struct State: Hashable {
     var blockFreed = false
     /// Per slot, the value of its writer's last completed store.
     var lastWritten: [Int]
-}
-
-/// One transition: a label for traces (empty unless asked for), the next
-/// state, and the claim it violates, if any.
-struct Step {
-    var label: String
-    var next: State
-    var violation: Violation?
 }
 
 // MARK: - the model
