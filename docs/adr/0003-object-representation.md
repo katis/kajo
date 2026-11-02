@@ -103,3 +103,40 @@ body offset and the header word, entries are allocated from per-worker chunks.
   per-worker chunks avoided.
 - The first thing to build after the object memory is a device benchmark of
   the walk and sends kernels on an iPhone, to confirm or revise this ADR.
+
+## Device measurement (2026-11-02)
+
+`experiments/device-measurement/` ran the three object memories on an
+iPhone 17 Pro (iOS 27.0.1, 2 performance and 4 efficiency cores). See its
+RESULTS.md.
+
+| kernel | workers | table / direct, phone | table / direct, Mac |
+|---|--:|--:|--:|
+| walk | 1 | 4.42 | 1.46 |
+| walk, traversal only | 1 | 7.65 | 2.02 |
+| walk | 6 (Mac 8) | 1.12 | 1.43 |
+| sends | 1 | 1.11 | 1.04 |
+| ivars | 1 | 1.01 | 1.00 |
+| footprint on walk | 1 | 1.38 | 1.38 |
+
+The prediction "wider, not narrower" held, in one regime only. A single
+thread chasing pointers through a structure of about 100 MB or more pays
+4.4x for the kernel and 7.4x per hop (522 ns against 70 ns). Below about
+50 MB per thread the table pays 1.1 to 1.3x, narrower than the Mac. The
+cost follows the per-thread structure size, which points at the reach of
+one core's address translation or cache with two pages touched per hop;
+no performance counters were read, so that is a hypothesis. Ordinary code
+and footprint match the Mac. Compaction and become pauses still favour the
+table by a third, and ADRs 0006 to 0008 have since built the concurrent
+collector on the entry switch.
+
+Status stays proposed. The table is kept. Before acceptance, in order: the
+concurrent marker's rate through the table against a direct-pointer marker
+on a 200 MB old heap on device, since the marker is the program that does
+this traversal every cycle and its QoS and the table are not yet separated;
+entry locality (entries allocated in body order or per block) to see
+whether the per-hop cost falls to the Mac's 2x; and a development-sized
+image under a realistic single-threaded traversal. If locality closes the
+gap, accept. If it does not and the marker pays the same 4x, revise toward
+heap offsets (C): the table's memory cost was the expected risk on a phone,
+its cache-reach cost is the one found.

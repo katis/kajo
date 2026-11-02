@@ -153,6 +153,23 @@ Safety:
  - Pause maxima depend on the OS descheduling any VM thread. Report p50 and
    p99 with the max, name the slowest participant, and re-measure on device
    before trusting a maximum.
+ - The iPhone runs this interpreter twice as fast as the M2 Max on one
+   thread and slower across workers; four of its six cores are efficiency
+   cores. Any collector or marker thread at utility QoS runs on them and
+   can be 5x slower; on a phone QoS decides whether a cycle completes.
+ - Device numbers carry a thermal state. The phone went from nominal to
+   serious in 12 minutes of matrix and ran up to 15 percent slower; cooling
+   took 7 minutes. Log `ProcessInfo.thermalState` on every result line,
+   repeat the first kernel at the end, and compare only configurations run
+   back to back.
+ - The object table's cost on a phone follows per-thread structure size:
+   1.1 to 1.3x below about 50 MB per thread, 4 to 7x per hop above 100 MB.
+   Entry locality is the open question before ADR 0003 can be accepted.
+ - `mach_vm.h` is unsupported in the iOS SDK; use the `vm_map` family with
+   the same arguments. The double heap mapping needs no entitlement.
+ - Device iteration is fast: about one second per launch over `devicectl`,
+   with stdout streamed. Design device benchmarks as one kernel per launch
+   so a crash costs one run and thermal state is logged per launch.
 
 ## Verification
 
@@ -177,8 +194,10 @@ spaces and concurrent relocation of old space through the entry table
 (proposed; old-space work is off the frame budget, scavenges remain), 0008
 young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
-thread exceeds a frame, acknowledgements and the initial mark remain). Read
-them before touching the areas they cover.
+thread exceeds a frame, acknowledgements and the initial mark remain). ADRs
+0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
+(experiments/device-measurement). Read them before touching the areas they
+cover.
 
 ## Project structure
 

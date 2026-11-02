@@ -151,3 +151,29 @@ Nurseries are collected without stopping the world.
   measurements are the acknowledgement cost, a parallel young-root scan,
   the mixed policy as a whole, and the device run that ADR 0003 has been
   waiting for.
+
+## Device measurement (2026-11-02)
+
+On the iPhone 17 Pro with 5 background workers and the phone cooled, the
+display delivered 120 Hz throughout:
+
+| scenario | missed of 1200 | main thread stopped for others' allocation |
+|---|--:|--:|
+| storm, stop-the-world | 1 | 108 ms (39 scavenges) |
+| storm, local | 0 | 25 ms (1040 acknowledgements) |
+| storm, offload | 0 | 29 ms (1315 acknowledgements) |
+| fragmentation ring, local | 0 | 1.6 ms |
+| heavy main-thread allocation, offload | 0 | 0.02 ms |
+
+The split holds on device: the collector thread keeps up with the main
+thread alone (1.5 percent busy, flips 0.023 ms max) and does not keep up
+with six allocating workers (76 to 96 percent busy). Local collection's
+own pause is worse than on the Mac relative to stop-the-world, 1.1 to 1.9
+times its p50, because one copying thread lands on an efficiency core.
+Most maxima moved down on the phone, not up. The eden-reuse wait has a
+10 ms floor at 2 and 6 workers, one scheduler quantum, since the epoch
+rule waits for a descheduled worker. A hot phone (thermal state serious)
+nearly doubled the main thread's acknowledgement time; a frame budget
+must be stated with a thermal state. The checksum gate held in 1044
+launches. Not run on device: ThreadSanitizer, the verifier scenarios, the
+share kernel. See experiments/device-measurement/RESULTS.md.

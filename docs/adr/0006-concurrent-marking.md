@@ -107,3 +107,13 @@ Old space is collected by concurrent marking and lazy sweeping.
   suite and runs in at least one scenario per benchmark.
 - Next collector work, in order of value: an age field with a survivor
   space, compaction of old space, large objects.
+
+## Device measurement (2026-11-02)
+
+On the iPhone 17 Pro the marker at utility QoS landed on efficiency cores
+with six busy workers and marked at 0.68 GB per CPU second; at
+user-initiated it marked at 3.6, the cycle on a 256 MiB heap fell from
+746 to 72 ms, and the allocation storm's fallbacks disappeared. The
+"collector QoS is a design input" lesson is a hard requirement on a phone:
+the marker runs at user-initiated at least while promotion is high. See
+experiments/device-measurement/RESULTS.md.
