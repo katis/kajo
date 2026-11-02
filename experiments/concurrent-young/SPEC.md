@@ -570,3 +570,17 @@ inline. These rules were added afterwards:
 14. **Waiting workers are quiescent for the epoch** (they hold no body
     pointer), otherwise a collector's epoch wait and a worker waiting for that
     collector deadlock.
+15. **The collector thread can be a stop-the-world stopper** (offload: the
+    initial mark (b) and fallbacks it requests). It has no nursery: it
+    promotes everything it copies in a stop-the-world scavenge, its
+    re-remembered holders go to the carried lists after they were consumed,
+    and its promotion buffer is retired before a mark-sweep (the mark-sweep
+    freed the block under an open buffer: lost objects in 2 of 20 alloc
+    runs, found by the checksum gate).
+16. **A global count of held hazard slots.** `hazardAcquire` increments it
+    (seq_cst) before publishing its slot; a young collector reads it after
+    its RELOCATING CAS and fence and scans the slots only when it is
+    nonzero (same Dekker argument as the slots). Scanning every worker's
+    slots for every copied object made local collection 2.7 times slower than
+    stop-the-world on alloc at 8 workers. Collectors also advance their
+    epoch word between objects and while waiting.
