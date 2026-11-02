@@ -112,3 +112,45 @@ appeared as a speedup on other kernels, which is a code-placement effect.
   or stalls become invisible to the measurement.
 - Swift code that builds closures for GCD or VM threads must not do so inside
   `@MainActor` methods; Swift 6 traps when such a closure runs elsewhere.
+
+## Built (module 3, 2026-11-02)
+
+`Sources/KajoVM/Workers/` and `Processes/` (docs/modules/workers.md) build
+this decision headlessly, without a shell: the main worker is worker 0,
+given to the VM in turns (`VM.runMain(budgetNs:minPriority:)`); Processes
+own 64 KiB stacks and move between workers mid-method; the safepoint poll
+counts down to a clock read every 1024 polls and preempts at bytecode
+boundaries; a shell-call primitive called off main hops (the Process
+becomes main-affine and the send is retried on main); primitives never
+block (Delay is a one-shot GCD timer signalling from outside through a
+lock-free queue and pending roots); a main-affine Process runnable for too
+long is reported once through a C hook (`checkStuck`). Hooks are C
+function pointers set before any worker starts.
+
+Headless numbers (M2 Max, release):
+
+- **Budget**: an infinite loop at normal priority on the main worker,
+  1 ms turns, with stops landing inside them: the VM's overrun past the
+  budget (CPU time, stops and entry waits taken out) at most 0.042 ms in
+  every run, including the debug suite under a load average of 40; alone,
+  the wall-clock overrun was at most 0.054 ms (debug). Under load the wall
+  tail reached 15 ms: the OS descheduling the thread, not the VM.
+- **Cost**: fib 2.8 percent slower than module 2 measured interleaved in
+  the same session (1714.1 against 1667.7 ms, medians of five), including
+  the Process, its slices and the countdown; the other kernels -0.2 to +4.8
+  percent, within the code-placement spread the experiment saw.
+- **Scaling**: eight workers run the compute kernels 7.1 to 7.6x faster
+  and `alloc` 6.05x, the remainder being two single-threaded
+  stop-the-world collections per run (35 to 37 ms pauses on a 1 GiB heap).
+- **Idle**: eight idle workers use no measurable CPU and wake zero times
+  in a second.
+- **Hop**, **stuck report**, **10,000 parked Processes**, **stack
+  overflow** terminating one Process only: tested, not timed.
+
+Still waiting for the shell (module 9): the 120 Hz scenarios, event
+latency and frames missed, the frame account (how much of a frame the
+shell gives the VM), the native event queue and `nextEvent`, the
+re-entrancy guard for nested run loops, and the measurement of hop latency
+and stalls on a real main thread. Still waiting for the collector
+(modules 4 to 7): pauses that fit in a frame; today a stop lands on the
+main worker as before (turns report it separately).
