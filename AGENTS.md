@@ -138,6 +138,15 @@ Safety:
    Any protocol built on a double mapping is covered by tests and the
    ordering argument only; say so where the mapping is created.
 
+## Verification
+
+Experiments are evidence, not production code; `docs/VERIFICATION.md` says
+how the production core is built from them and lists the verification
+layers it needs: a checked build with every verifier on, the stop-the-world
+collector kept as an oracle, stress modes, randomized programs, schedule
+perturbation, a model of the concurrent protocols, loader fuzzing, counters
+as telemetry, and device runs. Read it before starting `Sources/KajoVM`.
+
 ## Decisions
 
 Decisions live in `docs/adr/`, one per file, each pointing at the experiment
@@ -163,6 +172,8 @@ them before touching the areas they cover.
    package. Not created yet.
  * `experiments/` throwaway spikes with a design brief and results each.
  * `docs/CONTEXT.md` domain vocabulary. `docs/adr/` one decision per file.
+   `docs/VERIFICATION.md` how the experiments become the production core
+   and what verification that core needs beyond tests and ThreadSanitizer.
  * `references/` contains prior art and other references we might benefit from
    in the design. Gitignored; see `references/MANIFEST.md`.
  * `justfile` has the common commands: `just build`, `just test`, `just run`,
