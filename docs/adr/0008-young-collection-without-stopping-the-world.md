@@ -177,3 +177,39 @@ nearly doubled the main thread's acknowledgement time; a frame budget
 must be stated with a thermal state. The checksum gate held in 1044
 launches. Not run on device: ThreadSanitizer, the verifier scenarios, the
 share kernel. See experiments/device-measurement/RESULTS.md.
+
+## Energy on device (2026-11-02)
+
+`experiments/power` (CPU energy only, 120 Hz paced allocation, 10 percent
+survival, medians of 3), mJ per MB allocated:
+
+| MB/s | stop-the-world | offload + marker, both user-initiated | both utility | collector user-initiated, marker utility |
+|--:|--:|--:|--:|--:|
+| 2 | 1.98 | 2.22 | 2.08 | 2.05 |
+| 10 | 1.54 | 1.64 | 1.60 | 1.62 |
+| 50 | 1.62 | 1.79 | 1.74 | 1.74 |
+| 100 | 4.23 | 4.72 | 4.60 | 4.09 |
+| 200 | 7.70 | 7.97 | 9.61 | 8.15 |
+
+Stop-the-world is 5 to 12 percent cheaper in energy below 50 MB/s, where
+everything runs on efficiency cores, but its scavenges there take 4.5 to
+5.3 ms and its full collections miss 4 to 7 frames per run from 100 MB/s.
+The collector thread at utility costs more energy than at user-initiated
+from 150 MB/s (the main thread waited for it 130 to 160 times per run) and
+first missed frames at 150 MB/s; at user-initiated it took 13 to 16 percent
+of mutator CPU and 9 to 15 percent of energy. The young collector and the
+five parked workers use no CPU when idle; the idle wakeups belong to the
+marker (ADR 0006).
+
+Amendment: on device the young collector thread stays at
+**user-initiated**; the marker goes to utility (ADR 0006). This is the
+"mixed" policy and it never missed a frame up to 200 MB/s.
+
+**Open defect.** The test `sharedYoungObjectsAreClaimedOnceByParallelScavengers`
+(parallel stop-the-world scavenge with shared young objects) failed under
+CPU contention in `experiments/power` twice out of two full-suite runs and
+1 of 20 alone, and 0 of 23 in the concurrent-young package itself; an
+earlier full run during concurrent-young showed 3 unnamed issues under
+load. A schedule-dependent claim bug in the parallel scavenge is likely.
+It is in the stop-the-world oracle path, so every checksum comparison in
+this ADR and 0007 leans on it. Diagnose before building on this collector.

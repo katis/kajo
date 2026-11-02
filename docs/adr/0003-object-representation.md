@@ -195,12 +195,21 @@ are revised to:
   to 140 MB/s on one performance core over a random 200 MB graph.
 - A single latency-bound thread on an idle P cluster can run 2.5 to 4 times
   slower per miss on the phone under any representation, and reaches that
-  state more often through the table. The main thread running Smalltalk
-  while every worker idles is that shape. Before the UI path relies on
-  large traversals, measure a development-sized image traversed on the
-  main thread on device, alone and with a busy companion, and identify the
-  regime (Instruments CPU counters) and whether a shell can avoid it
-  cheaply.
+  state more often through the table. `experiments/power` measured the
+  regime's energy: it is **not** a power-saving state. In it the core runs
+  at a higher clock (4.08 against 3.78 GHz) with half the IPC and spends
+  1.4 to 1.5 times the CPU energy per hop as well as 2.7 times the time
+  (309 against 205 nJ per hop, CPU energy only, DRAM not counted). A
+  companion thread on the other P core in a `wfe` loop prevented it in 13 of
+  13 launches for 0.3 W, at the same process energy per hop as the slow
+  regime and 3.7 times the speed; a spinning companion costs 2.9 W, timers
+  at 100 Hz to 10 kHz and a utility-QoS spin do not prevent it. The main
+  thread running Smalltalk while every worker idles is the shape that hits
+  it. Before the UI path relies on large traversals, measure a
+  development-sized image traversed on the main thread on device, and decide
+  whether the shell runs a `wfe` companion during such traversals or accepts
+  the regime; measure DRAM energy first if it can be read, since it could
+  change the sign.
 - Revisit C only if that measurement shows table walks in the slow regime
   dominating real UI work, or if footprint (1.33 to 1.39x) becomes the limit
   on device.

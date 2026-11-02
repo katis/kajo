@@ -181,6 +181,31 @@ Safety:
  - Any variant that ties block size to page size makes block size a
    correctness parameter and forces a second arena for large objects. Do
    not pay that for a locality gain you have not measured.
+ - Energy on iOS: `ri_energy_nj` from `proc_pid_rusage` is the process's
+   CPU energy; `ri_billed_energy` is work others did on its behalf and falls
+   when the app gets busy. Per-thread and per-core-type energy comes from
+   `proc_pidinfo(PROC_PIDTHREADCOUNTS)`, a private flavor that worked on
+   iOS 27. Neither counts DRAM, display or the render server; say so.
+ - The phone's single-thread slow regime is not a power-saving state: 1.4
+   to 1.5x the CPU energy per hop at a higher clock and half the IPC. A
+   `wfe` loop on the other P core prevents it for 0.3 W; a spin costs 2.9 W;
+   timers and a utility-QoS spin do not prevent it (experiments/power).
+ - Below about 50 MB/s of allocation the whole app, main thread included,
+   runs on efficiency cores whatever QoS you ask for, and the collector's
+   QoS changes energy by under 10 percent. QoS matters from 100 MB/s up;
+   there the marker at utility costs a fifth of the energy per cycle and
+   kept up, and the young collector at utility made the main thread wait.
+   Mixed is the device policy: collector user-initiated, marker utility.
+ - A timed wait in a thread that has nothing to do is the whole idle cost
+   of the VM: the marker's 1 ms wait woke the phone 130 to 580 times a
+   second while every other VM thread woke zero times. Idle threads wait
+   untimed; measure wakeups per second with `ri_pkg_idle_wkups` and ask
+   for zero.
+ - An empty Smalltalk turn on every 120 Hz frame costs nothing beyond the
+   display link itself.
+ - A test that fails only when three test targets run at once is a real
+   schedule-dependent bug, not noise; the parallel stop-the-world scavenge
+   has one (ADR 0008, open defect). Run suites under CPU load on purpose.
  - `mach_vm.h` is unsupported in the iOS SDK; use the `vm_map` family with
    the same arguments. The double heap mapping needs no entitlement.
  - Device iteration is fast: about one second per launch over `devicectl`,
@@ -213,7 +238,9 @@ young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
 thread exceeds a frame, acknowledgements and the initial mark remain). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
-(experiments/device-measurement and entry-locality). Read them before touching the areas they
+(experiments/device-measurement and entry-locality) and energy measurements
+(experiments/power: marker at utility, young collector at user-initiated on
+device; the marker's timed wait is the VM's whole idle cost). Read them before touching the areas they
 cover.
 
 ## Project structure

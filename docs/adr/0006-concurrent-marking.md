@@ -117,3 +117,34 @@ user-initiated it marked at 3.6, the cycle on a 256 MiB heap fell from
 "collector QoS is a design input" lesson is a hard requirement on a phone:
 the marker runs at user-initiated at least while promotion is high. See
 experiments/device-measurement/RESULTS.md.
+
+## Energy on device (2026-11-02)
+
+`experiments/power` measured CPU energy (`ri_energy_nj`, per thread through
+`PROC_PIDTHREADCOUNTS`) on the iPhone 17 Pro under a 120 Hz paced
+allocation with 10 percent survival and a 200 MB mutating old heap.
+
+- Below about 50 MB/s the whole app, main thread included, runs on the
+  efficiency cores whatever the QoS, and the four collector configurations
+  are within 0.2 mJ per MB allocated of each other.
+- From 100 MB/s up the marker at user-initiated costs 0.13 to 0.15 J per
+  marking cycle, 93 to 95 percent on P cores; at utility 0.03 J. The
+  marker at utility never fell back to stop-the-world in 60 concurrent
+  launches, with promotion up to 28 MB/s.
+- Marker at utility with the young collector at user-initiated
+  (`conc-mixed`) matched the all-user-initiated configuration's energy
+  within 1 to 2 percent at 150 to 200 MB/s, was 13 percent cheaper at 100,
+  and never missed a frame.
+
+Amendment: on device the marker runs at **utility** by default and is
+raised to user-initiated only when old-space headroom shrinks below a
+threshold; the device-measurement result above (fallbacks at utility) was
+the allocation storm with six busy workers, which this policy must detect.
+The escalation itself was not measured.
+
+**Idle bug.** `markerLoop` waits with a 1 ms timed wait even when no block
+is pending (`experiments/concurrent-young/swift/Sources/VMR/Concurrent.swift`).
+A parked VM therefore wakes 130 times per second at utility and 580 at
+user-initiated, 0.1 mW; without the marker thread a parked VM wakes zero
+times. The production marker waits untimed when nothing is pending. See
+experiments/power/RESULTS.md.
