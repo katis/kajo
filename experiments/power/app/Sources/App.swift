@@ -6,7 +6,7 @@
 // the parts and every key of the result lines.
 //
 //   part=hello                 energy readout check: 1 s idle, 1 s busy
-//   part=1 kernel=walk22x6|walkbuild22 workers=1|2 comp=...   walk on B
+//   part=1 kernel=walk22x4|walkbuild22 workers=1|2 comp=...   walk on B
 //   part=1c size=256 hops=N comp=...                             chase
 //   part=2 rate=MB/s seconds=30 (collector config in KAJO_* args)
 //   part=3 mode=novm|parked|link|tick|tickalloc seconds=60

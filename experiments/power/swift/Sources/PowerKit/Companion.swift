@@ -119,6 +119,6 @@ public final class Companion: @unchecked Sendable {
         return " comp=\(c.name) comp_qos=\(q) comp_cpu_ms=\((Double(r.cpuNs) / 1e5).rounded() / 10)"
             + " comp_wall_ms=\((Double(r.wallNs) / 1e5).rounded() / 10) comp_count=\(r.count)"
             + " comp_rate_hz=\(rate.rounded()) comp_late_mean_us=\(r.count > 0 ? (Double(r.lateNs) / Double(r.count) / 100).rounded() / 10 : 0)"
-            + r.counts.fields("comp")
+            + r.counts.fields("comptc")
     }
 }

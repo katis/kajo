@@ -172,6 +172,8 @@ final class PowerController: UIViewController {
         ts0 = ThreadCPU.snapshot()
         frameTimes = []; turnMs = []; parkedMs = []
         measuring = true
+        // The actual start (asyncAfter may fire late by its leeway).
+        measureStart = CACurrentMediaTime()
         u0 = ProcUsage.now()
     }
 
@@ -198,13 +200,15 @@ final class PowerController: UIViewController {
 
     func finish() {
         let u1 = ProcUsage.now()
+        measureEnd = CACurrentMediaTime()
         measuring = false
+        let window = measureEnd - measureStart
         let ts1 = ThreadCPU.snapshot()
         var tc1: [String: ThreadCounts] = [:]
         let rl = roles()
         for (k, ids) in rl { tc1[k] = ThreadCounts.sum(ids.map { ThreadCounts.of($0) }) }
         link?.invalidate()
-        var line = info.head + " mode=\(mode) seconds=\(seconds) warmup=\(warmup) setup_ms=\(f2(setupMs))"
+        var line = info.head + " mode=\(mode) seconds=\(seconds) window_s=\(f3(window)) warmup=\(warmup) setup_ms=\(f2(setupMs))"
         for k in ["KAJO_GC", "KAJO_YOUNG", "KAJO_YC_QOS", "KAJO_CM_QOS", "KAJO_AGE"] {
             line += " env_\(k)=\(getenv(k).map { String(cString: $0) } ?? "-")"
         }
@@ -218,7 +222,7 @@ final class PowerController: UIViewController {
             let drops = gaps.filter { $0 > 1.5 * p120 }
             let missed = drops.reduce(0) { $0 + max(0, Int(($1 / p120).rounded()) - 1) }
             let gapsMs = gaps.map { $0 * 1000 }
-            line += " frames=\(frameTimes.count) refresh_hz=\(f2(Double(frameTimes.count) / seconds)) drops120=\(drops.count) missed120=\(missed)"
+            line += " frames=\(frameTimes.count) refresh_hz=\(f2(Double(frameTimes.count) / window)) drops120=\(drops.count) missed120=\(missed)"
             line += " gap_p50_ms=\(f3(pct(gapsMs, 0.5))) gap_p99_ms=\(f3(pct(gapsMs, 0.99))) gap_max_ms=\(f3(gapsMs.max() ?? 0))"
             line += " turn_p50_ms=\(f3(pct(turnMs, 0.5))) turn_p99_ms=\(f3(pct(turnMs, 0.99))) turn_max_ms=\(f3(turnMs.max() ?? 0))"
             line += " turn_total_ms=\(f2(turnMs.reduce(0, +))) parked_total_ms=\(f3(parkedMs.reduce(0, +))) parked_max_ms=\(f3(parkedMs.max() ?? 0))"
@@ -228,7 +232,7 @@ final class PowerController: UIViewController {
             let pts = s.pointsAllocated - points0, mut = s.mutationIters - mut0
             let allocMB = Double((pts + mut) * pointBodyBytes) / 1048576
             line += " bg=\(s.config.background) oldheap_mb=\(s.config.oldheapMB) heap_mb=\(s.config.heapMB)"
-            line += " points=\(pts) mut_iters=\(mut) alloc_mb=\(f3(allocMB)) alloc_mb_s=\(f3(allocMB / seconds)) pacer_capped=\(pacer.capped)"
+            line += " points=\(pts) mut_iters=\(mut) alloc_mb=\(f3(allocMB)) alloc_mb_s=\(f3(allocMB / window)) pacer_capped=\(pacer.capped)"
             line += " old_hwm_mb=\(f2(Double(oldHWM) / 1048576)) old_end_mb=\(f2(Double(s.oldBytes) / 1048576))"
             func d(_ m: Metric) -> UInt64 { vm.metric(m) &- (metrics0[m] ?? 0) }
             line += " d_scavenges=\(d(.scavenges)) d_fulls=\(d(.fullGCs)) d_yc=\(d(.ycCollections)) d_cm_cycles=\(d(.cmCycles)) d_cm_fallbacks=\(d(.cmFallbacks))"
@@ -238,7 +242,7 @@ final class PowerController: UIViewController {
             line += " main_own_n=\(mine.count) main_own_p50_ms=\(f3(pct(mine, 0.5))) main_own_p99_ms=\(f3(pct(mine, 0.99))) main_own_max_ms=\(f3(mine.max() ?? 0))"
             line += " vm_threads=coll:\(s.threads.collector.count),marker:\(s.threads.markers.count),bg:\(s.threads.background.count),unexpected:\(s.threads.unexpected.count)"
             line += " " + gcSummary(vm, from: gcLogStart)
-            line += ycSummary(vm, s.rt, wallMs: seconds * 1000, from: ycLogStart, hsFrom: hsStart)
+            line += ycSummary(vm, s.rt, wallMs: window * 1000, from: ycLogStart, hsFrom: hsStart)
         }
         // Per role: CPU from thread_info (all levels) and the core-type split.
         for k in ["main", "coll", "marker", "bg"] {

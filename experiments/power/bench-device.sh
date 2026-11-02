@@ -8,8 +8,8 @@
 # its first configuration. Configurations are interleaved run by run.
 #
 #   hello    the energy readout check (part=hello), 3 launches
-#   p1       walk22x6 and walkbuild22 on B, 1 worker, beside each companion
-#            in [COMPS]; walk23x6/walkbuild23 with 2 workers (each its own
+#   p1       walk22x4 and walkbuild22 on B, 1 worker, beside each companion
+#            in [COMPS]; walk23x4/walkbuild23 with 2 workers (each its own
 #            2^22 graph) without a companion; P1RUNS runs
 #   p1chase  chase 256 MB, 1 thread, alone and with a spinning companion
 #   p2       the rate matrix: [RATES] MB/s x stw conc-high conc-utility
@@ -92,27 +92,27 @@ walk() { # out tag kernel workers comp run
 
 if has p1; then
     O="$R/dev-p1.txt"
-    echo "== p1: walk22x6, walkbuild22 x [$COMPS]; 2 workers; $P1RUNS runs"
+    echo "== p1: walk22x4, walkbuild22 x [$COMPS]; 2 workers; $P1RUNS runs"
     cooldown
-    for i in $(seq 1 "$DRIFT"); do walk "$O" drift-start walk22x6 1 none "$i"; done
+    for i in $(seq 1 "$DRIFT"); do walk "$O" drift-start walk22x4 1 none "$i"; done
     for run in $(seq 1 "$P1RUNS"); do
         for c in $COMPS; do
-            walk "$O" matrix walk22x6 1 "$c" "$run"
+            walk "$O" matrix walk22x4 1 "$c" "$run"
             walk "$O" matrix walkbuild22 1 "$c" "$run"
         done
-        walk "$O" matrix walk23x6 2 none "$run"
+        walk "$O" matrix walk23x4 2 none "$run"
         walk "$O" matrix walkbuild23 2 none "$run"
         echo "   run $run/$P1RUNS done ($(tail -1 "$O" | grep -o 'thermal_end=[a-z]*'))"
         if (( run % 2 == 0 )); then cooldown; fi
     done
-    for i in $(seq 1 "$DRIFT"); do walk "$O" drift-end walk22x6 1 none "$i"; done
+    for i in $(seq 1 "$DRIFT"); do walk "$O" drift-end walk22x4 1 none "$i"; done
 fi
 
 if has p1chase; then
     O="$R/dev-p1chase.txt"
     echo "== p1chase: chase 256 MB, alone and with a spinning companion"
     for run in $(seq 1 "$P1RUNS"); do
-        for c in none spin; do launch "$O" matrix part=1c size=256 hops=33554432 comp="$c" run="$run" out=p1chase.txt; done
+        for c in none spin wfe; do launch "$O" matrix part=1c size=256 hops=33554432 comp="$c" run="$run" out=p1chase.txt; done
     done
 fi
 

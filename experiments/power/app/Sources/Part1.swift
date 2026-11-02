@@ -23,7 +23,7 @@ func companion(_ name: String) -> Companion? {
 
 func runWalk(_ opt: Options) -> String {
     kernelFlavor = .objectRepresentation
-    let kernel = opt["kernel"] ?? "walk22x6"
+    let kernel = opt["kernel"] ?? "walk22x4"
     let workers = opt.int("workers", 1)
     let compName = opt["comp"] ?? "none"
     let c = companion(compName)
@@ -101,7 +101,7 @@ func startUnplugged(_ opt: Options, info: LaunchInfo) {
             exit(0)
         }
         sleep(20)
-        let seq = (opt["seq"] ?? "walk22x6/none,walk22x6/spin,walkbuild22/none,walkbuild22/spin").split(separator: ",")
+        let seq = (opt["seq"] ?? "walk22x4/none,walk22x4/spin,walkbuild22/none,walkbuild22/spin").split(separator: ",")
         for rep in 0..<opt.int("reps", 3) {
             for item in seq {
                 let p = item.split(separator: "/")
