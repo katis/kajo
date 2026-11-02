@@ -62,10 +62,11 @@ VM's build.
 
 | file | contents |
 |---|---|
-| `Sources/RelocationModel/MemoryModel.swift` | shared words and per-thread store buffers; the rules below |
+| `Sources/ModelKit/MemoryModel.swift` | shared words and per-thread store buffers; the rules below (shared with the young-collection model) |
 | `Sources/RelocationModel/Configuration.swift` | instructions, the four switches and three probes, the three configurations |
 | `Sources/RelocationModel/Relocation.swift` | the claims, the memory layout, the state, every thread's steps |
-| `Sources/RelocationModel/Explorer.swift` | breadth-first search, traces, reports |
+| `Sources/ModelKit/Explorer.swift` | breadth-first search, traces, reports (generic, shared) |
+| `Sources/RelocationModel/Exploration.swift` | the model on the shared explorer |
 | `Tests/RelocationModelTests/RelocationModelTests.swift` | the claims hold; each rule is needed (traces in comments); probes |
 | `Tests/RelocationModelTests/MemoryModelTests.swift` | litmus tests of the memory model |
 
@@ -176,6 +177,10 @@ the sweep and the apply.
   adds nothing the CAS does not already do in this model.
 - The stopper's `gcRequested` and park/unpark are modelled as atomic actions
   under the mutex.
+- **Extension (2026-11-02, for `docs/models/young-collection.md`)**:
+  `Memory(sequentiallyConsistent: true)` has no store buffers; every store
+  reaches shared memory at its step. The relocation model does not use it.
+  `readModifyWrite` is a helper for the full-fence rule above.
 
 **Litmus tests** (`MemoryModelTests.swift`) pin the abstraction down:
 
