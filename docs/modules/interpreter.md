@@ -291,9 +291,9 @@ compactions, allocations and bytes.
 
 ## Unsafe surface
 
-280 lines with `unsafe` in `Interpreter/` and `Loader/` (comments
+282 lines with `unsafe` in `Interpreter/` and `Loader/` (comments
 excluded): Send 126, Dispatch 82, Interpreter 44, InterpreterState 22,
-Stack 4, Opcodes 1 (the decode's bit cast), FuzzEntry 1; one in each fuzz
+Stack 6, Opcodes 1 (the decode's bit cast), FuzzEntry 1; one in each fuzz
 target. They are the stack and register pointers, the two cached bases, the
 state pointer and the cache. `InterpreterState` is `@unsafe`; `Regs`,
 `Machine`, `Stack` and `Interpreter` are `@safe` wrappers. The parser,
