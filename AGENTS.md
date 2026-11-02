@@ -220,6 +220,16 @@ Safety:
  - Checksums do not see every lost object; the mark verifier does. Keep
    the verifiers running in at least one scenario per benchmark and treat
    one failure as a bug, never as noise.
+ - Strict memory safety cost the object memory 211 `unsafe` sites in 2,200
+   lines and forced no design change; the SDK differences (`mach_task_self_`
+   needs `unsafe` on macOS and warns on iOS) go behind one accessor.
+ - A plain release build strips every internal function nothing public
+   calls, so a disassembly check of internal hot paths needs
+   `-enable-testing` and a separate scratch path (`just arc-check`).
+ - A lock inside the struct it guards is a Swift exclusivity race to
+   ThreadSanitizer when one thread reads the lock through the struct while
+   another writes a field under it. The lock lives beside the struct, not in
+   it; this is the same rule as one sub-state per lock.
  - `mach_vm.h` is unsupported in the iOS SDK; use the `vm_map` family with
    the same arguments. The double heap mapping needs no entitlement.
  - Device iteration is fast: about one second per launch over `devicectl`,
@@ -261,7 +271,11 @@ cover.
 
  * `Package.swift` is the root SwiftPM package: `KajoVM` library, `kajo`
    headless CLI, `KajoVMTests` (Swift Testing).
- * `Sources/KajoVM/` the VM core. `Sources/kajo/` the CLI.
+ * `Sources/KajoVM/` the VM core, one directory per module:
+   `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`).
+   `Sources/kajo/` the CLI. `scripts/check-hot-path-arc.sh` (`just
+   arc-check`) greps the release disassembly of the allocation and store
+   paths for retain and release.
  * `kernel/` Smalltalk sources the image is built from. The image is never
    committed.
  * `apps/` Xcode projects for the macOS and iOS shells, depending on the root
