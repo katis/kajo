@@ -103,6 +103,7 @@ private func sleepMs(_ ms: Int) { usleep(useconds_t(ms * 1000)) }
     let cpu0 = rt.vm.markerCPUNanoseconds, waits0 = rt.marking.markerWaits
     sleepMs(1000)
     let cpu = rt.vm.markerCPUNanoseconds &- cpu0, waits = rt.marking.markerWaits &- waits0
+    print("idle marker: \(cpu) ns of CPU and \(waits) wakeups in 1 s parked")
     #expect(cpu < 1_000_000, "marker CPU \(cpu) ns in 1 s parked")
     #expect(waits <= 5, "marker woke \(waits) times in 1 s parked")
     rt.stop()
@@ -131,6 +132,7 @@ private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? 
     for k in 1...2 {
         rt.vm.startCycle()
         let ms = cycleDone(rt, c0 + UInt64(k), within: underThreadSanitizer ? 20 : 3)
+        print("idle marker: cycle \(k) after idling finished in \(ms.map { String($0) } ?? "-") ms")
         #expect(ms != nil, "cycle \(k) did not finish within 3 s after idling")
         if ms == nil { break }
         sleepMs(200)
