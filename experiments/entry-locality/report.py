@@ -336,6 +336,59 @@ def membw(name, label):
                   f(vals[-1] / vals[0], 2) if vals[0] and vals[-1] else '-', f(bw, 0), ', '.join(gh)))
 
 
+def membw2(name, label):
+    rows = parse(name)
+    if not rows:
+        return
+    g = defaultdict(list)
+    for r in rows:
+        rate = int(r.get('stream_rate', -1)) if 'stream_mb' in r else 0
+        key = r['variant'] + ' ' + r['kernel'] if 'variant' in r else '%s %s MB' % (r['mode'], r['size_mb'])
+        g[(key, rate)].append(r)
+    rates = sorted({k[1] for k in g})
+    th = thermal(rows)
+    print('\n### Companion rate, %s (`%s`): per hop against the companion\'s capped bandwidth, medians%s\n' % (
+        label, name, (' [thermal: %s]' % th) if th else ''))
+    print('Columns: companion off, then capped at N MB/s (1 = the companion thread only spins). Achieved companion MB/s in brackets.\n')
+    print('| ns/hop | ' + ' | '.join('off' if r == 0 else '%d MB/s' % r for r in rates) + ' |')
+    print('|---|' + '--:|' * len(rates))
+    for v in 'ABL':
+        cells = []
+        for r in rates:
+            w = medf(g.get((v + ' walk22', r), []), 'ms')
+            b = medf(g.get((v + ' walkbuild22', r), []), 'ms')
+            bw = medf(g.get((v + ' walk22', r), []), 'stream_mbs')
+            cells.append((f((w - b) * 1e6 / (2 * 2 ** 22)) if w is not None and b is not None else '-') +
+                         (' [%s]' % f(bw, 0) if bw else ''))
+        print('| %s walk22 | %s |' % (v, ' | '.join(cells)))
+    for m in ('chase', 'dsep'):
+        cells = []
+        for r in rates:
+            x = medf(g.get(('%s 256 MB' % m, r), []), 'ns_hop')
+            bw = medf(g.get(('%s 256 MB' % m, r), []), 'stream_mbs')
+            cells.append(f(x) + (' [%s]' % f(bw, 0) if bw else ''))
+        print('| %s 256 MB | %s |' % (m, ' | '.join(cells)))
+
+
+def lcg(name, label):
+    rows = parse(name)
+    if not rows:
+        return
+    g = defaultdict(list)
+    for r in rows:
+        g[(r['mode'], int(r['size_mb']), r.get('order', 'random'))].append(num(r, 'ns_hop'))
+    print('\n### Visiting order, %s (`%s`): random cycle vs the walk kernel\'s LCG order, ns per hop (median)%s\n' % (
+        label, name, (' [thermal: %s]' % thermal(rows)) if thermal(rows) else ''))
+    print('| size MB | mode | random | lcg | lcg/random |')
+    print('|--:|---|--:|--:|--:|')
+    for sz in sorted({k[1] for k in g}):
+        for m in ('chase', 'dsep', 'dlocal'):
+            a = g.get((m, sz, 'random')); b = g.get((m, sz, 'lcg'))
+            if not a or not b:
+                continue
+            print('| %d | %s | %s | %s | %s |' % (sz, m, f(median(a)), f(median(b)), f(median(b) / median(a), 2)))
+
+
 def qos(name, label):
     rows = parse(name)
     if not rows:
@@ -386,6 +439,9 @@ if __name__ == '__main__':
     sends('dev-sends.txt', 'iPhone')
     membw('mac-membw.txt', 'Mac')
     membw('dev-membw.txt', 'iPhone')
+    membw2('dev-membw2.txt', 'iPhone')
+    lcg('mac-lcg.txt', 'Mac')
+    lcg('dev-lcg.txt', 'iPhone')
     work('mac-work.txt', 'Mac')
     work('dev-work.txt', 'iPhone')
     qos('mac-qos.txt', 'Mac')

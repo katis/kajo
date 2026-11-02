@@ -1,0 +1,26 @@
+# machine: Apple M2 Max, 8 P + 4 E, 96 GB, 27.0.1
+# swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+run=1 tag=qos-ui variant=A kernel=walk22 workers=1 ms=2845.2 checksum=9016009025388544 misses=17 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=1 tag=qos-inherit variant=A kernel=walk22 workers=1 ms=2843.3 checksum=9016009025388544 misses=17 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=default
+run=1 tag=qos-ui variant=B kernel=walk22 workers=1 ms=3833.0 checksum=9016009025388544 misses=17 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=1 tag=qos-inherit variant=B kernel=walk22 workers=1 ms=3852.4 checksum=9016009025388544 misses=17 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=default
+run=1 tag=qos-ui variant=A kernel=walkbuild22 workers=1 ms=1686.9 checksum=0 misses=14 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=1 tag=qos-inherit variant=A kernel=walkbuild22 workers=1 ms=1644.2 checksum=0 misses=14 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=default
+run=1 tag=qos-ui variant=B kernel=walkbuild22 workers=1 ms=1633.4 checksum=0 misses=14 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=1 tag=qos-inherit variant=B kernel=walkbuild22 workers=1 ms=1601.5 checksum=0 misses=14 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=default
+run=2 tag=qos-ui variant=A kernel=walk22 workers=1 ms=2836.1 checksum=9016009025388544 misses=17 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=2 tag=qos-inherit variant=A kernel=walk22 workers=1 ms=2856.2 checksum=9016009025388544 misses=17 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=default
+run=2 tag=qos-ui variant=B kernel=walk22 workers=1 ms=3882.9 checksum=9016009025388544 misses=17 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=2 tag=qos-inherit variant=B kernel=walk22 workers=1 ms=3850.8 checksum=9016009025388544 misses=17 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=default
+run=2 tag=qos-ui variant=A kernel=walkbuild22 workers=1 ms=1625.8 checksum=0 misses=14 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=2 tag=qos-inherit variant=A kernel=walkbuild22 workers=1 ms=1601.7 checksum=0 misses=14 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=default
+run=2 tag=qos-ui variant=B kernel=walkbuild22 workers=1 ms=1568.2 checksum=0 misses=14 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=2 tag=qos-inherit variant=B kernel=walkbuild22 workers=1 ms=1682.7 checksum=0 misses=14 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=default
+run=3 tag=qos-ui variant=A kernel=walk22 workers=1 ms=3569.5 checksum=9016009025388544 misses=17 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=3 tag=qos-inherit variant=A kernel=walk22 workers=1 ms=3287.4 checksum=9016009025388544 misses=17 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=default
+run=3 tag=qos-ui variant=B kernel=walk22 workers=1 ms=3870.9 checksum=9016009025388544 misses=17 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=3 tag=qos-inherit variant=B kernel=walk22 workers=1 ms=3876.0 checksum=9016009025388544 misses=17 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=default
+run=3 tag=qos-ui variant=A kernel=walkbuild22 workers=1 ms=1629.3 checksum=0 misses=14 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=3 tag=qos-inherit variant=A kernel=walkbuild22 workers=1 ms=1622.7 checksum=0 misses=14 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=default
+run=3 tag=qos-ui variant=B kernel=walkbuild22 workers=1 ms=1679.5 checksum=0 misses=14 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=3 tag=qos-inherit variant=B kernel=walkbuild22 workers=1 ms=1620.0 checksum=0 misses=14 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=default

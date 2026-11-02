@@ -1,0 +1,32 @@
+# machine: Apple M2 Max, 8 P + 4 E, 96 GB, 27.0.1
+# swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+run=1 tag=orig variant=A kernel=walk workers=1 ms=3397.4 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=1 tag=orig variant=B kernel=walk workers=1 ms=4541.3 checksum=9016009025388544 misses=15 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=1 tag=orig variant=C kernel=walk workers=1 ms=2621.6 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=1 tag=orig variant=A kernel=walkbuild workers=1 ms=1774.9 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=1 tag=orig variant=B kernel=walkbuild workers=1 ms=2044.1 checksum=0 misses=12 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=1 tag=orig variant=C kernel=walkbuild workers=1 ms=2133.0 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=2 tag=orig variant=A kernel=walk workers=1 ms=4497.8 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=2 tag=orig variant=B kernel=walk workers=1 ms=4878.3 checksum=9016009025388544 misses=15 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=2 tag=orig variant=C kernel=walk workers=1 ms=2951.9 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=2 tag=orig variant=A kernel=walkbuild workers=1 ms=1725.6 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=2 tag=orig variant=B kernel=walkbuild workers=1 ms=1735.6 checksum=0 misses=12 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=2 tag=orig variant=C kernel=walkbuild workers=1 ms=1764.6 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=3 tag=orig variant=A kernel=walk workers=1 ms=3646.8 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=3 tag=orig variant=B kernel=walk workers=1 ms=4486.8 checksum=9016009025388544 misses=15 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=231 worker_qos=user-initiated
+run=3 tag=orig variant=C kernel=walk workers=1 ms=3205.1 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=3 tag=orig variant=A kernel=walkbuild workers=1 ms=2005.7 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=3 tag=orig variant=B kernel=walkbuild workers=1 ms=2362.8 checksum=0 misses=12 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=3 tag=orig variant=C kernel=walkbuild workers=1 ms=1740.9 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=4 tag=orig variant=A kernel=walk workers=1 ms=3564.8 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=4 tag=orig variant=B kernel=walk workers=1 ms=4553.4 checksum=9016009025388544 misses=15 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=4 tag=orig variant=C kernel=walk workers=1 ms=2883.4 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=4 tag=orig variant=A kernel=walkbuild workers=1 ms=1756.7 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=4 tag=orig variant=B kernel=walkbuild workers=1 ms=1899.3 checksum=0 misses=12 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=4 tag=orig variant=C kernel=walkbuild workers=1 ms=1924.4 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=5 tag=orig variant=A kernel=walk workers=1 ms=3926.0 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=5 tag=orig variant=B kernel=walk workers=1 ms=4796.3 checksum=9016009025388544 misses=15 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=5 tag=orig variant=C kernel=walk workers=1 ms=3088.3 checksum=9016009025388544 misses=15 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=5 tag=orig variant=A kernel=walkbuild workers=1 ms=1714.7 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated
+run=5 tag=orig variant=B kernel=walkbuild workers=1 ms=1705.7 checksum=0 misses=12 entryRefills=1025 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=232 worker_qos=user-initiated
+run=5 tag=orig variant=C kernel=walkbuild workers=1 ms=1587.3 checksum=0 misses=12 tlabRefills=5122 parkedMax_ms=0.0 rss_mb=167 worker_qos=user-initiated

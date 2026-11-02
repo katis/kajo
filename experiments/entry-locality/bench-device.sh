@@ -22,6 +22,10 @@
 #   membw    walk21/22, walkbuild21/22 x A B L, and chase dsep dlocal at 64
 #            and 256 MB, each alone and with a companion thread streaming
 #            through STREAM MB, 3 runs (added after hop; see RESULTS.md)
+#   membw2   walk22, walkbuild22 x A B L and chase, dsep at 256 MB, alone and
+#            with the companion capped at [RATES] MB/s (1 = it only spins),
+#            3 runs (added after membw)
+#   lcg      chase, dsep, dlocal x 64, 256 MB x random and LCG order, 3 runs
 #
 # Usage: ./bench-device.sh                     (everything)
 #        PARTS="build hop" RUNS=1 ./bench-device.sh
@@ -34,8 +38,10 @@ BUNDLE=dev.katajamaki.kajo.entrylocality
 RUNS=${RUNS:-5}
 P1RUNS=${P1RUNS:-3}
 DRIFT=${DRIFT:-2}
-PARTS=${PARTS:-"build part1 hop orig compact mark sends qos work membw pull report"}
+PARTS=${PARTS:-"build part1 hop orig compact mark sends qos work membw membw2 lcg pull report"}
 STREAM=${STREAM:-64}
+RATES=${RATES:-"1 250 1000 4000"}
+
 WSIZES=${WSIZES:-"16 32 64 96 128 192 256 512"}
 WORK=${WORK:-64}
 MODES=${MODES:-"chase dsep dlocal dhalf spread"}
@@ -230,9 +236,46 @@ if has membw; then
     done
 fi
 
+if has membw2; then
+    O="$R/dev-membw2.txt"
+    echo "== membw2: walk22 x A B L, chase dsep 256 MB x companion off, [$RATES] MB/s; 3 runs"
+    cooldown
+    for run in 1 2 3; do
+        for k in walk22 walkbuild22; do
+            for v in A B L; do
+                launch "$O" membw2 part=3 variant=$v kernel=$k workers=1 run=$run out=membw.txt
+                for r in $RATES; do
+                    launch "$O" membw2 part=3 variant=$v kernel=$k workers=1 run=$run stream=$STREAM rate=$r out=membw.txt
+                done
+            done
+        done
+        for m in chase dsep; do
+            launch "$O" membw2 part=1 mode=$m size=256 threads=1 run=$run out=membw.txt
+            for r in $RATES; do
+                launch "$O" membw2 part=1 mode=$m size=256 threads=1 run=$run stream=$STREAM rate=$r out=membw.txt
+            done
+        done
+        echo "   run $run/3 done ($(tail -1 "$O" | grep -o 'thermal_end=[a-z]*'))"
+    done
+fi
+
+if has lcg; then
+    O="$R/dev-lcg.txt"
+    echo "== lcg: chase dsep dlocal x 64, 256 MB x random, lcg order; 3 runs"
+    for run in 1 2 3; do
+        for sz in 64 256; do
+            for m in chase dsep dlocal; do
+                for o in random lcg; do
+                    launch "$O" lcg part=1 mode=$m size=$sz threads=1 order=$o run=$run out=lcg.txt
+                done
+            done
+        done
+    done
+fi
+
 if has pull; then
     echo "== pull Documents"
-    for f in part1 part3 work membw cooldown; do
+    for f in part1 part3 work membw lcg cooldown; do
         xcrun devicectl device copy from --device "$DEVICE" --domain-type appDataContainer \
             --domain-identifier "$BUNDLE" --source "Documents/$f.txt" --destination "$R/device-$f.txt" > /dev/null 2>&1 || true
     done

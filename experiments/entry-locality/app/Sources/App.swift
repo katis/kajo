@@ -5,11 +5,12 @@
 // --console`) and is appended to Documents/<out>.
 //
 //   part=hello                                   arith on B, 1 worker
-//   part=1 mode=chase|dsep|dlocal|dhalf|spread size=MB threads=N [work=K]
+//   part=1 mode=chase|dsep|dlocal|dhalf|spread size=MB threads=N [work=K] [order=lcg]
 //   part=3 variant=A|B|C|L kernel=walk22 workers=1
 //
 // Common: run=N tag=... out=file.txt [stream=MB: a companion thread
-// streams through its own MB buffer while the run is measured]
+// streams through its own MB buffer while the run is measured, at most
+// rate=MB/s if given]
 
 import Darwin
 import Kasm
@@ -151,13 +152,15 @@ func startHeadless(_ opt: Options, pre: String) {
         let head = "part=\(part) run=\(opt.int("run", 1))\(tag) \(pre) cores=\(ProcessInfo.processInfo.processorCount) thermal_start=\(Telemetry.thermal())"
         var line: String
         let streamMB = opt.int("stream", 0)
-        let streamer = streamMB > 0 ? Streamer(mb: streamMB) : nil
+        let streamRate = opt.int("rate", 0)
+        let streamer = streamMB > 0 ? Streamer(mb: streamMB, rateMBs: streamRate) : nil
         let u0 = ProcUsage.now()
         do {
             switch part {
             case "1":
                 line = runChase(ChaseSpec(mode: opt["mode"] ?? "chase", sizeMB: opt.int("size", 64),
-                                          threads: opt.int("threads", 1), work: opt.int("work", 0)))
+                                          threads: opt.int("threads", 1), work: opt.int("work", 0),
+                                          lcg: opt["order"] == "lcg"))
             case "3": line = try runPart3(opt)
             default: line = try VMB.benchLine(kernel: "arith", workers: 1, snapshotDir: NSTemporaryDirectory())
             }
@@ -165,7 +168,7 @@ func startHeadless(_ opt: Options, pre: String) {
             line = "FAILED=1 error=\(String(describing: error).replacingOccurrences(of: " ", with: "_"))"
         }
         let u1 = ProcUsage.now()
-        if let st = streamer { line += " stream_mb=\(streamMB) stream_mbs=\(Int(st.finish()))" }
+        if let st = streamer { line += " stream_mb=\(streamMB) stream_rate=\(streamRate) stream_mbs=\(Int(st.finish()))" }
         line += ProcUsage.line(u0, u1)
         Output.shared.emit(head + " " + line + " thermal_end=\(Telemetry.thermal())" + Telemetry.suffix())
         Output.shared.emit("DONE")

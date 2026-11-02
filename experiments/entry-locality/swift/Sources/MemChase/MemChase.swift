@@ -9,6 +9,9 @@
 //   dhalf   as dsep with 32-byte nodes
 //   spread  as chase, one node per 16 KiB page at a random line offset;
 //           `sizeMB` is then the page footprint
+//   order=lcg  (chase, dsep, dlocal) node i links to (1664525 i + 1013904223)
+//           mod N instead of a random cycle: the walk kernel's order (full
+//           period for power-of-two N). Added after the device runs.
 //   work=K  (any mode) K multiply-adds per hop on a register the chain does
 //           not depend on, so the core has work to overlap with each miss,
 //           like an interpreter between two loads (added after the first
@@ -128,8 +131,9 @@ public struct ChaseSpec: Sendable {
     public var sizeMB: Int
     public var threads: Int
     public var work: Int
-    public init(mode: String, sizeMB: Int, threads: Int, work: Int = 0) {
-        self.mode = mode; self.sizeMB = sizeMB; self.threads = threads; self.work = work
+    public var lcg: Bool
+    public init(mode: String, sizeMB: Int, threads: Int, work: Int = 0, lcg: Bool = false) {
+        self.mode = mode; self.sizeMB = sizeMB; self.threads = threads; self.work = work; self.lcg = lcg
     }
 
     /// Objects per thread.
@@ -170,7 +174,14 @@ struct Prepared {
 func prepare(_ spec: ChaseSpec, seed: UInt64) -> Prepared {
     var rng = Rng(s: seed)
     let n = spec.nodes
-    let next = cycle(n, &rng)
+    let next: UnsafeMutablePointer<UInt32>
+    if spec.lcg {
+        precondition(n & (n - 1) == 0, "lcg order needs a power-of-two node count")
+        next = .allocate(capacity: n)
+        for i in 0..<n { next[i] = UInt32(truncatingIfNeeded: (1664525 &* UInt64(i) &+ 1013904223) & UInt64(n - 1)) }
+    } else {
+        next = cycle(n, &rng)
+    }
     defer { next.deallocate() }
     var p = Prepared()
     switch spec.mode {
@@ -289,7 +300,7 @@ public func runChase(_ spec: ChaseSpec) -> String {
         let r = (x * 100).rounded() / 100
         return "\(r)"
     }
-    return "mode=\(spec.mode) size_mb=\(spec.sizeMB) threads=\(n) work=\(spec.work) nodes=\(spec.nodes) hops=\(spec.hops)"
+    return "mode=\(spec.mode) size_mb=\(spec.sizeMB) threads=\(n) work=\(spec.work) order=\(spec.lcg ? "lcg" : "random") nodes=\(spec.nodes) hops=\(spec.hops)"
         + " ws_mb=\(f(Double(spec.workingSet) / 1048576)) pages=\(spec.pages)"
         + " ns_hop=\(f(med)) ns_hop_min=\(f(per.first!)) ns_hop_max=\(f(per.last!))"
         + " build_ms=\(f(Double(build) / 1e6)) wall_ms=\(f(Double(wall) / 1e6))"

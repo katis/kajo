@@ -1,0 +1,102 @@
+part=hello run=1 tag=hello battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1210.7 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.4 footprint_peak_mb=8.4 avail_mb=3367
+DONE
+part=hello run=1 tag=hello battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1138.6 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.3 footprint_peak_mb=8.3 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1118.4 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1458.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1152.2 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1490.1 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=2 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1296.3 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1269.1 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=4 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1200.7 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=5 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1147.2 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=6 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1155.7 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=hello battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1143.4 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.3 footprint_peak_mb=8.4 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1158.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=hello battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1113.3 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1127.3 p_frac=0.988 p_ghz=4.05 e_ghz=2.5 ipc=7.33 runnable_ms=1176.3 energy_mj=6386.4 thermal_end=nominal thermal=nominal footprint_mb=8.3 footprint_peak_mb=8.4 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1155.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1171.7 p_frac=0.981 p_ghz=3.92 e_ghz=2.58 ipc=7.3 runnable_ms=1185.1 energy_mj=5956.2 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1348.5 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1366.5 p_frac=0.987 p_ghz=3.82 e_ghz=2.54 ipc=6.41 runnable_ms=1404.3 energy_mj=5855.3 thermal_end=nominal thermal=nominal footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1424.5 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1442.8 p_frac=0.985 p_ghz=3.68 e_ghz=2.51 ipc=6.29 runnable_ms=1462.1 energy_mj=5606.7 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1550.2 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1571.9 p_frac=0.986 p_ghz=3.17 e_ghz=2.54 ipc=6.69 runnable_ms=1611.4 energy_mj=4367.1 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=2 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1372.2 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1388.0 p_frac=0.984 p_ghz=3.8 e_ghz=2.52 ipc=6.35 runnable_ms=1449.4 energy_mj=5719.7 thermal_end=fair thermal=fair footprint_mb=8.7 footprint_peak_mb=8.7 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1273.1 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1290.6 p_frac=0.985 p_ghz=3.83 e_ghz=2.5 ipc=6.78 runnable_ms=1325.0 energy_mj=5674.8 thermal_end=fair thermal=fair footprint_mb=8.7 footprint_peak_mb=8.8 avail_mb=3367
+DONE
+part=hello run=4 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1238.5 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1254.1 p_frac=0.986 p_ghz=4.21 e_ghz=2.5 ipc=6.34 runnable_ms=1309.7 energy_mj=6882.0 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=5 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1225.1 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1242.9 p_frac=0.984 p_ghz=4.21 e_ghz=2.5 ipc=6.4 runnable_ms=1277.3 energy_mj=6838.6 thermal_end=nominal thermal=nominal footprint_mb=8.6 footprint_peak_mb=8.7 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1274.5 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1291.4 p_frac=0.984 p_ghz=3.6 e_ghz=2.54 ipc=7.2 runnable_ms=1331.6 energy_mj=5287.9 thermal_end=nominal thermal=nominal footprint_mb=8.6 footprint_peak_mb=8.7 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1270.1 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1288.1 p_frac=0.986 p_ghz=3.66 e_ghz=2.55 ipc=7.09 runnable_ms=1324.0 energy_mj=5182.1 thermal_end=nominal thermal=nominal footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1249.6 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1269.9 p_frac=0.982 p_ghz=3.71 e_ghz=2.53 ipc=7.1 runnable_ms=1323.8 energy_mj=5304.3 thermal_end=fair thermal=fair footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=2 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1280.4 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1300.5 p_frac=0.984 p_ghz=4.02 e_ghz=2.51 ipc=6.41 runnable_ms=1364.2 energy_mj=6373.2 thermal_end=fair thermal=fair footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1194.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1212.6 p_frac=0.982 p_ghz=3.8 e_ghz=2.5 ipc=7.27 runnable_ms=1263.4 energy_mj=5521.7 thermal_end=fair thermal=fair footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=hello battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1209.4 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=25 worker_qos=user-initiated cpu_ms=1226.0 p_frac=0.985 p_ghz=4.1 e_ghz=2.46 ipc=6.66 runnable_ms=1288.6 energy_mj=6539.5 thermal_end=fair thermal=fair footprint_mb=8.2 footprint_peak_mb=8.3 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1133.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1154.4 p_frac=0.982 p_ghz=3.97 e_ghz=2.58 ipc=7.31 runnable_ms=1186.9 energy_mj=5947.8 thermal_end=fair thermal=fair footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=2 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1228.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1249.9 p_frac=0.98 p_ghz=4.21 e_ghz=2.5 ipc=6.37 runnable_ms=1299.6 energy_mj=6870.2 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1352.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1369.8 p_frac=0.985 p_ghz=3.39 e_ghz=2.54 ipc=7.19 runnable_ms=1403.2 energy_mj=4672.4 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1089.6 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1107.9 p_frac=0.98 p_ghz=4.14 e_ghz=2.54 ipc=7.31 runnable_ms=1142.9 energy_mj=6442.2 thermal_end=fair thermal=fair footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=4 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1172.6 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1192.2 p_frac=0.981 p_ghz=4.2 e_ghz=2.52 ipc=6.7 runnable_ms=1229.7 energy_mj=6705.9 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=5 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1192.4 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1210.2 p_frac=0.984 p_ghz=4.2 e_ghz=2.57 ipc=6.58 runnable_ms=1246.2 energy_mj=6718.5 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1192.2 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1213.6 p_frac=0.984 p_ghz=3.97 e_ghz=2.56 ipc=6.95 runnable_ms=1251.4 energy_mj=6101.9 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1219.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1236.6 p_frac=0.983 p_ghz=3.8 e_ghz=2.55 ipc=7.12 runnable_ms=1266.2 energy_mj=5486.9 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1285.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1306.5 p_frac=0.984 p_ghz=3.8 e_ghz=2.57 ipc=6.73 runnable_ms=1354.0 energy_mj=5744.4 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1382.0 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1399.5 p_frac=0.987 p_ghz=3.89 e_ghz=2.49 ipc=6.14 runnable_ms=1435.1 energy_mj=6101.7 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1343.2 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1358.2 p_frac=0.986 p_ghz=3.85 e_ghz=2.56 ipc=6.39 runnable_ms=1396.6 energy_mj=5912.9 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1246.0 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1265.9 p_frac=0.983 p_ghz=4.22 e_ghz=2.53 ipc=6.27 runnable_ms=1298.4 energy_mj=6807.2 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1263.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1279.5 p_frac=0.985 p_ghz=3.88 e_ghz=2.55 ipc=6.74 runnable_ms=1313.1 energy_mj=5796.8 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1210.7 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1228.3 p_frac=0.981 p_ghz=3.72 e_ghz=2.53 ipc=7.34 runnable_ms=1258.2 energy_mj=5437.7 thermal_end=nominal thermal=nominal footprint_mb=8.6 footprint_peak_mb=8.6 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1243.7 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1264.1 p_frac=0.984 p_ghz=3.66 e_ghz=2.55 ipc=7.23 runnable_ms=1298.7 energy_mj=5378.7 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=2 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1098.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1115.0 p_frac=0.984 p_ghz=4.11 e_ghz=2.55 ipc=7.3 runnable_ms=1154.1 energy_mj=6461.0 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1173.0 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1190.7 p_frac=0.984 p_ghz=4.21 e_ghz=2.55 ipc=6.69 runnable_ms=1228.2 energy_mj=6640.9 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1313.3 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1332.0 p_frac=0.989 p_ghz=3.53 e_ghz=2.53 ipc=7.1 runnable_ms=1377.0 energy_mj=4942.3 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=2 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1105.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1123.4 p_frac=0.983 p_ghz=4.11 e_ghz=2.56 ipc=7.25 runnable_ms=1171.3 energy_mj=6503.8 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=3 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=fair variant=B kernel=arith workers=1 ms=1169.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1187.7 p_frac=0.984 p_ghz=4.2 e_ghz=2.53 ipc=6.71 runnable_ms=1215.2 energy_mj=6615.6 thermal_end=fair thermal=fair footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=4 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1124.3 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1143.9 p_frac=0.978 p_ghz=4.2 e_ghz=2.54 ipc=6.99 runnable_ms=1157.7 energy_mj=6481.8 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE
+part=hello run=1 tag=hello battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1246.9 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1258.4 p_frac=0.989 p_ghz=3.61 e_ghz=2.56 ipc=7.34 runnable_ms=1302.5 energy_mj=5232.6 thermal_end=nominal thermal=nominal footprint_mb=8.4 footprint_peak_mb=8.4 avail_mb=3367
+DONE
+part=hello run=1 tag=cooldown battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal variant=B kernel=arith workers=1 ms=1478.8 checksum=372800000 misses=1 parkedMax_ms=0.0 rss_mb=26 worker_qos=user-initiated cpu_ms=1498.6 p_frac=0.988 p_ghz=3.6 e_ghz=2.54 ipc=6.18 runnable_ms=1550.0 energy_mj=5389.7 thermal_end=nominal thermal=nominal footprint_mb=8.5 footprint_peak_mb=8.5 avail_mb=3367
+DONE

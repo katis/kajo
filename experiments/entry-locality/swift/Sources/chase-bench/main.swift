@@ -9,9 +9,11 @@ guard a.count >= 4, let mb = Int(a[2]), let t = Int(a[3]) else {
     exit(1)
 }
 let streamMB = getenv("KAJO_STREAM_MB").flatMap { Int(String(cString: $0)) } ?? 0
-let streamer = streamMB > 0 ? Streamer(mb: streamMB) : nil
+let streamRate = getenv("KAJO_STREAM_RATE").flatMap { Int(String(cString: $0)) } ?? 0
+let streamer = streamMB > 0 ? Streamer(mb: streamMB, rateMBs: streamRate) : nil
 let u0 = ProcUsage.now()
-var line = runChase(ChaseSpec(mode: a[1], sizeMB: mb, threads: t, work: a.count > 4 ? Int(a[4]) ?? 0 : 0))
+var line = runChase(ChaseSpec(mode: a[1], sizeMB: mb, threads: t, work: a.count > 4 ? Int(a[4]) ?? 0 : 0,
+                             lcg: getenv("KAJO_ORDER").map { String(cString: $0) } == "lcg"))
 let u1 = ProcUsage.now()
-if let st = streamer { line += " stream_mb=\(streamMB) stream_mbs=\(Int(st.finish()))" }
+if let st = streamer { line += " stream_mb=\(streamMB) stream_rate=\(streamRate) stream_mbs=\(Int(st.finish()))" }
 print(line + ProcUsage.line(u0, u1))

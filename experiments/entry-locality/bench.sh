@@ -10,6 +10,7 @@
 #   sends   el-bench sends, ivars x A B L x 1, 6 workers
 #   qos     el-bench walk22, walkbuild22 x A B, workers at user-initiated vs
 #           default attributes (KAJO_WORKER_QOS=inherit), 3 runs
+#   lcg     chase-bench chase dsep dlocal x 64, 256 MB x random, LCG order, 3 runs
 #   work    chase-bench chase dsep dlocal x [WSIZES] x work 0, WORK, 1 thread,
 #           3 runs (added after part1; see RESULTS.md)
 #
@@ -19,7 +20,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 HERE=$(pwd)
 RUNS=${RUNS:-5}
-PARTS=${PARTS:-"build part1 hop orig compact mark sends qos work report"}
+PARTS=${PARTS:-"build part1 hop orig compact mark sends qos work lcg report"}
 WSIZES=${WSIZES:-"16 32 64 96 128 192 256 512"}
 WORK=${WORK:-64}
 MODES=${MODES:-"chase dsep dlocal dhalf spread"}
@@ -130,6 +131,17 @@ if has work; then
         for sz in $WSIZES; do
             for m in chase dsep dlocal; do
                 for w in 0 "$WORK"; do echo "run=$run tag=work $("$B/chase-bench" $m $sz 1 $w)" >> "$O"; done
+            done
+        done
+    done
+fi
+
+if has lcg; then
+    O="$R/mac-lcg.txt"; hdr "$O"
+    for run in 1 2 3; do
+        for sz in 64 256; do
+            for m in chase dsep dlocal; do
+                for o in random lcg; do echo "run=$run tag=lcg $(KAJO_ORDER=$o "$B/chase-bench" $m $sz 1)" >> "$O"; done
             done
         done
     done
