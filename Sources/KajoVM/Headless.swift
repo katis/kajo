@@ -232,7 +232,7 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
     let qosList = qos.keys.sorted().map { "\($0)x\(qos[$0]!)" }.joined(separator: ",")
     return [
         ("gc", "cm"), ("cycles", "\(c.cycles)"), ("cyclesDone", "\(c.cyclesCompleted)"),
-        ("byFloor", "\(c.cyclesByFloor)"), ("byPredictor", "\(c.cyclesByPredictor)"), ("forced", "\(c.cyclesForced)"),
+        ("byFloor", "\(c.cyclesByFloor)"), ("byPredictor", "\(c.cyclesByPredictor)"), ("byEntries", "\(c.cyclesByEntries)"), ("forced", "\(c.cyclesForced)"),
         ("fallbacks", "\(c.fallbacks)"), ("fallbacksIdle", "\(c.fallbacksIdle)"), ("fallbacksMarking", "\(c.fallbacksMarking)"),
         ("fallbacksSweeping", "\(c.fallbacksSweeping)"), ("fallbacksVerifier", "\(c.fallbacksVerifier)"),
         ("aborts", "\(c.aborts)"), ("sweepsInPause", "\(c.sweepsFinishedInPause)"),

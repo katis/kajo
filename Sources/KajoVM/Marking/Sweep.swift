@@ -121,6 +121,7 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe log.pointee.counters.applyNs &+= t1 &- t0
     unsafe log.pointee.counters.sweepNs &+= m.pointee.sweepNs
     unsafe log.pointee.counters.entriesFreed &+= m.pointee.entriesFreed
+    unsafe log.pointee.oldEntries &-= Swift.min(log.pointee.oldEntries, m.pointee.entriesFreed)
     unsafe log.pointee.counters.blocksFreed &+= UInt64(blocks)
     // The policy lowers the marker only when a cycle ends with headroom
     // above the threshold.

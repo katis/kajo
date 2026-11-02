@@ -22,6 +22,8 @@ enum MarkingPhase: UInt8, Sendable {
 enum CycleTrigger: UInt8, Sendable {
     /// Old space in use reached `floor` of the soft limit.
     case floor
+    /// Old entries reached `floor` of the entry table.
+    case entries
     /// The predicted time to fill the headroom was under `safetyFactor`
     /// cycles.
     case predictor
@@ -149,6 +151,7 @@ struct MarkingCounters: Sendable {
     var cyclesCompleted: UInt64 = 0
     var cyclesByFloor: UInt64 = 0
     var cyclesByPredictor: UInt64 = 0
+    var cyclesByEntries: UInt64 = 0
     var cyclesForced: UInt64 = 0
     var initialMarkNs: UInt64 = 0
     var finalMarkNs: UInt64 = 0
@@ -204,6 +207,14 @@ struct MarkingLog {
     /// Promotion over the last scavenges: (time, cumulative promoted bytes).
     var samples: [(ns: UInt64, promoted: UInt64)] = []
     var lastCycleNs: UInt64 = 0
+    /// Old entries, estimated: promoted objects and old allocations since
+    /// the last scavenge added, a sweep's frees taken off, recounted from
+    /// the old map after module 1 collected. With the module 1 collection
+    /// count and the cumulative counts at the last sample.
+    var oldEntries: UInt64 = 0
+    var lastCollections: UInt64 = .max
+    var lastPromotedObjects: UInt64 = 0
+    var lastOldAllocations: UInt64 = 0
     /// Words of the snapshot map that may have bits (high water at the
     /// snapshot, rounded up).
     var snapshotWords = 0

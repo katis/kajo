@@ -41,10 +41,32 @@ func afterScavenge(_ vm: VMPointer, roots: [Oop], literalBefore: RawArray<UInt64
     let promoted = unsafe (vm.pointee.nursery?.pointee.state.pointee.counters.promotedBytes ?? 0) &+ om.allocationCounters.allocatedBytes
     unsafe log.pointee.samples.append((now, promoted))
     if unsafe log.pointee.samples.count > MarkingConfig.rateWindow { unsafe log.pointee.samples.removeFirst() }
+    unsafe countOldEntries(vm, mk)
     unsafe updateWantedQoS(mk)
     if unsafe mk.phaseNow != .idle || fullCollectionDue(vm) { return }
     guard let trigger = unsafe decideTrigger(mk) else { return }
     unsafe initialMark(vm, mk, roots: roots, trigger: trigger, literal: false)
+}
+
+/// Keep the old-entry estimate (world stopped).
+private func countOldEntries(_ vm: VMPointer, _ mk: MarkingPointer) {
+    let om = unsafe mk.pointee.om
+    let log = unsafe mk.pointee.log
+    let promoted = unsafe vm.pointee.nursery?.pointee.state.pointee.counters.promotedObjects ?? 0
+    let allocated = om.allocationCounters.allocations
+    let collections = om.counters.collections
+    if unsafe log.pointee.lastCollections != collections {
+        // Module 1 collected (or this is the first sample): count.
+        let words = Int((om.highWater &+ 63) &>> 6)
+        var n: UInt64 = 0
+        for w in 0..<words { n &+= UInt64(om.oldMap.word(w).nonzeroBitCount) }
+        unsafe log.pointee.oldEntries = n
+        unsafe log.pointee.lastCollections = collections
+    } else {
+        unsafe log.pointee.oldEntries &+= (promoted &- log.pointee.lastPromotedObjects) &+ (allocated &- log.pointee.lastOldAllocations)
+    }
+    unsafe log.pointee.lastPromotedObjects = promoted
+    unsafe log.pointee.lastOldAllocations = allocated
 }
 
 /// The promotion rate over the last scavenges (bytes per second; 0 with
@@ -77,6 +99,7 @@ func decideTrigger(_ mk: MarkingPointer) -> CycleTrigger? {
     unsafe log.pointee.counters.lastPredictedFillNs = fillNs
     if c.stress.contains(.cycleAtEveryScavenge) { return .forced }
     if inUse >= c.floor * soft { return .floor }
+    if unsafe Double(log.pointee.oldEntries) >= c.floor * Double(om.entryCapacity) { return .entries }
     return predicted ? .predictor : nil
 }
 
@@ -164,6 +187,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     switch trigger {
     case .floor: unsafe log.pointee.counters.cyclesByFloor &+= 1
     case .predictor: unsafe log.pointee.counters.cyclesByPredictor &+= 1
+    case .entries: unsafe log.pointee.counters.cyclesByEntries &+= 1
     case .forced: unsafe log.pointee.counters.cyclesForced &+= 1
     }
     unsafe log.pointee.counters.initialMarkNs &+= t3 &- t0
