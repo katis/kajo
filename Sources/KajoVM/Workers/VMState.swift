@@ -1,0 +1,243 @@
+import Darwin
+import Synchronization
+
+/// The VM: one struct reached through a pointer, holding pointers to the
+/// object memory, the worker table and one separately allocated sub-state
+/// per lock, each lock beside (never inside) what it guards (AGENTS.md).
+/// No global mutable state.
+@unsafe struct VMState {
+    let om: ObjectMemory
+    let image: Image
+    let config: VMConfig
+    let nilObject: Oop
+    /// Workers: 0 is the main worker, 1...background the background
+    /// workers, the last one the host's (used by host calls under
+    /// `hostLock`; it never runs a Process).
+    let workers: UnsafeMutablePointer<WorkerPointer>
+    let workerCount: Int
+
+    // Safepoints: the flag every poll reads, the state, its mutex and cond.
+    let flag: UnsafeMutablePointer<Atomic<UInt32>>
+    let safepoint: UnsafeMutablePointer<SafepointState>
+    let safepointLock: UnsafeMutablePointer<pthread_mutex_t>
+    let safepointCond: UnsafeMutablePointer<pthread_cond_t>
+
+    // The scheduler: queues, records, Semaphore lists and Process states
+    // are guarded by `schedLock`. Idle background workers wait on
+    // `schedCond`; the host waits for the last termination on `doneCond`.
+    let sched: UnsafeMutablePointer<SchedulerState>
+    let queues: UnsafeMutablePointer<UInt64>
+    let records: UnsafeMutablePointer<ProcessRecord>
+    let schedLock: UnsafeMutablePointer<pthread_mutex_t>
+    let schedCond: UnsafeMutablePointer<pthread_cond_t>
+    let doneCond: UnsafeMutablePointer<pthread_cond_t>
+
+    // External signals: the MPSC stack head (own cache line), the pending
+    // roots and their mutex.
+    let externalHead: UnsafeMutablePointer<Atomic<UInt>>
+    let pending: UnsafeMutablePointer<PendingState>
+    let pendingSlots: UnsafeMutablePointer<UInt64>
+    let pendingNext: UnsafeMutablePointer<Int>
+    let pendingLock: UnsafeMutablePointer<pthread_mutex_t>
+
+    /// Host calls use the host worker one at a time.
+    let hostLock: UnsafeMutablePointer<pthread_mutex_t>
+    /// Per-worker words other threads read: terminate requests (the
+    /// record index + 1 to terminate), the QoS a thread got, its Mach
+    /// thread port. One 128-byte line per worker.
+    let workerShared: UnsafeMutableRawPointer
+    /// Errors that terminated Processes, by Process id (own mutex).
+    let errors: UnsafeMutablePointer<ErrorLog>
+    let errorsLock: UnsafeMutablePointer<pthread_mutex_t>
+
+    let counters: UnsafeMutablePointer<Atomic<UInt64>>
+    var hooks = VMHooks()
+}
+
+/// Read by other threads: atomics only, one line per worker.
+struct WorkerShared: ~Copyable {
+    /// Record index + 1 of a Process to terminate at the next budget check.
+    let attention = Atomic<Int>(0)
+    let qos = Atomic<UInt32>(0)
+    let machThread = Atomic<UInt32>(0)
+    let started = Atomic<Bool>(false)
+}
+
+/// Guarded by the safepoint mutex.
+struct SafepointState {
+    /// Workers inside the VM.
+    var active = 0
+    /// Active workers waiting at a safepoint for the current stop.
+    var parked = 0
+    var requested = false
+    /// Bumped when a stop releases the world.
+    var epoch: UInt64 = 0
+    /// Returns from a park: the stop verifier checks none happens while a
+    /// stop's work runs.
+    var wakeups: UInt64 = 0
+    /// The worker that parked last: the slowest participant of a stop.
+    var lastParker = -1
+    /// One line per stop.
+    var stops: UnsafeMutablePointer<StopRecord>
+    var stopCount = 0
+    static let stopLog = 1 << 16
+}
+
+struct StopRecord: Sendable {
+    /// From the request to every active worker parked.
+    var timeToSafepointNs: UInt64
+    /// From the request to the release.
+    var pauseNs: UInt64
+    /// The worker that parked last (-1: none had to).
+    var slowest: Int
+    var requester: Int
+}
+
+/// Guarded by the scheduler lock.
+struct SchedulerState {
+    var idleWorkers = 0
+    var shutdown = false
+    var liveProcesses = 0
+    var nextId: Int64 = 1
+    var recordFree = -1
+    var recordHighWater = 0
+    var hopLatencies: [UInt64] = []
+}
+
+/// A Process's native record (fixed table, free list under the scheduler
+/// lock). The Process oop is a root while the record is live.
+struct ProcessRecord {
+    var process = Oop.none
+    var base: UnsafeMutablePointer<UInt64>? = nil
+    var end: UnsafeMutablePointer<UInt64>? = nil
+    /// The worker running it, -1 when none.
+    var runningOn = -1
+    /// Mach ticks when it became ready from a wait or creation; 0 when it
+    /// waits. The stuck check reads it.
+    var runnableSince: UInt64 = 0
+    /// Mach ticks when it hopped to main; 0 otherwise.
+    var hopStart: UInt64 = 0
+    var stuckReported = false
+    var terminateRequested = false
+    var nextFree = -1
+}
+
+/// Guarded by the pending-root mutex.
+struct PendingState {
+    var free = -1
+    var highWater = 0
+    var count = 0
+}
+
+/// Guarded by its own mutex.
+struct ErrorLog {
+    var byProcess: [Int64: VMError] = [:]
+}
+
+/// VM-wide counters, relaxed atomics (none is on the hot path).
+enum Counter: Int, CaseIterable {
+    case forks, terminations, yields, waits, signals, preemptions, hops, detaches
+    case externalSignals, staleExternalSignals, externalDrains, stackOverflows, processErrors
+    case stops, stopNs, timeToSafepointNs, parkNs, enterWaitNs, leaveWaitNs
+    case schedLocks, schedContended, schedWaitNs, pendingContended, safepointContended
+    case idleWaits, idleWakeups, idleNs, slices, stuckReports, terminateRequests
+    case stopVerifierFailures, scheduleVerifierFailures, perturbations
+}
+
+/// A snapshot of the counters.
+struct VMCounters: Sendable {
+    private let values: [UInt64]
+    init(_ values: [UInt64]) { self.values = values }
+    subscript(_ c: Counter) -> UInt64 { values[c.rawValue] }
+
+    var forks: UInt64 { self[.forks] }
+    var terminations: UInt64 { self[.terminations] }
+    var yields: UInt64 { self[.yields] }
+    var waits: UInt64 { self[.waits] }
+    var signals: UInt64 { self[.signals] }
+    var preemptions: UInt64 { self[.preemptions] }
+    var hops: UInt64 { self[.hops] }
+    var detaches: UInt64 { self[.detaches] }
+    var externalSignals: UInt64 { self[.externalSignals] }
+    var staleExternalSignals: UInt64 { self[.staleExternalSignals] }
+    var stackOverflows: UInt64 { self[.stackOverflows] }
+    var processErrors: UInt64 { self[.processErrors] }
+    var stops: UInt64 { self[.stops] }
+    var idleWakeups: UInt64 { self[.idleWakeups] }
+    var stuckReports: UInt64 { self[.stuckReports] }
+    var stopVerifierFailures: UInt64 { self[.stopVerifierFailures] }
+    var scheduleVerifierFailures: UInt64 { self[.scheduleVerifierFailures] }
+
+    var named: [(name: String, value: UInt64)] {
+        Counter.allCases.map { ("\($0)", values[$0.rawValue]) }
+    }
+}
+
+extension UnsafeMutablePointer where Pointee == VMState {
+    @inline(__always)
+    func count(_ c: Counter, _ n: UInt64 = 1) {
+        unsafe pointee.counters[c.rawValue].wrappingAdd(n, ordering: .relaxed)
+    }
+
+    @inline(__always)
+    func worker(_ i: Int) -> WorkerPointer { unsafe pointee.workers[i] }
+
+    var hostWorker: WorkerPointer { unsafe pointee.workers[pointee.workerCount - 1] }
+
+    /// Worker `i`'s shared line.
+    @inline(__always)
+    func shared(_ i: Int) -> UnsafeMutablePointer<WorkerShared> {
+        unsafe (pointee.workerShared + i &* 128).assumingMemoryBound(to: WorkerShared.self)
+    }
+}
+
+// MARK: - locks
+
+/// Every lock acquisition tries first and counts the contended ones and
+/// their wait (docs/modules/workers.md: nothing is optimised until a
+/// counter says so).
+@inline(__always)
+func lockCounted(_ m: UnsafeMutablePointer<pthread_mutex_t>, _ vm: UnsafeMutablePointer<VMState>,
+                 contended: Counter, waitNs: Counter? = nil) {
+    if unsafe pthread_mutex_trylock(m) != 0 {
+        let t0 = nanoseconds()
+        unsafe pthread_mutex_lock(m)
+        unsafe vm.count(contended)
+        if let waitNs { unsafe vm.count(waitNs, nanoseconds() &- t0) }
+    }
+}
+
+func makeMutex() -> UnsafeMutablePointer<pthread_mutex_t> {
+    let m = UnsafeMutablePointer<pthread_mutex_t>.allocate(capacity: 1)
+    unsafe pthread_mutex_init(m, nil)
+    return unsafe m
+}
+
+func makeCond() -> UnsafeMutablePointer<pthread_cond_t> {
+    let c = UnsafeMutablePointer<pthread_cond_t>.allocate(capacity: 1)
+    unsafe pthread_cond_init(c, nil)
+    return unsafe c
+}
+
+func freeMutex(_ m: UnsafeMutablePointer<pthread_mutex_t>) {
+    unsafe pthread_mutex_destroy(m)
+    unsafe m.deallocate()
+}
+
+func freeCond(_ c: UnsafeMutablePointer<pthread_cond_t>) {
+    unsafe pthread_cond_destroy(c)
+    unsafe c.deallocate()
+}
+
+/// One value in its own 128-byte line.
+func boxed<T: ~Copyable>(_ v: consuming T) -> UnsafeMutablePointer<T> {
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: max(MemoryLayout<T>.stride, 128), alignment: 128)
+    let p = unsafe raw.bindMemory(to: T.self, capacity: 1)
+    unsafe p.initialize(to: v)
+    return unsafe p
+}
+
+func unbox<T: ~Copyable>(_ p: UnsafeMutablePointer<T>) {
+    unsafe p.deinitialize(count: 1)
+    unsafe UnsafeMutableRawPointer(p).deallocate()
+}

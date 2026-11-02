@@ -1,3 +1,5 @@
+import Synchronization
+
 /// The dispatch loop: one case per opcode, a `switch` over `Opcode?` that
 /// compiles to one jump table (docs/modules/interpreter.md has the check).
 /// Fast paths are inline; everything else is one out-of-line call that
@@ -75,7 +77,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
         case .jump?:
             let off = unsafe OperandDecoding.jumpOffset(r.pc[0], r.pc[1])
             unsafe r.pc += 2 &+ off
-            if off < 0, unsafe flag.pointee.load(ordering: .relaxed) != 0 {
+            if off < 0, unsafe pollDue(s, flag) {
                 r = unsafe pollAtJump(s, r.pc, r.sp, r.fp, r.hdr)
             }
         case .jumpIfTrue?:
@@ -85,7 +87,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             unsafe r.sp -= 1
             if v == trueObject {
                 unsafe r.pc += off
-                if off < 0, unsafe flag.pointee.load(ordering: .relaxed) != 0 {
+                if off < 0, unsafe pollDue(s, flag) {
                     r = unsafe pollAtJump(s, r.pc, r.sp, r.fp, r.hdr)
                 }
             } else if _slowPath(v != falseObject) {
@@ -98,7 +100,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             unsafe r.sp -= 1
             if v == falseObject {
                 unsafe r.pc += off
-                if off < 0, unsafe flag.pointee.load(ordering: .relaxed) != 0 {
+                if off < 0, unsafe pollDue(s, flag) {
                     r = unsafe pollAtJump(s, r.pc, r.sp, r.fp, r.hdr)
                 }
             } else if _slowPath(v != trueObject) {
@@ -170,6 +172,14 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             r = unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 1, .invalidBytecode, 0, r.fp.pointee)
         }
     }
+}
+
+/// The poll at a backward jump: count down; due when the budget check is
+/// or a stop is requested.
+@_transparent
+func pollDue(_ s: StatePointer, _ flag: UnsafeMutablePointer<Atomic<UInt32>>) -> Bool {
+    unsafe s.pointee.countdown &-= 1
+    return unsafe s.pointee.countdown == 0 || flag.pointee.load(ordering: .relaxed) != 0
 }
 
 @_transparent

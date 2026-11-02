@@ -44,6 +44,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 15: return primGlobal(m, c, put: true)
     case 18: return c.argc == 1 ? (c.receiver == c.arg0 ? m.trueObject : m.falseObject) : .none
     case 19: return c.argc == 0 ? primIdentityHash(c.receiver) : .none
+    case 20...34: return processPrimitive(n, m, c)  // module 3, Processes/ProcessPrimitives.swift
     default: return .none
     }
 }

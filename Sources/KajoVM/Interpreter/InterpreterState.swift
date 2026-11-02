@@ -44,6 +44,10 @@ enum ExitReason: UInt8, Sendable {
     case running
     case returned
     case error
+    /// Module 3: the Process was suspended (preempted, waiting, hopped,
+    /// terminated) and is no longer this worker's; the worker's `leave`
+    /// says why. Its stack must not be touched again.
+    case suspended
 }
 
 /// What the host needs to build a VMError, recorded where it happened.
@@ -62,9 +66,9 @@ struct CacheEntry {
     var method: UInt64
 }
 
-/// The interpreter's state, in its own 128-byte aligned allocation (one per
-/// worker from module 3 on). Plain values and raw pointers only, so the
-/// loop, the send path and the primitives see no ARC.
+/// The interpreter's state: the first field of a `Worker` (module 3), in
+/// the worker's 128-byte aligned allocation. Plain values and raw pointers
+/// only, so the loop, the send path and the primitives see no ARC.
 @unsafe struct InterpreterState {
     let om: ObjectMemory
     let context: AllocContext
@@ -94,6 +98,12 @@ struct CacheEntry {
     /// re-derives its cached bases when it changes.
     var pauses: UInt64 = 0
     var counters = InterpreterCounters()
+    /// Module 3: polls left until the next budget check. The poll is
+    /// `countdown -= 1; if countdown == 0 || flag { pollSlow }`.
+    var countdown = 1024
+    /// Module 3: the length of the send instruction whose primitive is
+    /// running, so a primitive that suspends can rewind to it (hop).
+    var sendLength = 0
 
     static let cacheEntries = 1024
 }
@@ -140,10 +150,37 @@ struct CacheEntry {
 
     @inline(never)
     func allocateSlow(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop) -> Oop {
+        let ctx = unsafe state.pointee.context
+        if let vm = unsafe workerOf(state).pointee.vm {
+            // Module 3: another worker may be stopping the world already;
+            // park for it and try again before stopping it ourselves.
+            let w = unsafe workerOf(state)
+            let keep = extra == .none ? [nilObject] : [nilObject, extra]
+            while true {
+                if unsafe !state.pointee.collectAtEveryAllocation {
+                    let o = bytes ? om.tryAllocateBytes(ctx, classIndex: cls, count: count)
+                                  : om.tryAllocate(ctx, classIndex: cls, slots: count, fill: nilObject)
+                    if o != .none { return o }
+                }
+                var result: Oop? = nil
+                let before = pauseCount()
+                let stopped = unsafe stopWorld(vm, w, retry: false, keeping: keep) { stop in
+                    let roots = stop.roots()
+                    result = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots)
+                                   : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
+                }
+                if !stopped { continue }
+                unsafe state.pointee.counters.collectionsTriggered &+= pauseCount() &- before
+                guard let o = result else {
+                    fail(.outOfMemory)
+                    return .none
+                }
+                return o
+            }
+        }
         var roots = rootsForPause()
         if extra != .none { roots.append(extra) }
         let before = pauseCount()
-        let ctx = unsafe state.pointee.context
         let o = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots)
                       : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
         afterPause(collections: pauseCount() &- before)
@@ -154,6 +191,14 @@ struct CacheEntry {
         return o
     }
 
+    /// Argument `i` (0-based) of a primitive call with more than two, read
+    /// from the stack where the send left it.
+    func argument(_ i: Int, of c: PrimitiveCall) -> Oop {
+        precondition(i < c.argc)
+        let top = unsafe state.pointee.regs.sp
+        return unsafe Oop(raw: state.pointee.stackBase[top - c.argc + 1 + i])
+    }
+
     // MARK: pauses
 
     /// Stop-the-world collection with this interpreter's roots. The world
@@ -162,12 +207,22 @@ struct CacheEntry {
     /// must stay out of the primitives and polls that call them.
     @inline(never)
     func collect() {
+        if let vm = unsafe workerOf(state).pointee.vm {
+            unsafe stopWorld(vm, workerOf(state), retry: true) { om.collect(extraRoots: $0.roots()) }
+            unsafe state.pointee.counters.collectionsTriggered &+= 1
+            return
+        }
         om.collect(extraRoots: rootsForPause())
         afterPause(collections: 1)
     }
 
     @inline(never)
     func compact() {
+        if let vm = unsafe workerOf(state).pointee.vm {
+            unsafe stopWorld(vm, workerOf(state), retry: true) { om.compact(extraRoots: $0.roots()) }
+            unsafe state.pointee.counters.collectionsTriggered &+= 1
+            return
+        }
         om.compact(extraRoots: rootsForPause())
         afterPause(collections: 1)
     }
@@ -178,6 +233,13 @@ struct CacheEntry {
     func become(_ a: Oop, _ b: Oop) -> Bool {
         guard a.isObject, b.isObject, !Image.isStructural(classIndex(of: a)), !Image.isStructural(classIndex(of: b)) else {
             return false
+        }
+        if let vm = unsafe workerOf(state).pointee.vm {
+            var ok = false
+            unsafe stopWorld(vm, workerOf(state), retry: true) { _ in
+                do { try om.becomeExchange(a, b); ok = true } catch {}
+            }
+            return ok
         }
         do { try om.becomeExchange(a, b) } catch { return false }
         afterPause(collections: 0)

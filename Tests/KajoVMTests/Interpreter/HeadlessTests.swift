@@ -1,3 +1,4 @@
+import Darwin
 import Testing
 import KajoVM
 
@@ -23,7 +24,20 @@ import KajoVM
                            options: options)
     guard case .failure(.vm(let e)) = dnu.checksum else { Issue.record("not a VM error"); return }
     #expect(e.kind == .doesNotUnderstand && e.selector == "foo")
-    options.workers = 2
+    options.workers = 0
     let workers = Headless.run([("t.kasm", "")], options: options)
-    guard case .failure(.unsupported) = workers.checksum else { Issue.record("two workers accepted"); return }
+    guard case .failure(.unsupported) = workers.checksum else { Issue.record("no workers accepted"); return }
+}
+
+/// `--workers N`: one Process per worker runs `run: i of: N`; the answers
+/// are summed, and the report names each worker's QoS and the stops.
+@Test func headlessRunOnFourWorkers() throws {
+    var options = Headless.Options()
+    options.heapMiB = 16
+    options.entries = 1 << 16
+    options.workers = 4
+    let src = "method UndefinedObject run:of: temps=0\n push_temp 0\n push_int 10\n mul\n push_temp 1\n add\n return_top\nend\n"
+    let out = Headless.run([("prelude.kasm", kernel("prelude")), ("t.kasm", src)], options: options)
+    #expect(try out.checksum.get() == (0 + 10 + 20 + 30) + 4 * 4)
+    #expect(out.report.first { $0.name == "qos" }?.value == Array(repeating: "\(QOS_CLASS_USER_INITIATED.rawValue)", count: 4).joined(separator: ","))
 }

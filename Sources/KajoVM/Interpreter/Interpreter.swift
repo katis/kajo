@@ -12,37 +12,19 @@ import Synchronization
 
     init(image: Image) {
         self.image = image
-        let raw = unsafe UnsafeMutableRawPointer.allocate(byteCount: MemoryLayout<InterpreterState>.stride, alignment: 128)
-        let special = UnsafeMutablePointer<UInt64>.allocate(capacity: image.specialSelectors.count)
-        for (i, s) in image.specialSelectors.enumerated() { unsafe special[i] = s.raw }
-        let cache = unsafe UnsafeMutablePointer<CacheEntry>.allocate(capacity: InterpreterState.cacheEntries)
-        unsafe cache.initialize(repeating: CacheEntry(classIndex: 0, selector: 0, method: 0), count: InterpreterState.cacheEntries)
         let flag = UnsafeMutablePointer<Atomic<UInt32>>.allocate(capacity: 1)
         unsafe flag.initialize(to: Atomic(0))
-        let leave = UnsafeMutablePointer<UInt8>.allocate(capacity: 1)
-        unsafe leave.initialize(to: 0xFF)
-        precondition(Opcode(rawValue: 0xFF) == nil, "the leave code must not be an opcode")
-        let om = image.om
-        unsafe state = raw.bindMemory(to: InterpreterState.self, capacity: 1)
-        unsafe state.initialize(to: InterpreterState(
-            om: om, context: om.makeContext(), nilObject: image.nilObject, trueObject: image.trueObject,
-            falseObject: image.falseObject, globals: image.globals, doesNotUnderstand: image.doesNotUnderstand,
-            specialSelectors: special, cache: cache, safepointFlag: flag, leaveCode: leave,
-            collectAtEveryAllocation: om.config.stress.contains(.collectAtEveryAllocation),
-            stackBase: special, stackEnd: special))
+        // A worker of no VM: its polls only honour the test switch below.
+        let w = unsafe Worker.make(image: image, vm: nil, index: 0, isMain: true, flag: flag, pollEvery: 1024, seed: 1)
+        unsafe state = w.pointer(to: \Worker.interp)!
         loadsSeen = image.loads
     }
 
     func destroy() {
-        let s = unsafe state.pointee
-        unsafe image.om.destroyContext(s.context)
-        unsafe s.specialSelectors.deallocate()
-        unsafe s.cache.deallocate()
-        unsafe s.safepointFlag.deinitialize(count: 1)
-        unsafe s.safepointFlag.deallocate()
-        unsafe s.leaveCode.deallocate()
-        unsafe state.deinitialize(count: 1)
-        unsafe UnsafeMutableRawPointer(state).deallocate()
+        let flag = unsafe state.pointee.safepointFlag
+        unsafe Worker.destroy(workerOf(state))
+        unsafe flag.deinitialize(count: 1)
+        unsafe flag.deallocate()
     }
 
     var machine: Machine { unsafe Machine(state: state) }
@@ -94,6 +76,8 @@ import Synchronization
             return .success(unsafe state.pointee.regs.result)
         case .error:
             return .failure(currentError())
+        case .suspended:
+            preconditionFailure("a standalone interpreter has no Process to suspend")
         case .running:
             // The host's send ran a primitive: the result is in the receiver's slot.
             let v = unsafe Oop(raw: stack.base[1])

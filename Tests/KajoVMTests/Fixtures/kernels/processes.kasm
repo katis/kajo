@@ -1,0 +1,43 @@
+; Module 3's primitives (docs/modules/workers.md, "Primitives"). Loaded after
+; the prelude and lib.kasm. Numbering follows experiments/ui-thread-scheduling
+; SPEC.md where it exists.
+
+; nil fork: #selector with: arg priority: nil|0..2 main: bool exit: sem|nil
+method Object fork:with:priority:main:exit: temps=0 prim=20
+end
+method Object yield temps=0 prim=21
+end
+method Semaphore wait temps=0 prim=22
+end
+method Semaphore signal temps=0 prim=23
+end
+method Process terminate temps=0 prim=24
+end
+; nil delay: ms signal: aSemaphore  (a one-shot GCD timer)
+method UndefinedObject delay:signal: temps=0 prim=25
+end
+method UndefinedObject newSemaphore temps=0 prim=26
+end
+; A shell call: runs only on the main worker; off main the Process hops.
+method UndefinedObject setLabel: temps=0 prim=29
+end
+method UndefinedObject detachFromMain temps=0 prim=32
+end
+method UndefinedObject activeProcess temps=0 prim=33
+end
+method UndefinedObject workerId temps=0 prim=34
+end
+
+; --- kernel: packed  ->  run: packed // 256 of: packed \\ 256
+; (fork passes one argument; the kernels take two)
+method UndefinedObject kernel: temps=0
+  push_self
+  push_temp 0
+  push_lit 256
+  send // 1
+  push_temp 0
+  push_lit 256
+  send \\ 1
+  send run:of: 2
+  return_top
+end

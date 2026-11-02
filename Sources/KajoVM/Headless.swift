@@ -11,9 +11,13 @@ public enum Headless {
         /// `KAJO_STRESS` syntax: `every`, `oneblock`, `tiny`, `all`.
         public var stress = ""
         public var verify = false
-        /// One until module 3 brings workers.
+        /// Background workers; one Process per worker runs `run: i of: n`.
         public var workers = 1
         public var stackWords = 1 << 16
+        /// Module 3's stress flags: `preempt`, `stop`.
+        public var vmStress = ""
+        /// 0: no background time slice (kernel cost isolation).
+        public var sliceMs = 5.0
 
         public init() {}
     }
@@ -23,8 +27,10 @@ public enum Headless {
         public let checksum: Result<Int64, Failure>
         /// Wall time of the run, load excluded.
         public let milliseconds: Double
-        /// Interpreter and object memory counters, in a stable order.
+        /// Interpreter, object memory and scheduler counters, in a stable order.
         public let counters: [(name: String, value: UInt64)]
+        /// Per-worker QoS, stop percentiles with the slowest participant.
+        public let report: [(name: String, value: String)]
     }
 
     public enum Failure: Error, CustomStringConvertible, Sendable {
@@ -45,8 +51,8 @@ public enum Headless {
 
     /// Load `files` (path, text) in order and run `nil run: 0 of: workers`.
     public static func run(_ files: [(path: String, text: String)], options: Options = Options()) -> Outcome {
-        func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: []) }
-        if options.workers != 1 { return failed(.unsupported("--workers: only 1 until module 3 (workers and safepoints)")) }
+        func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: [], report: []) }
+        if options.workers < 1 || options.workers > 255 { return failed(.unsupported("--workers: 1 to 255")) }
         var config = ObjectMemoryConfig()
         config.heapBytes = options.heapMiB << 20
         config.entryCapacity = options.entries
@@ -67,21 +73,52 @@ public enum Headless {
         } catch {
             return failed(.load("\(error)"))
         }
-        let interpreter = Interpreter(image: image)
-        let stack = Stack(words: options.stackWords)
+        var vc = VMConfig()
+        vc.backgroundWorkers = options.workers
+        vc.stackWords = options.stackWords
+        vc.stress = VMStress(parsing: options.vmStress)
+        vc.sliceNs = UInt64(options.sliceMs * 1e6)
+        let vm = VM(image: image, config: vc)
         defer {
-            stack.destroy()
-            interpreter.destroy()
+            vm.shutdown()
+            vm.destroy()
         }
+        vm.start()
+        let n = options.workers
         let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        let r = interpreter.run(on: stack, receiver: image.nilObject, selector: "run:of:",
-                                arguments: [Oop(smallInteger: 0), Oop(smallInteger: Int64(options.workers))])
-        let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
-        let checksum: Result<Int64, Failure> = switch r {
-        case .success(let v): v.isSmallInteger ? .success(v.smallIntegerValue) : .failure(.notAnInteger("\(v)"))
-        case .failure(let e): .failure(.vm(e))
+        var processes: [Oop] = []
+        for i in 0..<n {
+            guard let p = vm.spawn(receiver: image.nilObject, selector: "run:of:",
+                                   arguments: [Oop(smallInteger: Int64(i)), Oop(smallInteger: Int64(n))]) else {
+                return failed(.unsupported("no method UndefinedObject>>run:of:"))
+            }
+            processes.append(p)
         }
-        let c = interpreter.counters, m = image.om.counters
+        vm.waitUntilAllTerminated()
+        let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
+        vm.shutdown()
+        var sum: Int64 = 0
+        var checksum: Result<Int64, Failure> = .success(0)
+        for p in processes {
+            if let e = vm.error(of: p) { checksum = .failure(.vm(e)); break }
+            let v = vm.result(of: p)
+            guard v.isSmallInteger else { checksum = .failure(.notAnInteger("\(v)")); break }
+            sum = sum &+ v.smallIntegerValue
+            checksum = .success(sum)
+        }
+        let c = vm.interpreterCounters, m = image.om.counters, v = vm.counters
+        let stops = vm.stops
+        let pauses = stops.map(\.pauseNs).sorted()
+        func pct(_ q: Double) -> String {
+            pauses.isEmpty ? "-" : String(format: "%.3f", Double(pauses[min(pauses.count - 1, Int(Double(pauses.count) * q))]) / 1e6)
+        }
+        let worst = stops.max { $0.pauseNs < $1.pauseNs }
+        let qos = (1...n).map { "\(vm.workerQoS($0).rawValue)" }.joined(separator: ",")
+        let report: [(String, String)] = [
+            ("qos", qos), ("stops", "\(stops.count)"), ("pauseP50ms", pct(0.5)), ("pauseP99ms", pct(0.99)),
+            ("pauseMaxMs", pauses.last.map { String(format: "%.3f", Double($0) / 1e6) } ?? "-"),
+            ("slowestParticipant", worst.map { "\($0.slowest)" } ?? "-"),
+        ]
         return Outcome(checksum: checksum, milliseconds: ms, counters: [
             ("sends", c.sends), ("cacheMisses", c.cacheMisses), ("cacheFlushes", c.cacheFlushes),
             ("primitiveCalls", c.primitiveCalls), ("primitiveFailures", c.primitiveFailures),
@@ -89,6 +126,8 @@ public enum Headless {
             ("safepointPolls", c.safepointPolls), ("collectionsTriggered", c.collectionsTriggered),
             ("collections", m.collections), ("compactions", m.compactions), ("allocations", m.allocations),
             ("allocatedBytes", m.allocatedBytes),
-        ])
+        ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
+                              "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors"].contains($0.name) },
+        report: report)
     }
 }

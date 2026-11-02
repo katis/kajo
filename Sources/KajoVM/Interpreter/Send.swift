@@ -93,8 +93,11 @@ func restoreLeaving(_ s: StatePointer) -> Regs { unsafe leaving(s, restore(s)) }
 @_transparent
 func send(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ sel: UInt64, _ argc: Int, _ length: Int,
           poll: Bool, count: Bool = true) -> Regs {
-    if poll, unsafe s.pointee.safepointFlag.pointee.load(ordering: .relaxed) != 0 {
-        return unsafe pollAndSend(s, r.pc, r.sp, r.fp, r.hdr, sel, argc, length)
+    if poll {
+        unsafe s.pointee.countdown &-= 1
+        if unsafe s.pointee.countdown == 0 || s.pointee.safepointFlag.pointee.load(ordering: .relaxed) != 0 {
+            return unsafe pollAndSend(s, r.pc, r.sp, r.fp, r.hdr, sel, argc, length)
+        }
     }
     if count { unsafe s.pointee.counters.sends &+= 1 }
     let rcv = unsafe (r.sp - argc).pointee
@@ -193,31 +196,47 @@ func lookupMiss(_ s: StatePointer, _ cls: UInt64, _ sel: UInt64) -> UInt64 {
     return m.raw
 }
 
-/// The safepoint flag was set at a send: stop (here: collect, the test
-/// switch), then send.
+/// The countdown ran out or the safepoint flag was set at a send: flush
+/// the registers, run the poll slow path (which may park, stop the world,
+/// or suspend the Process with the send rewound so it is re-executed),
+/// then send.
 @inline(never)
 func pollAndSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                  _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>,
                  _ sel: UInt64, _ argc: Int, _ length: Int) -> Regs {
-    unsafe safepoint(s, pc, sp, fp, hdr)
+    unsafe flushForPoll(s, pc, sp, fp, hdr)
+    if unsafe pollSlow(s, rewind: length) { return unsafe leavingWithoutStack(s) }
     let r = unsafe restore(s)
     return unsafe send(s, s.pointee.om, r, sel, argc, length, poll: false)
 }
 
-/// The safepoint flag was set at a backward jump.
+/// As `pollAndSend`, at a backward jump (the saved pc is the target).
 @inline(never)
 func pollAtJump(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                 _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>) -> Regs {
-    unsafe safepoint(s, pc, sp, fp, hdr)
+    unsafe flushForPoll(s, pc, sp, fp, hdr)
+    if unsafe pollSlow(s, rewind: 0) { return unsafe leavingWithoutStack(s) }
     return unsafe restore(s)
 }
 
+/// The registers to the saved form before the poll can park or stop the
+/// world (the test switch `flushAfterStop` stops first, with stale ones).
 @inline(__always)
-func safepoint(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
-               _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>) {
+func flushForPoll(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+                  _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>) {
+    if let vm = unsafe workerOf(s).pointee.vm, unsafe vm.pointee.config.testSwitches.flushAfterStop {
+        unsafe stopIfStressed(vm, workerOf(s))
+    }
     unsafe save(s, pc, sp, fp, hdr)
-    unsafe s.pointee.counters.safepointPolls &+= 1
-    unsafe Machine(state: s).collect()
+}
+
+/// Registers that leave the loop at once without reading the stack: the
+/// Process has been published and may already run elsewhere.
+@inline(__always)
+func leavingWithoutStack(_ s: StatePointer) -> Regs {
+    let d = unsafe workerOf(s).pointee.dummy
+    let leave = unsafe UnsafePointer(s.pointee.leaveCode)
+    return unsafe Regs(pc: leave, sp: d, fp: d, hdr: d, code: leave, lits: UnsafePointer(d))
 }
 
 /// A special arithmetic or comparison bytecode whose fast path did not
@@ -251,11 +270,13 @@ func primitiveSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMu
     let prim = primAndArgc &>> 8, argc = primAndArgc & 0xFF
     unsafe save(s, pc, sp, fp, hdr)
     unsafe s.pointee.counters.primitiveCalls &+= 1
+    unsafe s.pointee.sendLength = length
     let m = unsafe Machine(state: s)
     let call = unsafe PrimitiveCall(receiver: Oop(raw: (sp - argc).pointee), argc: argc,
                                     arg0: argc > 0 ? Oop(raw: (sp - argc + 1).pointee) : .none,
                                     arg1: argc > 1 ? Oop(raw: (sp - argc + 2).pointee) : .none)
     let result = primitive(prim, m, call)
+    if unsafe s.pointee.exit == .suspended { return unsafe leavingWithoutStack(s) }
     if result != .none {
         let base = unsafe s.pointee.stackBase
         let top = unsafe s.pointee.regs.sp &- argc

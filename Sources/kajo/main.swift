@@ -2,11 +2,13 @@ import Foundation
 import KajoVM
 
 let usage = """
-usage: kajo run <file.kasm>... [--workers 1] [--heap MiB] [--entries N] [--stress every,tiny,oneblock] [--verify]
+usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N] [--stress every,tiny,oneblock,preempt,stop]
+                [--slice-ms 5] [--verify]
        kajo version
 
-Loads the files in order into a fresh image, sends run: 0 of: workers to nil,
-and prints one key=value line: the checksum, the run time and the counters.
+Loads the files in order into a fresh image, runs one Process per worker
+sending run: i of: workers to nil, and prints one key=value line: the sum
+of their answers, the run time, the counters, per-worker QoS and the stops.
 """
 
 func fail(_ message: String, _ code: Int32 = 2) -> Never {
@@ -35,7 +37,11 @@ case "run":
         case "--workers": options.workers = Int(value()) ?? 0
         case "--heap": options.heapMiB = Int(value()) ?? 0
         case "--entries": options.entries = Int(value()) ?? 0
-        case "--stress": options.stress = value()
+        case "--stress":
+            let v = value().split(separator: ",")
+            options.stress = v.filter { ["every", "tiny", "oneblock", "all"].contains($0) }.joined(separator: ",")
+            options.vmStress = v.filter { ["preempt", "stop"].contains($0) }.joined(separator: ",")
+        case "--slice-ms": options.sliceMs = Double(value()) ?? 5
         case "--verify": options.verify = true
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
@@ -52,7 +58,8 @@ case "run":
     switch outcome.checksum {
     case .success(let checksum):
         let counters = outcome.counters.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
-        print("checksum=\(checksum) ms=\(String(format: "%.1f", outcome.milliseconds)) workers=\(options.workers) \(counters)")
+        let report = outcome.report.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
+        print("checksum=\(checksum) ms=\(String(format: "%.1f", outcome.milliseconds)) workers=\(options.workers) \(counters) \(report)")
     case .failure(let f):
         fail("kajo: \(f)", 1)
     }
