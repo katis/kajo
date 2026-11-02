@@ -400,12 +400,15 @@ alone and does not depend on VMR.
 Published numbers: `stw` (the ADR 0007 reference and the checksum oracle)
 never defers a free, so nothing it measured can change. In `local` and
 `offload` the initial-mark pause and full collections gain one walk over
-the deferred lists, which at a pause hold only kept entries, a subset of
-the deferred frees (`yc_deferred`, the count of deferred frees, is 0 in 697
-of the bench's kernel lines and in the single digits otherwise), so no
-pause, wall time or checksum in RESULTS.md or ADR 0008 should move
-measurably; old-space sweep counts (`snap_entries`, freed entries) can
-differ by those few entries. The matrices were not re-run. The bug could
-have freed a live object in a `local`/`offload` run that overlapped
-collections with cross-nursery holders and a marking cycle; every published
-checksum was equal, so no published result shows that it did.
+the deferred lists, which at a pause hold only the kept subset of the
+deferred frees. Deferred frees are 0 in 697 of the 750 kernel lines of
+`bench-raw-kernels.txt`; they reach 2 to 26 per run in `alloc` and `share`
+at 8 workers and 992 to 6144 per run in `survivors30` at 8 workers (local
+and offload). How many of those were kept across a pause was not counted.
+The walk is a few loads per kept entry, so no pause or wall time in
+RESULTS.md or ADR 0008 should move measurably, but old-space counts
+(`snap_entries`, sweep freed entries and bytes, floating garbage) of
+`survivors30`, `alloc` and `share` at 8 workers under `local`/`offload`
+can differ by the kept entries. Those are also the runs where the defect
+could have freed a live object; every published checksum there was equal,
+so no published result shows that it did. The matrices were not re-run.
