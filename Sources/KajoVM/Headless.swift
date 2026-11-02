@@ -167,6 +167,10 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
         parts += r.participants
     }
     let rate = busy == 0 ? "-" : f(Double(copied) / Double(busy) * 1e3)  // MB/s per participant
+    let sweeps = log.map(\.maxSweepNs).sorted()
+    let sweepP50 = sweeps.isEmpty ? "-" : f(Double(sweeps[sweeps.count / 2]) / 1e6)
+    let ttsp = scav.map(\.timeToSafepointNs).sorted()
+    let ttspP50 = ttsp.isEmpty ? "-" : f(Double(ttsp[ttsp.count / 2]) / 1e6)
     let fullMax = fulls.map(\.pauseNs).max().map { f(Double($0) / 1e6) } ?? "-"
     return [
         ("scavenges", "\(c.scavenges)"), ("scavP50ms", pct(0.5)), ("scavP99ms", pct(0.99)),
@@ -175,7 +179,7 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
         ("promotedMB", mb(c.promotedBytes)), ("promotedMBs", ms > 0 ? f(Double(c.promotedBytes) / 1e3 / ms) : "-"),
         ("survivedMB", mb(c.survivedBytes)), ("overflowMB", mb(c.overflowBytes)),
         ("fullCollections", "\(fulls.count)"), ("fullMaxMs", fullMax), ("fullRequested", "\(c.fullCollectionsRequested)"),
-        ("copyMBsPerParticipant", rate), ("youngAllocations", "\(c.youngAllocations)"),
+        ("copyMBsPerParticipant", rate), ("sweepP50ms", sweepP50), ("ttspP50ms", ttspP50), ("youngAllocations", "\(c.youngAllocations)"),
         ("largeAllocations", "\(c.largeAllocations)"), ("barrierSlow", "\(c.barrierSlowCalls)"),
         ("remHolders", "\(c.rememberedHolders)"), ("entriesFreed", "\(c.entriesFreed)"),
     ]
