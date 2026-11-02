@@ -1,48 +1,55 @@
 #!/bin/zsh
-# Release-build disassembly check: the object memory's allocation and store
-# paths must contain no swift_retain / swift_release (AGENTS.md hot-path
-# rules). Internal functions are dead-stripped from a plain release build
-# (nothing public calls them yet), so this builds -O with -enable-testing,
-# which keeps every internal function as an optimized symbol, and
-# disassembles each function on the paths with relocations shown, so every
-# call names its callee.
+# Release-build disassembly checks (AGENTS.md hot-path rules):
+#  1. no swift_retain / swift_release on the object memory's allocation and
+#     store paths, the interpreter's dispatch loop, its send path and slow
+#     paths, and the primitives (including the ones that allocate);
+#  2. the dispatch loop `interpret` is one jump table: one indirect branch
+#     and one jump-table relocation.
+# Internal functions are dead-stripped from a plain release build, so this
+# builds -O with -enable-testing, which keeps every internal function as an
+# optimized symbol, and disassembles each one with relocations shown, so
+# every call names its callee. Private functions are local symbols (`t`).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 swift build -c release -Xswiftc -enable-testing --scratch-path .build/release-testing >/dev/null || exit 2
 objs=.build/release-testing/out/Intermediates.noindex/kajo.build/Release/KajoVM-t.build/Objects-normal/arm64
+typeset -A wanted
 wanted=(
-  'ObjectMemory.tryAllocate(_:classIndex:slots:fill:)'
-  'ObjectMemory.tryAllocateBytes(_:classIndex:count:)'
-  'ObjectMemory.allocate(_:header:bytes:fill:)'
-  'ObjectMemory.place(_:header:bytes:fill:)'
-  'ObjectMemory.allocateSlow(_:header:bytes:fill:)'
-  'ObjectMemory.refillBlock(_:bytes:)'
-  'ObjectMemory.refillEntries(_:)'
-  'ObjectMemory.allocateBody(_:bytes:)'
-  'ObjectMemory.retire(_:)'
-  'ObjectMemory.store(_:_:_:)'
-  'ObjectMemory.load(_:_:)'
-  'ObjectMemory.storeByte(_:_:_:)'
-  'ObjectMemory.loadByte(_:_:)'
-  'ObjectMemory.lockPools()'
-  'ObjectMemory.unlockPools()'
+  Allocation 'ObjectMemory.tryAllocate(_:classIndex:slots:fill:)|ObjectMemory.tryAllocateBytes(_:classIndex:count:)|ObjectMemory.allocate(_:header:bytes:fill:)|ObjectMemory.place(_:header:bytes:fill:)|ObjectMemory.allocateSlow(_:header:bytes:fill:)|ObjectMemory.refillBlock(_:bytes:)|ObjectMemory.refillEntries(_:)|ObjectMemory.allocateBody(_:bytes:)|ObjectMemory.retire(_:)'
+  ObjectMemory 'ObjectMemory.store(_:_:_:)|ObjectMemory.load(_:_:)|ObjectMemory.storeByte(_:_:_:)|ObjectMemory.loadByte(_:_:)|ObjectMemory.lockPools()|ObjectMemory.unlockPools()|ObjectMemory.bytesBase(_:)|ObjectMemory.slotsBase(_:)'
+  Dispatch 'interpret(_:_:)'
+  Send 'lookupMiss(_:_:_:)|pollAndSend(_:_:_:_:_:_:_:_:)|pollAtJump(_:_:_:_:_:)|specialSend(_:_:_:_:_:_:)|primitiveSend(_:_:_:_:_:_:_:_:)|bottomReturn(_:_:_:_:_:)|stackOverflow(_:_:_:_:_:_:_:)|failAt(_:_:_:_:_:_:_:_:_:)|doesNotUnderstand(_:_:_:_:_:_:_:_:)'
+  Primitives 'primitive(_:_:_:)|primAt(_:_:)|primAtPut(_:_:)|primBasicNew(_:_:size:)|primDivide(_:modulo:)'
+  InterpreterState 'Machine.allocate(_:slots:keeping:)|Machine.allocateBytes(_:count:)|Machine.fail(_:selector:receiverClass:primitive:)'
+  Image 'lookupMethod(_:nilObject:classIndex:selector:)'
 )
 fail=0
 found=0
-for o in $objs/Allocation.o $objs/ObjectMemory.o; do
-  syms=("${(@f)$(nm $o | awk '$2 == "T" {print $3}')}")
-  names=("${(@f)$(print -l -- $syms | xcrun swift-demangle --simplified --compact)}")
+total=0
+for obj in ${(k)wanted}; do
+  list=("${(@s:|:)wanted[$obj]}")
+  total=$((total + ${#list}))
+  o=$objs/$obj.o
+  syms=("${(@f)$(nm $o | awk '$2 == "T" || $2 == "t" {print $3}')}")
+  names=("${(@f)$(print -l -- $syms | xcrun swift-demangle --simplified --compact | sed 's/^specialized //')}")
   for i in {1..${#syms}}; do
-    (( ${wanted[(Ie)${names[$i]}]} )) || continue
+    (( ${list[(Ie)${names[$i]}]} )) || continue
     found=$((found + 1))
     body=$(xcrun objdump -d -r --no-show-raw-insn --disassemble-symbols="${syms[$i]}" $o)
     n=$(print -- "$body" | grep -cE '^ +[0-9a-f]+:')
     arc=$(print -- "$body" | grep -cE 'swift_(retain|release|bridgeObjectRetain|bridgeObjectRelease|unknownObjectRetain|unknownObjectRelease)')
     calls=$(print -- "$body" | grep -E 'ARM64_RELOC_BRANCH26|R_AARCH64_CALL26' | awk '{print $NF}' | sort -u | xcrun swift-demangle --simplified --compact | tr '\n' ' ')
-    printf '%-52s %4d insns  ARC %d  calls: %s\n' "${names[$i]}" "$n" "$arc" "${calls:-none}"
+    printf '%-46s %5d insns  ARC %d  calls: %s\n' "${names[$i]}" "$n" "$arc" "${calls:-none}"
     (( arc == 0 )) || fail=1
+    if [[ ${names[$i]} == 'interpret(_:_:)' ]]; then
+      branches=$(print -- "$body" | grep -cE '	br	x[0-9]+')
+      tables=$(print -- "$body" | grep -oE 'lJTI[0-9_]+' | sort -u | wc -l | tr -d ' ')
+      printf '%-46s indirect branches %d, jump tables %d\n' "  dispatch" "$branches" "$tables"
+      (( branches == 1 && tables == 1 )) || { echo "FAIL: the dispatch loop is not one jump table"; fail=1; }
+    fi
   done
 done
-if (( found != ${#wanted} )); then echo "found $found of ${#wanted} functions"; exit 2; fi
-(( fail == 0 )) && echo "OK: no retain or release on the allocation and store paths"
+# a function may be emitted twice (a specialization beside the original): count names
+if (( found < total )); then echo "found $found of $total functions"; exit 2; fi
+(( fail == 0 )) && echo "OK: no retain or release on the checked paths; the dispatch loop is one jump table"
 exit $fail

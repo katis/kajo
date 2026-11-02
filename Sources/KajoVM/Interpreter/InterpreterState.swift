@@ -96,7 +96,6 @@ struct CacheEntry {
     var counters = InterpreterCounters()
 
     static let cacheEntries = 1024
-    static let byteSize = 256
 }
 
 /// The state behind a pointer, with the operations primitives and slow
@@ -158,12 +157,16 @@ struct CacheEntry {
     // MARK: pauses
 
     /// Stop-the-world collection with this interpreter's roots. The world
-    /// is this thread until module 3.
+    /// is this thread until module 3. The pause operations are out of line:
+    /// they build Swift arrays for module 1's root interface, and that ARC
+    /// must stay out of the primitives and polls that call them.
+    @inline(never)
     func collect() {
         om.collect(extraRoots: rootsForPause())
         afterPause(collections: 1)
     }
 
+    @inline(never)
     func compact() {
         om.compact(extraRoots: rootsForPause())
         afterPause(collections: 1)
@@ -171,6 +174,7 @@ struct CacheEntry {
 
     /// Two-way become. Refused for SmallIntegers and the structural
     /// classes, whose shape the interpreter trusts.
+    @inline(never)
     func become(_ a: Oop, _ b: Oop) -> Bool {
         guard a.isObject, b.isObject, !Image.isStructural(classIndex(of: a)), !Image.isStructural(classIndex(of: b)) else {
             return false

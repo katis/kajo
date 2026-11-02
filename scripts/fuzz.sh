@@ -1,30 +1,36 @@
 #!/bin/zsh
 # Fuzz one of the two loaders that read untrusted bytes:
 #   scripts/fuzz.sh kasm|snapshot [seconds]
-# Tries a libFuzzer build first (-sanitize=fuzzer,address -DKAJO_LIBFUZZER).
-# The Xcode toolchain does not support it ("unsupported option
-# '-sanitize=fuzzer' for target 'arm64-apple-macosx...'", no
-# libclang_rt.fuzzer_osx.a); a swift.org toolchain does, selected with
-# TOOLCHAINS=<its bundle id> (swiftly or the .pkg from swift.org). Without
-# one this falls back to the same target built plainly: it replays the seed
-# corpus and mutates it, without coverage guidance, for the given time.
-# A trap leaves its input in .build/fuzz-run/<target>/fuzz-current.
+# libFuzzer needs a toolchain with libclang_rt.fuzzer_osx.a. Xcode's has
+# none ("unsupported option '-sanitize=fuzzer' for target
+# 'arm64-apple-macos15.0'"); a swift.org toolchain does. It is selected with
+# TOOLCHAINS (default `swift`, the installed swift.org toolchain; override
+# with KAJO_FUZZ_TOOLCHAINS=<bundle id>). The targets are built with
+# -sanitize=fuzzer,address -DKAJO_LIBFUZZER; new corpus entries go to
+# .build/fuzz-run/<target>/corpus, crashes to .build/fuzz-run/<target>/.
+# Without such a toolchain this falls back to the same target built
+# plainly: it replays the seed corpus and mutates it, without coverage
+# guidance, for the given time.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+root=$PWD
 target=${1:?kasm or snapshot}
 seconds=${2:-60}
 [[ $target == kasm || $target == snapshot ]] || { echo "target: kasm or snapshot"; exit 2; }
-seeds=$PWD/Tests/KajoVMTests/Fixtures/fuzz/$target
-run=$PWD/.build/fuzz-run/$target
+seeds=$root/Tests/KajoVMTests/Fixtures/fuzz/$target
+run=$root/.build/fuzz-run/$target
 mkdir -p $run/corpus
 log=$run/libfuzzer-build.log
-if swift build -c release --product fuzz-$target --scratch-path .build/fuzz \
-     -Xswiftc -sanitize=fuzzer,address -Xswiftc -DKAJO_LIBFUZZER >$log 2>&1; then
-  echo "libFuzzer build: ok"
-  cd $run && $PWD/../../fuzz/release/fuzz-$target corpus $seeds -max_total_time=$seconds
+toolchains=${KAJO_FUZZ_TOOLCHAINS:-swift}
+flags=(-c release --product fuzz-$target --scratch-path .build/fuzz -Xswiftc -sanitize=fuzzer,address -Xswiftc -DKAJO_LIBFUZZER)
+if TOOLCHAINS=$toolchains swift build $flags >$log 2>&1; then
+  bin=$(TOOLCHAINS=$toolchains swift build $flags --show-bin-path)/fuzz-$target
+  echo "libFuzzer build: ok ($(TOOLCHAINS=$toolchains swift --version 2>&1 | head -1))"
+  cd $run && $bin -max_total_time=$seconds -print_final_stats=1 corpus $seeds
   exit $?
 fi
 echo "libFuzzer build failed: $(grep -m1 -E 'error' $log)"
 echo "falling back to the corpus replay and mutation driver (no coverage guidance)"
 swift build -c release --product fuzz-$target >/dev/null || exit 2
-cd $run && $OLDPWD/.build/release/fuzz-$target --seconds $seconds --seed $RANDOM $seeds
+bin=$(swift build -c release --product fuzz-$target --show-bin-path)/fuzz-$target
+cd $run && $bin --seconds $seconds --seed $RANDOM $seeds
