@@ -39,3 +39,7 @@ fuzz TARGET SECONDS="60":
 # The fixture kernels through `kajo run` against their published single-worker checksums
 golden:
     scripts/golden.sh
+
+# The test suite in a release build, which adds the full-size golden kernels
+test-release:
+    swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests

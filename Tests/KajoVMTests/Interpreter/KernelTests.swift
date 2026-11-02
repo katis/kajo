@@ -8,9 +8,9 @@ let scaledWorkers: [String: Int64] = [
     "arith": 8000, "fib": 96, "sends": 40000, "alloc": 320, "ivars": 8000, "walk": 1024,
 ]
 
-private func kernelHarness(_ name: String, stress: StressFlags = [], heapBlocks: Int = 2048,
+private func kernelHarness(_ name: String, stress: StressFlags = [], heapBlocks: Int = 2048, entries: Int = 1 << 20,
                            verify: Bool = true) throws -> Harness {
-    try Harness(kernel(name), base: ["prelude", "lib"], heapBlocks: heapBlocks, entries: 1 << 20, stress: stress, verify: verify)
+    try Harness(kernel(name), base: ["prelude", "lib"], heapBlocks: heapBlocks, entries: entries, stress: stress, verify: verify)
 }
 
 /// Each fixture kernel, scaled down, answers what its Swift model answers
@@ -30,7 +30,8 @@ func scaledKernelsMatchTheirModels(_ name: String) throws {
 @Test(.enabled(if: !checkedBuild || ProcessInfo.processInfo.environment["KAJO_GOLDEN"] != nil),
       arguments: goldenKernels.map(\.name))
 func goldenKernelChecksums(_ name: String) throws {
-    let h = try kernelHarness(name, heapBlocks: name == "walk" ? 16384 : 2048)
+    let walk = name == "walk"  // 4M nodes
+    let h = try kernelHarness(name, heapBlocks: walk ? 16384 : 2048, entries: walk ? 1 << 23 : 1 << 20)
     defer { h.destroy() }
     #expect(try h.value() == goldenKernels.first { $0.name == name }!.checksum)
 }
