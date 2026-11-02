@@ -220,3 +220,88 @@ Instrumentation planned (step 4) separates H6 from H7: a ring of events
 pushes, kept and frees, local-sweep frees of snapshot entries during
 marking, and entry refills that hand out snapshot entries during marking,
 dumped for each entry the mark verifier reports.
+
+### Step 4: instrument
+
+Instrumentation (commit 17b28ab, removed after the fix): a ring of 2^20
+events (`mach_absolute_time`, kind, worker, entry, extra) written from the
+rare paths only: initial and final mark, a dead remembered holder's free
+deferred (`deferPush`), a deferred free postponed because the `rem` word was
+re-armed (`deferKept`, extra = the re-armed word), a deferred free
+(`deferFree`), a local sweep freeing a snapshot entry while marking
+(`ycFreeSnap`), and an entry refill handing out a snapshot entry while
+marking (`reallocSnap`). The mark verifier dumps the events of the first
+three entries it reports.
+
+Counts per run of the minimal program (no Semaphore), passing and failing:
+
+```
+diag: cycles=2 yc=125 verifyFailures=0 kept=546 deferPush=18809 reallocSnap=0 ycFreeSnap=0
+diag: cycles=5 yc=124 verifyFailures=2 kept=1457 deferPush=18591 reallocSnap=179 ycFreeSnap=77
+```
+
+and without the neighbour link: `kept=0 deferPush=75` (and `kept=1` once),
+never failing. A trace from a failing run (worker = nursery = collector of
+its own nursery in `local`; extra of `deferKept` = the re-armed `rem` word,
+4 = membership bit of nursery 2):
+
+```
+verify: concurrent mark missed reachable entry 1585056 (class 14)
+diag: events for entry 99066 (counts: initialMark=2 finalMark=2 deferPush=14522 deferKept=1230 deferFree=14426 reallocSnap=338 ycFreeSnap=171)
+  t=5950509671585 initialMark w=-1 a=1 b=0
+  t=5950513330371 finalMark w=-1 a=1 b=0
+  t=5950538647695 deferPush w=5 a=99066 b=5
+  t=5950538687419 deferKept w=5 a=99066 b=4
+  t=5950540463615 initialMark w=-1 a=2 b=0
+  t=5950548502100 deferFree w=5 a=99066 b=5
+  t=5950550034529 reallocSnap w=5 a=99066 b=0
+  t=5950551345212 ycFreeSnap w=5 a=99066 b=5
+  t=5950555666095 reallocSnap w=5 a=99066 b=0
+  t=5950559969274 ycFreeSnap w=5 a=99066 b=5
+  t=5950563692131 reallocSnap w=5 a=99066 b=0
+  t=5950564045886 finalMark w=-1 a=2 b=0
+```
+
+Every reported entry in every failing run has this shape: deferred, kept
+(re-armed), **initial mark**, deferred free during marking, reallocated
+while still a snapshot bit, reachable and unmarked at the final mark.
+**H6 is confirmed.** H7 (a young body missed by the young-root scan) is
+refuted for these entries: they were dead and in no nursery's young log at
+the snapshot, and the object the verifier finds is one allocated after it.
+
+How the re-arm happens so often (1 in 13 deferred frees here): nursery j's
+collection scans a holder H of nursery k from its remembered lists and,
+when H names a survivor of j, sets the pending bit (`keepForNext`). k's
+collection finds H dead, zeroes its `rem` word and defers the free. j's
+`foldCarried` at the end of its collection then sets the membership bit
+for every holder on its next-carried list unconditionally, H included, and
+k's step 6 sees a nonzero word. The window is the rest of j's collection,
+which preemption stretches.
+
+ThreadSanitizer, under the same contention (4 copies + 12 `yes`, TSan
+build, `DYLD_INSERT_LIBRARIES` set to the bundle's TSan runtime, needed
+when running the bundle directly): the original test failed 3 of 12 with
+the same mark message and no TSan report; the minimal program failed 5 of
+12 and one run reported a race that is the same defect seen from the lazy
+sweep:
+
+```
+WARNING: ThreadSanitizer: data race
+  Read of size 8 by thread T3:
+    #0 sweepWork(_:_:_:) Concurrent.swift:842      (the entry's header)
+    #1 markerLoop(_:_:) Concurrent.swift:557
+  Previous atomic write of size 8 by thread T6:
+    #0 evacuate(_:_:_:_:_:_:_:) Young.swift:967     (header CAS of a young object)
+    #1 classify ... #3 ycCollect ... #4 ycLocal ... #5 allocSlow
+```
+
+The lazy sweep reads the header of a snapshot entry that is now a young
+object being evacuated by a local collection: a kept deferred entry freed
+during the *sweep* phase and reallocated, which the sweep then frees under
+the live object (no mark verifier message in that run; the young verifier
+runs after every fourth collection only). This is also the
+`verify young: reachable entry is free` of step 1.
+
+The same hole exists in the full mark-sweep (`sweepTable`): it frees every
+used, unmarked entry, a kept deferred one included, and the nursery's
+deferred free later clears the bit again, possibly under a new object.
