@@ -35,12 +35,16 @@ extension ObjectMemory {
     /// One-way bulk become: every reference to `from[i]`, in any slot, the
     /// root registry, the class table or `extraRoots`, becomes a reference
     /// to `to[i]`; the sources' entries are freed and their bodies are
-    /// garbage. One scan of every used entry: copying an entry over another
+    /// garbage. Chains (a source that is also a target) are refused, not
+    /// followed. One scan of every used entry: copying an entry over another
     /// would make two oops for one body and break identity
     /// (experiments/object-representation SPEC, "Deviation"). World stopped.
     func becomeForward(_ from: [Oop], to: [Oop], extraRoots: inout [Oop]) throws(BecomeError) {
         guard from.count == to.count else { throw .lengthMismatch }
         for o in from + to where !isUsedReference(o) { throw .notAnObject }
+        // A pair whose source is its target is skipped (as in the experiment).
+        let pairs = zip(from, to).filter { $0.0 != $0.1 }
+        let from = pairs.map(\.0), to = pairs.map(\.1)
         let hw = highWater
         var target = RawArray<UInt64>(repeating: 0, count: Int(hw))
         defer { target.free() }

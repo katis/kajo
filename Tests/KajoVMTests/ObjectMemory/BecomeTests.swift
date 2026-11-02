@@ -98,6 +98,18 @@ private func array(_ w: World, _ elems: [Oop]) -> Oop {
     #expect(throws: BecomeError.lengthMismatch) { try om.becomeForward([a, b], to: [c]) }
     #expect(throws: BecomeError.duplicateSource) { try om.becomeForward([a, a], to: [b, c]) }
     #expect(throws: BecomeError.sourceIsATarget) { try om.becomeForward([a, b], to: [b, c]) }
-    #expect(throws: BecomeError.sourceIsATarget) { try om.becomeForward([a], to: [a]) }
     #expect(om.isUsedReference(a) && om.isUsedReference(b) && om.isUsedReference(c))
+}
+
+/// As in the experiment, a pair whose source is its target is skipped.
+@Test func bulkForwardSkipsIdenticalPairs() throws {
+    let om = try makeMemory()
+    defer { om.destroy() }
+    let w = World(om)
+    let a = object(w, 2, [1]), b = object(w, 2, [2]), c = object(w, 2, [3])
+    let holder = array(w, [a, b])
+    _ = om.addRoot(holder)
+    try om.becomeForward([a, b], to: [a, c])
+    #expect(om.load(holder, 0) == a && om.load(holder, 1) == c && om.isUsedReference(a) && !om.isUsedReference(b))
+    #expect(om.counters.forwardedObjects == 1)
 }
