@@ -472,7 +472,7 @@ Every checksum is the experiments' published one.
 Against the experiments:
 
 - **churn at 8 workers**: p99 0.26 ms at 1 MiB, **0.53 ms at 4 MiB**
-  (expected under 0.4; the experiment had 0.32), 1.67 at 16 MiB. Nothing
+  (expected under 0.4; the experiment had 0.32), 1.76 at 16 MiB. Nothing
   is copied: the pause is the time to safepoint (0.09 ms p50) and the entry
   sweep, which **reads every entry allocated since the last scavenge**: 0.073
   ms of a 0.074 ms pause on one worker (131 000 entries per 4 MiB nursery),

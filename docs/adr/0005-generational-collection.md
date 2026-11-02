@@ -106,7 +106,7 @@ the experiments'):
 
 | kernel, 8 workers | 1 MiB p99 | 4 MiB p99 | 16 MiB p99 | 4 MiB max |
 |---|--:|--:|--:|--:|
-| churn | 0.26 ms | 0.53 ms | 1.67 ms | 0.60 ms |
+| churn | 0.26 ms | 0.53 ms | 1.76 ms | 0.60 ms |
 | survivors5 (N = 1) | 0.65 ms | 1.06 ms | 2.82 ms | 1.15 ms |
 | survivors30 (N = 1) | 0.69 ms | 1.55 ms | 5.96 ms | 1.68 ms |
 | alloc (N = 1) | 1.20 ms | 3.90 ms | 4.89 ms | 4.39 ms |
