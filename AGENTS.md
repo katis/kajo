@@ -290,6 +290,20 @@ Safety:
    violation. The first run's "violation" of a claim was a modelling bug (a
    buffered revert at a pause) that also exposed an unstated fence in the
    SPEC; write both kinds of finding down.
+ - The young-collection model (docs/models/young-collection.md) found that
+   a relaxed store followed by the barrier's seq_cst load of the remembered
+   word can be overtaken by that load (C++ and ARMv8 both allow `str` then
+   `ldar` to reorder), so a concurrent collector's clear-then-scan misses
+   the store and nobody re-arms the holder. Every store that a barrier's
+   load follows is seq_cst or has a seq_cst fence before the load; the
+   experiment's array-copy primitive got this wrong. The same model showed
+   the owner's new-half scan alone covers amendment 7 and the snoop is
+   belt and braces, that the wake from a quiescent wait must store epoch 0
+   like `enterVM`, and reproduced both the single-round loss under
+   sequential consistency and the deferred-entry double free.
+ - In a shared working tree never `git mv`: it stages the rename for every
+   agent, and another agent's commit by name can carry it. Move with plain
+   `mv` and add the new path when committing.
  - Device iteration is fast: about one second per launch over `devicectl`,
    with stdout streamed. Design device benchmarks as one kernel per launch
    so a crash costs one run and thermal state is logged per launch.
