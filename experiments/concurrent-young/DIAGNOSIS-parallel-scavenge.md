@@ -122,6 +122,47 @@ verifier finding a reachable object whose entry bit in `used` is clear.
 Both name a reachable object whose entry the collector treats as something
 else: a snapshot entry it never marked, or a free entry.
 
+### Step 2: minimise
+
+A scratch copy of the test with knobs from the environment
+(`Tests/VMRTests/DiagMinTests.swift`, removed after the diagnosis): number
+of Processes and workers, iterations, Array size, the Semaphore around
+publication, publication into the shared old Array, linking the
+neighbour's published Array into the own list (else the own Array), the
+fill loop. No final walk. 40 runs per row, 4 copies at once + 12 `yes`,
+`local`.
+
+| variant | failed |
+|---|---|
+| as the test (8 Processes, 8 workers, 3000 iterations, 32 Pairs) | 6 of 40 |
+| no neighbour link | 4 of 40 |
+| no Semaphore | 22 of 40 |
+| no fill (empty Arrays; 32 instead of 125 collections) | 1 of 40 |
+| 4 Processes, 4 workers | 3 of 40 |
+| 2 Processes, 2 workers | 0 of 40 |
+| 1000 iterations | 1 of 40 |
+| no Semaphore, no link | 0 of 40 (and 0 of 20 again) |
+| no Semaphore, no link, no publication | 0 of 40 |
+| no Semaphore, 2 Processes, 2 workers | 0 of 40 |
+| no Semaphore, no link, no publication, 1 Process, 1 worker | 0 of 40 |
+| no Semaphore, no link, no publication, 8 Processes on 2 workers | 0 of 40 |
+
+(The last five rows and a repeat of "no Semaphore", 8 of 20, ran with the
+step 4 instrumentation compiled in; it touches only rare paths.)
+
+Smallest program that still fails often: **8 Processes on 8 workers, each
+allocating young Arrays of 32 Pairs, publishing each into a shared old
+Array and linking the neighbour's into its own young list, no Semaphore**
+(22 of 40). The Semaphore is not needed; it only slows the program and
+makes failures rarer. What removes the failure: removing cross-nursery
+young-to-young references (no link and no Semaphore), or fewer than 4
+workers (fewer overlapping local collections), or fewer collections. The
+clue: the failure needs overlapping local collections of different
+nurseries *and* young holders remembered for another nursery. With the
+Semaphore but no link it still fails (4 of 40): Processes that wait and
+resume on another worker make their own list nodes cross-nursery holders.
+Neither the Semaphore nor the parallel scavenge is involved.
+
 ### Step 3: hypotheses (written before any instrumentation output)
 
 The message says: entry E was in the marking snapshot (`used` minus the
