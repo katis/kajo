@@ -262,7 +262,8 @@ diag: events for entry 99066 (counts: initialMark=2 finalMark=2 deferPush=14522 
   t=5950564045886 finalMark w=-1 a=2 b=0
 ```
 
-Every reported entry in every failing run has this shape: deferred, kept
+Every reported entry in every failing run has this shape (31 of 31 dumped
+entries over all instrumented failing runs): deferred, kept
 (re-armed), **initial mark**, deferred free during marking, reallocated
 while still a snapshot bit, reachable and unmarked at the final mark.
 **H6 is confirmed.** H7 (a young body missed by the young-root scan) is
@@ -305,3 +306,105 @@ runs after every fourth collection only). This is also the
 The same hole exists in the full mark-sweep (`sweepTable`): it frees every
 used, unmarked entry, a kept deferred one included, and the nursery's
 deferred free later clears the bit again, possibly under a new object.
+
+### Step 5: fix
+
+**Root cause.** Amendment 10 keeps a dead remembered young holder's entry
+used until its nursery's next collection when another collection re-armed
+its `rem` word; meanwhile the entry is dead, used and in no young log.
+Every old-space reclaimer assumes "used and not in a young log" means an
+old object: the initial-mark snapshot made it a snapshot entry, and the
+full sweep freed it, so the nursery's later deferred free and the
+old-space collector both own the entry, and whichever frees it second frees
+whatever object reused it. The defect is in the collector (the protocol
+between amendment 10 and the old-space snapshot), not in the test and not in
+the verifier; the verifier was right. One verifier did have a matching gap:
+the stop-the-world scavenge's `postVerify` did not skip deferred entries as
+the young and relocation verifiers do, so any stop-the-world scavenge in
+`local` or `offload` with a kept deferred entry would report "young entry N
+is in no young log" (the full-collection regression test shows it).
+
+**Fix** (commit 7484f9b; SPEC.md amendment 17):
+
+- `Sources/VMR/Young.swift`: `forEachDeferred`, every entry on a nursery's
+  deferred list as (bitmap word, bit), next to `deferredDead`.
+- `Sources/VMR/Concurrent.swift`, `initialMark`: the snapshot excludes
+  deferred entries, after the young logs.
+- `Sources/VMR/Memory.swift`, `markSweep`: deferred entries are hidden from
+  `sweepTable` (bits cleared from `used` around the call and restored), so
+  the full sweep neither frees nor counts them; their nursery frees them.
+- `Sources/VMR/Scavenge.swift`, `postVerify`: skips deferred entries.
+- `Sources/VMR/Young.swift`, `ycCollect`: test hook point 2 after the
+  entry sweep and survivor flip, before the epoch rule (commit af0a11b).
+
+Why this and not something else: the deferred free itself is right (stale
+lists may still name the holder, amendment 10), and the re-arm is legal
+(a collection may keep a holder it scanned). What was wrong is the
+ownership of the entry while it waits: exactly one reclaimer must free it,
+and that is its nursery. Preventing the re-arm instead (`foldCarried`
+skipping a holder whose word another collection zeroed) would leave that
+holder on the other nursery's carried list while its entry is freed and
+reused, which is what amendment 10's wait exists to prevent; the deferred
+list spanning pauses is by design, so the rule belongs at the pauses. No hot
+path changes: the snapshot and the full sweep each gain one walk over the
+deferred lists (empty or a handful of entries) inside their pauses.
+
+### Step 6: regression tests and numbers
+
+Tests (`Tests/VMRTests/YoungTests.swift`, stepped `local` runtime, commit
+af0a11b): `keptDeferredHolder` builds the state deterministically: H in
+nursery 2 holds Y of nursery 1 (remembered for 1), H dies, nursery 2's
+collection defers H's free, and hook point 2 re-arms H's membership bit as
+nursery 1's `foldCarried` would.
+
+- `aDeferredEntryFreeIsNotASnapshotEntry`: initial mark with the free still
+  deferred; H must not be a snapshot entry; nursery 2's next collection
+  frees it during marking, worker 2 reuses it for a live Pair; final mark
+  must report nothing, the sweep must not free it, contents intact.
+- `aFullCollectionLeavesADeferredEntryFreeToItsNursery`: a full collection
+  with the free deferred must leave the entry used; worker 2 allocates,
+  nursery 2's deferred free runs; no verifier failure, contents intact.
+
+Numbers (4 copies at once + 12 `yes` unless stated; "before" is a worktree
+at af0a11b, the tests without the fix):
+
+| test | before the fix | after the fix |
+|---|---|---|
+| `aDeferredEntryFreeIsNotASnapshotEntry` | 20 of 20 failed | 50 of 50 passed |
+| `aFullCollectionLeavesADeferredEntryFreeToItsNursery` | 20 of 20 failed | 50 of 50 passed |
+| minimal program (step 2, no Semaphore) | 9 of 20 failed | 50 of 50 passed |
+| `sharedYoungObjectsAreClaimedOnce...` (`local`) | 2 of 20 failed (10 of 40 in step 1) | 50 of 50 passed |
+| same, `KAJO_TEST_YOUNG=stw` | (0 of 40 in step 1) | 50 of 50 passed |
+| same, `KAJO_TEST_YOUNG=offload` | (0 of 40 in step 1) | 50 of 50 passed |
+
+Without the fix the snapshot test reports `verify: concurrent mark missed
+reachable entry 196608 (class 14)` (H's oop) and the full-collection test
+reports `verify: young entry 12288 is in no young log` (the scavenge
+verifier gap) and then `verify young: reachable entry 12288 is free`.
+
+Full suite (74 tests) with 12 `yes` running: 5 of 5 passed. Full suite
+under ThreadSanitizer (`swift test --sanitize=thread`, idle Mac): passed,
+no reports, 347 s. Once, in an unloaded full run before these, the
+inherited `aFramePinnedObjectIsNotMoved` failed (frame pin not set); alone
+it passed 20 of 20 idle and 20 of 20 under contention. It looks like a race
+in that test (it waits for the Process to be running, not for its temp to
+hold the object), unrelated to this fix; not changed here.
+
+`experiments/power/swift` full `swift test` after the fix (its VMR and
+VMRTests are symlinks into this experiment, so it runs the fix and the new
+tests): VMRTests 74 of 74 passed, PowerVMTests 7 of 7 passed, PowerKitTests
+failed `perThreadCountsSeeASpinner` (a 300 ms spinner thread measured below
+200 ms of CPU while three test targets ran at once); that test passed 3 of 3
+alone and does not depend on VMR.
+
+Published numbers: `stw` (the ADR 0007 reference and the checksum oracle)
+never defers a free, so nothing it measured can change. In `local` and
+`offload` the initial-mark pause and full collections gain one walk over
+the deferred lists, which hold only kept entries (yc_deferred is 0 in 697
+of the bench's kernel lines and at most single digits otherwise), so no
+pause, wall time or checksum in RESULTS.md or ADR 0008 should move
+measurably; old-space sweep counts (`snap_entries`, freed entries) can
+differ by those few entries. The matrices were not re-run. The bug could
+have freed a live object in a `local`/`offload` run that overlapped
+collections with cross-nursery holders and a marking cycle; every published
+checksum was equal, so no published result shows that it did.
