@@ -308,6 +308,7 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
             if failed.count > 3 { break }
         }
     }
+    print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
     #expect(failed.isEmpty, "failing seeds: \(failed)")
 }
 
