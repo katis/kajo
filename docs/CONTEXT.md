@@ -32,6 +32,26 @@ as they are understood.
 
 ## Memory
 
-- **Oop**: a 64-bit tagged word that is either a SmallInteger or an object
-  pointer. The exact tag scheme is an open decision.
-- **Header**: the first word of a heap object. Packing is an open decision.
+- **Oop**: a 64-bit tagged word. Low bit 1: a SmallInteger, 63-bit two's
+  complement. Low four bits 0 and nonzero: an object reference, the byte
+  offset of the object's entry in the entry table (ADR 0003). The other
+  low-nibble patterns are reserved for future immediates. 0 is no object.
+  Oops never change when objects move.
+- **Entry**: 16 bytes in the entry table: the state word (the body's offset
+  in the heap, offset + 2^32 while RELOCATING, or a free-list link with bit
+  63 set) and the header word. Entry 0 is never used.
+- **Header**: the object's header word, kept in its entry, not in the body.
+  Bits 0..21 class index, 22..45 slot or byte count, 46 mark (reserved;
+  marks live in a side byte map), 47 byte object, 52..55 nursery index, 56
+  young, 57..59 age, 60 pinned for good, 61 frame pin, 62..63 scavenge
+  claim tag. Written only with the world stopped.
+  docs/modules/object-memory.md has the full layout and which bits each
+  module uses.
+- **Body**: an object's storage in the heap: a back reference (entry index
+  and body size) then the slots or bytes. Never spans a block.
+- **Block**: 32 KiB unit of the heap; bodies are bump-allocated in blocks.
+- **Allocation context**: a caller's private block and private free-entry
+  list; one per worker.
+- **Pin**: a header bit that keeps a body from moving. Pinned for good:
+  objects the interpreter holds raw pointers into. Frame pin: objects a
+  running frame names, for the current collection only.

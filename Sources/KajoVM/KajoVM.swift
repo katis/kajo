@@ -1,9 +1,11 @@
 /// Kajo virtual machine core.
 ///
-/// Nothing is decided yet beyond the implementation language (see
-/// docs/adr/0001-swift-for-the-vm-core.md). The object representation, GC
-/// strategy and scheduler are open decisions; each should land as its own
-/// module that hides the decision, with an ADR.
+/// Built module by module (docs/PLAN.md). Present: the object memory
+/// (`ObjectMemory/`, docs/modules/object-memory.md): oops as entry-table
+/// offsets (ADR 0003), the block heap, allocation contexts, the
+/// stop-the-world collector and compactor, become, reshape, snapshots and
+/// the verifiers. Everything is internal; the VM's public surface arrives
+/// with the interpreter and the shells.
 public enum KajoVM {
-    public static let version = "0.0.0"
+    public static let version = "0.1.0"
 }
