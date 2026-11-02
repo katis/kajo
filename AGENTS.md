@@ -162,9 +162,25 @@ Safety:
    took 7 minutes. Log `ProcessInfo.thermalState` on every result line,
    repeat the first kernel at the end, and compare only configurations run
    back to back.
- - The object table's cost on a phone follows per-thread structure size:
-   1.1 to 1.3x below about 50 MB per thread, 4 to 7x per hop above 100 MB.
-   Entry locality is the open question before ADR 0003 can be accepted.
+ - The object table costs 2x per cache-missing hop and 1.8 to 2x marking
+   time against direct pointers on both machines; the phone's 4 to 7x was a
+   power regime, not cache or translation reach (experiments/entry-locality).
+   Entry locality (entries in the body's page) bought nothing: one page walk
+   is under 5 percent of a 250 ns hop. Count dependent misses, not bytes.
+ - A single latency-bound thread on an idle iPhone P cluster runs in one of
+   two regimes from launch to launch, the slow one 2.5 to 4x per miss, for
+   every representation. A thread that only spins on the other P core
+   removes it. Before reading a single-thread device number, check the
+   per-launch spread and whether the rest of the cluster was idle.
+ - Default pthread attributes give workers QoS `default` on Darwin, not
+   user-initiated. Log the QoS each thread actually got on every result
+   line; the first three experiments' workers ran at `default`.
+ - The phone core overlaps little independent work with an outstanding miss
+   (55 ns of multiply-adds per hop added nearly all of itself; the M2 Max
+   hid it). Interpreter work per object is not free under a miss there.
+ - Any variant that ties block size to page size makes block size a
+   correctness parameter and forces a second arena for large objects. Do
+   not pay that for a locality gain you have not measured.
  - `mach_vm.h` is unsupported in the iOS SDK; use the `vm_map` family with
    the same arguments. The double heap mapping needs no entitlement.
  - Device iteration is fast: about one second per launch over `devicectl`,
@@ -184,8 +200,9 @@ as telemetry, and device runs. Read it before starting `Sources/KajoVM`.
 
 Decisions live in `docs/adr/`, one per file, each pointing at the experiment
 that produced its evidence. Current: 0001 Swift for the VM core, 0002
-repository layout, 0003 object table for object representation (proposed,
-pending a device measurement), 0004 Smalltalk UI code on the main thread with
+repository layout, 0003 object table for object representation (accepted;
+2x per cache-missing hop and 1.8 to 2x marking against direct pointers,
+entry locality rejected), 0004 Smalltalk UI code on the main thread with
 budgeted preemption (proposed, pending a pause-bounded collector), 0005
 generational collection with per-worker nurseries (proposed), 0006
 concurrent marking and lazy sweeping of old space (proposed; pauses no longer
@@ -196,7 +213,7 @@ young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
 thread exceeds a frame, acknowledgements and the initial mark remain). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
-(experiments/device-measurement). Read them before touching the areas they
+(experiments/device-measurement and entry-locality). Read them before touching the areas they
 cover.
 
 ## Project structure

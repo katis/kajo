@@ -1,7 +1,7 @@
 # ADR 0003: Object representation
 
 Date: 2026-11-01
-Status: proposed
+Status: accepted (2026-11-02, after experiments/entry-locality)
 
 ## Context
 
@@ -140,3 +140,67 @@ image under a realistic single-threaded traversal. If locality closes the
 gap, accept. If it does not and the marker pays the same 4x, revise toward
 heap offsets (C): the table's memory cost was the expected risk on a phone,
 its cache-reach cost is the one found.
+
+## Entry locality and the marker (2026-11-02)
+
+`experiments/entry-locality/` answered the three questions above on the same
+iPhone and the Mac. See its RESULTS.md; every table is regenerated from the
+raw lines in `results/`.
+
+**The 7x is not cache or translation reach.** A chase microbenchmark without
+the VM found the same translation reach on both machines (L1 TLB 2 to 4 MB
+on the phone, 4 to 8 on the Mac; L2 TLB 48 MB on both; a page walk costs
+12 to 14 ns past it on both) and no knee between 50 and 100 MB. A double
+dependent miss costs 1.9 to 2.2 times a single one on both machines once
+every core is busy. What the phone does have is two per-launch regimes for
+a single latency-bound thread on an otherwise idle performance cluster: in
+the slow one every dependent miss costs 2.5 to 4 times more. Table walks
+fall into it far more often than direct-pointer walks (B in 4 of 8
+launches, L in 8 of 8, A in 0 of 8 at 48 MB), and direct pointers are not
+immune (A after a compaction ran 2.3 to 2.6 times its fresh cost). The P
+cores were at 3.5 to 4.15 GHz with over 92 percent of CPU time on them in
+every run; worker QoS and visiting order changed nothing. A companion thread
+on the other P core that only spins removes the regime. The mechanism
+inside the chip was not identified; no performance counters were read.
+
+**Entry locality does not close the gap.** Variant L allocated 99.95
+percent of entries in the 16 KiB page of their body and cost the same per
+hop as the table as built: L/B 0.91 to 1.11 on both machines, before and
+after a compaction that moved every live body away from its entry. It saved
+11 percent of marking on the phone and nothing elsewhere, and it cost a
+second non-moving arena for bodies over 4 KiB, a sparse entry index space
+(side tables at 6.25 percent of the heap), and a compaction that cannot
+free a block while any entry in it is live.
+
+**The marker pays 1.8 to 2.0x, not 4x.** One thread at user-initiated QoS
+marking a random graph: phone 271 / 141 MB/s (direct / table) at 128 MB
+live and 211 / 120 at 256 MB; Mac 244 / 122 and 235 / 117.
+
+| 1 worker, ns per cache-missing hop | phone, idle cluster | phone, other P core busy | Mac |
+|---|--:|--:|--:|
+| table / direct | 3.7 to 6.9 | 2.0 to 2.3 | 1.4 to 2.1 |
+| table with local entries / table | 0.96 to 1.09 | 0.91 | 0.92 to 1.11 |
+| marker, table / direct (time) | 1.76 to 1.91 | not measured | 2.00 |
+| footprint, table / direct | 1.33 to 1.39 | | 1.39 |
+
+**Decision: accepted, variant B as built, without L.** The ADR's own rule
+was to accept if locality closed the gap and to revise toward heap offsets
+(C) if it did not and the marker paid 4x. Neither branch applied: locality
+buys nothing, and the marker pays the Mac's 2x. With the cluster awake the
+table's per-hop cost on the phone is the Mac's. The costs accepted above
+are revised to:
+
+- 2x per cache-missing hop and 1.8 to 2.0x marking time against direct
+  pointers. ADR 0006's old-space headroom must be sized for a marker at 120
+  to 140 MB/s on one performance core over a random 200 MB graph.
+- A single latency-bound thread on an idle P cluster can run 2.5 to 4 times
+  slower per miss on the phone under any representation, and reaches that
+  state more often through the table. The main thread running Smalltalk
+  while every worker idles is that shape. Before the UI path relies on
+  large traversals, measure a development-sized image traversed on the
+  main thread on device, alone and with a busy companion, and identify the
+  regime (Instruments CPU counters) and whether a shell can avoid it
+  cheaply.
+- Revisit C only if that measurement shows table walks in the slow regime
+  dominating real UI work, or if footprint (1.33 to 1.39x) becomes the limit
+  on device.
