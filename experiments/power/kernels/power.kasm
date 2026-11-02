@@ -1,0 +1,243 @@
+; power: the rate-limited allocation frame of the power experiment (SPEC.md
+; "Part 2"). Loaded after concurrent-young's base sources and
+; concurrent-marking's oldheap.kasm. The shell calls one Process per frame
+; on the main worker; nothing here loops on its own.
+;
+; Survival shape: generational-gc's survivors.kasm with p percent kept.
+; Per Point allocated a counter c advances; the Point is kept when
+; c \\ 100 < p and stored, striped, into the keeper store (an Array of 1024
+; Arrays of 64, old after its first scavenges). When 65 536 keepers are
+; stored the store is replaced, so a keeper lives until 65 536 more have
+; been kept and then dies, young or old.
+;
+; Globals: 6 = keeper store, 7 = keepers in it, 8 = counter c, 9 = the old
+; heap state (oldheap.kasm's ohBuild:of: result), 10 = running checksum.
+class PPoint Object 2
+
+method PPoint x:y: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+method PPoint x temps=0
+  push_ivar 0
+  return_top
+end
+
+; nil pwNewStore -> Array of 1024 Arrays of 64. t0 = spine, t1 = i
+method UndefinedObject pwNewStore temps=2
+  push_lit @Array
+  push_lit 1024
+  send new: 1
+  store_temp 0
+  push_int 1
+  store_temp 1
+loop:
+  push_temp 1
+  push_lit 1024
+  le
+  jump_if_false done
+  push_temp 0
+  push_temp 1
+  push_lit @Array
+  push_lit 64
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump loop
+done:
+  push_temp 0
+  return_top
+end
+
+; nil pwSetup: mb -> 0. Builds the old heap (one worker's share of mb MiB,
+; oldheap.kasm), the keeper store, and zeroes the counters.
+method UndefinedObject pwSetup: temps=0
+  push_nil
+  push_int 9
+  push_nil
+  push_int 0
+  push_int 1
+  send ohBuild:of: 2
+  send globalAt:put: 2
+  pop
+  push_nil
+  push_int 6
+  push_nil
+  send pwNewStore 0
+  send globalAt:put: 2
+  pop
+  push_nil
+  push_int 7
+  push_int 0
+  send globalAt:put: 2
+  pop
+  push_nil
+  push_int 8
+  push_int 0
+  send globalAt:put: 2
+  pop
+  push_nil
+  push_int 10
+  push_int 0
+  send globalAt:put: 2
+  pop
+  push_int 0
+  return_top
+end
+
+; nil pwFrame: arg -> number of Points allocated. arg = n * 1048576 + m * 256
+; + p (m < 4096, p < 256): n Points (p percent kept), then m oldheap mutation iterations
+; (ohMutate:iters:, which churns one OHPoint per iteration, rewires an old
+; node every 8th and replaces a group every oldheapReplaceEvery).
+; t0 = arg, t1 = n, t2 = store, t3 = k, t4 = c, t5 = pt, t6 = sum, t7 = p,
+; t8 = i
+method UndefinedObject pwFrame: temps=8
+  push_temp 0
+  push_lit 1048576
+  send // 1
+  store_temp 1
+  push_temp 0
+  push_lit 256
+  send \\ 1
+  store_temp 7
+  push_nil
+  push_int 6
+  send globalAt: 1
+  store_temp 2
+  push_nil
+  push_int 7
+  send globalAt: 1
+  store_temp 3
+  push_nil
+  push_int 8
+  send globalAt: 1
+  store_temp 4
+  push_int 0
+  store_temp 6
+  push_int 0
+  store_temp 8
+loop:
+  push_temp 8
+  push_temp 1
+  lt
+  jump_if_false mutate
+  push_lit @PPoint
+  send basicNew 0
+  push_temp 4
+  push_temp 8
+  send x:y: 2
+  store_temp 5
+  push_temp 6
+  push_temp 5
+  send x 0
+  add
+  store_temp 6
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  push_temp 4
+  push_lit 100
+  send \\ 1
+  push_temp 7
+  lt
+  jump_if_false next
+  ; keep: store[k \\ 1024 + 1][k // 1024 + 1] := pt
+  push_temp 2
+  push_temp 3
+  push_lit 1024
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 3
+  push_lit 1024
+  send // 1
+  push_int 1
+  add
+  push_temp 5
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  push_temp 3
+  push_lit 65536
+  lt
+  jump_if_true next
+  push_nil
+  send pwNewStore 0
+  store_temp 2
+  push_nil
+  push_int 6
+  push_temp 2
+  send globalAt:put: 2
+  pop
+  push_int 0
+  store_temp 3
+next:
+  push_temp 8
+  push_int 1
+  add
+  store_temp 8
+  jump loop
+mutate:
+  push_nil
+  push_int 7
+  push_temp 3
+  send globalAt:put: 2
+  pop
+  push_nil
+  push_int 8
+  push_temp 4
+  send globalAt:put: 2
+  pop
+  push_temp 0
+  push_lit 1048576
+  send \\ 1
+  push_lit 256
+  send // 1
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 6
+  push_nil
+  push_nil
+  push_int 9
+  send globalAt: 1
+  push_temp 0
+  push_lit 1048576
+  send \\ 1
+  push_lit 256
+  send // 1
+  send ohMutate:iters: 2
+  add
+  store_temp 6
+done:
+  push_nil
+  push_int 10
+  push_nil
+  push_int 10
+  send globalAt: 1
+  push_temp 6
+  add
+  send globalAt:put: 2
+  pop
+  push_temp 1
+  return_top
+end
+
+; nil pwEmpty -> nil: the empty Smalltalk frame of Part 3.
+method UndefinedObject pwEmpty temps=0
+  push_nil
+  return_top
+end
