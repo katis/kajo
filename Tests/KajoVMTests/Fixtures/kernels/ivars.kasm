@@ -1,0 +1,175 @@
+; Fixture copied from experiments/object-representation/kernels/ivars.kasm (2026-11-02).
+; ivars: a tight loop reading and writing the instance variables of four
+; receivers that stay in L1. Best case for an object table (entries cached).
+; Per iteration: a := a + b mod P, c := c + a mod P, b := b + 1 wrapping at 1000,
+; d := d + 1. 32 000 calls of spin: 1000 in total, split between workers.
+class Cell Object 4
+
+; t0 = n
+method Cell spin: temps=0
+loop:
+  push_temp 0
+  push_int 0
+  gt
+  jump_if_false done
+  push_ivar 0
+  push_ivar 1
+  add
+  store_ivar 0
+  push_ivar 0
+  push_lit 1000003
+  ge
+  jump_if_false s1
+  push_ivar 0
+  push_lit 1000003
+  sub
+  store_ivar 0
+s1:
+  push_ivar 2
+  push_ivar 0
+  add
+  store_ivar 2
+  push_ivar 2
+  push_lit 1000003
+  ge
+  jump_if_false s2
+  push_ivar 2
+  push_lit 1000003
+  sub
+  store_ivar 2
+s2:
+  push_ivar 1
+  push_int 1
+  add
+  store_ivar 1
+  push_ivar 1
+  push_lit 1000
+  lt
+  jump_if_true s3
+  push_int 0
+  store_ivar 1
+s3:
+  push_ivar 3
+  push_int 1
+  add
+  store_ivar 3
+  push_temp 0
+  push_int 1
+  sub
+  store_temp 0
+  jump loop
+done:
+  return_self
+end
+
+method Cell init: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 0
+  store_ivar 1
+  push_temp 0
+  store_ivar 2
+  push_int 0
+  store_ivar 3
+  return_self
+end
+
+method Cell sum temps=0
+  push_ivar 0
+  push_ivar 1
+  add
+  push_ivar 2
+  add
+  push_ivar 3
+  add
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = cells (Array of 4), t3 = reps, t4 = k, t5 = sum
+method UndefinedObject run:of: temps=4
+  push_lit @Array
+  push_int 4
+  send new: 1
+  store_temp 2
+  push_int 1
+  store_temp 4
+init:
+  push_temp 4
+  push_int 4
+  le
+  jump_if_false go
+  push_temp 2
+  push_temp 4
+  push_lit @Cell
+  send basicNew 0
+  push_temp 4
+  push_temp 0
+  add
+  send init: 1
+  send at:put: 2
+  pop
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump init
+go:
+  push_lit 32000
+  push_temp 1
+  send // 1
+  store_temp 3
+  push_int 1
+  store_temp 4
+loop:
+  push_temp 3
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 2
+  push_temp 4
+  send at: 1
+  push_lit 1000
+  send spin: 1
+  pop
+  push_temp 4
+  push_int 1
+  add
+  dup
+  store_temp 4
+  push_int 4
+  gt
+  jump_if_false next
+  push_int 1
+  store_temp 4
+next:
+  push_temp 3
+  push_int 1
+  sub
+  store_temp 3
+  jump loop
+done:
+  push_int 0
+  store_temp 5
+  push_int 1
+  store_temp 4
+sum:
+  push_temp 4
+  push_int 4
+  le
+  jump_if_false out
+  push_temp 5
+  push_temp 2
+  push_temp 4
+  send at: 1
+  send sum 0
+  add
+  store_temp 5
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump sum
+out:
+  push_temp 5
+  return_top
+end

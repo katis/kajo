@@ -24,7 +24,8 @@ let package = Package(
         ),
         .testTarget(
             name: "KajoVMTests",
-            dependencies: ["KajoVM"]
+            dependencies: ["KajoVM"],
+            exclude: ["Fixtures"]
         ),
     ]
 )

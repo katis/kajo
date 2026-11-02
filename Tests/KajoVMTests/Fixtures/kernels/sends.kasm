@@ -1,0 +1,99 @@
+; Fixture copied from experiments/vm-language-bench/kernels/sends.kasm (2026-11-02).
+; sends: one polymorphic call site (step:) over receivers of three classes,
+; plus an at: primitive send per iteration. Leaf inherits step: from Adder,
+; so its cold lookup walks the superclass chain.
+class Adder Object 0
+class Doubler Object 0
+class Leaf Adder 0
+class Subber Object 0
+
+method Adder step: temps=0
+  push_temp 0
+  push_int 1
+  add
+  return_top
+end
+
+method Doubler step: temps=0
+  push_temp 0
+  push_temp 0
+  add
+  return_top
+end
+
+method Subber step: temps=0
+  push_temp 0
+  push_int 3
+  sub
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = arr, t3 = reps, t4 = sum, t5 = k
+method UndefinedObject run:of: temps=4
+  push_lit @Array
+  push_int 3
+  send new: 1
+  store_temp 2
+  push_temp 2
+  push_int 1
+  push_lit @Leaf
+  send basicNew 0
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 2
+  push_lit @Doubler
+  send basicNew 0
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 3
+  push_lit @Subber
+  send basicNew 0
+  send at:put: 2
+  pop
+  push_lit 40000000
+  push_temp 1
+  send // 1
+  store_temp 3
+  push_int 0
+  store_temp 4
+  push_temp 0
+  push_int 3
+  send \\ 1
+  push_int 1
+  add
+  store_temp 5
+loop:
+  push_temp 3
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 4
+  push_temp 2
+  push_temp 5
+  send at: 1
+  push_temp 3
+  send step: 1
+  add
+  store_temp 4
+  push_temp 5
+  push_int 1
+  add
+  dup
+  store_temp 5
+  push_int 3
+  gt
+  jump_if_false next
+  push_int 1
+  store_temp 5
+next:
+  push_temp 3
+  push_int 1
+  sub
+  store_temp 3
+  jump loop
+done:
+  push_temp 4
+  return_top
+end

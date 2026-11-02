@@ -1,0 +1,51 @@
+; Fixture copied from experiments/vm-language-bench/kernels/arith.kasm (2026-11-02).
+; arith: sum of (i * 3 + 7) mod 1000000007 over this worker's slice of
+; TOTAL iterations. Only special arithmetic bytecodes in the loop, no sends,
+; no allocation. The modulo is a conditional subtract (each addend < modulus).
+; args: t0 = w, t1 = n. temps: t2 = i, t3 = end, t4 = sum, t5 = chunk
+method UndefinedObject run:of: temps=4
+  push_lit 80000000
+  push_temp 1
+  send // 1
+  store_temp 5
+  push_temp 0
+  push_temp 5
+  mul
+  store_temp 2
+  push_temp 2
+  push_temp 5
+  add
+  store_temp 3
+  push_int 0
+  store_temp 4
+loop:
+  push_temp 2
+  push_temp 3
+  lt
+  jump_if_false done
+  push_temp 4
+  push_temp 2
+  push_int 3
+  mul
+  push_int 7
+  add
+  add
+  dup
+  store_temp 4
+  push_lit 1000000007
+  ge
+  jump_if_false next
+  push_temp 4
+  push_lit 1000000007
+  sub
+  store_temp 4
+next:
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump loop
+done:
+  push_temp 4
+  return_top
+end

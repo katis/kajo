@@ -1,0 +1,42 @@
+; Fixture copied from experiments/object-representation/kernels/walk.kasm (2026-11-02).
+; walk: each worker builds a graph of 2^22 / n WNodes linked in a scattered
+; (LCG) order, then follows `next` around the whole cycle 2 times summing
+; val * hop. Dependent loads that defeat the prefetcher: the worst case for
+; an object table, where each hop is two dependent loads.
+; args: t0 = w, t1 = n. temps: t2 = m, t3 = nodes, t4 = reps, t5 = sum
+method UndefinedObject run:of: temps=4
+  push_lit 4194304
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  push_temp 2
+  send buildGraph: 1
+  store_temp 3
+  push_int 0
+  store_temp 5
+  push_int 2
+  store_temp 4
+loop:
+  push_temp 4
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 5
+  push_nil
+  push_temp 3
+  push_int 0
+  send get: 1
+  push_temp 2
+  send walk:hops: 2
+  add
+  store_temp 5
+  push_temp 4
+  push_int 1
+  sub
+  store_temp 4
+  jump loop
+done:
+  push_temp 5
+  return_top
+end

@@ -1,0 +1,18 @@
+; Fixture copied from experiments/vm-language-bench/kernels/prelude.kasm (2026-11-02).
+; Primitives shared by every kernel. Loaded before the kernel file.
+method Object at: temps=0 prim=1
+end
+method Object at:put: temps=0 prim=2
+end
+method Class basicNew: temps=0 prim=3
+end
+method Class new: temps=0 prim=3
+end
+method Class basicNew temps=0 prim=4
+end
+method Object class temps=0 prim=5
+end
+method SmallInteger // temps=0 prim=6
+end
+method SmallInteger \\ temps=0 prim=7
+end
