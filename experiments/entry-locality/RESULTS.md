@@ -27,7 +27,7 @@ single Mac rows are not precise to better than about 15 percent.
 
 **1. What is the phone's memory hierarchy doing? Its caches and
 translation do not explain 7x; a power state does, mostly.** Part 1 found
-the same translation reach on both machines (L1 TLB 2 MB on the phone, 4 MB
+the same translation reach on both machines (L1 TLB 2 to 4 MB on the phone, 4 to 8 MB
 on the Mac; L2 TLB 48 MB on both, 3072 pages of 16 KiB) and a page walk that
 costs 12 to 14 ns past it on both. A double chase costs 1.1 to 2.0 times a
 single chase on the phone (single thread) and 1.8 to 2.0 on the Mac past
