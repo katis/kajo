@@ -43,3 +43,7 @@ golden:
 # The test suite in a release build, which adds the full-size golden kernels
 test-release:
     swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests
+
+# A thousand randomized programs under every configuration, in a release build with -enable-testing (SEEDS, BASE override)
+soak SEEDS="1000" BASE="1":
+    KAJO_SEEDS={{SEEDS}} KAJO_SEED_BASE={{BASE}} swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests --filter randomPrograms

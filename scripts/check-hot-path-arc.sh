@@ -3,6 +3,8 @@
 #  1. no swift_retain / swift_release on the object memory's allocation and
 #     store paths, the interpreter's dispatch loop, its send path and slow
 #     paths, and the primitives (including the ones that allocate);
+#     module 3's poll slow path, park, enter and leave, suspension and
+#     resumption (runSlice) and the scheduler's queue operations;
 #  2. the dispatch loop `interpret` is one jump table: one indirect branch
 #     and one jump-table relocation.
 # Internal functions are dead-stripped from a plain release build, so this
@@ -22,6 +24,11 @@ wanted=(
   Primitives 'primitive(_:_:_:)|primAt(_:_:)|primAtPut(_:_:)|primBasicNew(_:_:size:)|primDivide(_:modulo:)'
   InterpreterState 'Machine.allocate(_:slots:keeping:)|Machine.allocateBytes(_:count:)|Machine.fail(_:selector:receiverClass:primitive:)'
   Image 'lookupMethod(_:nilObject:classIndex:selector:)'
+  Poll 'pollSlow(_:rewind:)|stopIfStressed(_:_:)'
+  Safepoint 'park(_:_:)|enterVM(_:_:)|leaveVM(_:_:)'
+  Scheduling 'requeueCurrent(_:_:sp:pc:affinity:result:reason:hop:)|suspendLocked(_:_:sp:pc:)|suspendAfterPrimitiveLocked(_:_:argc:result:)|finishSuspend(_:_:_:)|detachLocked(_:_:unconditionally:)|makeReadyLocked(_:_:fromBlocked:)|dequeueLocked(_:main:minPriority:for:)|waitSemaphore(_:_:_:argc:)|signalSemaphore(_:_:_:)|signalLocked(_:_:)|terminateCurrent(_:_:result:)'
+  Run 'runSlice(_:_:_:)'
+  External 'drainExternal(_:_:)'
 )
 fail=0
 found=0
