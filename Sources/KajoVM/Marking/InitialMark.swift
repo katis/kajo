@@ -153,6 +153,8 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     unsafe m.pointee.entriesFreed = 0
     unsafe m.pointee.bytesFreed = 0
     om.setMarkingActive(true)
+    // Module 6: a relocation planned for this cycle counts live bytes.
+    unsafe relocationAtInitialMark(vm, mk, cycle: cycle)
     // Roots: module 3's and module 1's full root set. Every word naming a
     // snapshot entry is marked and queued in grey packets.
     unsafe greyRoots(mk, roots)

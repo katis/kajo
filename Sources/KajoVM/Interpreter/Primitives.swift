@@ -18,6 +18,7 @@ enum Primitives {
         (1, "at:", 1), (2, "at:put:", 2), (3, "basicNew: / new:", 1), (4, "basicNew", 0), (5, "class", 0),
         (6, "//", 1), (7, "\\\\", 1), (8, "become:", 1), (11, "collect (gc:)", -1), (12, "compact (compact:)", -1),
         (14, "globalAt:", 1), (15, "globalAt:put:", 2), (18, "==", 1), (19, "identityHash", 0),
+        (38, "replaceFrom:to:with:startingAt:", 4),
     ]
 }
 
@@ -46,6 +47,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 19: return c.argc == 0 ? primIdentityHash(c.receiver) : .none
     case 20...34: return processPrimitive(n, m, c)  // module 3, Processes/ProcessPrimitives.swift
     case 35...37: return nurseryPrimitive(n, m, c)  // module 4, Nursery/Finalization.swift
+    case 38: return primReplace(m, c)  // module 6, Relocation/Hazard.swift
     default: return .none
     }
 }
@@ -79,7 +81,7 @@ private func primAtPut(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard c.argc == 2, indexable(m, c.receiver), let i = slotIndex(m, c.receiver, c.arg0) else { return .none }
     if m.om.isBytes(c.receiver) {
         guard c.arg1.isSmallInteger, c.arg1.smallIntegerValue >= 0, c.arg1.smallIntegerValue <= 255 else { return .none }
-        m.om.storeByte(c.receiver, i, UInt8(c.arg1.smallIntegerValue))
+        unsafe checkedStoreByte(m.state, c.receiver, i, UInt8(c.arg1.smallIntegerValue))
     } else {
         m.store(c.receiver, i, c.arg1, .atPut)
     }

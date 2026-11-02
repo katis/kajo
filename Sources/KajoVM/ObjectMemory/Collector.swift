@@ -306,6 +306,68 @@ extension ObjectMemory {
 
     /// The smallest free tail of an in-use block worth handing out.
     static let minimumTail: UInt64 = 4096
+
+    // MARK: - module 6: evacuated blocks
+
+    /// Module 6: take `blocks` (an in-use block selected for relocation)
+    /// out of the pool, so no allocator puts a new body in it before the
+    /// relocator has evacuated it. The next `rebuildBlockPool` puts any
+    /// left in use back. World stopped.
+    func withdrawFromPool(_ isSelected: (Int) -> Bool) {
+        lockPools()
+        defer { unlockPools() }
+        var j = 0
+        let n = unsafe pools.pointee.freeBlocks.count
+        for i in 0..<n {
+            let b = unsafe pools.pointee.freeBlocks[i]
+            if isSelected(Int(b)) { continue }
+            unsafe pools.pointee.freeBlocks[j] = b
+            j += 1
+        }
+        unsafe pools.pointee.freeBlocks.truncate(j)
+    }
+
+    /// Module 6: block `b` was evacuated and no worker can hold a pointer
+    /// into it any more: free it and hand it to the allocators at once (on
+    /// top of the pool). Any thread inside the VM, or world stopped.
+    func releaseEvacuatedBlock(_ b: Int) {
+        lockPools()
+        defer { unlockPools() }
+        precondition(heap.isInUse(b), "an evacuated block is in use until it is freed")
+        heap.setInUse(b, false)
+        heap.setUsed(b, 0)
+        unsafe pools.pointee.blocksInUse -= 1
+        unsafe pools.pointee.freeBlocks.append(UInt32(b))
+    }
+
+    /// The stamp of block `b`'s last refill (module 5's cycle number).
+    /// World stopped: no refill runs, so no lock is needed.
+    func blockStampAtPause(_ b: Int) -> UInt32 { unsafe pools.pointee.blockStamps[b] }
+
+    /// The pool's blocks, top last (the verifiers). World stopped.
+    var poolBlocks: [Int] {
+        lockPools()
+        defer { unlockPools() }
+        return unsafe (0..<pools.pointee.freeBlocks.count).map { unsafe Int(pools.pointee.freeBlocks[$0]) }
+    }
+
+    /// Per block, the end of its bodies: `used`, or, for the block an
+    /// allocation context holds, the context's bump pointer (the
+    /// verifiers, world stopped, contexts not retired).
+    func bodyEnds() -> [UInt64] {
+        let h = heap
+        var ends = (0..<h.blockCount).map { h.usedBytes($0) }
+        lockPools()
+        defer { unlockPools() }
+        for i in unsafe 0..<pools.pointee.contexts.count {
+            let c = unsafe pools.pointee.contexts[i]
+            let end = unsafe c.pointee.end
+            if end == 0 { continue }
+            let b = BlockHeap.block(ofOffset: end &- 1)
+            ends[b] = unsafe Swift.max(ends[b], c.pointee.top &- BlockHeap.start(ofBlock: b))
+        }
+        return ends
+    }
 }
 
 /// Threads free entries into runs of `chunk` for the pool.

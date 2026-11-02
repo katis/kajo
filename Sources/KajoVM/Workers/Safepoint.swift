@@ -24,6 +24,8 @@ func enterVM(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> UInt64 
     unsafe sp.pointee.active += 1
     let epoch = unsafe sp.pointee.epoch
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    // Module 6: 0, then the relocation epoch, before any heap access.
+    unsafe epochEnter(vm, w)
     unsafe noteEpoch(w, epoch)
     unsafe w.pointee.enterWaitNs &+= waited
     unsafe vm.count(.enterWaitNs, waited)
@@ -36,6 +38,8 @@ func enterVM(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> UInt64 
 @discardableResult
 func leaveVM(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> UInt64 {
     let t0 = nanoseconds()
+    // Module 6: no body pointer from here on.
+    unsafe epochQuiesce(vm, w)
     unsafe lockCounted(vm.pointee.safepointLock, vm, contended: .safepointContended)
     unsafe vm.pointee.safepoint.pointee.active -= 1
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
@@ -49,6 +53,9 @@ func leaveVM(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> UInt64 
 /// At a poll that found the flag set. The registers are saved.
 @inline(never)
 func park(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) {
+    // Module 6: the relocator never parks between its CAS and its switch.
+    if unsafe w.pointee.inRelocation { unsafe parkWhileRelocating(vm) }
+    unsafe epochAdvance(vm, w)
     unsafe perturb(vm, w)
     unsafe lockCounted(vm.pointee.safepointLock, vm, contended: .safepointContended)
     unsafe parkLocked(vm, w)
@@ -148,8 +155,11 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     let slowest = unsafe sp.pointee.lastParker
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 
-    // The world is stopped.
+    // The world is stopped. Module 6: pending blocks are freed first, the
+    // relocation verifier runs after the work.
+    unsafe relocationAtPauseStart(vm)
     work(unsafe StopContext(vm: vm, keeping: keeping, timeToSafepointNs: t1 &- t0))
+    unsafe relocationAtPauseEnd(vm)
     if unsafe vm.pointee.config.verifyStops { unsafe verifySchedule(vm) }
     // A full collection fired ephemerons: signal the finalization
     // Semaphore through the external queue (module 4, ADR 0009 section 1).

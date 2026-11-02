@@ -23,6 +23,8 @@ struct VMConfig: Sendable {
     /// Module 5: concurrent marking of old space (needs a nursery; off: the
     /// stop-the-world oracle).
     var marking = MarkingConfig()
+    /// Module 6: concurrent relocation of old space (needs marking).
+    var relocation = RelocationConfig()
     /// Injected yields and sleeps, seeded (docs/VERIFICATION.md layer 5).
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).

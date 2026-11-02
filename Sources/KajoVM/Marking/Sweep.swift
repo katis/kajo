@@ -70,6 +70,8 @@ func sweepCycle(_ vm: VMPointer, _ mk: MarkingPointer, inPause: Bool) -> Bool {
         unsafe m.pointee.bytesFreed &+= bytes
         unsafe m.pointee.sweepCursor = end
         if !inPause, unsafe !markerPoll(vm, mk, cycle: cycle, phase: .sweeping) { return false }
+        // Module 6: evacuated blocks whose epoch every worker passed.
+        if !inPause, let r = unsafe vm.pointee.relocation { unsafe tryFreePending(vm, r, atPause: false) }
     }
     unsafe m.pointee.sweptCycle = cycle
     unsafe mk.setPhase(.swept)
@@ -101,6 +103,7 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
     _ = om.publishPendingRuns()
     om.setPendingDead(nil)
     om.setMarkingActive(false)
+    unsafe relocationAtCycleEnd(vm, completed: true)
     unsafe mk.setPhase(.idle)
     let t1 = nanoseconds()
     let ri = unsafe log.pointee.current
@@ -146,6 +149,7 @@ func abortCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe dropMarkerWork(mk)
     om.setPendingDead(nil)
     om.setMarkingActive(false)
+    unsafe relocationAtCycleEnd(vm, completed: false)
     let ri = unsafe log.pointee.current
     if ri >= 0 { unsafe log.pointee.records[ri].aborted = true }
     unsafe log.pointee.current = -1

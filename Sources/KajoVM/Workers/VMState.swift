@@ -59,6 +59,8 @@ import Synchronization
     var nursery: NurseryPointer? = nil
     /// Module 5: concurrent marking, nil when it is off (or no nursery).
     var marking: MarkingPointer? = nil
+    /// Module 6: concurrent relocation, nil when it is off (or no marking).
+    var relocation: RelocationPointer? = nil
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -68,6 +70,13 @@ struct WorkerShared: ~Copyable {
     let qos = Atomic<UInt32>(0)
     let machThread = Atomic<UInt32>(0)
     let started = Atomic<Bool>(false)
+    /// Module 6: the two hazard slots (an oop a primitive holds a body
+    /// pointer of, 0 when free) and the epoch word (the global epoch as
+    /// this worker last saw it at a point where it held no body pointer;
+    /// 0 while entering the VM; `quiescentEpoch` outside it).
+    let hazard0 = Atomic<UInt64>(0)
+    let hazard1 = Atomic<UInt64>(0)
+    let epoch = Atomic<UInt64>(quiescentEpoch)
 }
 
 /// Guarded by the safepoint mutex.

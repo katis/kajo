@@ -161,6 +161,10 @@ extension ObjectMemory {
                 }
                 continue
             }
+            // Module 6: a pending-dead entry's body may lie in a block the
+            // relocator evacuated and freed (it moved only the live ones);
+            // the lazy sweep frees the entry.
+            if isPendingDead(e) { continue }
             if s >= heapBytes { out.fail("entry \(e): body offset \(s) is outside the heap"); continue }
             let b = BlockHeap.block(ofOffset: s)
             if !h.isInUse(b) { out.fail("entry \(e): body in block \(b), which is not in use"); continue }
@@ -179,9 +183,7 @@ extension ObjectMemory {
                 continue
             }
             if seen[Int(e)] != 1 { out.fail("entry \(e): offset \(s) is not the start of a body in block \(b)'s walk") }
-            // Module 5: a lazy sweep will free it; its slots may name
-            // entries that sweep already freed.
-            if hd.isBytes || isPendingDead(e) { continue }
+            if hd.isBytes { continue }
             for i in 0..<hd.count {
                 let v = Oop(raw: h.word(atOffset: s &+ 8 &+ i &<< 3))
                 if !isValidReferenceOrInteger(v, highWater: hw) { out.fail("entry \(e) slot \(i) holds \(v)") }

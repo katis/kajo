@@ -92,9 +92,20 @@ import Synchronization
 
     // MARK: - entries
 
+    /// A relaxed atomic load (a plain `ldr` on arm64): module 6's relocator
+    /// switches a used entry's state word between stops, and a mutator's
+    /// body address is always computed from the value just loaded, never
+    /// from a cached or compared one (docs/models/relocation.md, finding 6).
     @inline(__always)
     func stateWord(_ raw: UInt64) -> UInt64 {
-        unsafe table.load(fromByteOffset: Int(truncatingIfNeeded: raw), as: UInt64.self)
+        unsafe stateWordAtomic(raw).pointee.load(ordering: .relaxed)
+    }
+
+    /// The state word as an atomic (module 6: the CAS to RELOCATING, the
+    /// switch, the post-store check's reloads).
+    @inline(__always)
+    func stateWordAtomic(_ raw: UInt64) -> UnsafeMutablePointer<Atomic<UInt64>> {
+        unsafe (table + Int(truncatingIfNeeded: raw)).assumingMemoryBound(to: Atomic<UInt64>.self)
     }
 
     @inline(__always)
@@ -144,23 +155,90 @@ import Synchronization
         return header(o).isBytes
     }
 
+    /// A relaxed atomic load of the slot (a plain `ldr`): module 6's
+    /// relocator writes new bodies with relaxed atomic stores, and the
+    /// address depends on the state word just loaded (the RCU argument).
     @inline(__always)
     func load(_ o: Oop, _ i: Int) -> Oop {
         assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i &<< 3
-        return Oop(raw: unsafe heapBase.load(fromByteOffset: off, as: UInt64.self))
+        return Oop(raw: unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.load(ordering: .relaxed))
     }
 
-    /// Every store into a slot goes through here: module 4's barrier and
-    /// module 6's post-store check hook in at this one place. A relaxed
-    /// atomic store (a plain `str` on arm64): module 5's marker reads slots
-    /// of old objects with relaxed atomic loads while mutators store.
+    /// The raw store: no post-store check. A relaxed atomic store (a plain
+    /// `str` on arm64): module 5's marker reads slots of old objects with
+    /// relaxed atomic loads while mutators store. Only for stores that no
+    /// relocation can race: fresh objects being initialised, collectors in
+    /// a pause, the image loader, and module 6's tests (the "raw store"
+    /// that shows the check is needed). Every mutator store into an object
+    /// that may be old goes through `storeChecked` (module 6).
     @inline(__always)
     func store(_ o: Oop, _ i: Int, _ v: Oop) {
         assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
         assert(v.isSmallInteger || isUsedReference(v))
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i &<< 3
         unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v.raw, ordering: .relaxed)
+    }
+
+    /// Module 6's post-store check (ADR 0007; docs/models/relocation.md,
+    /// steps `M store`): load the state word (relaxed), store the slot
+    /// through it (seq_cst), reload the state word (seq_cst). True when the
+    /// store certainly landed in the body the entry leads to: the reload
+    /// equals the first load and that had no RELOCATING bit. False: the
+    /// caller makes one out-of-line call (`postStoreSlow`) that waits out
+    /// the copy and stores again. Both halves are seq_cst, each on its own
+    /// (the model shows either weakened loses the store). On arm64: `ldr`,
+    /// `stlr`, `ldar`, `cmp`, `b.ne`, `tbnz`.
+    @inline(__always)
+    func storeChecked(_ o: Oop, _ i: Int, _ v: Oop) -> Bool {
+        assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
+        assert(v.isSmallInteger || isUsedReference(v))
+        let sw = unsafe stateWordAtomic(o.raw)
+        let e1 = unsafe sw.pointee.load(ordering: .relaxed)
+        let off = Int(truncatingIfNeeded: e1) &+ 8 &+ i &<< 3
+        unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v.raw, ordering: .sequentiallyConsistent)
+        let e2 = unsafe sw.pointee.load(ordering: .sequentiallyConsistent)
+        return e2 == e1 && e1 & EntryState.relocatingBit == 0
+    }
+
+    /// The same for one byte of a byte object (`at:put:` on a ByteArray).
+    @inline(__always)
+    func storeByteChecked(_ o: Oop, _ i: Int, _ v: UInt8) -> Bool {
+        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < header(o).count)
+        let sw = unsafe stateWordAtomic(o.raw)
+        let e1 = unsafe sw.pointee.load(ordering: .relaxed)
+        let off = Int(truncatingIfNeeded: e1) &+ 8 &+ i
+        unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt8>.self).pointee.store(v, ordering: .sequentiallyConsistent)
+        let e2 = unsafe sw.pointee.load(ordering: .sequentiallyConsistent)
+        return e2 == e1 && e1 & EntryState.relocatingBit == 0
+    }
+
+    /// Store `v` into slot `i` of the body at state word `e` (no check):
+    /// the post-store slow path's redo, the hazard primitive's stores
+    /// through the body it holds. seq_cst (module 6; the young-collection
+    /// model's finding for stores a barrier's load follows).
+    @inline(__always)
+    func storeSlot(atState e: UInt64, _ i: Int, _ v: UInt64) {
+        let off = Int(truncatingIfNeeded: e) &+ 8 &+ i &<< 3
+        unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v, ordering: .sequentiallyConsistent)
+    }
+
+    @inline(__always)
+    func storeByte(atState e: UInt64, _ i: Int, _ v: UInt8) {
+        let off = Int(truncatingIfNeeded: e) &+ 8 &+ i
+        unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt8>.self).pointee.store(v, ordering: .sequentiallyConsistent)
+    }
+
+    /// A heap word as module 6's relocator reads and writes it (back
+    /// references and body words): relaxed atomics.
+    @inline(__always)
+    func wordAtomic(atOffset off: UInt64) -> UInt64 {
+        unsafe (heapBase + Int(truncatingIfNeeded: off)).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.load(ordering: .relaxed)
+    }
+
+    @inline(__always)
+    func setWordAtomic(atOffset off: UInt64, _ v: UInt64) {
+        unsafe (heapBase + Int(truncatingIfNeeded: off)).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v, ordering: .relaxed)
     }
 
     /// A slot as the concurrent marker reads it: a relaxed atomic load.
@@ -174,14 +252,16 @@ import Synchronization
     func loadByte(_ o: Oop, _ i: Int) -> UInt8 {
         assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < header(o).count)
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i
-        return unsafe heapBase.load(fromByteOffset: off, as: UInt8.self)
+        return unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt8>.self).pointee.load(ordering: .relaxed)
     }
 
+    /// The raw byte store (no post-store check): fresh objects and the
+    /// image loader only. Mutators use `storeByteChecked`.
     @inline(__always)
     func storeByte(_ o: Oop, _ i: Int, _ v: UInt8) {
         assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < header(o).count)
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i
-        unsafe heapBase.storeBytes(of: v, toByteOffset: off, as: UInt8.self)
+        unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt8>.self).pointee.store(v, ordering: .relaxed)
     }
 
     // MARK: - body bases (the interpreter's two cached pointers)

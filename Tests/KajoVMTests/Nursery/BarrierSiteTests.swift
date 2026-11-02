@@ -30,6 +30,36 @@ method UndefinedObject makeHolders temps=0
   push_int 0
   return_top
 end
+; module 6's array copy primitive: (global 8) at: 2 gets a fresh Pair
+; through replaceFrom:to:with:startingAt: from a fresh Array
+method UndefinedObject viaArrayCopy temps=1
+  push_lit @Array
+  push_int 1
+  send new: 1
+  store_temp 0
+  push_temp 0
+  push_int 1
+  push_nil
+  push_int 6
+  send pair: 1
+  send at:put: 2
+  pop
+  push_nil
+  push_int 8
+  send g: 1
+  push_int 2
+  push_int 2
+  push_temp 0
+  push_int 1
+  send replaceFrom:to:with:startingAt: 4
+  pop
+  push_int 0
+  return_top
+end
+method Object replaceFrom:to:with:startingAt: temps=0 prim=38
+  push_nil
+  return_top
+end
 method UndefinedObject viaIvar temps=0
   push_nil
   push_int 9
@@ -110,7 +140,7 @@ end
 /// critical section, or their holder is young.
 let barrierSitesCaught: Set<BarrierSite> = [
     .storeIvar, .atPut, .globalAtPut, .hostGlobal, .readyQueueLink, .unlinkLink, .processResult, .waitingOn,
-    .waiterLink, .lastWaiterOnWait,
+    .waiterLink, .lastWaiterOnWait, .arrayCopy,
 ]
 
 /// Run the scenarios with `skip` switched off; answers whether a verifier
@@ -125,7 +155,7 @@ private func siteScenario(_ skip: BarrierSite?) throws -> Bool {
         rt.spawn("makeHolders")
         rt.runOn(1)
         try rt.checkedScavenge()
-        for sel in ["viaIvar", "viaAtPut", "viaGlobal", "viaMessage", "viaFork"] {
+        for sel in ["viaIvar", "viaAtPut", "viaGlobal", "viaMessage", "viaFork", "viaArrayCopy"] {
             rt.spawn(sel)
             rt.runOn(1)
             try rt.checkedScavenge()

@@ -12,7 +12,7 @@ final class Runtime {
     let vm: VM
 
     init(_ src: String, background: Int, heapBlocks: Int = 2048, entries: Int = 1 << 20, sliceMs: Double = 5,
-         pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true,
+         pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true, pinsForGood: Bool = true,
          configure: (inout VMConfig) -> Void = { _ in }, before: (Image) -> Void = { _ in }) throws {
         var vc = VMConfig()
         vc.backgroundWorkers = background
@@ -28,7 +28,7 @@ final class Runtime {
         c.stress = stress
         c.verify = verify
         c.onVerifyFailure = .record
-        image = try Image(memory: ObjectMemory(c))
+        image = try Image(memory: ObjectMemory(c), pinsForGood: pinsForGood)
         before(image)
         try image.load(["prelude", "lib", "processes", "nursery"].map { (file: "\($0).kasm", text: kernel($0)) }
                        + [(file: "test.kasm", text: src)])

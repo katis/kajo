@@ -92,6 +92,10 @@ enum CycleTrigger: UInt8, Sendable {
     var qos: UInt32 = 0
     var escalations: UInt64 = 0
     var lowerings: UInt64 = 0
+    /// Module 6: live bytes per block, counted while tracing when a
+    /// relocation is planned for this cycle (nil otherwise).
+    var blockLive: UnsafeMutablePointer<UInt32>? = nil
+    var blockLiveCount = 0
 }
 
 /// One cycle (docs/modules/concurrent-marking.md "Counters"). ns.

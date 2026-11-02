@@ -2,7 +2,7 @@ import Testing
 @testable import KajoVM
 
 func makeImage(heapBlocks: Int = 256, entries: Int = 1 << 18, stress: StressFlags = [],
-               limits: LoaderLimits = LoaderLimits(), verify: Bool = true) throws -> Image {
+               limits: LoaderLimits = LoaderLimits(), verify: Bool = true, pinsForGood: Bool = true) throws -> Image {
     var c = ObjectMemoryConfig()
     c.heapBytes = heapBlocks * BlockHeap.blockBytes
     c.entryCapacity = entries
@@ -10,7 +10,7 @@ func makeImage(heapBlocks: Int = 256, entries: Int = 1 << 18, stress: StressFlag
     c.stress = stress
     c.onVerifyFailure = .trap
     c.verify = verify
-    return try Image(memory: ObjectMemory(c), limits: limits)
+    return try Image(memory: ObjectMemory(c), limits: limits, pinsForGood: pinsForGood)
 }
 
 private func loadError(_ img: Image, _ files: [(String, String)]) -> LoadError.Kind? {

@@ -27,7 +27,12 @@ func storeWithBarrier(_ s: StatePointer, _ flag: UnsafeMutablePointer<Atomic<UIn
         unsafe storeWithBarriers(s, o.raw, i, v.raw, site.rawValue)
         return
     }
-    om.store(o, i, v)
+    // Module 6: the post-store check; a failed one is one call that redoes
+    // the store and runs this barrier.
+    if _slowPath(!om.storeChecked(o, i, v)) {
+        unsafe storeConflict(s, o.raw, i, v.raw, site.rawValue)
+        return
+    }
     if v.raw & 1 == 0 {
         let hv = om.headerWord(v.raw)
         if hv & Header.youngBit != 0 {
@@ -87,5 +92,5 @@ func clearingStore(_ w: WorkerPointer, _ o: Oop, _ i: Int, _ v: Oop) {
         unsafe storeWithBarriers(s, o.raw, i, v.raw, 0)
         return
     }
-    unsafe w.pointee.interp.om.store(o, i, v)
+    unsafe checkedStore(s, o, i, v)
 }

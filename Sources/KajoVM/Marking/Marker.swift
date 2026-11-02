@@ -38,10 +38,16 @@ func isUnmarkedSnapshotEntry(_ mk: MarkingPointer, _ om: ObjectMemory, _ v: UInt
 @inline(__always)
 func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ o: UInt64) {
     let h = om.headerWord(o)
-    unsafe m.pointee.markedObjects &+= 1
-    unsafe m.pointee.markedBytes &+= Header(raw: h).bodyBytes
-    if h & Header.bytesBit != 0 { return }
     let s = om.stateWord(o)
+    let bytes = Header(raw: h).bodyBytes
+    unsafe m.pointee.markedObjects &+= 1
+    unsafe m.pointee.markedBytes &+= bytes
+    // Module 6: live bytes per block, when a relocation is planned.
+    if let live = unsafe m.pointee.blockLive {
+        let b = BlockHeap.block(ofOffset: s)
+        if unsafe b < m.pointee.blockLiveCount { unsafe live[b] &+= UInt32(truncatingIfNeeded: bytes) }
+    }
+    if h & Header.bytesBit != 0 { return }
     var n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
     let f = om.classFormat(h & Header.classMask)
     if _slowPath(f.isSpecial) {
@@ -230,6 +236,13 @@ func markerLoop(_ vm: VMPointer, _ mk: MarkingPointer) {
         unsafe enterVM(vm, mw)
         unsafe applyWantedQoS(mk)
         if mark { unsafe markCycle(vm, mk) }
+        if unsafe mk.phaseNow == .sweeping && m.pointee.sweptCycle != mk.cycleNow {
+            // Module 6: relocate before sweeping (the sweep then sees the
+            // new offsets, and evacuated blocks hold no live body).
+            if let r = unsafe vm.pointee.relocation, unsafe !r.pointee.config.testSwitches.manualRelocation {
+                _ = unsafe relocatePass(vm, mk, cycle: mk.cycleNow)
+            }
+        }
         if unsafe mk.phaseNow == .sweeping && m.pointee.sweptCycle != mk.cycleNow {
             if unsafe sweepCycle(vm, mk, inPause: false) && !mk.pointee.config.stress.contains(.sweepNeverApplies) {
                 unsafe stopWorld(vm, mw, retry: true) { _ in

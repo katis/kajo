@@ -141,4 +141,6 @@ enum BarrierSite: UInt8, CaseIterable, Sendable {
     case exitSemaphore
     /// Host: `VM.setGlobal`.
     case hostGlobal
+    /// Module 6: the array copy primitive's stores (under hazard slots).
+    case arrayCopy
 }

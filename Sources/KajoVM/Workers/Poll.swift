@@ -21,6 +21,8 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
         }
         return false
     }
+    // Module 6: a poll slow path holds no body pointer.
+    unsafe epochAdvance(vm, w)
     if flagged {
         unsafe s.pointee.counters.safepointPolls &+= 1
         unsafe park(vm, w)

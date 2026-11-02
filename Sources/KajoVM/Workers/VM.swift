@@ -22,6 +22,7 @@ import Synchronization
         // The safepoint flag and (word 2) module 5's barrier word, one line.
         let flag = unsafe makeFlagLine()
         let workers = UnsafeMutablePointer<WorkerPointer>.allocate(capacity: workerCount)
+        precondition(MemoryLayout<WorkerShared>.size <= 128, "a worker's shared words fit one line")
         let shared = UnsafeMutableRawPointer.allocate(byteCount: 128 * workerCount, alignment: 128)
         for i in 0..<workerCount {
             unsafe (shared + 128 * i).bindMemory(to: WorkerShared.self, capacity: 1).initialize(to: WorkerShared())
@@ -54,6 +55,7 @@ import Synchronization
         }
         unsafe NurseryShared.install(state)
         unsafe MarkingShared.install(state)
+        unsafe RelocationShared.install(state)
     }
 
     var config: VMConfig { unsafe state.pointee.config }
@@ -120,6 +122,7 @@ import Synchronization
             node = unsafe n.pointee.next
             unsafe n.deallocate()
         }
+        unsafe RelocationShared.uninstall(state)
         unsafe MarkingShared.uninstall(state)
         unsafe NurseryShared.uninstall(state)
         for i in unsafe 0..<s.workerCount { unsafe Worker.destroy(s.workers[i]) }

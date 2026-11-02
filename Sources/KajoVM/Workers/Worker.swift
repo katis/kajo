@@ -51,6 +51,12 @@ enum LeaveReason: UInt8, Sendable {
     var collectorNs: UInt64 = 0
     /// The stop epoch whose pause this worker's lookup cache has seen.
     var seenEpoch: UInt64 = 0
+    /// Module 6: this worker's post-store checks and hazard slots.
+    var relocation = RelocationMutatorCounters()
+    /// Module 6: the relocator (the marker worker) is between its CAS and
+    /// its switch or revert; a park there would deadlock (checked builds
+    /// trap, every build counts it).
+    var inRelocation = false
     /// Perturbation generator state (xorshift).
     var rng: UInt64
     var thread: pthread_t? = nil

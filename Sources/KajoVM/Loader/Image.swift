@@ -9,6 +9,11 @@ final class Image {
     let om: ObjectMemory
     let limits: LoaderLimits
     let context: AllocContext
+    /// Module 6: methods, bytecodes, literal Arrays, classes, symbols, nil,
+    /// true and false are pinned for good. Only tests of module 2's
+    /// re-derivation after a compaction build an image without, and a VM
+    /// over such an image does not relocate.
+    let pinsForGood: Bool
     private(set) var nilObject = Oop.none
     private(set) var trueObject = Oop.none
     private(set) var falseObject = Oop.none
@@ -35,20 +40,21 @@ final class Image {
 
     /// Boot: nil, true, false, the well-known classes, the special selectors,
     /// the globals (SPEC-SHARED "Boot / allocation order", steps 1 to 3).
-    init(memory: ObjectMemory, limits: LoaderLimits = LoaderLimits()) throws(LoadError) {
+    init(memory: ObjectMemory, limits: LoaderLimits = LoaderLimits(), pinsForGood: Bool = true) throws(LoadError) {
         om = memory
         self.limits = limits
+        self.pinsForGood = pinsForGood
         context = memory.makeContext()
         for _ in WellKnown.classes { om.registerClass(.none) }
-        nilObject = try allocate(WellKnown.undefinedObject, slots: 0, fill: Oop(smallInteger: 0))
+        nilObject = try allocatePinned(WellKnown.undefinedObject, slots: 0, fill: Oop(smallInteger: 0))
         om.addRoot(nilObject)
         om.nilObject = nilObject
-        trueObject = try allocate(WellKnown.trueClass, slots: 0)
+        trueObject = try allocatePinned(WellKnown.trueClass, slots: 0)
         om.addRoot(trueObject)
-        falseObject = try allocate(WellKnown.falseClass, slots: 0)
+        falseObject = try allocatePinned(WellKnown.falseClass, slots: 0)
         om.addRoot(falseObject)
         for (_, index) in WellKnown.classes {
-            om.setClassOop(index, try allocate(WellKnown.classClass, slots: ClassLayout.size))
+            om.setClassOop(index, try allocatePinned(WellKnown.classClass, slots: ClassLayout.size))
         }
         for (name, index) in WellKnown.classes {
             let sup = index == WellKnown.object ? nilObject : om.classOop(WellKnown.object)
@@ -94,6 +100,17 @@ final class Image {
         return o
     }
 
+    /// Module 6: an object pinned for good (header bit 60): never moved by
+    /// a relocation or a compaction. Every method, its bytecodes and its
+    /// literal Array (the interpreter caches raw pointers into the last
+    /// two), every class, every symbol, nil, true and false. The image is
+    /// built before any VM exists, so the header write races nothing.
+    private func allocatePinned(_ cls: UInt64, slots: Int, fill: Oop? = nil, roots: [Oop] = []) throws(LoadError) -> Oop {
+        let o = try allocate(cls, slots: slots, fill: fill, roots: roots)
+        if pinsForGood { om.pinForGood(o) }
+        return o
+    }
+
     private func allocateBytes(_ count: Int, roots: [Oop]) throws(LoadError) -> Oop {
         guard let o = om.allocateBytes(context, classIndex: WellKnown.byteArray, count: count, extraRoots: roots) else {
             throw LoadError(.heapFull, "the heap has no room for the image")
@@ -105,7 +122,7 @@ final class Image {
     @discardableResult
     func intern(_ name: String) throws(LoadError) -> Oop {
         if let s = symbols[name] { return s }
-        let s = try allocate(WellKnown.symbol, slots: 1)
+        let s = try allocatePinned(WellKnown.symbol, slots: 1)
         om.store(s, 0, Oop(smallInteger: Int64(symbols.count)))
         om.addRoot(s)
         symbols[name] = s
@@ -143,7 +160,7 @@ final class Image {
             for (k, c) in f.classes.enumerated() {
                 let index = om.registerClass(.none)
                 precondition(index == f.firstIndex + UInt64(k))
-                om.setClassOop(index, try allocate(WellKnown.classClass, slots: ClassLayout.size))
+                om.setClassOop(index, try allocatePinned(WellKnown.classClass, slots: ClassLayout.size))
                 classesByName[c.name] = index
             }
             for c in f.classes {
@@ -156,10 +173,11 @@ final class Image {
                 let sel = try intern(m.selector)
                 for case .symbol(let s) in m.literals { try intern(s) }
                 let bytes = try allocateBytes(m.bytecodes.count, roots: [])
+                if pinsForGood { om.pinForGood(bytes) }
                 for (i, b) in m.bytecodes.enumerated() { om.storeByte(bytes, i, b) }
-                let lits = try allocate(WellKnown.array, slots: m.literals.count, roots: [bytes])
+                let lits = try allocatePinned(WellKnown.array, slots: m.literals.count, roots: [bytes])
                 for (i, l) in m.literals.enumerated() { om.store(lits, i, literalValue(l)) }
-                let meth = try allocate(WellKnown.method, slots: MethodLayout.size, roots: [bytes, lits])
+                let meth = try allocatePinned(WellKnown.method, slots: MethodLayout.size, roots: [bytes, lits])
                 om.store(meth, MethodLayout.bytecodes, bytes)
                 om.store(meth, MethodLayout.literals, lits)
                 om.store(meth, MethodLayout.argc, Oop(smallInteger: Int64(m.argc)))

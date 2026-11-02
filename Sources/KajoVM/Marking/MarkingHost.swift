@@ -182,6 +182,11 @@ extension VM {
         let mk = unsafe manualMarker()
         let mw = unsafe mk.pointee.markerWorker
         unsafe enterVM(state, mw)
+        // Module 6: relocate first, as the marker thread does.
+        if let r = unsafe state.pointee.relocation, unsafe !r.pointee.config.testSwitches.manualRelocation,
+           unsafe mk.phaseNow == .sweeping {
+            _ = unsafe relocatePass(state, mk, cycle: mk.cycleNow)
+        }
         if unsafe mk.phaseNow == .sweeping { _ = unsafe sweepCycle(state, mk, inPause: false) }
         unsafe leaveVM(state, mw)
     }

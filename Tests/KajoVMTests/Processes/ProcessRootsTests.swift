@@ -29,7 +29,9 @@ import Testing
     end
     """
     var garbage: [RootHandle] = []
-    let rt = try Runtime(src, background: 1, start: false, before: { image in
+    // Module 6 pins methods for good; an image without pins (no relocation)
+    // keeps module 2's re-derivation after a compaction tested.
+    let rt = try Runtime(src, background: 1, start: false, pinsForGood: false, before: { image in
         // garbage below the methods, so a compaction slides them down
         for _ in 0..<2000 {
             let o = image.om.allocate(image.context, classIndex: WellKnown.array, slots: 30, fill: image.nilObject)!

@@ -158,6 +158,7 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     unsafe m.pointee.markedCycle = cycle
 
     if verdict.failed {
+        unsafe m.pointee.blockLive = nil
         // Checked builds trapped in `record`; here the cycle cannot be
         // trusted: nothing is freed, and a full collection falls back.
         unsafe abortCycle(vm, mk)
@@ -165,6 +166,8 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
         if let n = unsafe vm.pointee.nursery { unsafe n.pointee.fullRequested.pointee.store(true, ordering: .relaxed) }
         return
     }
+    // Module 6: the relocation set and the frame pins.
+    unsafe relocationAtFinalMark(vm, mk, cycle: cycle)
     // The sweep may start: pending-dead entries are skipped by the
     // verifiers until it has passed them.
     om.setPendingDead(unsafe mk.pointee.snapshot)

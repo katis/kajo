@@ -175,7 +175,9 @@ end
       return_top
     end
     """
-    let h = try Harness(src) { img in
+    // Module 6 pins methods for good; this test is module 2's re-derivation
+    // after a stop-the-world compaction, so its image pins nothing.
+    let h = try Harness(src, pinsForGood: false) { img in
         for _ in 0..<5000 { _ = img.om.allocate(img.context, classIndex: WellKnown.array, slots: 10, fill: img.nilObject) }
     }
     defer { h.destroy() }

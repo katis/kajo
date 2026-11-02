@@ -9,9 +9,9 @@ struct Harness {
 
     /// `before` runs between boot and load (garbage below the methods).
     init(_ src: String, base: [String] = ["prelude", "lib"], heapBlocks: Int = 512, entries: Int = 1 << 18,
-         stress: StressFlags = [], verify: Bool = true, stackWords: Int = 1 << 16,
+         stress: StressFlags = [], verify: Bool = true, stackWords: Int = 1 << 16, pinsForGood: Bool = true,
          before: (Image) -> Void = { _ in }) throws {
-        image = try makeImage(heapBlocks: heapBlocks, entries: entries, stress: stress, verify: verify)
+        image = try makeImage(heapBlocks: heapBlocks, entries: entries, stress: stress, verify: verify, pinsForGood: pinsForGood)
         before(image)
         try image.load(base.map { (file: "\($0).kasm", text: kernel($0)) } + [(file: "test.kasm", text: src)])
         interpreter = Interpreter(image: image)
