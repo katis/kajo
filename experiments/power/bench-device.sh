@@ -24,6 +24,9 @@
 #            P2RUNS runs, to place where conc-utility starts missing frames
 #   p3x      added after p3: parked and tick with KAJO_GC=stw (no marker
 #            thread), P3RUNS runs, to name the source of idle wakeups
+#   p3fix    added after concurrent-young's SPEC amendment 18 (the marker
+#            waits untimed unless blocks are pending): parked and tick at
+#            conc-utility and conc-high, P3RUNS runs
 #   pull     copy Documents/*.txt from the phone into results/device-*.txt
 #
 # Usage: SCRATCH=<dir> ./bench-device.sh                 (everything)
@@ -216,6 +219,19 @@ if has p3x; then
     for run in $(seq 1 "$P3RUNS"); do
         p3 "$O" matrix parked stw "$run"
         p3 "$O" matrix tick stw "$run"
+    done
+fi
+
+if has p3fix; then
+    O="$R/dev-p3fix.txt"
+    echo "== p3fix: parked, tick x conc-utility conc-high after the untimed marker wait, $P3RUNS runs"
+    cooldown
+    for run in $(seq 1 "$P3RUNS"); do
+        for c in conc-utility conc-high; do
+            p3 "$O" matrix parked "$c" "$run"
+            p3 "$O" matrix tick "$c" "$run"
+        done
+        echo "   run $run/$P3RUNS done ($(tail -1 "$O" | grep -o 'thermal_end=[a-z]*'))"
     done
 fi
 

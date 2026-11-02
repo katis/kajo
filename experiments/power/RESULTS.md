@@ -505,3 +505,27 @@ configuration uses that scavenge with one participant).
   19 and 0 in its three launches: whether utility misses frames at a given
   rate is a probability, not a threshold.
 - Battery was `full` on every line (adapter power); see the unplugged note.
+
+## 2026-11-02: Part 3 idle after the untimed marker wait
+
+concurrent-young SPEC.md amendment 18: the marker waits untimed unless
+evacuated blocks are pending (the timed 1 ms wait was the only periodic VM
+activity above). The app rebuilt with it, `PARTS="build p3fix"`
+(`results/dev-p3fix.txt`), parked and tick at conc-utility and conc-high
+(marker and young collector at user-initiated), 60 s windows, 3 launches
+each, interleaved, every line at nominal. Per second of window, medians:
+
+| mode | cfg | idle wakeups/s before | after | interrupt wakeups/s before | after | CPU ms/s before | after | energy mW before | after | marker CPU ms/s after |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| VM parked | conc-utility | 131.6 | 0.08 | 213.9 | 0.11 | 1.98 | 0.02 | 0.11 | 0.00 | 0.000 |
+| VM parked | conc-high | - | 0.05 | - | 0.10 | - | 0.02 | - | 0.00 | 0.000 |
+| tick | conc-utility | 216.5 | 76.4 | 343.2 | 120.0 | 17.54 | 14.71 | 0.90 | 0.78 | 0.000 |
+| tick | conc-high | - | 79.0 | - | 120.0 | - | 14.39 | - | 0.75 | 0.000 |
+
+"Before" is the Part 3 table; parked and tick were not measured at
+conc-high then (the 582 wakeups/s were tick + 2 MB/s at conc-high). The
+after rows equal the no-marker floor (`stw` rows: parked 0.0, tick 78.0
+idle wakeups/s): the marker thread exists (`vm_threads=...marker:1`) and
+ran 0.000 ms in all 12 windows; it no longer appears in `threads=`. A
+parked VM now costs nothing measurable; the tick's remaining wakeups are
+the display link's.
