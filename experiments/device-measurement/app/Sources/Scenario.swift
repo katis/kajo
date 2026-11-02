@@ -605,7 +605,7 @@ final class ScenarioController: UIViewController {
         let rate = Double(frameTimes.count) / (measureEnd - measureStart)
         let gapsMs = gaps.map { $0 * 1000 }
         func d(_ m: Metric) -> UInt64 { vm.metric(m) &- (metricsAtStart[m] ?? 0) }
-        var line = "part=C scenario=\(scenarioId) mac_scenario=\(ys) run=\(runN) bg=\(bg) seconds=\(seconds) verify=0 build_wait_s=\(f2(buildWaitS))"
+        var line = "part=C scenario=\(scenarioId) mac_scenario=\(ys) run=\(runN) tag=\(opts["tag"] ?? "-") bg=\(bg) seconds=\(seconds) verify=0 build_wait_s=\(f2(buildWaitS))"
         line += " battery=\(info.battery) battery_level=\(f2(Double(info.batteryLevel))) low_power=\(info.lowPower ? 1 : 0) cores=\(info.cores) thermal_start=\(thermalStart)"
         line += " nominal_hz=\(f2(1 / nominal)) refresh_hz=\(f2(rate)) frames=\(frameTimes.count)"
         line += " drops=\(drops.count) missed=\(missed)"
