@@ -23,7 +23,7 @@ run *ARGS:
 bench:
     experiments/vm-language-bench/bench.sh
 
-# Check that the VM core compiles for iOS
+# Check that the VM core compiles for iOS (every file under Sources/KajoVM)
 ios-check:
     xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk $(xcrun --sdk iphoneos --show-sdk-path) \
-        -parse-as-library -module-name KajoVM -strict-memory-safety Sources/KajoVM/*.swift
+        -parse-as-library -module-name KajoVM -strict-memory-safety $(find Sources/KajoVM -name '*.swift')
