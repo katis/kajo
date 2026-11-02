@@ -38,6 +38,8 @@ import Darwin
             heap.release()
             throw error
         }
+        let poolLock = os_unfair_lock_t.allocate(capacity: 1)
+        unsafe poolLock.initialize(to: os_unfair_lock())
         let pools = UnsafeMutablePointer<Pools>.allocate(capacity: 1)
         unsafe pools.initialize(to: Pools(blockCount: heap.blockCount))
         let gc = UnsafeMutablePointer<CollectorState>.allocate(capacity: 1)
@@ -45,7 +47,8 @@ import Darwin
         let shared = UnsafeMutablePointer<MemoryShared>.allocate(capacity: 1)
         unsafe shared.initialize(to: MemoryShared(
             config: config, heap: heap, entryCapacity: UInt64(config.entryCapacity), tableBytes: tableBytes,
-            marks: marks.bindMemory(to: UInt8.self, capacity: config.entryCapacity), pools: pools, gc: gc))
+            marks: marks.bindMemory(to: UInt8.self, capacity: config.entryCapacity), poolLock: poolLock,
+            pools: pools, gc: gc))
         unsafe self.table = table
         unsafe self.heapBase = heap.base
         unsafe self.shared = shared
@@ -60,6 +63,7 @@ import Darwin
         unsafe s.pools.pointee.free()
         unsafe s.pools.deinitialize(count: 1)
         unsafe s.pools.deallocate()
+        unsafe s.poolLock.deallocate()
         unsafe s.gc.pointee.free()
         unsafe s.gc.deinitialize(count: 1)
         unsafe s.gc.deallocate()
@@ -195,9 +199,18 @@ import Darwin
         return a
     }
 
-    func lockPools() { unsafe os_unfair_lock_lock(pools.pointee.lock) }
-    func unlockPools() { unsafe os_unfair_lock_unlock(pools.pointee.lock) }
+    /// The lock is outside `Pools`: reading it through `pools.pointee` would
+    /// be an access to the whole struct, racing with writes made under the
+    /// lock (a Swift exclusivity race to ThreadSanitizer, AGENTS.md).
+    func lockPools() { unsafe os_unfair_lock_lock(shared.pointee.poolLock) }
+    func unlockPools() { unsafe os_unfair_lock_unlock(shared.pointee.poolLock) }
 }
+
+/// Copies are handed to other threads by design: allocation through
+/// distinct contexts runs concurrently (the pools take a lock), everything
+/// else runs with the world stopped. The checker cannot see that rule;
+/// tests under ThreadSanitizer do.
+extension ObjectMemory: @unchecked Sendable {}
 
 /// What every copy of an `ObjectMemory` shares. Immutable after creation
 /// except through the sub-state pointers, one per lock (AGENTS.md).
@@ -208,16 +221,17 @@ import Darwin
     let tableBytes: Int
     /// Mark bytes, one per entry, beside the table. Never set in headers.
     let marks: UnsafeMutablePointer<UInt8>
-    /// Guarded by `Pools.lock`.
+    let poolLock: os_unfair_lock_t
+    /// Guarded by `poolLock`.
     let pools: UnsafeMutablePointer<Pools>
     /// Written with the world stopped only.
     let gc: UnsafeMutablePointer<CollectorState>
 }
 
 /// Free blocks, free entry runs, the table's high water mark and the
-/// registered contexts. Guarded by `lock`; a pause takes it too.
+/// registered contexts. Guarded by `MemoryShared.poolLock`; a pause takes
+/// it too.
 @safe struct Pools {
-    let lock: os_unfair_lock_t
     /// Blocks to hand out, lowest index on top. A block here is either free
     /// (used 0, not in use) or the partly filled last destination of a
     /// compaction (in use, used < block size).
@@ -231,8 +245,6 @@ import Darwin
     var retiredCounters = AllocationCounters()
 
     init(blockCount: Int) {
-        unsafe lock = .allocate(capacity: 1)
-        unsafe lock.initialize(to: os_unfair_lock())
         var b = blockCount - 1
         while b >= 0 { freeBlocks.append(UInt32(b)); b -= 1 }
     }
@@ -248,7 +260,6 @@ import Darwin
         freeBlocks.free()
         entryRuns.free()
         unsafe contexts.free()
-        unsafe lock.deallocate()
     }
 }
 

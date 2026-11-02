@@ -2,7 +2,7 @@
 /// private free-entry list (experiments/object-representation SPEC, B).
 /// Module 3 gives one to each worker. A context is used by one thread at a
 /// time.
-@safe struct AllocContext: Equatable {
+@safe struct AllocContext: Equatable, @unchecked Sendable {
     let state: UnsafeMutablePointer<ContextState>
 }
 
