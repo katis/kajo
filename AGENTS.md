@@ -325,6 +325,34 @@ Safety:
  - Device iteration is fast: about one second per launch over `devicectl`,
    with stdout streamed. Design device benchmarks as one kernel per launch
    so a crash costs one run and thermal state is logged per launch.
+ - A snapshot-at-the-beginning barrier records stores, not loads. A
+   referent held only weakly at the snapshot, read through its weak slot
+   and stored into an already scanned object, was swept under a live
+   reference. Weak reads during marking need a keep-alive barrier; the test
+   that fails without it is in the marking suite.
+ - The marking snapshot set is an old map, one bit per entry set exactly
+   while the entry holds an old object, maintained by old allocation, the
+   entry sweep and the lazy sweep. Copying it is 0.02 to 0.05 ms for
+   millions of entries; a used bitmap would have cost an atomic per eden
+   allocation and still needed the survivors subtracted.
+ - A test variant whose broken protocol is a data race by construction
+   (a released worker running inside the next stop) is a ThreadSanitizer
+   report, not a failing check. Skip only that variant under the sanitizer
+   and keep it in every other build, as trapping variants are run by hand.
+ - A trigger must watch every resource a fallback can exhaust. `alloc`
+   filled a 16.7 million-entry table before its blocks reached the
+   occupancy floor and fell back with no cycle ever started; the entry
+   table got a floor of its own.
+ - A marking cycle is cheap to abandon; a lazy sweep is not. Once entries
+   sit in pending runs, abandoning the sweep would leave them owned twice,
+   so a module 1 operation finishes and applies the sweep in its pause and
+   abandons only marking.
+ - "If no pause comes" cannot be decided without a timer. The sweeper
+   requests its own short apply stop when it finishes, unless a scavenge
+   applied first; a module with no timed wait has no other way.
+ - A terminated Process's result slot is a root. Tests that expect
+   objects to be reclaimed must release the Processes that answered them,
+   or the "dead" objects stay reachable through the host's Process roots.
 
 ## Verification
 
@@ -345,8 +373,9 @@ entry locality rejected), 0004 Smalltalk UI code on the main thread with
 budgeted preemption (proposed, built headlessly in module 3; pending a
 pause-bounded collector and the shell's 120 Hz measurement), 0005
 generational collection with per-worker nurseries (proposed, built in module 4), 0006
-concurrent marking and lazy sweeping of old space (proposed; pauses no longer
-depend on heap size, given old-space headroom), 0007 age field with survivor
+concurrent marking and lazy sweeping of old space (proposed, built in module
+5: the final mark is 0.11 to 0.14 ms p50 at 8 workers from 64 to 512 MiB of
+live old data, the barrier costs 1.4 percent on `ivars` with marking off), 0007 age field with survivor
 spaces and concurrent relocation of old space through the entry table
 (proposed; old-space work is off the frame budget, scavenges remain; the age
 half is built in module 4, the relocation half is model checked in
@@ -382,7 +411,13 @@ cover.
    built; `docs/modules/nursery.md`: per-worker eden and survivors, age and
    claim tags, barrier and remembered set, parallel stop-the-world scavenge,
    entry stashes, weak slots, ephemerons in the oracle, the finalization
-   queue, snapshot v2), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   queue, snapshot v2), `Marking/` with `ObjectMemory/OldMap.swift` (module
+   5, built; `docs/modules/concurrent-marking.md`: old map and snapshot map,
+   SATB barrier behind the flag word, the marker thread as a VM participant,
+   initial mark at the end of a scavenge, final mark with the remembered
+   filter, ephemerons and weak slots, lazy sweep into pending runs applied
+   at the next pause, triggers and counted fallbacks, the QoS policy, the
+   final-mark verifier; `kajo run --gc cm|stw`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
    CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
    targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
