@@ -121,3 +121,61 @@ contention passed 40 of 40. The one `verify young` message is the young
 verifier finding a reachable object whose entry bit in `used` is clear.
 Both name a reachable object whose entry the collector treats as something
 else: a snapshot entry it never marked, or a free entry.
+
+### Step 3: hypotheses (written before any instrumentation output)
+
+The message says: entry E was in the marking snapshot (`used` minus the
+young logs at the initial-mark pause), is reachable at the final mark, and
+was never marked. `verify young: reachable entry is free` says a reachable
+object's `used` bit is clear. Only `local` fails.
+
+- **H1, lost claim between two parallel scavengers** (the brief's first
+  candidate). Unlikely: the failing mode never runs the parallel scavenge
+  except as a fallback, and `stw` passed 40 of 40. Would show as a verifier
+  message from `Scavenge.swift`, not from `verifyMarks`.
+- **H2, a Process root scanned twice or not at all (`claimParked`).** A
+  local-collection rule; a miss there loses a young object (young verifier,
+  checksum), not an old snapshot entry. Does not explain the mark message.
+- **H3, a remembered-list entry naming a freed entry.** Related to H6 below:
+  the deferred-free machinery (amendment 10) exists because lists can name
+  dead holders.
+- **H4, `result` or another interpreter register not a root.** The
+  snapshot's roots are the stop's root ranges; a value only in a register
+  across a pause would be lost under `stw` too.
+- **H5, the verifier reads state a late participant still writes.**
+  `verifyMarks` runs in the final-mark pause, world stopped, no young
+  collection in progress (stops wait for `ycActive == 0`), markers parked.
+  Unlikely.
+- **H6, a deferred dead young entry becomes a snapshot entry.** A dead
+  young remembered holder's free is deferred to step 6 of its collection;
+  if its `rem` word was re-armed meanwhile (another nursery's concurrent
+  collection scanning it from a stale list), the free waits for the
+  nursery's *next* collection (amendment 10). Until then the entry is used,
+  dead, and in no young log. An initial-mark pause in between therefore puts
+  it in the snapshot (unmarked, it is dead). The next local collection of
+  that nursery, during marking, frees it; any worker can reallocate it for a
+  new object (a Pair: class 14). That object is reachable, in the snapshot,
+  unmarked: exactly the message. The lazy sweep then frees every unmarked
+  snapshot entry, so the live object's entry is freed under it: the
+  `verify young` message, and a real lost object. Predicts: the missed
+  entry has a `deferKept` event before the cycle's initial mark, then a
+  `deferFree` and a `reallocSnap` during marking. Contention fits: a re-arm
+  needs one collection to be descheduled between its fetch_and on a holder
+  and its `keepForNext`, while the owner's collection sweeps the holder;
+  Processes migrating between workers (after a wait or a preemption) make
+  their own list nodes cross-nursery holders, so dead remembered holders
+  are common. `stw` never defers.
+- **H7, the young-root scan misses a young body** (a stale `nurseryTop` or
+  survivor top at the pause, or the linear walk stopping at a hole). An old
+  object named only by that body is never greyed. Predicts: the missed
+  entry was old at the snapshot and never freed or reallocated.
+- **H8, the SATB barrier's young-holder skip racing a promotion.** A store
+  into a holder whose header still reads young while a local collector
+  promotes it. By the snapshot argument (Part 3) the overwritten value is
+  grey or recorded elsewhere; listed for completeness.
+
+Instrumentation planned (step 4) separates H6 from H7: a ring of events
+(`mach_absolute_time`, worker, entry) for initial and final marks, deferred
+pushes, kept and frees, local-sweep frees of snapshot entries during
+marking, and entry refills that hand out snapshot entries during marking,
+dumped for each entry the mark verifier reports.
