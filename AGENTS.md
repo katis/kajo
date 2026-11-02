@@ -267,6 +267,8 @@ cover.
  * `apps/` Xcode projects for the macOS and iOS shells, depending on the root
    package. Not created yet.
  * `experiments/` throwaway spikes with a design brief and results each.
+ * `docs/PLAN.md` the module order for building the production core from
+   the experiments; `docs/modules/` one brief, later description, per module.
  * `docs/CONTEXT.md` domain vocabulary. `docs/adr/` one decision per file.
    `docs/VERIFICATION.md` how the experiments become the production core
    and what verification that core needs beyond tests and ThreadSanitizer.
