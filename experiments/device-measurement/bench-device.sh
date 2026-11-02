@@ -24,6 +24,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 HERE=$(pwd)
+command -v timeout > /dev/null || { echo "needs timeout (brew install coreutils)"; exit 1; }
 DEVICE=${DEVICE:-00008150-001271502182401C}
 TEAM=${TEAM:-BDN6M642M2}
 BUNDLE=dev.katajamaki.kajo.devicebench
@@ -219,5 +220,8 @@ fi
 
 if has report; then
     python3 "$HERE/report.py" "$R" > "$HERE/bench-output.txt"
+    # RESULTS.md = RESULTS.tmpl.md (the prose) with its {{...}} markers
+    # replaced by the matching tables of bench-output.txt.
+    python3 "$HERE/render.py"
     cat "$HERE/bench-output.txt"
 fi
