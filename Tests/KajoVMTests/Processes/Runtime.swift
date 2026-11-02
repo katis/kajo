@@ -29,6 +29,7 @@ final class Runtime {
         vc.backgroundWorkers = background
         vc.sliceNs = UInt64(sliceMs * 1e6)
         vc.pollEvery = pollEvery
+        vc.verifyStops = true  // the stop and schedule verifiers, in release builds too
         configure(&vc)
         vm = VM(image: image, config: vc)
         if start { vm.start() }

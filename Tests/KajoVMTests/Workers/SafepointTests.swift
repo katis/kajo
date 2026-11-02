@@ -173,17 +173,38 @@ func kernelsOnEightWorkersMatchTheirModels(_ name: String) throws {
 /// a second, and a handful of wakeups at most (experiments/power: a timed
 /// wait was the VM's whole idle cost).
 @Test func idleWorkersCostNothing() throws {
-    let rt = try Runtime("", background: 8)
+    let spinSrc = """
+    method UndefinedObject spinUntil: temps=0
+    loop:
+      push_nil
+      push_int 9
+      send globalAt: 1
+      push_nil
+      identical
+      jump_if_true loop
+      push_int 1
+      return_top
+    end
+    """
+    let rt = try Runtime(spinSrc, background: 8)
     #expect(eventually { rt.vm.idleWorkerCount == 8 })
     usleep(100_000)
     let cpu0 = rt.vm.workerCPUNanoseconds(), wakes0 = rt.vm.counters.idleWakeups
-    #expect(cpu0.dropFirst().prefix(8).allSatisfy { $0 > 0 })  // the readings are real: each thread ran a little
     usleep(1_000_000)
     let cpu = zip(rt.vm.workerCPUNanoseconds(), cpu0).map { $0 &- $1 }
     let wakes = rt.vm.counters.idleWakeups &- wakes0
     print("idle: cpu ns per worker \(cpu) wakeups \(wakes)")
     for c in cpu.dropFirst() { #expect(c < 1_000_000) }  // worker 0 is the main worker: no thread of its own
     #expect(wakes <= 5)
+    // The probe reads real CPU time (microsecond grained: a worker can
+    // reach its wait in less): a Process that spins 50 ms shows up in it.
+    let before = rt.vm.workerCPUNanoseconds().reduce(0, +)
+    let p = rt.spawn("spinUntil:", [int(0)])
+    usleep(50_000)
+    rt.vm.setGlobal(9, int(1))
+    #expect(eventually { rt.state(p) == .terminated })
+    let spun = rt.vm.workerCPUNanoseconds().reduce(0, +) &- before
+    #expect(spun > 30_000_000, "\(spun) ns")
     rt.stop()
 }
 
