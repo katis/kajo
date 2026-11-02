@@ -260,6 +260,17 @@ import Darwin
     /// The object memory's own context, for bodies allocated inside an
     /// operation (reshape).
     var collectorContext: AllocContext?
+    /// Root registry slots; `Oop.none` marks a removed slot.
+    var roots = RawArray<UInt64>()
+    var freeRootSlots = RawArray<Int32>()
+    /// Class index -> class oop. Index 0 is never a class.
+    var classTable = RawArray<UInt64>(repeating: 0, count: 1)
+    var markStack = RawArray<UInt64>()
 
-    mutating func free() {}
+    mutating func free() {
+        roots.free()
+        freeRootSlots.free()
+        classTable.free()
+        markStack.free()
+    }
 }
