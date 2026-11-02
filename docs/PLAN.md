@@ -1,6 +1,6 @@
 # Build plan: from the experiments to `Sources/KajoVM`
 
-Status: started 2026-11-02; module 1 built the same day. A step or two at a time; the order below is the
+Status: started 2026-11-02; modules 1 and 2 built the same day. A step or two at a time; the order below is the
 current best guess, revised as modules land. `docs/VERIFICATION.md` says how
 each module is verified; this file says what is built and in what order.
 
@@ -41,7 +41,7 @@ each module is verified; this file says what is built and in what order.
 | # | Module | Ports from | Gate before it |
 |---|---|---|---|
 | 1 | **Object memory** (built 2026-11-02, `docs/modules/object-memory.md`): oops and tags, header word, entry table, block heap, allocation, stop-the-world mark, sweep and compaction, become and bulk forward, reshape and instance enumeration, snapshot save and load, verifiers, counters | object-representation (B), concurrent-young's final layout (SPEC "Header word") | this plan |
-| 2 | **Interpreter and loader**: bytecode set v0 (the experiments' set, behind the module; a real set is an open ADR), method and context representation, sends, primitives boundary, the kasm loader as the first loader | vm-language-bench, object-representation | module 1; the loader gets a fuzz target |
+| 2 | **Interpreter and loader** (built 2026-11-02, `docs/modules/interpreter.md`): bytecode set v0 (the experiments' set, behind the module; a real set is an open ADR), method and context representation, sends, primitives boundary, the kasm loader as the first loader | vm-language-bench, object-representation | module 1; the loader gets a fuzz target |
 | 3 | **Workers, safepoints, Processes, scheduler**: OS-thread workers, safepoint protocol, Process-owned stacks, the main-affine ready queue and budgeted preemption of ADR 0004 | ui-thread-scheduling, concurrent-young's Process.swift | module 2; randomized programs start here |
 | 4 | **Nursery**: per-worker eden and survivors, age field, remembered sets, write barrier, stop-the-world scavenge (ADR 0005, 0007 age) | generational-gc, concurrent-relocation | module 3 |
 | 5 | **Concurrent marking and lazy sweep** (ADR 0006), marker at utility on device | concurrent-marking | module 4; schedule perturbation in place |

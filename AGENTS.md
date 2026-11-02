@@ -239,6 +239,22 @@ Safety:
    it; this is the same rule as one sub-state per lock.
  - `mach_vm.h` is unsupported in the iOS SDK; use the `vm_map` family with
    the same arguments. The double heap mapping needs no entitlement.
+ - A generated `Opcode(rawValue:)` was an out-of-line call per bytecode and
+   cost a third of fib. The dispatch loop decodes with one compare
+   (`Opcode.decode`), and `just arc-check` asserts the loop is exactly one
+   indirect branch and one jump table so the regression cannot return
+   silently.
+ - Frame links (caller pc, fp, hdr) are SmallInteger offsets and indices,
+   never addresses. Methods move under compaction and stacks will move with
+   Processes; with offsets nothing inside a stack needs fixing after either.
+ - A loader's stack-depth check must trace every path through the method; a
+   linear scan is unsound for untrusted input, and a unary
+   `doesNotUnderstand:` at the deepest operand slot pushes one word past the
+   computed maximum. Frames reserve that word and a guard past the stack end
+   catches the next such case.
+ - Class, Method and MethodDict are sealed from Smalltalk (no primitive
+   reads, writes, creation or become; no ivar access in their methods) or a
+   verified method's bytecodes could be rewritten at run time.
  - Device iteration is fast: about one second per launch over `devicectl`,
    with stdout streamed. Design device benchmarks as one kernel per launch
    so a crash costs one run and thermal state is logged per launch.
@@ -279,10 +295,18 @@ cover.
  * `Package.swift` is the root SwiftPM package: `KajoVM` library, `kajo`
    headless CLI, `KajoVMTests` (Swift Testing).
  * `Sources/KajoVM/` the VM core, one directory per module:
-   `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`).
-   `Sources/kajo/` the CLI. `scripts/check-hot-path-arc.sh` (`just
-   arc-check`) greps the release disassembly of the allocation and store
-   paths for retain and release.
+   `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`),
+   `Interpreter/` and `Loader/` (module 2, built; `docs/modules/interpreter.md`),
+   `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
+   targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
+   toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
+   `check-hot-path-arc.sh` (`just arc-check`) greps the release disassembly
+   of the dispatch loop, send, primitive and allocation paths for retain and
+   release and asserts the loop is one jump table; `golden.sh` (`just
+   golden`) runs the fixture kernels through `kajo run` against their
+   published checksums; `just test-release` runs the suite in a release
+   build with the full-size kernels.
  * `kernel/` Smalltalk sources the image is built from. The image is never
    committed.
  * `apps/` Xcode projects for the macOS and iOS shells, depending on the root
