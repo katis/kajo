@@ -519,3 +519,54 @@ their own line.
    scan loses a concurrent insertion.
 6. **Dead remembered young entries are freed after the epoch**, not at the
    sweep.
+
+## Amendments made while building (each found by a test or the verifier)
+
+The sections above are as written before the code, except where noted
+inline. These rules were added afterwards:
+
+7. **Offload: the owner's new eden half.** Between W's flip and the snapshot,
+   W allocates in its other half; such an object can hold the only reference
+   to a Y object (found by `sharedYoungObjectsAreClaimedOnce...` under
+   offload: the young verifier reported reachable entries freed). The
+   collector never traces it (it is not in Y and is not remembered: same
+   nursery). Two rules close it: (a) at W's H1 acknowledgement W retires its
+   TLAB and the range of its new half allocated so far is recorded; at T1
+   the collector scans those bodies' slots as roots (they were initialised
+   before the acknowledgement, so the mutex orders them); (b) after that,
+   the **snoop**: while nursery k is being collected, a store of a value
+   young in k into a young holder of k outside Y remembers the holder for k
+   (in the barrier slow path, which runs whenever the flag word is nonzero).
+   A store into an object allocated after W's H1 acknowledgement happens
+   after H0 completed, so the storer sees `collecting[k]`. Tests:
+   `theOwnersNewHalfObjectsAreScannedAtT1`, `theSnoopRemembersANewHalfHolder`,
+   `withoutNewHalfScanAndSnoopTheValueIsLost`.
+8. **`result` is not a root.** It is live only between a bottom-frame return
+   and the termination that consumes it; a stale one kept dead objects alive
+   (it hid the cross-nursery test's loss).
+9. **Pending bits.** Clearing a holder's bit before scanning it and setting
+   it again in the same pass made the bit useless for deduplication: a
+   holder listed twice was scanned and re-listed twice, and lists grew
+   without bound (51 356 entries for 2 holders under `share`). During a pass
+   only bit 16 + k ("kept for next time") is set; it is folded into the
+   membership bit at the end of the collection. `rem` is 32 bits per entry.
+10. **Dead remembered holders get a slot count of 0** when their free is
+    deferred, and a deferred free whose `rem` word was re-armed meanwhile
+    waits for the next collection. Without this a stale list scanned a dead
+    holder whose old body had been reused (ThreadSanitizer: bus error in
+    `classify`).
+11. **The collector thread runs queued collections while it waits for a
+    stop** (a stop waits for every opened collection, and only that thread
+    runs them), but never inside a collection of its own (nesting corrupted
+    the collector's stack and crashed).
+12. **The stop-the-world scavenge drops young holders from the remembered
+    lists before the parallel phase.** In the phase another participant can
+    promote one, and its header then says "old" while its new body is still
+    being copied (ThreadSanitizer). They are traced if reachable and the copy
+    re-remembers them.
+13. **Object initialisation uses relaxed atomic stores** (plain `str`): a
+    collector can read a fresh object through a published slot
+    (ThreadSanitizer). Same instructions.
+14. **Waiting workers are quiescent for the epoch** (they hold no body
+    pointer), otherwise a collector's epoch wait and a worker waiting for that
+    collector deadlock.

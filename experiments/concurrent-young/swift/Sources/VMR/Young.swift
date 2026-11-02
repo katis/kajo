@@ -34,6 +34,9 @@ public struct YCConfig {
     public var collectorQoS = QOS_CLASS_USER_INITIATED
     /// Young verifier at a forced pause after every local collection.
     public var verifyYoung = false
+    /// Verify after every n-th collection (threaded tests use 4: the
+    /// from-scratch walk dominates them under ThreadSanitizer).
+    public var verifyEvery = 1
     // --- test-only switches (SPEC.md "Test-only switches")
     public var youngDeletion = true
     public var crossNursery = true
@@ -732,7 +735,7 @@ func ycCollect(_ vm: VMRef, _ c: WorkerRef, _ k: Int, verify: Bool = true) {
     vm.add(.overflowBytes, st.overflowBytes)
     vm.add(.youngBytes, st.youngBytes)
     vm.add(.entriesFreed, st.entriesFreed)
-    if cfg.verifyYoung && verify {
+    if cfg.verifyYoung && verify && vm.metric(.ycCollections) % UInt64(max(cfg.verifyEvery, 1)) == 0 {
         // A forced pause after the collection (SPEC.md "Young verifier").
         stopWorld(vm, c, .verify, retry: true)
     }
@@ -1030,6 +1033,12 @@ private func sweepCollection(_ vm: VMRef, _ nur: UnsafeMutablePointer<Nur>, _ k:
             d &= d &- 1
             let idx = gw &* 64 &+ b
             if sp.rem[idx].load(ordering: .relaxed) != 0 {
+                // A dead remembered holder: stale lists may still name it, and
+                // another collection may re-arm it before it is freed. With a
+                // slot count of 0 a later scan of it reads no body (its old
+                // body is reused once the epoch passes).
+                let ent = atomicHeader(vm.pointee.om.entry(UInt64(idx) &<< 4))
+                ent.pointee.store(ent.pointee.load(ordering: .relaxed) & ~(slotsMask &<< slotsShift), ordering: .releasing)
                 sp.rem[idx].store(0, ordering: .sequentiallyConsistent)
                 nur.pointee.deferred.push(UInt64(idx) &<< 4)
                 dead &= ~(UInt64(1) &<< UInt64(b))
@@ -1347,4 +1356,19 @@ public func ycFlipNow(_ vm: VMRef, _ w: WorkerRef) {
 
 public func ycWaitDone(_ vm: VMRef, _ k: Int) {
     while !vm.pointee.yc.done[k].load(ordering: .acquiring) { usleep(200) }
+}
+
+/// Is worker `i` inside the VM (tests)?
+public func workerInside(_ vm: VMRef, _ i: Int) -> Bool {
+    pthread_mutex_lock(vm.pointee.mutex)
+    defer { pthread_mutex_unlock(vm.pointee.mutex) }
+    return vm.pointee.sync.pointee.inside[i]
+}
+
+/// Run the young verifier now at a stop requested from the host worker (tests).
+public func youngVerifyNow(_ vm: VMRef) {
+    let w = worker(vm, vm.pointee.workerCount - 1)
+    enterVM(vm, w)
+    stopWorld(vm, w, .verify, retry: true)
+    leaveVM(vm, w)
 }

@@ -442,7 +442,24 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64, p
         }
     }
     g.pointee.sweeps.count = 0
-    func remTasks(_ b: RawBuf<Oop>) {
+    func remTasks(_ bp: UnsafeMutablePointer<RawBuf<Oop>>) {
+        // Young holders (cross-nursery) leave the lists here, while headers
+        // are stable: in the parallel phase another participant may promote
+        // one, and its new body is not copied yet. They are traced if
+        // reachable and re-remembered by the copy (`drain`).
+        let rem = vm.pointee.space.rem
+        var j = 0
+        for i in 0..<bp.pointee.count {
+            let o = bp.pointee.ptr[i]
+            if vm.pointee.om.header(o) & youngBit != 0 {
+                rem[Int(truncatingIfNeeded: o &>> 4)].store(0, ordering: .relaxed)
+            } else {
+                bp.pointee.ptr[j] = o
+                j += 1
+            }
+        }
+        bp.pointee.count = j
+        let b = bp.pointee
         var off = 0
         while off < b.count {
             g.pointee.tasks.push(GCTask(ptr: b.ptr + off, count: min(remTaskHolders, b.count - off), remembered: true))
@@ -460,8 +477,8 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64, p
     for i in 0..<n {
         let x = ws[i]
         let nur = nurOf(vm, i)
-        for k in 0..<maxNurseries { remTasks(x.pointee.rem[k]) }
-        remTasks(nur.pointee.carried)
+        for k in 0..<maxNurseries { remTasks(x.pointee.rem + k) }
+        withUnsafeMutablePointer(to: &nur.pointee.carried) { remTasks($0) }
         sweepTasks(x.pointee.logWord, x.pointee.logBits)
         sweepTasks(nur.pointee.survLogWord, nur.pointee.survLogBits)
     }

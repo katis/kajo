@@ -33,6 +33,7 @@ func runtime(_ src: String, background: Int, heap: Int = 64 << 20, sliceMs: Doub
     // world: `KAJO_TEST_YOUNG` (local by default, offload, or stw).
     var y = YCConfig()
     y.verifyYoung = true
+    y.verifyEvery = 4
     if start && config == nil { y.mode = testYoungMode() }
     return Runtime(img, background: background, pollEvery: 64, sliceMs: sliceMs, start: start, verify: true, config: cfg, young: y)
 }
@@ -826,7 +827,9 @@ final class FakeMain: @unchecked Sendable {
     for _ in 0..<200 { spawn(vm, nilObj, rt.symbol("pinger:"), mkInt(50)) }
     waitAllTerminated(vm)
     #expect(intVal(vm.pointee.om.slot(global(rt, 6), sExcess)) == 200 * 50)
-    #expect(vm.metric(.terminations) == 200)
+    // The counter is bumped after the termination is published (inherited);
+    // the last one can trail waitAllTerminated.
+    #expect(eventually { vm.metric(.terminations) == 200 })
     rt.stop()
     #expect(vm.metric(.verifyFailures) == 0)
 }

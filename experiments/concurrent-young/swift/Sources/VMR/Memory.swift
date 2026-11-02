@@ -174,14 +174,16 @@ private func initObject(_ om: OM, _ w: WorkerRef, _ free: UInt64, _ cur: UInt, _
     let e = w.pointee.ws.entBase &+ (bit &<< 4)
     let ent = om.entry(e)
     w.pointee.tlab.cur = cur &+ UInt(size)
-    ent[0] = makeHeader(cls, slots, bytes) | w.pointee.youngMark
+    // Relaxed atomic stores (plain `str`): a young collector may read a
+    // fresh object it finds through a published slot (SPEC.md "Header word").
+    atomicHeader(ent).pointee.store(makeHeader(cls, slots, bytes) | w.pointee.youngMark, ordering: .relaxed)
     om.offsetWord(e).pointee.store(UInt64(cur &- om.heap), ordering: .relaxed)
     let p = wordPtr(cur)
-    p[0] = backref(e &>> 4, size)
+    atomicWord(p).pointee.store(backref(e &>> 4, size), ordering: .relaxed)
     let n = (size &- 8) / 8
     let f = bytes ? 0 : fill
     var i = 1
-    while i <= n { p[i] = f; i &+= 1 }
+    while i <= n { atomicWord(p + i).pointee.store(f, ordering: .relaxed); i &+= 1 }
     return e
 }
 

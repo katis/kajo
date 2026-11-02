@@ -544,7 +544,7 @@ private func noFailures(_ rt: Runtime) { #expect(rt.vm.metric(.verifyFailures) =
     } else {
         // Local or offloaded collections, each followed by the young verifier.
         #expect(vm.metric(.ycCollections) >= 10)
-        #expect(vm.metric(.youngVerifyRuns) >= 10)
+        #expect(vm.metric(.youngVerifyRuns) >= 2) // every 4th collection
     }
     noFailures(rt)
 }

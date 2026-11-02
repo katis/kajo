@@ -1,4 +1,9 @@
-// kajo-ui <R0..R6|R5n> [--seconds 10] [--warmup 1] [--out file] [--verify]
+// kajo-ui <Y0..Y6|Y4l|Y4o|Y5l|Y5o> [--seconds 10] [--warmup 1] [--out file] [--verify]
+//
+// This experiment's scenarios (../SPEC.md "Scenarios"): the storm under the
+// stop-the-world, local and offloaded young collectors, the fragmentation
+// ring, heavy main-thread allocation over idle workers, and `share`, with the
+// main thread's pause attribution. Below, the inherited description.
 //
 // Copied from ../concurrent-marking (window, frame measurement, turns and
 // frame account unchanged); the scenarios are this experiment's R0..R6 and
@@ -20,7 +25,7 @@ import VMR
 // MARK: - arguments
 
 struct Options {
-    var scenario = "R0"
+    var scenario = "Y0"
     var seconds = 10.0
     var warmup = 1.0
     var out: String? = nil
@@ -31,7 +36,7 @@ struct Options {
 func parseOptions() -> Options {
     var o = Options()
     var args = Array(CommandLine.arguments.dropFirst())
-    if let s = args.first, s.hasPrefix("R") { o.scenario = s; args.removeFirst() }
+    if let s = args.first, s.hasPrefix("Y") { o.scenario = s; args.removeFirst() }
     var i = 0
     while i < args.count {
         let a = args[i], v = i + 1 < args.count ? args[i + 1] : ""
@@ -199,25 +204,27 @@ final class Controller: NSObject, NSApplicationDelegate {
     @MainActor func start() {
         Controller.shared = self
         do {
-            // SPEC.md "Scenarios": 4 MiB nurseries throughout; R4 loads
-            // oldheap at 256 MiB live with a 576 MiB soft limit, R5/R5n
-            // fragment with 512 MiB.
+            // SPEC.md "Scenarios": 4 MiB nurseries, N = 2, KAJO_GC=cm.
             let s = opt.scenario
-            let big = oldHeap
-            let frag = s.hasPrefix("R5")
-            let src = try appSources(oldheap: big ? 256 : nil, fragment: frag)
-            let img = try Image.fromSources(src, heapSize: (big ? 576 : frag ? 512 : 64) << 20, nurseryBytes: 4 << 20)
+            let frag = s.hasPrefix("Y4")
+            let share = s == "Y6"
+            let src = try appSources(fragment: frag, share: share)
+            let img = try Image.fromSources(src, heapSize: (frag ? 512 : 64) << 20, nurseryBytes: 4 << 20)
             var cfg = cmConfigFromEnv()
             cfg.concurrent = true
-            cfg.ageN = s == "R1" ? 1 : 2
-            cfg.relocThreshold = ["R0", "R3", "R5", "R6"].contains(s) ? 50 : s == "R4" ? 101 : 0
-            if s == "R4" { cfg.force = true; cfg.threshold = 0 }
-            // R5/R5n: cycles from 30 percent of 512 MiB, so the paced
-            // fragment load (about 40 MB/s promoted) starts them early in
-            // the window.
+            cfg.ageN = 2
+            cfg.relocThreshold = frag ? 50 : 0
+            // Y4: cycles from 30 percent of 512 MiB (R5 of ADR 0007).
             if frag { cfg.threshold = 0.30 }
             cfg.verify = opt.verify
-            rt = Runtime(img, background: 7, config: cfg)
+            var y = ycConfigFromEnv()
+            switch s {
+            case "Y1": y.mode = YoungMode.stw
+            case "Y2", "Y4l", "Y5l": y.mode = YoungMode.local
+            default: y.mode = YoungMode.offload
+            }
+            y.verifyYoung = opt.verify
+            rt = Runtime(img, background: share ? 8 : 7, config: cfg, young: y)
         } catch {
             fputs("load failed: \(error)\n", stderr); exit(1)
         }
@@ -227,16 +234,6 @@ final class Controller: NSObject, NSApplicationDelegate {
         calibrate()
         buildWindow()
         startLoad()
-        if oldHeap {
-            // Wait (run loop running, window animating) until every worker
-            // built its share of the old heap.
-            let tb = CACurrentMediaTime()
-            while hostCountNonNil(vm, global: 12) < 7 {
-                RunLoop.main.run(until: Date(timeIntervalSinceNow: 0.05))
-                if CACurrentMediaTime() - tb > 120 { fputs("old heap not built\n", stderr); exit(1) }
-            }
-            buildWaitS = CACurrentMediaTime() - tb
-        }
         t0 = CACurrentMediaTime()
         measureStart = t0 + opt.warmup
         measureEnd = measureStart + opt.seconds
@@ -276,8 +273,16 @@ final class Controller: NSObject, NSApplicationDelegate {
     }
 
     @MainActor func buildWindow() {
-        let w = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 480, height: 320),
-                         styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        // On the built-in display when there is one (ProMotion, 120 Hz, as
+        // in the earlier experiments), whatever screen is the main one.
+        let builtin = NSScreen.screens.first { sc in
+            guard let n = sc.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
+            return CGDisplayIsBuiltin(CGDirectDisplayID(n.uint32Value)) != 0
+        }
+        let target = builtin ?? NSScreen.main
+        let vf = target?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
+        let w = NSWindow(contentRect: NSRect(x: vf.minX + 200, y: vf.minY + 200, width: 480, height: 320),
+                         styleMask: [.titled, .closable], backing: .buffered, defer: false, screen: target)
         w.title = "kajo-ui \(opt.scenario)"
         let v = NSView(frame: w.contentRect(forFrameRect: w.frame))
         v.wantsLayer = true
@@ -311,24 +316,24 @@ final class Controller: NSObject, NSApplicationDelegate {
         w.makeKeyAndOrderFront(nil)
     }
 
-    var oldHeap: Bool { opt.scenario == "R4" }
-
     @MainActor func startLoad() {
         let s = opt.scenario
         let nilObj = vm.pointee.nilObj
-        if s == "R0" { return }
-        if s == "R6" {
+        if s == "Y0" { return }
+        if s.hasPrefix("Y5") {
+            // Heavy main-thread allocation: R6's ~100 us of Point churn after
+            // every event, background workers idle.
             spawn(vm, nilObj, rt.symbol("uiChurnLoop:"), mkInt(Int64(spin50us * 65536 + churn100us)), priority: uiPriority, main: true)
         } else {
             spawn(vm, nilObj, rt.symbol("uiLoop:"), mkInt(Int64(spin50us)), priority: uiPriority, main: true)
         }
         startEvents()
-        if oldHeap {
-            hostNewArrayInGlobal(vm, 7, global: 12)
-            for w in 1...7 { spawn(vm, nilObj, rt.symbol("ohLoop:"), mkInt(Int64(w)), priority: 1) }
-        } else if s.hasPrefix("R5") {
+        if s.hasPrefix("Y4") {
             for w in 1...7 { spawn(vm, nilObj, rt.symbol("fragLoop:"), mkInt(Int64(w)), priority: 1) }
-        } else {
+        } else if s == "Y6" {
+            hostNewArrayInGlobal(vm, 256 * 8, global: 5)
+            for _ in 1...8 { spawn(vm, nilObj, rt.symbol("shareLoop:"), mkInt(8), priority: 1) }
+        } else if !s.hasPrefix("Y5") {
             for _ in 0..<7 { spawn(vm, nilObj, rt.symbol("allocLoop"), nilObj, priority: 1) }
         }
     }
@@ -337,8 +342,27 @@ final class Controller: NSObject, NSApplicationDelegate {
     var footprintTimer: DispatchSourceTimer?
     var workerBase: [(UInt64, UInt64, UInt64, UInt64)] = []
 
+    var mainBase: [UInt64] = []
+    var ycLogStart = 0
+    var hsStart = 0
+    var mainPauseStart = 0
+
+    /// The main worker's attribution counters (SPEC.md "Scenarios").
+    func mainCounters() -> [UInt64] {
+        let m = rt.workers[0]
+        var c: [UInt64] = [m.pointee.ownPauses, m.pointee.ownPauseNs, m.pointee.collWaits, m.pointee.collWaitNs,
+                           m.pointee.stwWaitNs, m.pointee.ackOwn, m.pointee.ackOwnNs, m.pointee.ackOther, m.pointee.ackOtherNs,
+                           m.pointee.parkedForOthersNs, m.pointee.parkedNs, m.pointee.resumeScans, m.pointee.ownPauseOpenNs]
+        for k in 0..<16 { c.append(m.pointee.parkedByKind[k]) }
+        return c
+    }
+
     @MainActor func beginMeasure() {
         measuring = true
+        mainBase = mainCounters()
+        ycLogStart = vm.pointee.yc.log.pointee.count
+        hsStart = vm.pointee.yc.hsLatency.pointee.count
+        mainPauseStart = rt.workers[0].pointee.pauseSamples.pointee.count
         for m in Metric.allCases { metricsAtStart[m] = vm.metric(m) }
         // Read on the main thread while the workers run (a benign race on
         // aligned counters): the window's starting values.
@@ -537,6 +561,49 @@ final class Controller: NSObject, NSApplicationDelegate {
 
     // MARK: results
 
+    /// Main-thread pause attribution over the window (SPEC.md "Scenarios"),
+    /// ms. Wait (blocked on another thread) is kept apart from work.
+    func mainAttribution() -> String {
+        let c = mainCounters()
+        func d(_ i: Int) -> UInt64 { c[i] &- (i < mainBase.count ? mainBase[i] : 0) }
+        func ms(_ ns: UInt64) -> String { f3(Double(ns) / 1e6) }
+        let mode = YoungMode.name(vm.pointee.ycConfig.mode)
+        var o = " main_own_\(mode == "offload" ? "flips" : "collections")=\(d(0)) main_own_ms=\(ms(d(1)))"
+        let ps = rt.workers[0].pointee.pauseSamples.pointee.values()
+        let mine = ps[min(mainPauseStart, ps.count)...].map { Double($0) / 1e6 }
+        o += " main_own_p50_ms=\(f3(pct(mine, 0.5))) main_own_p99_ms=\(f3(pct(mine, 0.99))) main_own_max_ms=\(f3(mine.max() ?? 0))"
+        o += " main_own_open_ms=\(ms(d(12)))"
+        o += " main_coll_waits=\(d(2)) main_coll_wait_ms=\(ms(d(3))) main_stw_pending_wait_ms=\(ms(d(4)))"
+        o += " main_acks_own=\(d(5)) main_acks_own_ms=\(ms(d(6))) main_acks_other=\(d(7)) main_acks_other_ms=\(ms(d(8)))"
+        o += " main_resume_scans=\(d(11))"
+        // Stops by kind (main parked in them), and who requested scavenges.
+        for k in 0..<7 {
+            let n = d(13 + 8 + k), t = d(13 + k)
+            if n > 0 { o += " main_stw_\(PauseKind.name(UInt8(k)))=\(n) main_stw_\(PauseKind.name(UInt8(k)))_ms=\(ms(t))" }
+        }
+        o += " main_parked_ms=\(ms(d(10)))"
+        // Mine (own collection's work and waits) vs others'.
+        let others = d(9) &+ d(8) &+ d(4)
+        o += " main_stopped_for_others_ms=\(ms(others)) main_stw_scav_for_others_ms=\(ms(d(9)))"
+        var cyc: UInt64 = 0
+        for k in [PauseKind.full, PauseKind.initial, PauseKind.final, PauseKind.fallback, PauseKind.apply, PauseKind.verify] {
+            cyc &+= d(13 + Int(k))
+        }
+        o += " main_oldspace_pauses_ms=\(ms(cyc))"
+        // Every pause in the window by kind, and scavenges by requester.
+        let recs = Array(vm.pointee.gcLog.pointee.records[min(gcLogStart, vm.pointee.gcLog.pointee.count)...])
+        for k in 0..<7 {
+            let rk = recs.filter { $0.kind == UInt8(k) }
+            if rk.isEmpty { continue }
+            let ts = rk.map { Double($0.totalNs) / 1e6 }
+            o += " stw_\(PauseKind.name(UInt8(k)))_n=\(rk.count) stw_\(PauseKind.name(UInt8(k)))_max_ms=\(f3(ts.max() ?? 0)) stw_\(PauseKind.name(UInt8(k)))_p50_ms=\(f3(pct(ts, 0.5)))"
+            o += " stw_\(PauseKind.name(UInt8(k)))_drainwait_max_ms=\(f3((rk.map { Double($0.drainWaitNs) / 1e6 }).max() ?? 0))"
+        }
+        let sc = recs.filter { $0.kind == PauseKind.scavenge }
+        o += " stw_scav_by_main=\(sc.filter { $0.requester == 0 }.count) stw_scav_by_others=\(sc.filter { $0.requester != 0 }.count)"
+        return o
+    }
+
     @MainActor func finish() {
         eventTimer?.cancel()
         watchdog?.cancel()
@@ -555,6 +622,13 @@ final class Controller: NSObject, NSApplicationDelegate {
         var line = "scenario=\(opt.scenario) run=\(opt.run) seconds=\(opt.seconds) verify=\(opt.verify ? 1 : 0) build_wait_s=\(f2(buildWaitS))"
         line += " nominal_hz=\(f2(1 / nominal)) refresh_hz=\(f2(rate)) frames=\(frameTimes.count)"
         line += " drops=\(drops.count) missed=\(missed)"
+        // The 120 Hz frame budget of the brief, whatever the display runs at
+        // (the experiment ran on a 165 Hz external display): gaps longer than
+        // 1.5 x 8.33 ms, counted in 8.33 ms frames.
+        let p120 = 1.0 / 120
+        let drops120 = gaps.filter { $0 > 1.5 * p120 }
+        let missed120 = drops120.reduce(0) { $0 + max(0, Int(($1 / p120).rounded()) - 1) }
+        line += " drops120=\(drops120.count) missed120=\(missed120)"
         line += " gap_p50_ms=\(f3(pct(gapsMs, 0.5))) gap_p99_ms=\(f3(pct(gapsMs, 0.99))) gap_max_ms=\(f3(gapsMs.max() ?? 0))"
         line += " cb_late_p50_ms=\(f3(pct(callbackLate, 0.5))) cb_late_p99_ms=\(f3(pct(callbackLate, 0.99))) cb_late_max_ms=\(f3(callbackLate.max() ?? 0))"
         line += " link_duration_ms=\(f3(pct(linkDurations, 0.5) * 1000))"
@@ -584,6 +658,10 @@ final class Controller: NSObject, NSApplicationDelegate {
         footprintTimer?.cancel()
         line += " churn100us=\(churn100us) " + gcSummary(vm, from: gcLogStart)
         line += relocSummary(vm, rt, from: gcLogStart, base: metricsAtStart, workerBase: workerBase)
+        line += ycSummary(vm, rt, wallMs: opt.seconds * 1000, from: ycLogStart, hsFrom: hsStart)
+        line += mainAttribution()
+        line += " verifyFailures=\(vm.metric(.verifyFailures)) youngVerifyRuns=\(vm.metric(.youngVerifyRuns)) relocVerifyRuns=\(vm.metric(.relocVerifyRuns))"
+        line += " screen=\((window.screen?.localizedName ?? "?").replacingOccurrences(of: " ", with: "_")) screen_max_fps=\(window.screen?.maximumFramesPerSecond ?? 0)"
         let mb = 1048576.0
         line += " footprint=" + footprint.map { "\(Int($0.0)):\(f2(Double($0.1) / mb)):\(f2(Double($0.2) / mb))" }.joined(separator: ",")
         dumpPauses(vm, prefix: "scenario=\(opt.scenario) run=\(opt.run)", from: gcLogStart)

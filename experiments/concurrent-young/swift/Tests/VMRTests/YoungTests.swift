@@ -513,11 +513,18 @@ private func newHalf(scan: Bool, snoop: Bool) throws -> UInt64 {
     _ = spawnSel(rt, "mkY")
     slice(rt, 1)
     _ = spawnSel(rt, "hold")
-    hook0Action = { k in if k == 1 { _ = runOneSlice(vm, rt.workers[1]) } }
+    // The test thread still acts as worker 1 until ycFlipNow leaves the VM.
+    hook0Action = { k in
+        if k == 1 {
+            while workerInside(vm, 1) { usleep(100) }
+            let ran = runOneSlice(vm, rt.workers[1])
+            #expect(ran)
+        }
+    }
     ycFlipNow(vm, rt.workers[1])
     ycWaitDone(vm, 1)
     hook0Action = nil
-    #expect(eventually { vm.metric(.youngVerifyRuns) >= 1 })
+    youngVerifyNow(vm)
     let f = failures(rt)
     rt.stop()
     return f
