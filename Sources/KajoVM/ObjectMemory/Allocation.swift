@@ -193,7 +193,7 @@ extension ObjectMemory {
             }
             _ = unsafe pools.pointee.freeBlocks.popLast()
             heap.setInUse(b, true)
-            if unsafe !wasInUse { unsafe pools.pointee.blocksInUse += 1 }
+            if !wasInUse { unsafe pools.pointee.blocksInUse += 1 }
             if used &+ bytes <= UInt64(BlockHeap.blockBytes) {
                 unsafe c.pointee.top = start &+ used
                 unsafe c.pointee.end = start &+ UInt64(BlockHeap.blockBytes)

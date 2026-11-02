@@ -11,35 +11,35 @@ import Darwin
 /// with the entries of dead young objects. Module 1's sweep discards every
 /// stash (its entries are free in the table and land in the new runs) and
 /// the free-list verifier walks them.
-struct EntryStash {
+@unsafe struct EntryStash {
     var base: UnsafeMutablePointer<UInt32>? = nil
     var next = 0
     var count = 0
     var capacity = 0
 
     /// The entries handed out since the stash was last swept: `[0, next)`.
-    var taken: Int { next }
+    var taken: Int { unsafe next }
 
     mutating func reserve(_ n: Int) {
-        if n <= capacity { return }
-        let c = Swift.max(n, capacity &* 2, 1024)
+        if unsafe n <= capacity { return }
+        let c = unsafe Swift.max(n, capacity &* 2, 1024)
         guard let raw = unsafe realloc(UnsafeMutableRawPointer(base), c &* 4) else { fatalError("out of memory") }
         unsafe base = raw.bindMemory(to: UInt32.self, capacity: c)
-        capacity = c
+        unsafe capacity = c
     }
 
     mutating func append(_ index: UInt32) {
-        if count == capacity { reserve(count &+ 1) }
+        if unsafe count == capacity { unsafe reserve(count &+ 1) }
         unsafe base.unsafelyUnwrapped[count] = index
-        count &+= 1
+        unsafe count &+= 1
     }
 
     mutating func free() {
         unsafe Darwin.free(UnsafeMutableRawPointer(base))
         unsafe base = nil
-        next = 0
-        count = 0
-        capacity = 0
+        unsafe next = 0
+        unsafe count = 0
+        unsafe capacity = 0
     }
 }
 

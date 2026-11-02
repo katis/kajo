@@ -79,8 +79,8 @@ func verifyBeforeScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>) -> Scave
     let om = unsafe n.pointee.om
     let hw = om.highWater
     var out = Issues()
-    checkRemembered(n, &out)
-    checkYoungBodies(n, &out, after: false)
+    unsafe checkRemembered(n, &out)
+    unsafe checkYoungBodies(n, &out, after: false)
     var x = ScavengeExpectation()
     x.reached = RawArray(repeating: 0, count: Int(hw))
     var stack: [UInt64] = []
@@ -220,8 +220,8 @@ func verifyAfterScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>, expected 
         if lived && now.raw != referent { out.fail("weak slot \(slot) of \(Oop(raw: holder)) lost its live referent") }
         if !lived && now != nilObj { out.fail("weak slot \(slot) of \(Oop(raw: holder)) still names dead \(Oop(raw: referent))") }
     }
-    checkYoungBodies(n, &out, after: true)
-    checkRemembered(n, &out)
+    unsafe checkYoungBodies(n, &out, after: true)
+    unsafe checkRemembered(n, &out)
     om.record("nursery verifier, after scavenge \(unsafe n.pointee.phase.pointee.number)",
               out.list + om.verifyFreeLists())
 }
@@ -230,7 +230,7 @@ func verifyAfterScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>, expected 
 /// scavenge, before anything allocates): tests of the verifier.
 func verifyNurseryAfterScavenge(_ n: NurseryPointer) -> [String] {
     var out = Issues()
-    checkYoungBodies(n, &out, after: true)
-    checkRemembered(n, &out)
+    unsafe checkYoungBodies(n, &out, after: true)
+    unsafe checkRemembered(n, &out)
     return out.list
 }

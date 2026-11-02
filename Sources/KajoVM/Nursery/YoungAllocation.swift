@@ -77,7 +77,7 @@ extension Machine {
         var fulls = 0
         while true {
             if !force {
-                if unsafe a.pointee.stash.next == a.pointee.stash.count, om.refillStash(stash, atLeast: 1024) {
+                if unsafe a.pointee.stash.next == a.pointee.stash.count, unsafe om.refillStash(stash, atLeast: 1024) {
                     unsafe a.pointee.stashRefills &+= 1
                 }
                 if unsafe a.pointee.top &+ size <= a.pointee.end && a.pointee.stash.next < a.pointee.stash.count {

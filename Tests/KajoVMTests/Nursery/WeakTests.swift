@@ -3,6 +3,7 @@
 // them.
 
 import Darwin
+import Foundation
 import Testing
 @testable import KajoVM
 
@@ -296,4 +297,50 @@ end
     om.destroy()
     rt.noFailures()
     rt.stop()
+}
+
+/// Snapshot version 2 keeps the class formats, the finalization queue and
+/// the nil object weak slots become. With `KAJO_WRITE_SNAPSHOT_SEED` set it
+/// also writes the snapshot fuzz seed (Fixtures/fuzz/snapshot/seed.snap).
+@Test func aSnapshotKeepsFormatsTheFinalizationQueueAndNil() throws {
+    let rt = try nurseryRuntime(weakSrc, age: 1)
+    rt.spawn("makeWeak")
+    rt.runOn(1)
+    rt.spawn("makeEph")
+    rt.runOn(1)
+    rt.vm.collect()   // the ephemeron's key is only its own: queued
+    #expect(rt.image.om.finalizationQueueCount == 1)
+    let bytes = rt.vm.snapshot()
+    var c = ObjectMemoryConfig()
+    c.heapBytes = 2048 * BlockHeap.blockBytes
+    c.reserveBytes = 2048 * BlockHeap.blockBytes
+    c.entryCapacity = 1 << 20
+    let om = try ObjectMemory.load(snapshot: bytes, config: c)
+    let weakBag = rt.image.classIndex(named: "WeakBag")!, eph = rt.image.classIndex(named: "Eph")!
+    #expect(om.classFormat(weakBag).isWeak && om.classFormat(eph).isEphemeron && om.classFormat(eph).namedSlots == 2)
+    #expect(om.finalizationQueueCount == 1 && om.nilObject == rt.image.nilObject)
+    if let path = ProcessInfo.processInfo.environment["KAJO_WRITE_SNAPSHOT_SEED"] {
+        try Data(bytes).write(to: URL(fileURLWithPath: path))
+    }
+    om.destroy()
+    rt.noFailures()
+    rt.stop()
+}
+
+/// The loader refuses a young header (a snapshot follows a promote-all) and
+/// an unknown format bit.
+@Test func theSnapshotLoaderRefusesYoungObjectsAndBadFormats() throws {
+    let rt = try nurseryRuntime(weakSrc, age: 1)
+    let bytes = rt.vm.snapshot()
+    rt.stop()
+    let L = try SnapshotLayout(parsing: bytes)
+    func word(_ b: [UInt8], _ at: Int) -> UInt64 { SnapshotLayout.word(b, at) }
+    func put(_ b: inout [UInt8], _ at: Int, _ v: UInt64) { for k in 0..<8 { b[at + k] = UInt8(truncatingIfNeeded: v >> (8 * UInt64(k))) } }
+    var young = bytes
+    let nilEntry = L.tableAt + Int(word(bytes, 8 * 8) >> 4) * 16 + 8
+    put(&young, nilEntry, word(bytes, nilEntry) | Header.youngBit)
+    #expect(throws: SnapshotError.self) { _ = try ObjectMemory.load(snapshot: young) }
+    var format = bytes
+    put(&format, L.formatsAt + 8, 1 << 30)
+    #expect(throws: SnapshotError.self) { _ = try ObjectMemory.load(snapshot: format) }
 }

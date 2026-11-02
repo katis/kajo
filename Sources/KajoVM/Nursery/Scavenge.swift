@@ -43,7 +43,7 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         while off < rootCount {
             unsafe ph.pointee.tasks.append(ScavengeTask(words: rbase + off, count: Swift.min(NurseryShared.rootTaskWords, rootCount - off),
                                                         remembered: false))
-            off += NurseryShared.rootTaskWords
+            unsafe off += NurseryShared.rootTaskWords
         }
     }
     var youngBytes: UInt64 = 0
@@ -61,7 +61,7 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
             while off < rc {
                 unsafe ph.pointee.tasks.append(ScavengeTask(words: rb + off, count: Swift.min(NurseryShared.remTaskHolders, rc - off),
                                                             remembered: true))
-                off += NurseryShared.remTaskHolders
+                unsafe off += NurseryShared.remTaskHolders
             }
         }
         let s = unsafe n.scav(k)
@@ -178,26 +178,26 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
                               formats: ph.formats.unsafelyUnwrapped, rem: n.pointee.rem, nilRaw: n.pointee.om.nilObject.raw,
                               w: sw.pointee)
     unsafe n.pointee.inCopy.pointee.wrappingAdd(1, ordering: .acquiringAndReleasing)
-    let ntasks = ph.tasks.count
+    let ntasks = unsafe ph.tasks.count
     while true {
         let i = unsafe n.pointee.taskNext.pointee.wrappingAdd(1, ordering: .relaxed).oldValue
         if i >= ntasks { break }
-        let t = ph.tasks[i]
+        let t = unsafe ph.tasks[i]
         let a = nanoseconds()
-        if t.remembered {
+        if unsafe t.remembered {
             unsafe sc.scanRemembered(t.words, t.count)
-            sc.w.stats.remNs &+= nanoseconds() &- a
+            unsafe sc.w.stats.remNs &+= nanoseconds() &- a
         } else {
             var k = 0
-            while k < t.count {
+            while unsafe k < t.count {
                 _ = unsafe sc.scanWord(t.words[k])
                 k &+= 1
             }
-            sc.w.stats.rootsNs &+= nanoseconds() &- a
+            unsafe sc.w.stats.rootsNs &+= nanoseconds() &- a
         }
         let b = nanoseconds()
-        sc.drain()
-        sc.w.stats.copyNs &+= nanoseconds() &- b
+        unsafe sc.drain()
+        unsafe sc.w.stats.copyNs &+= nanoseconds() &- b
     }
     // Tasks are exhausted: help with exported packets until no participant
     // is copying. Packets are pushed only by a counted (`inCopy`)
@@ -206,8 +206,8 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     // once `inCopy` reached 0. So `inCopy == 0` means no packet is left and
     // no copy is in flight: the copy barrier.
     let b = nanoseconds()
-    while sc.takePacket() { sc.drain() }
-    sc.w.stats.copyNs &+= nanoseconds() &- b
+    while unsafe sc.takePacket() { unsafe sc.drain() }
+    unsafe sc.w.stats.copyNs &+= nanoseconds() &- b
     unsafe n.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
     let wa = nanoseconds()
     var spins = 0
@@ -226,8 +226,8 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             if counted {
                 unsafe n.pointee.idle.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
                 let t = nanoseconds()
-                while sc.takePacket() { sc.drain() }
-                sc.w.stats.copyNs &+= nanoseconds() &- t
+                while unsafe sc.takePacket() { unsafe sc.drain() }
+                unsafe sc.w.stats.copyNs &+= nanoseconds() &- t
                 unsafe n.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
                 unsafe n.pointee.idle.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
                 continue
@@ -239,7 +239,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     unsafe n.pointee.idle.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
     let ce = nanoseconds()
     _ = unsafe n.pointee.copyEnd.pointee.compareExchange(expected: 0, desired: ce, ordering: .relaxed)
-    sc.w.stats.waitNs = ce &- wa
+    unsafe sc.w.stats.waitNs = ce &- wa
     // Entry sweep: one task per nursery.
     let count = unsafe n.pointee.count
     while true {
@@ -247,7 +247,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         if k >= count { break }
         unsafe sc.sweepNursery(k)
     }
-    sc.w.stats.sweepNs = nanoseconds() &- ce
+    unsafe sc.w.stats.sweepNs = nanoseconds() &- ce
     unsafe sw.pointee = sc.w
 }
 
@@ -282,7 +282,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         if v & Oop.objectTagMask != 0 || v == 0 { return 0 }
         let h = unsafe headerAtomic(v).pointee.load(ordering: .relaxed)
         if h & Header.youngBit == 0 { return 0 }
-        if h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
+        if unsafe h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
         return unsafe evacuate(v, h)
     }
 
@@ -295,9 +295,9 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         var decision = ClaimDecision.promote
         while true {
             if h & Header.youngBit == 0 { return 0 }  // promoted by another participant
-            if h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
-            let room = w.survCur &+ size <= w.survEnd
-            let (nh, d) = claimedHeader(h, tag: tag, ageLimit: ageLimit, participant: me, promoteAll: promoteAll, hasRoom: room)
+            if unsafe h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
+            let room = unsafe w.survCur &+ size <= w.survEnd
+            let (nh, d) = unsafe claimedHeader(h, tag: tag, ageLimit: ageLimit, participant: me, promoteAll: promoteAll, hasRoom: room)
             let (won, cur) = unsafe hp.pointee.compareExchange(expected: h, desired: nh, ordering: .relaxed)
             if won {
                 h = nh
@@ -308,15 +308,15 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         }
         let dst: UInt64
         if decision == .survive {
-            dst = w.survCur
-            w.survCur = dst &+ size
+            dst = unsafe w.survCur
+            unsafe w.survCur = dst &+ size
         } else {
-            guard let d = om.bumpPromotion(ctx, bytes: size) else {
+            guard let d = unsafe om.bumpPromotion(ctx, bytes: size) else {
                 preconditionFailure("kajo: promotion found no block: the promotion reserve is exhausted (counted in reserveExhaustions)")
             }
             dst = d
         }
-        let src = om.bodyOffset(Oop(raw: v))
+        let src = unsafe om.bodyOffset(Oop(raw: v))
         if size <= 128 {
             // Most bodies are a few words: a word loop beats a memmove call.
             let s = unsafe (om.heapBase + Int(truncatingIfNeeded: src)).assumingMemoryBound(to: UInt64.self)
@@ -331,21 +331,21 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             unsafe memcpy(om.heapBase + Int(truncatingIfNeeded: dst), om.heapBase + Int(truncatingIfNeeded: src),
                           Int(truncatingIfNeeded: size))
         }
-        om.setStateWord(v, dst)
+        unsafe om.setStateWord(v, dst)
         if decision == .survive {
-            w.stats.survivedBytes &+= size
-            w.stats.survivedObjects &+= 1
-            w.survLog.append(UInt32(truncatingIfNeeded: v &>> 4))
+            unsafe w.stats.survivedBytes &+= size
+            unsafe w.stats.survivedObjects &+= 1
+            unsafe w.survLog.append(UInt32(truncatingIfNeeded: v &>> 4))
         } else {
-            w.stats.promotedBytes &+= size
-            w.stats.promotedObjects &+= 1
+            unsafe w.stats.promotedBytes &+= size
+            unsafe w.stats.promotedObjects &+= 1
             if decision == .promoteOverflow {
-                w.stats.overflowBytes &+= size
-                w.stats.overflowObjects &+= 1
+                unsafe w.stats.overflowBytes &+= size
+                unsafe w.stats.overflowObjects &+= 1
             }
         }
-        if h & Header.bytesBit == 0 { w.stack.append(v) }
-        return decision == .survive ? UInt16(truncatingIfNeeded: 1 &<< me) : 0
+        if h & Header.bytesBit == 0 { unsafe w.stack.append(v) }
+        return unsafe decision == .survive ? UInt16(truncatingIfNeeded: 1 &<< me) : 0
     }
 
     /// Scan the slots of copied objects until the stack is empty. A promoted
@@ -354,21 +354,21 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     /// bottom half of the stack.
     mutating func drain() {
         var k = 0
-        while let o = w.stack.popLast() {
+        while let o = unsafe w.stack.popLast() {
             // Claimed by this participant. An atomic load: losers' failed
             // compare-and-swaps on this header are atomic accesses to
             // ThreadSanitizer, so a plain load would be reported.
             let h = unsafe headerAtomic(o).pointee.load(ordering: .relaxed)
             let bits = unsafe scanSlots(o, h)
-            if bits != 0 && h & Header.youngBit == 0 && !forgetPromoted {
+            if unsafe bits != 0 && h & Header.youngBit == 0 && !forgetPromoted {
                 unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(bits, ordering: .relaxed)
-                w.nextRem.append(o)
+                unsafe w.nextRem.append(o)
             }
             k &+= 1
             if unsafe k & 1023 == 0 && w.stack.count >= 8
                 && n.pointee.idle.pointee.load(ordering: .relaxed) > 0
                 && n.pointee.poolCount.pointee.load(ordering: .relaxed) == 0 {
-                exportPacket()
+                unsafe exportPacket()
             }
         }
     }
@@ -384,7 +384,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         if _slowPath(f & ClassFormat.weakBit != 0) {
             let named = Int(truncatingIfNeeded: f & ClassFormat.namedMask)
             if count > named {
-                w.weak.append(o)
+                unsafe w.weak.append(o)
                 count = named
             }
         }
@@ -405,28 +405,28 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         var k = 0
         while k < count {
             let o = unsafe holders[k]
-            let h = om.headerWord(o)  // old: never written during a scavenge
+            let h = unsafe om.headerWord(o)  // old: never written during a scavenge
             var bits: UInt16 = 0
             if h & Header.bytesBit == 0 {
                 bits = unsafe scanSlots(o, h)
-                w.stats.remSlots &+= (h & Header.countMask) &>> Header.countShift
+                unsafe w.stats.remSlots &+= (h & Header.countMask) &>> Header.countShift
             }
-            if bits != 0 && !dropCarried {
+            if unsafe bits != 0 && !dropCarried {
                 unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(bits, ordering: .relaxed)
-                w.nextRem.append(o)
+                unsafe w.nextRem.append(o)
             } else {
                 unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(0, ordering: .relaxed)
             }
             k &+= 1
         }
-        w.stats.remHolders &+= UInt64(count)
+        unsafe w.stats.remHolders &+= UInt64(count)
     }
 
     // MARK: work sharing
 
     mutating func exportPacket() {
         let pool = unsafe n.pointee.packets
-        let words = Swift.min(w.stack.count / 2, PacketPool.words)
+        let words = unsafe Swift.min(w.stack.count / 2, PacketPool.words)
         if words == 0 { return }
         unsafe pthread_mutex_lock(n.pointee.packetLock)
         guard let slot = unsafe pool.pointee.free.popLast() else {
@@ -437,12 +437,12 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         let dst = unsafe pool.pointee.storage + Int(slot) * PacketPool.words
         unsafe dst.update(from: st, count: words)
         unsafe st.update(from: st + words, count: w.stack.count - words)
-        w.stack.truncate(w.stack.count - words)
+        unsafe w.stack.truncate(w.stack.count - words)
         unsafe pool.pointee.length[Int(slot)] = words
         unsafe pool.pointee.full.append(slot)
         unsafe n.pointee.poolCount.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
         unsafe pthread_mutex_unlock(n.pointee.packetLock)
-        w.stats.packetsExported &+= 1
+        unsafe w.stats.packetsExported &+= 1
     }
 
     /// Move one exported packet onto this participant's stack. The caller is
@@ -476,17 +476,17 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         let a = unsafe n.alloc(k)
         var st = unsafe a.pointee.stash
         var swept: UInt64 = 0, freed: UInt64 = 0
-        if let base = st.base {
+        if let base = unsafe st.base {
             var j = 0
-            let taken = st.next
+            let taken = unsafe st.next
             var i = 0
             while i < taken {
                 let e = unsafe base[i]
                 let raw = UInt64(e) &<< 4
-                let h = om.headerWord(raw)
-                if h & Header.youngBit != 0 && h & tag == 0 {
-                    om.setStateWord(raw, EntryState.free(next: 0))
-                    om.setHeaderWord(raw, 0)
+                let h = unsafe om.headerWord(raw)
+                if unsafe h & Header.youngBit != 0 && h & tag == 0 {
+                    unsafe om.setStateWord(raw, EntryState.free(next: 0))
+                    unsafe om.setHeaderWord(raw, 0)
                     unsafe base[j] = e
                     j &+= 1
                     freed &+= 1
@@ -494,20 +494,20 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
                 i &+= 1
             }
             swept &+= UInt64(taken)
-            let unused = st.count &- taken
+            let unused = unsafe st.count &- taken
             if unused > 0 && j < taken { unsafe (base + j).update(from: base + taken, count: unused) }
-            st.next = 0
-            st.count = j &+ unused
+            unsafe st.next = 0
+            unsafe st.count = j &+ unused
         }
         let log = unsafe a.pointee.survLog
         for i in 0..<log.count {
             let e = log[i]
             let raw = UInt64(e) &<< 4
-            let h = om.headerWord(raw)
-            if h & Header.youngBit != 0 && h & tag == 0 {
-                om.setStateWord(raw, EntryState.free(next: 0))
-                om.setHeaderWord(raw, 0)
-                st.append(e)
+            let h = unsafe om.headerWord(raw)
+            if unsafe h & Header.youngBit != 0 && h & tag == 0 {
+                unsafe om.setStateWord(raw, EntryState.free(next: 0))
+                unsafe om.setHeaderWord(raw, 0)
+                unsafe st.append(e)
                 freed &+= 1
             }
         }
@@ -516,9 +516,9 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         unsafe a.pointee.stash = st
         // A stash that grew past what an eden can use gives the rest back.
         let keep = Int(truncatingIfNeeded: unsafe n.pointee.edenBytes / 16) &+ 4096
-        if st.count > keep { unsafe om.trimStash(a.pointer(to: \NurseryAlloc.stash)!, keep: keep) }
-        w.stats.entriesSwept &+= swept
-        w.stats.entriesFreed &+= freed
+        if unsafe st.count > keep { unsafe om.trimStash(a.pointer(to: \NurseryAlloc.stash)!, keep: keep) }
+        unsafe w.stats.entriesSwept &+= swept
+        unsafe w.stats.entriesFreed &+= freed
     }
 }
 

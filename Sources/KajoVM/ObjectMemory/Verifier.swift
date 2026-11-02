@@ -220,7 +220,7 @@ extension ObjectMemory {
         let stashes = unsafe pools.pointee.stashes
         for i in unsafe 0..<stashes.count {
             let st = unsafe stashes[i].pointee
-            for k in st.next..<st.count { unsafe stashed.append((UInt64(st.base.unsafelyUnwrapped[k]), "stash \(i)")) }
+            for k in unsafe st.next..<st.count { unsafe stashed.append((UInt64(st.base.unsafelyUnwrapped[k]), "stash \(i)")) }
         }
         let pool = unsafe pools.pointee.freeBlocks.toArray()
         unlockPools()

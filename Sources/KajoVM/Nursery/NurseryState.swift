@@ -49,8 +49,8 @@ import Synchronization
     var youngBytes: UInt64 = 0
     var stashRefills: UInt64 = 0
 
-    var survFromStart: UInt64 { survTo == 0 ? survivorStart.1 : survivorStart.0 }
-    var survToStart: UInt64 { survTo == 0 ? survivorStart.0 : survivorStart.1 }
+    var survFromStart: UInt64 { unsafe survTo == 0 ? survivorStart.1 : survivorStart.0 }
+    var survToStart: UInt64 { unsafe survTo == 0 ? survivorStart.0 : survivorStart.1 }
 }
 
 /// A scavenge participant's state (participant `index` is worker `index`).
@@ -93,7 +93,7 @@ struct ParticipantStats: Sendable {
 }
 
 /// A copy task: root words, or a slice of remembered holders.
-struct ScavengeTask {
+@unsafe struct ScavengeTask {
     var words: UnsafeMutablePointer<UInt64>
     var count: Int
     var remembered: Bool
@@ -107,7 +107,7 @@ struct ScavengeTask {
     var tag: UInt64 = 0
     var ageLimit: UInt64 = 2
     var promoteAll = false
-    var tasks = RawArray<ScavengeTask>()
+    var tasks = unsafe RawArray<ScavengeTask>()
     /// Root values of this scavenge, the tasks' storage for roots.
     var roots = RawArray<UInt64>()
     /// Class formats (the class table does not change in a stop).
@@ -297,14 +297,14 @@ extension NurseryShared {
         }
         let remBytes = (Int(om.entryCapacity) * 2 + 16383) & ~16383
         let remRaw: UnsafeMutableRawPointer
-        do { remRaw = try unsafe VirtualMemory.reserve(remBytes) } catch { preconditionFailure("nursery: \(error)") }
+        do { unsafe remRaw = try unsafe VirtualMemory.reserve(remBytes) } catch { preconditionFailure("nursery: \(error)") }
         // Zero-filled pages: every marker starts as Atomic(0).
         let rem = unsafe remRaw.bindMemory(to: Atomic<UInt16>.self, capacity: Int(om.entryCapacity))
-        let storage = UnsafeMutablePointer<UInt64>.allocate(capacity: PacketPool.words * PacketPool.capacity)
-        let length = UnsafeMutablePointer<Int>.allocate(capacity: PacketPool.capacity)
+        let storage = unsafe UnsafeMutablePointer<UInt64>.allocate(capacity: PacketPool.words * PacketPool.capacity)
+        let length = unsafe UnsafeMutablePointer<Int>.allocate(capacity: PacketPool.capacity)
         unsafe length.initialize(repeating: 0, count: PacketPool.capacity)
         var pool = unsafe PacketPool(storage: storage, length: length)
-        for i in 0..<PacketPool.capacity { unsafe pool.free.append(Int32(i)) }
+        for i in unsafe 0..<PacketPool.capacity { unsafe pool.free.append(Int32(i)) }
         let s = unsafe lined(NurseryShared(
             config: config, om: om, count: workers, regionStart: start, stride: stride, edenBytes: eden,
             survivorBytes: surv, largeLimit: large, alloc: alloc, scav: scav, rem: rem, remBytes: remBytes,
@@ -316,7 +316,7 @@ extension NurseryShared {
 
     static func destroy(_ n: NurseryPointer) {
         let s = unsafe n.pointee
-        for i in 0..<s.count {
+        for i in unsafe 0..<s.count {
             let a = unsafe s.alloc[i]
             unsafe s.om.unregisterStash(a.pointer(to: \NurseryAlloc.stash)!)
             unsafe a.pointee.stash.free()
@@ -330,7 +330,7 @@ extension NurseryShared {
             unsafe w.pointee.weak.free()
             unsafe unlined(w)
         }
-        s.om.releaseNurseryPages(s.regionStart, Int(s.stride) * s.count)
+        unsafe s.om.releaseNurseryPages(s.regionStart, Int(s.stride) * s.count)
         unsafe s.alloc.deallocate()
         unsafe s.scav.deallocate()
         unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.rem), s.remBytes)
