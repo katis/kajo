@@ -336,6 +336,10 @@ func performOp(_ vm: VMRef, _ w: WorkerRef, _ op: SafeOp, requested t0: UInt64, 
     if needFull {
         if let ws = vm.pointee.workers {
             for i in 0..<vm.pointee.workerCount { vm.pointee.heap.retire(&ws[i].pointee.promo) }
+            // The young collector thread's promotion buffer too (offload): an
+            // open buffer in a block the mark-sweep frees was written into
+            // after the free (relocation verifier: bodies in free blocks).
+            if let c = vm.pointee.yc.collector.pointee { vm.pointee.heap.retire(&c.pointee.promo) }
         }
         let (mark, sweep) = markSweep(vm, w)
         rec.full = true
@@ -424,6 +428,7 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64, p
             x.pointee.nextRem[k].count = 0
             remSet &+= UInt64(x.pointee.rem[k].count)
         }
+        if i == 0 && w.pointee.id >= n { for k in 0..<maxNurseries { w.pointee.nextRem[k].count = 0 } }
         remSet &+= UInt64(nur.pointee.carried.count)
         x.pointee.gc = GCShare()
     }
@@ -496,7 +501,8 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64, p
     var critSweep: UInt64 = 0
     var busy: UInt64 = 0
     for k in 0..<parts {
-        let s = worker(vm, g.pointee.parts[k]).pointee.gc
+        let pid = g.pointee.parts[k]
+        let s = (pid == w.pointee.id ? w : worker(vm, pid)).pointee.gc
         if s.copyBusy >= crit.copyBusy { crit = s }
         critSweep = max(critSweep, s.sweepNs)
         busy &+= s.copyBusy &+ s.sweepNs
@@ -532,8 +538,20 @@ private func scavenge(_ vm: VMRef, _ w: WorkerRef, _ t0: UInt64, _ t1: UInt64, p
         nur.pointee.survFromTop = nur.pointee.survCur
         nur.pointee.survTo = 1 &- nur.pointee.survTo
     }
+    // After the carried lists were consumed (cleared above).
+    if w.pointee.id >= n {
+        // A collector-thread stopper's re-remembered holders join the
+        // carried lists (they are part of each nursery's remembered set).
+        for k in 0..<maxNurseries {
+            let b = w.pointee.nextRem + k
+            for j in 0..<b.pointee.count { nurOf(vm, k).pointee.carried.push(b.pointee.ptr[j]) }
+            b.pointee.count = 0
+        }
+    }
     rebuildChunkPool(vm)
     if vm.pointee.verify { postVerify(vm, expected: expected, copied: rec.promotedObjects &+ rec.survivedObjects) }
+    // The reachability-based young verifier after stop-the-world scavenges too.
+    if vm.pointee.ycConfig.verifyYoung { youngVerify(vm) }
     let tf = now()
     let ce = g.pointee.copyEnd.pointee.load(ordering: .relaxed)
     rec.prepNs = tp &- t1
@@ -706,7 +724,10 @@ private func rememberMask(_ w: WorkerRef, _ r: UnsafeMutablePointer<Atomic<UInt3
 private func evacuate(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ v: Oop, _ ent: UnsafeMutablePointer<UInt64>, _ h0: UInt64) -> Int {
     let g = vm.pointee.gc
     let tag = g.pointee.claimTag
-    let nur = nurOf(vm, w.pointee.id)
+    // The stopper may be the young collector thread (offload: an initial
+    // mark (b) or a fallback it requested): it has no nursery and promotes.
+    let hasNursery = w.pointee.id < vm.pointee.workerCount
+    let nur = nurOf(vm, hasNursery ? w.pointee.id : 0)
     var h = h0
     var survive = false, overflow = false
     let size = objectBytes(h0)
@@ -717,7 +738,7 @@ private func evacuate(_ vm: VMRef, _ w: WorkerRef, _ om: OM, _ v: Oop, _ ent: Un
         survive = false
         overflow = false
         if age < g.pointee.ageN {
-            if nur.pointee.survCur &+ UInt(size) <= nur.pointee.survStart(nur.pointee.survTo) &+ nur.pointee.survBytes {
+            if hasNursery && nur.pointee.survCur &+ UInt(size) <= nur.pointee.survStart(nur.pointee.survTo) &+ nur.pointee.survBytes {
                 survive = true
             } else {
                 overflow = true
