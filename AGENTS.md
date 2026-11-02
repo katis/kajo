@@ -283,7 +283,13 @@ spaces and concurrent relocation of old space through the entry table
 (proposed; old-space work is off the frame budget, scavenges remain), 0008
 young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
-thread exceeds a frame, acknowledgements and the initial mark remain). ADRs
+thread exceeds a frame, acknowledgements and the initial mark remain), 0009 object
+model and bytecode set (proposed, accepted in principle: weak slots and
+ephemerons, immediate SmallFloat and Character, native frames materialized
+into Contexts on demand, compiled closures with temp vectors, frame-walk
+unwinding, classic metaclasses, UTF-8 strings, read-only bit, bytecode set
+v1, unsynchronized kernel collections; its first three sections precede
+module 5 and module 3 reserves the frame's Context slot). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
