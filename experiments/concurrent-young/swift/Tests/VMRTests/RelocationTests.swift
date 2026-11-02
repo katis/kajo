@@ -95,7 +95,8 @@ done:
   send g:put: 2
   return_top
 end
-; Hold (global 8) at: 1 in a temp and spin forever (frame-pin test).
+; Hold (global 8) at: 1 in a temp, then set global 10 to 1 (the temp holds
+; it now) and spin forever (frame-pin test).
 method UndefinedObject holdFirst temps=1
   push_nil
   push_int 8
@@ -103,6 +104,11 @@ method UndefinedObject holdFirst temps=1
   push_int 1
   send at: 1
   store_temp 0
+  push_nil
+  push_int 10
+  push_int 1
+  send globalAt:put: 2
+  pop
 loop:
   push_temp 0
   pop
@@ -263,9 +269,12 @@ private func framePin(rule: Bool) throws {
         let vm = UnsafeMutablePointer<VMCore>(bitPattern: bits)!
         _ = runOneSlice(vm, UnsafeMutablePointer<Worker>(bitPattern: wb)!)
     }
-    // Running once the Process is no longer on a ready queue (read inside
-    // the VM under the scheduler lock).
-    #expect(eventually { processState(vm, p) == stRunning })
+    // Wait until the temp holds `a`: the Process sets global 10 after the
+    // store. "Running" is not enough: the state is set when the worker
+    // dequeues the Process, before the bytecodes that load and store `a`
+    // run, and a stop landing in between parks the worker at a send with
+    // `a` nowhere in its frame (the final mark then pins nothing).
+    #expect(eventually { atomicWord(vm.pointee.globals + 9).pointee.load(ordering: .acquiring) == mkInt(1) })
     cmStart(vm)
     cmMark(vm, m, 10_000_000)
     cmFinal(vm)                       // the frame holds `a`: pinned
