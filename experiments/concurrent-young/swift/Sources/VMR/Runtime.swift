@@ -94,6 +94,27 @@ public final class Runtime {
 
     public var mainWorker: WorkerRef { workers[0] }
 
+    /// CPU time (user + system) of the marker threads so far, read from the
+    /// kernel (tests: an idle marker must not spin; SPEC.md amendment 18).
+    public func markerThreadsCpuNs() -> UInt64 {
+        var total: UInt64 = 0
+        for t in markerThreads {
+            var info = thread_basic_info()
+            var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info_data_t>.size / MemoryLayout<integer_t>.size)
+            let kr = withUnsafeMutablePointer(to: &info) {
+                $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    thread_info(pthread_mach_thread_np(t), thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
+                }
+            }
+            if kr != KERN_SUCCESS { continue }
+            func ns(_ v: time_value_t) -> UInt64 { UInt64(v.seconds) * 1_000_000_000 + UInt64(v.microseconds) * 1000 }
+            total += ns(info.user_time) + ns(info.system_time)
+        }
+        return total
+    }
+
+    public var markerThreadCount: Int { markerThreads.count }
+
     public func symbol(_ name: String) -> Oop {
         guard let s = img.symbol(name) else { fatal("no symbol \(name)") }
         return s

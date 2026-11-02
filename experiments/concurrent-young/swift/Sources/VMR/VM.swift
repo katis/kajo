@@ -293,6 +293,8 @@ public enum Metric: Int, CaseIterable {
     case remSetTotal, entriesAllocated, entriesFreed, entrySweepNs, fullEntriesFreed
     case barrierSlow, verifyFailures, verifyRuns
     case cmCycles, cmFallbacks, cmAborts, cmVerifyRuns, cmMissed, cmFloatingBytes
+    /// Returns from the marker threads' condition wait (idle wakeups; SPEC.md amendment 18).
+    case cmMarkerWaits
     // relocation (SPEC.md "Part 2"); the first six are per-cycle deltas too
     case relocMovedBytes, relocMovedObjects, relocSkipPinned, relocSkipHazard, relocNoSpace, relocEvacuated
     case relocCasFail, relocFreedEpoch, relocFreedPause, relocFreeDelayNs, relocFreeDelayMaxNs, relocPins

@@ -153,6 +153,14 @@ func relocPass(_ vm: VMRef, _ m: MarkerRef, _ cyc: UInt64) -> Bool {
     m.pointee.relocEnd = now()
     m.pointee.relocCpu = threadCpuNs() &- cpu0
     if !aborted { tryFreePending(vm, atPause: false) }
+    // Blocks left pending: the first marker must retry them with a timed
+    // wait. It is the relocator itself except in the manual mode, where the
+    // marker may be in an untimed wait (SPEC.md amendment 18).
+    if cm.pendingCount.pointee.load(ordering: .relaxed) > 0 {
+        pthread_mutex_lock(cm.lock)
+        pthread_cond_broadcast(cm.cond)
+        pthread_mutex_unlock(cm.lock)
+    }
     return !aborted
 }
 

@@ -539,12 +539,21 @@ private func markerLoop(_ vm: VMRef, _ m: MarkerRef) {
             if ph == CMPhase.marking && (cm.q.pointee.items.count > 0 || cyc != lastCycle) { work = 1; break }
             if ph == CMPhase.sweeping && first && cyc != sweptCycle { work = 2; break }
             // Evacuated blocks waiting for epochs: retry every millisecond.
-            if first && cm.pendingCount.pointee.load(ordering: .relaxed) > 0
-                && now() &- lastFreeTry > 1_000_000 { work = 3; break }
+            let pending = first && cm.pendingCount.pointee.load(ordering: .relaxed) > 0
+            if pending && now() &- lastFreeTry > 1_000_000 { work = 3; break }
+            // The wait is timed only while blocks are pending (SPEC.md
+            // amendment 18); otherwise every condition above changes under
+            // `cm.lock` with a signal or broadcast of `cm.cond`, and an idle
+            // VM never wakes the marker.
             cm.q.pointee.waiting += 1
-            var ts = timespec(tv_sec: 0, tv_nsec: 1_000_000)
-            pthread_cond_timedwait_relative_np(cm.cond, cm.lock, &ts)
+            if pending {
+                var ts = timespec(tv_sec: 0, tv_nsec: 1_000_000)
+                pthread_cond_timedwait_relative_np(cm.cond, cm.lock, &ts)
+            } else {
+                pthread_cond_wait(cm.cond, cm.lock)
+            }
             cm.q.pointee.waiting -= 1
+            vm.add(.cmMarkerWaits, 1)
         }
         pthread_mutex_unlock(cm.lock)
         if work == 0 { break }

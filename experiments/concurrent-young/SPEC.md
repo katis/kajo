@@ -602,3 +602,28 @@ inline. These rules were added afterwards:
     the epoch rule, where a test plays the re-arm. Tests:
     `aDeferredEntryFreeIsNotASnapshotEntry`,
     `aFullCollectionLeavesADeferredEntryFreeToItsNursery`.
+18. **The marker waits untimed unless blocks are pending.** The idle loop
+    waited on `cm.cond` with a 1 ms timeout unconditionally, so a parked VM
+    woke its marker 249 times a second on the Mac (the test below) and 130
+    (utility) to 580 (user-initiated) times a second on the phone
+    (`experiments/power/RESULTS.md`, Part 3), and nothing else in the VM
+    woke at all. The only work that needs a timer is retrying evacuated
+    blocks that wait for every worker's epoch, and only the first marker
+    does it. Rule: the first marker uses the 1 ms timed wait while
+    `pendingCount > 0`; every other wait is `pthread_cond_wait`. In
+    exchange every transition the loop's conditions depend on changes under
+    `cm.lock` and signals or broadcasts `cm.cond` there, since a missed
+    wake now stalls marking instead of costing a millisecond: phase to
+    marking (the initial mark, broadcast; the cycle number changes just
+    before it in the same pause), a queued item (SATB handover, signal when
+    a marker waits; exported packet, broadcast when a marker waits), phase
+    to sweeping (the final mark, broadcast), shutdown (broadcast), and
+    blocks left pending at the end of a relocation pass (broadcast; the
+    relocator is the first marker itself except under `manualReloc`). The
+    other transitions (to swept, to idle, an abort's cycle change) only
+    make the conditions false. Wakeups are counted (`cmMarkerWaits`).
+    Tests: `aParkedVMDoesNotWakeItsMarker` (under 1 ms of marker CPU and at
+    most 5 wakeups in a second parked, offload and local; 249 wakeups and
+    2.3 ms before), `markingCompletesPromptlyAfterIdling` (two cycles with
+    relocation, each started after an idle period, finish and free their
+    evacuated blocks).
