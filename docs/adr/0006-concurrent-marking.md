@@ -142,9 +142,16 @@ threshold; the device-measurement result above (fallbacks at utility) was
 the allocation storm with six busy workers, which this policy must detect.
 The escalation itself was not measured.
 
-**Idle bug.** `markerLoop` waits with a 1 ms timed wait even when no block
-is pending (`experiments/concurrent-young/swift/Sources/VMR/Concurrent.swift`).
-A parked VM therefore wakes 130 times per second at utility and 580 at
-user-initiated, 0.1 mW; without the marker thread a parked VM wakes zero
-times. The production marker waits untimed when nothing is pending. See
-experiments/power/RESULTS.md.
+**Idle bug, fixed.** `markerLoop` waited with a 1 ms timed wait even when
+no block was pending, so a parked VM woke 130 times per second at utility
+and 580 at user-initiated under a 2 MB/s trickle. SPEC amendment 18 in
+experiments/concurrent-young (commit c8a77da): the marker waits untimed
+unless evacuated blocks are pending, every transition it waits for signals
+the condition under the lock (the audit is in the commit message; one new
+signal site in the relocation pass), and two tests guard it: a parked
+second costs the marker under 1 ms of CPU and at most 5 wakeups, and
+marking after idling completes within a bound so a lost wake cannot hide.
+Re-measured on the iPhone (experiments/power/RESULTS.md, dated section):
+parked wakeups fell from 131.6 to 0.08 per second, the no-marker floor; the
+120 Hz tick fell from 216 to 76, also the floor. The production marker
+inherits the rule (docs/PLAN.md: idle threads wait untimed).

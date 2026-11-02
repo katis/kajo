@@ -198,9 +198,16 @@ Safety:
    Mixed is the device policy: collector user-initiated, marker utility.
  - A timed wait in a thread that has nothing to do is the whole idle cost
    of the VM: the marker's 1 ms wait woke the phone 130 to 580 times a
-   second while every other VM thread woke zero times. Idle threads wait
-   untimed; measure wakeups per second with `ri_pkg_idle_wkups` and ask
-   for zero.
+   second while every other VM thread woke zero times; untimed, 0.08.
+   Idle threads wait untimed, and before removing a timeout audit every
+   transition the wait depends on for a signal under the lock and add a
+   test that work after idling completes within a bound.
+ - A wall-clock assertion in a test (a 300 ms spinner accrued 200 to 400 ms,
+   N wakeups in a window) fails under load. Assert agreement between two
+   readings of the same quantity, or run until a CPU budget is spent.
+ - "Wait until the Process is running" is not "wait until its frame holds
+   the object": the state is set before the frame is installed. Tests that
+   need a value on a stack wait on a flag the program sets after the store.
  - An empty Smalltalk turn on every 120 Hz frame costs nothing beyond the
    display link itself.
  - A test that fails only under CPU load is a real schedule-dependent bug.
