@@ -7,6 +7,7 @@ extension ObjectMemory {
     /// A full mark-sweep. World stopped. `extraRoots` are marked but not
     /// rewritten (oops never change, ADR 0003).
     func collect(extraRoots: [Oop] = []) {
+        prepareOldSpaceOperation(extraRoots)
         retireAllContexts()
         verifyAtPause("before collection", phase: .idle)
         mark(extraRoots: extraRoots)
@@ -68,28 +69,127 @@ extension ObjectMemory {
         unsafe shared.pointee.marks[Int(truncatingIfNeeded: index)] = v
     }
 
-    /// Mark everything reachable from the class table, the root registry and
-    /// `extraRoots`. Contexts must be retired.
+    /// Mark everything reachable from the class table, the root registry,
+    /// the finalization queue and `extraRoots`. Contexts must be retired.
+    ///
+    /// Weak slots (the indexed slots of a weak class) are not traced; once
+    /// marking is complete each one whose referent is unmarked becomes nil.
+    /// An ephemeron (not yet fired) whose key is not marked is deferred;
+    /// when its key gets marked it is traced like any object. Ephemerons
+    /// whose keys are still unmarked when nothing else is left are fired:
+    /// queued for finalization, then traced, so key and value survive this
+    /// one collection (ADR 0009 section 1).
     func mark(extraRoots: [Oop]) {
         let hw = highWater
         unsafe memset(shared.pointee.marks, 0, Int(hw))
         var stack = unsafe gc.pointee.markStack
+        var weak = unsafe gc.pointee.weakObjects
+        var ephs = unsafe gc.pointee.ephemerons
         stack.removeAll()
+        weak.removeAll()
+        ephs.removeAll()
         forEachRoot(extraRoots: extraRoots) { markAndPush($0, &stack) }
-        while let raw = stack.popLast() {
-            let o = Oop(raw: raw)
-            let h = header(o)
-            if h.isBytes { continue }
-            let base = Int(truncatingIfNeeded: bodyOffset(o)) &+ 8
-            let n = Int(truncatingIfNeeded: h.count)
+        drainMarks(&stack, &weak, &ephs)
+        var queued: UInt64 = 0
+        while !ephs.isEmpty {
+            // Ephemerons whose key got marked are ordinary objects now.
+            var progressed = false
             var i = 0
+            while i < ephs.count {
+                let e = Oop(raw: ephs[i])
+                let key = load(e, 0)
+                if !key.isObject || isMarked(key) {
+                    pushSlots(e, from: 0, &stack)
+                    ephs[i] = ephs[ephs.count - 1]
+                    _ = ephs.popLast()
+                    progressed = true
+                } else {
+                    i += 1
+                }
+            }
+            if progressed {
+                drainMarks(&stack, &weak, &ephs)
+                continue
+            }
+            // Only ephemerons hold their keys: fire them all.
+            let fin = unsafe shared.pointee.finalization
+            while let raw = ephs.popLast() {
+                let e = Oop(raw: raw)
+                var h = header(e)
+                h.isFiredEphemeron = true
+                setHeader(e, h)
+                lockPools()
+                unsafe fin.pointee.append(raw)
+                unlockPools()
+                queued &+= 1
+                pushSlots(e, from: 0, &stack)
+            }
+            drainMarks(&stack, &weak, &ephs)
+        }
+        var niled: UInt64 = 0
+        let nilObj = unsafe gc.pointee.nilObject
+        for k in 0..<weak.count {
+            let o = Oop(raw: weak[k])
+            let h = header(o)
+            let base = Int(truncatingIfNeeded: bodyOffset(o)) &+ 8
+            var i = classFormat(h.classIndex).namedSlots
+            let n = Int(truncatingIfNeeded: h.count)
             while i < n {
                 let v = unsafe Oop(raw: heapBase.load(fromByteOffset: base &+ i &<< 3, as: UInt64.self))
-                markAndPush(v, &stack)
+                if v.isObject && !isMarked(v) {
+                    unsafe heapBase.storeBytes(of: nilObj.raw, toByteOffset: base &+ i &<< 3, as: UInt64.self)
+                    niled &+= 1
+                }
                 i &+= 1
             }
         }
         unsafe gc.pointee.markStack = stack
+        unsafe gc.pointee.weakObjects = weak
+        unsafe gc.pointee.ephemerons = ephs
+        unsafe gc.pointee.counters.weakSlotsNiled &+= niled
+        unsafe gc.pointee.counters.ephemeronsQueued &+= queued
+        if queued > 0 { unsafe gc.pointee.finalizationSignal = true }
+    }
+
+    /// Scan marked objects until the stack is empty: weak objects' strong
+    /// part only (and remember them), unfired ephemerons only once their key
+    /// is marked (else defer them).
+    private func drainMarks(_ stack: inout RawArray<UInt64>, _ weak: inout RawArray<UInt64>,
+                            _ ephs: inout RawArray<UInt64>) {
+        while let raw = stack.popLast() {
+            let o = Oop(raw: raw)
+            let h = header(o)
+            if h.isBytes { continue }
+            let f = classFormat(h.classIndex)
+            if _slowPath(f.isSpecial) {
+                if f.isWeak {
+                    weak.append(raw)
+                    pushSlots(o, from: 0, upTo: f.namedSlots, &stack)
+                    continue
+                }
+                if !h.isFiredEphemeron && h.count > 0 {
+                    let key = load(o, 0)
+                    if key.isObject && !isMarked(key) {
+                        ephs.append(raw)
+                        continue
+                    }
+                }
+            }
+            pushSlots(o, from: 0, &stack)
+        }
+    }
+
+    @inline(__always)
+    private func pushSlots(_ o: Oop, from: Int, upTo limit: Int = .max, _ stack: inout RawArray<UInt64>) {
+        let h = header(o)
+        let base = Int(truncatingIfNeeded: bodyOffset(o)) &+ 8
+        let n = Swift.min(Int(truncatingIfNeeded: h.count), limit)
+        var i = from
+        while i < n {
+            let v = unsafe Oop(raw: heapBase.load(fromByteOffset: base &+ i &<< 3, as: UInt64.self))
+            markAndPush(v, &stack)
+            i &+= 1
+        }
     }
 
     @inline(__always)
@@ -106,6 +206,7 @@ extension ObjectMemory {
         for i in 0..<ct.count { body(Oop(raw: ct[i])) }
         let rs = unsafe gc.pointee.roots
         for i in 0..<rs.count { body(Oop(raw: rs[i])) }
+        forEachFinalized(body)
         for v in extraRoots { body(v) }
     }
 
@@ -137,6 +238,13 @@ extension ObjectMemory {
         lockPools()
         let nc = unsafe pools.pointee.contexts.count
         for i in 0..<nc { unsafe pools.pointee.contexts[i].pointee.freeEntry = 0 }
+        // Stashes too: their entries are free in the table and land in the
+        // new runs.
+        let ns = unsafe pools.pointee.stashes.count
+        for i in 0..<ns {
+            unsafe pools.pointee.stashes[i].pointee.next = 0
+            unsafe pools.pointee.stashes[i].pointee.count = 0
+        }
         unsafe pools.pointee.entryRuns.removeAll()
         unlockPools()
         var live = RawArray<Bool>(repeating: false, count: heap.blockCount)
@@ -172,13 +280,16 @@ extension ObjectMemory {
         lockPools()
         defer { unlockPools() }
         unsafe pools.pointee.freeBlocks.removeAll()
+        var inUse = 0
         var b = h.blockCount - 1
         while b >= 0 {
+            if h.isInUse(b) { inUse += 1 }
             if !h.isInUse(b) || UInt64(BlockHeap.blockBytes) &- h.usedBytes(b) >= ObjectMemory.minimumTail {
                 unsafe pools.pointee.freeBlocks.append(UInt32(b))
             }
             b -= 1
         }
+        unsafe pools.pointee.blocksInUse = inUse
     }
 
     /// The smallest free tail of an in-use block worth handing out.

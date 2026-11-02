@@ -73,6 +73,12 @@ extension ObjectMemory {
         for i in 0..<rs.count where rs[i] != 0 && !isValidReferenceOrInteger(Oop(raw: rs[i]), highWater: hw) {
             out.fail("root \(i) holds \(Oop(raw: rs[i]))")
         }
+        forEachFinalized { v in
+            if !isValidReferenceOrInteger(v, highWater: hw) { out.fail("the finalization queue (a root) holds \(v)") }
+        }
+        let nilObj = unsafe gc.pointee.nilObject
+        if nilObj != .none && !isValidReferenceOrInteger(nilObj, highWater: hw) { out.fail("the nil object (a root) is \(nilObj)") }
+        let nursery = nurseryRegion
 
         var seen = RawArray<UInt8>(repeating: 0, count: Int(hw))
         defer { seen.free() }
@@ -115,10 +121,35 @@ extension ObjectMemory {
             }
             if s & EntryState.relocatingBit != 0 { out.fail("entry \(e) is RELOCATING"); continue }
             if s & 7 != 0 { out.fail("entry \(e): body offset \(s) is not aligned"); continue }
+            if hd.reservedBits != 0 { out.fail("entry \(e): header has reserved bits 0x\(String(hd.reservedBits, radix: 16))") }
+            if !hd.isYoung && hd.raw & Header.youngOnlyMask != 0 {
+                out.fail("entry \(e): an old header with young-only bits 0x\(String(hd.raw & Header.youngOnlyMask, radix: 16))")
+            }
+            if hd.isYoung {
+                // Module 4's nursery verifier checks where in its nursery;
+                // here only that a young body is in the nursery region and
+                // is a well-formed body of this entry.
+                if !nursery.contains(s) || !nursery.contains(s &+ hd.bodyBytes &- 1) {
+                    out.fail("entry \(e): a young body at \(s) is outside the nursery region")
+                    continue
+                }
+                if !isRegisteredClass(hd.classIndex) { out.fail("entry \(e): class index \(hd.classIndex) is not registered") }
+                let br = h.word(atOffset: s)
+                if BackRef.entryIndex(br) != e || BackRef.words(br) != hd.bodyWords {
+                    out.fail("entry \(e): the young body's back reference or size disagrees")
+                    continue
+                }
+                if !hd.isBytes {
+                    for i in 0..<hd.count {
+                        let v = Oop(raw: h.word(atOffset: s &+ 8 &+ i &<< 3))
+                        if !isValidReferenceOrInteger(v, highWater: hw) { out.fail("entry \(e) slot \(i) holds \(v)") }
+                    }
+                }
+                continue
+            }
             if s >= heapBytes { out.fail("entry \(e): body offset \(s) is outside the heap"); continue }
             let b = BlockHeap.block(ofOffset: s)
             if !h.isInUse(b) { out.fail("entry \(e): body in block \(b), which is not in use"); continue }
-            if hd.reservedBits != 0 { out.fail("entry \(e): header has reserved bits 0x\(String(hd.reservedBits, radix: 16))") }
             if !isRegisteredClass(hd.classIndex) { out.fail("entry \(e): class index \(hd.classIndex) is not registered") }
             if s &+ hd.bodyBytes > BlockHeap.start(ofBlock: b) &+ h.usedBytes(b) {
                 out.fail("entry \(e): body at \(s) of \(hd.bodyBytes) bytes is outside block \(b)'s used bytes")
@@ -185,10 +216,22 @@ extension ObjectMemory {
         for i in 0..<runs.count { heads.append((runs[i], "run \(i)")) }
         let contexts = unsafe pools.pointee.contexts
         for i in unsafe 0..<contexts.count { unsafe heads.append((contexts[i].pointee.freeEntry, "context \(i)")) }
+        var stashed: [(UInt64, String)] = []
+        let stashes = unsafe pools.pointee.stashes
+        for i in unsafe 0..<stashes.count {
+            let st = unsafe stashes[i].pointee
+            for k in st.next..<st.count { unsafe stashed.append((UInt64(st.base.unsafelyUnwrapped[k]), "stash \(i)")) }
+        }
         let pool = unsafe pools.pointee.freeBlocks.toArray()
         unlockPools()
 
         for (head, name) in heads { walk(head, name) }
+        for (idx, name) in stashed {
+            if idx == 0 || idx >= hw { out.fail("\(name) holds entry \(idx), outside the table's used range"); continue }
+            if visited[Int(idx)] != 0 { out.fail("entry \(idx) is twice in the free lists (\(name))"); continue }
+            visited[Int(idx)] = 1
+            if !EntryState.isFree(stateWord(idx &<< 4)) { out.fail("used entry \(idx) is in a free list (\(name))") }
+        }
         var e: UInt64 = 1
         while e < hw {
             if EntryState.isFree(stateWord(e &<< 4)) && visited[Int(e)] == 0 {
@@ -235,11 +278,30 @@ extension ObjectMemory {
             stack.append(v.raw)
         }
         forEachRoot(extraRoots: extraRoots) { visit($0, from: "a root") }
-        while let raw = stack.popLast() {
-            let o = Oop(raw: raw)
-            let hd = header(o)
-            if hd.isBytes { continue }
-            for i in 0..<Int(hd.count) { visit(load(o, i), from: "entry \(o.entryIndex) slot \(i)") }
+        // Weak slots are not edges; an unfired ephemeron's slots are edges
+        // only once its key is reached (ADR 0009 section 1).
+        var pending: [Oop] = []
+        while true {
+            while let raw = stack.popLast() {
+                let o = Oop(raw: raw)
+                let hd = header(o)
+                if hd.isBytes { continue }
+                let f = classFormat(hd.classIndex)
+                var n = Int(hd.count)
+                if f.isWeak { n = Swift.min(n, f.namedSlots) }
+                if f.isEphemeron && !hd.isFiredEphemeron && n > 0 {
+                    let key = load(o, 0)
+                    if key.isObject && isValidReferenceOrInteger(key, highWater: hw) && reached[Int(key.entryIndex)] == 0 {
+                        pending.append(o)
+                        continue
+                    }
+                }
+                for i in 0..<n { visit(load(o, i), from: "entry \(o.entryIndex) slot \(i)") }
+            }
+            let ready = pending.filter { reached[Int(load($0, 0).entryIndex)] != 0 }
+            if ready.isEmpty { break }
+            pending.removeAll { reached[Int(load($0, 0).entryIndex)] != 0 }
+            for o in ready { for i in 0..<Int(header(o).count) { visit(load(o, i), from: "entry \(o.entryIndex) slot \(i)") } }
         }
         var e: UInt64 = 1
         while e < hw {

@@ -49,6 +49,7 @@ extension ObjectMemory {
     /// (ADR 0003); no slot anywhere is rewritten. Pinned objects stay.
     /// World stopped.
     func compact(extraRoots: [Oop] = []) {
+        prepareOldSpaceOperation(extraRoots)
         retireAllContexts()
         verifyAtPause("before compaction", phase: .idle)
         mark(extraRoots: extraRoots)

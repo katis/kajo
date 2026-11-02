@@ -49,7 +49,27 @@ import Darwin
         }
     }
 
+    var last: Element? { count == 0 ? nil : unsafe base.unsafelyUnwrapped[count - 1] }
+
     mutating func removeAll() { count = 0 }
+
+    /// Drop the first element (a queue that stays short).
+    mutating func removeFirst() {
+        precondition(count > 0)
+        let b = unsafe base.unsafelyUnwrapped
+        if count > 1 { unsafe b.update(from: b + 1, count: count - 1) }
+        count -= 1
+    }
+
+    /// Keep the first `n` elements.
+    mutating func truncate(_ n: Int) {
+        precondition(n >= 0 && n <= count)
+        count = n
+    }
+
+    /// The storage, for loops that must not go through the subscript's
+    /// checks. Valid until the next append or free.
+    var baseAddress: UnsafeMutablePointer<Element>? { unsafe base }
 
     mutating func free() {
         unsafe Darwin.free(UnsafeMutableRawPointer(base))

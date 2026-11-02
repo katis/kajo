@@ -46,6 +46,7 @@ extension ObjectMemory {
         let n = unsafe gc.pointee.classTable.count
         precondition(UInt64(n) <= Header.maxClassIndex, "class table full")
         unsafe gc.pointee.classTable.append(classOop.raw)
+        unsafe gc.pointee.classFormats.append(0)
         return UInt64(n)
     }
 

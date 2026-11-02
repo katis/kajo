@@ -20,14 +20,15 @@ import Darwin
     init(_ requested: ObjectMemoryConfig) throws(ObjectMemoryError) {
         let config = requested.effective
         guard config.heapBytes > 0, config.heapBytes % BlockHeap.blockBytes == 0,
-              UInt64(config.heapBytes) <= VirtualMemory.aliasDistance else {
-            throw .invalidConfig("heapBytes must be a positive multiple of \(BlockHeap.blockBytes), at most 4 GiB")
+              config.reserveBytes >= 0, config.reserveBytes % BlockHeap.blockBytes == 0,
+              UInt64(config.heapBytes + config.reserveBytes) <= VirtualMemory.aliasDistance else {
+            throw .invalidConfig("heapBytes and reserveBytes must be multiples of \(BlockHeap.blockBytes), at most 4 GiB together")
         }
         guard config.entryCapacity >= 2, UInt64(config.entryCapacity) <= 1 << 32 else {
             throw .invalidConfig("entryCapacity must be in 2...2^32")
         }
         guard config.entryChunk >= 1 else { throw .invalidConfig("entryChunk must be positive") }
-        let heap = try BlockHeap(bytes: config.heapBytes)
+        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes)
         let tableBytes = config.entryCapacity * 16
         let table: UnsafeMutableRawPointer
         let marks: UnsafeMutableRawPointer
@@ -41,14 +42,16 @@ import Darwin
         let poolLock = os_unfair_lock_t.allocate(capacity: 1)
         unsafe poolLock.initialize(to: os_unfair_lock())
         let pools = UnsafeMutablePointer<Pools>.allocate(capacity: 1)
-        unsafe pools.initialize(to: Pools(blockCount: heap.blockCount))
+        unsafe pools.initialize(to: Pools(blockCount: heap.blockCount, softLimit: config.heapBytes / BlockHeap.blockBytes))
         let gc = UnsafeMutablePointer<CollectorState>.allocate(capacity: 1)
         unsafe gc.initialize(to: CollectorState())
+        let fin = UnsafeMutablePointer<RawArray<UInt64>>.allocate(capacity: 1)
+        unsafe fin.initialize(to: RawArray())
         let shared = UnsafeMutablePointer<MemoryShared>.allocate(capacity: 1)
         unsafe shared.initialize(to: MemoryShared(
             config: config, heap: heap, entryCapacity: UInt64(config.entryCapacity), tableBytes: tableBytes,
             marks: marks.bindMemory(to: UInt8.self, capacity: config.entryCapacity), poolLock: poolLock,
-            pools: pools, gc: gc))
+            pools: pools, gc: gc, finalization: fin))
         unsafe self.table = table
         unsafe self.heapBase = heap.base
         unsafe self.shared = shared
@@ -67,6 +70,9 @@ import Darwin
         unsafe s.gc.pointee.free()
         unsafe s.gc.deinitialize(count: 1)
         unsafe s.gc.deallocate()
+        unsafe s.finalization.pointee.free()
+        unsafe s.finalization.deinitialize(count: 1)
+        unsafe s.finalization.deallocate()
         s.heap.release()
         unsafe VirtualMemory.release(table, s.tableBytes)
         unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.marks), Int(s.entryCapacity))
@@ -247,6 +253,10 @@ extension ObjectMemory: @unchecked Sendable {}
     let pools: UnsafeMutablePointer<Pools>
     /// Written with the world stopped only.
     let gc: UnsafeMutablePointer<CollectorState>
+    /// Ephemerons whose key was found unreachable, oldest first, until the
+    /// finalization Process takes them. A root. Under `poolLock` (a worker
+    /// takes from it while the world runs); appended with the world stopped.
+    let finalization: UnsafeMutablePointer<RawArray<UInt64>>
 }
 
 /// Free blocks, free entry runs, the table's high water mark and the
@@ -262,10 +272,20 @@ extension ObjectMemory: @unchecked Sendable {}
     /// Next never-used entry index. Entry 0 is reserved.
     var highWater: UInt64 = 1
     var contexts = unsafe RawArray<UnsafeMutablePointer<ContextState>>()
+    /// Entry stashes (module 4's nurseries): array-held free entries, each
+    /// owned by one stash.
+    var stashes = unsafe RawArray<UnsafeMutablePointer<EntryStash>>()
     /// Counters of destroyed contexts.
     var retiredCounters = AllocationCounters()
+    /// Blocks in use, and how many a mutator may hold: blocks past the soft
+    /// limit are the promotion reserve (module 4).
+    var blocksInUse = 0
+    var softLimitBlocks: Int
+    /// Promotion refills that found no block (the reserve was too small).
+    var reserveExhausted: UInt64 = 0
 
-    init(blockCount: Int) {
+    init(blockCount: Int, softLimit: Int) {
+        softLimitBlocks = Swift.min(softLimit, blockCount)
         var b = blockCount - 1
         while b >= 0 { freeBlocks.append(UInt32(b)); b -= 1 }
     }
@@ -281,6 +301,7 @@ extension ObjectMemory: @unchecked Sendable {}
         freeBlocks.free()
         entryRuns.free()
         unsafe contexts.free()
+        unsafe stashes.free()
     }
 }
 
@@ -297,12 +318,34 @@ extension ObjectMemory: @unchecked Sendable {}
     var freeRootSlots = RawArray<Int32>()
     /// Class index -> class oop. Index 0 is never a class.
     var classTable = RawArray<UInt64>(repeating: 0, count: 1)
+    /// Class index -> format word (ADR 0009 section 6), beside the table.
+    var classFormats = RawArray<UInt64>(repeating: 0, count: 1)
     var markStack = RawArray<UInt64>()
+    /// Marked weak objects and deferred ephemerons of the current mark.
+    var weakObjects = RawArray<UInt64>()
+    var ephemerons = RawArray<UInt64>()
+    /// What a weak slot becomes when its referent dies (the image's nil;
+    /// `.none` until set: then no class may be weak).
+    var nilObject = Oop.none
+    /// A mark fired ephemerons since the last `takeFinalizationSignal`.
+    var finalizationSignal = false
+    /// Heap offsets of the nursery region (module 4), where young bodies
+    /// lie; empty when there is none.
+    var nurseryStart: UInt64 = 0
+    var nurseryEnd: UInt64 = 0
+    /// Run before every operation that needs nothing young (collect,
+    /// compact, become, forward, reshape, snapshot): module 4 promotes
+    /// everything. The argument is the operation's extra roots, or nil when
+    /// it was given none (the hook gathers the stop's roots itself).
+    var beforeOldSpaceOperation: (([Oop]?) -> Void)? = nil
 
     mutating func free() {
         roots.free()
         freeRootSlots.free()
         classTable.free()
+        classFormats.free()
         markStack.free()
+        weakObjects.free()
+        ephemerons.free()
     }
 }

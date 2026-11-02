@@ -14,6 +14,7 @@ extension ObjectMemory {
     func becomeExchange(_ a: Oop, _ b: Oop) throws(BecomeError) {
         guard isUsedReference(a), isUsedReference(b) else { throw .notAnObject }
         if a == b { return }
+        prepareOldSpaceOperation(nil)
         retireAllContexts()
         let sa = stateWord(a.raw), ha = headerWord(a.raw)
         let sb = stateWord(b.raw), hb = headerWord(b.raw)
@@ -53,6 +54,7 @@ extension ObjectMemory {
             target[Int(f.entryIndex)] = t.raw
         }
         for t in to where target[Int(t.entryIndex)] != 0 { throw .sourceIsATarget }
+        prepareOldSpaceOperation(extraRoots)
         retireAllContexts()
 
         var rewritten: UInt64 = 0

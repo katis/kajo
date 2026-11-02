@@ -1,8 +1,10 @@
 import Darwin
 import Foundation
 
-/// Snapshot format, version 1. Little-endian 64-bit words, then raw heap
-/// and table bytes (the hosts are little-endian):
+/// Snapshot format, version 2 (module 4 added the class formats, the
+/// finalization queue and the nil object; version 1 is refused).
+/// Little-endian 64-bit words, then raw heap and table bytes (the hosts are
+/// little-endian):
 ///
 ///     word 0   magic "KAJOOM\0\0"
 ///     word 1   version
@@ -11,8 +13,12 @@ import Foundation
 ///     word 4   entry high water mark H
 ///     word 5   class table length C (index 0 included, always 0)
 ///     word 6   root registry length R (0 = removed slot)
+///     word 7   finalization queue length Q
+///     word 8   the nil object weak slots become (0: none)
 ///     C words  class table
+///     C words  class formats (`ClassFormat`)
 ///     R words  root registry
+///     Q words  finalization queue
 ///     B words  used bytes per block (0 = free)
 ///     ...      the used bytes of every block, in block order
 ///     H x 16   entry table [0, H)
@@ -20,7 +26,8 @@ import Foundation
 /// Oops are entry offsets, so a snapshot loads at any base with no
 /// relocation (ADR 0003). The loader trusts nothing: it checks the
 /// geometry, then every entry, block, slot and root invariant with the
-/// heap verifier, then rebuilds the free lists. Frame pins are dropped on
+/// heap verifier (nothing may be young: a snapshot follows a promote-all),
+/// then rebuilds the free lists. Frame pins are dropped on
 /// save; free entries' links are rebuilt on load.
 enum SnapshotError: Error, Equatable, CustomStringConvertible {
     case badMagic
@@ -46,15 +53,19 @@ enum SnapshotError: Error, Equatable, CustomStringConvertible {
 /// touches only the bytes given, with bounds checks: no unsafe code.
 struct SnapshotLayout {
     static let magic: UInt64 = 0x0000_4D4F_4F4A_414B // "KAJOOM\0\0"
-    static let version: UInt64 = 1
-    static let headerWords = 7
+    static let version: UInt64 = 2
+    static let headerWords = 9
 
     let blockCount: Int
     let highWater: UInt64
     let classCount: Int
     let rootCount: Int
+    let queueCount: Int
+    let nilObject: UInt64
     let classTableAt: Int
+    let formatsAt: Int
     let rootsAt: Int
+    let queueAt: Int
     let usedAt: Int
     let used: [UInt64]
     /// File position of each block's bytes.
@@ -75,16 +86,22 @@ struct SnapshotLayout {
         guard w(2) == UInt64(BlockHeap.blockBytes) else { throw .malformed("block size \(w(2))") }
         let words = UInt64(b.count / 8)
         // Every count is bounded by the length before it is used.
-        guard w(3) <= words, w(5) <= words, w(6) <= words else { throw .malformed("a count exceeds the length \(b.count)") }
+        guard w(3) <= words, w(5) <= words, w(6) <= words, w(7) <= words else {
+            throw .malformed("a count exceeds the length \(b.count)")
+        }
         guard w(4) >= 1, w(4) <= 1 << 32 else { throw .malformed("high water \(w(4))") }
         blockCount = Int(w(3))
         highWater = w(4)
         classCount = Int(w(5))
         rootCount = Int(w(6))
+        queueCount = Int(w(7))
+        nilObject = w(8)
         guard classCount >= 1 else { throw .malformed("class table length 0") }
         classTableAt = SnapshotLayout.headerWords * 8
-        rootsAt = classTableAt + classCount * 8
-        usedAt = rootsAt + rootCount * 8
+        formatsAt = classTableAt + classCount * 8
+        rootsAt = formatsAt + classCount * 8
+        queueAt = rootsAt + rootCount * 8
+        usedAt = queueAt + queueCount * 8
         let heapAt = usedAt + blockCount * 8
         guard heapAt <= b.count else { throw .malformed("length \(b.count) is shorter than the sections") }
         var used: [UInt64] = []
@@ -116,6 +133,7 @@ extension ObjectMemory {
 
     /// The whole object memory as snapshot bytes. World stopped.
     func snapshot() -> [UInt8] {
+        prepareOldSpaceOperation(nil)
         retireAllContexts()
         verifyAtPause("before snapshot", phase: .idle)
         let h = heap
@@ -123,8 +141,11 @@ extension ObjectMemory {
         var blockCount = 0
         for b in 0..<h.blockCount where h.isInUse(b) { blockCount = b + 1 }
         let classes = unsafe gc.pointee.classTable.toArray()
+        let formats = unsafe gc.pointee.classFormats.toArray()
         let roots = unsafe gc.pointee.roots.toArray()
-        var size = (SnapshotLayout.headerWords + classes.count + roots.count + blockCount) * 8
+        var queue: [UInt64] = []
+        forEachFinalized { queue.append($0.raw) }
+        var size = (SnapshotLayout.headerWords + 2 * classes.count + roots.count + queue.count + blockCount) * 8
         for b in 0..<blockCount { size += Int(h.usedBytes(b)) }
         size += Int(hw) * 16
         var out = [UInt8](repeating: 0, count: size)
@@ -134,9 +155,11 @@ extension ObjectMemory {
             at += 8
         }
         for v in [SnapshotLayout.magic, SnapshotLayout.version, UInt64(BlockHeap.blockBytes), UInt64(blockCount),
-                  hw, UInt64(classes.count), UInt64(roots.count)] { put(v) }
+                  hw, UInt64(classes.count), UInt64(roots.count), UInt64(queue.count), nilObject.raw] { put(v) }
         for v in classes { put(v) }
+        for v in formats { put(v) }
         for v in roots { put(v) }
+        for v in queue { put(v) }
         for b in 0..<blockCount { put(h.usedBytes(b)) }
         out.withUnsafeMutableBytes { dst in
             for b in 0..<blockCount {
@@ -185,8 +208,8 @@ extension ObjectMemory {
     static func load(snapshot b: [UInt8], config: ObjectMemoryConfig = .init()) throws(SnapshotError) -> ObjectMemory {
         let L = try SnapshotLayout(parsing: b)
         let c = config.effective
-        guard L.blockCount * BlockHeap.blockBytes <= c.heapBytes else {
-            throw .doesNotFit("\(L.blockCount) blocks, heap of \(c.heapBytes / BlockHeap.blockBytes)")
+        guard L.blockCount * BlockHeap.blockBytes <= c.heapBytes + c.reserveBytes else {
+            throw .doesNotFit("\(L.blockCount) blocks, heap of \((c.heapBytes + c.reserveBytes) / BlockHeap.blockBytes)")
         }
         guard L.highWater <= UInt64(c.entryCapacity) else {
             throw .doesNotFit("high water \(L.highWater), table of \(c.entryCapacity)")
@@ -206,7 +229,19 @@ extension ObjectMemory {
     private func fill(from b: [UInt8], _ L: SnapshotLayout) throws(SnapshotError) {
         guard SnapshotLayout.word(b, L.classTableAt) == 0 else { throw .malformed("class 0 is set") }
         let g = unsafe gc
-        for i in 1..<L.classCount { unsafe g.pointee.classTable.append(SnapshotLayout.word(b, L.classTableAt + i * 8)) }
+        guard SnapshotLayout.word(b, L.formatsAt) == 0 else { throw .malformed("class 0 has a format") }
+        for i in 1..<L.classCount {
+            unsafe g.pointee.classTable.append(SnapshotLayout.word(b, L.classTableAt + i * 8))
+            let f = SnapshotLayout.word(b, L.formatsAt + i * 8)
+            let format = ClassFormat(raw: f)
+            guard f & ~ClassFormat.validMask == 0, !(format.isWeak && format.isEphemeron),
+                  !format.isSpecial || L.nilObject != 0 else { throw .malformed("class \(i) has format 0x\(String(f, radix: 16))") }
+            unsafe g.pointee.classFormats.append(f)
+        }
+        unsafe g.pointee.nilObject = Oop(raw: L.nilObject)
+        for i in 0..<L.queueCount {
+            unsafe shared.pointee.finalization.pointee.append(SnapshotLayout.word(b, L.queueAt + i * 8))
+        }
         for i in 0..<L.rootCount {
             let v = SnapshotLayout.word(b, L.rootsAt + i * 8)
             unsafe g.pointee.roots.append(v)

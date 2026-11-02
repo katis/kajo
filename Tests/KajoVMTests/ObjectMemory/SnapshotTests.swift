@@ -206,7 +206,7 @@ func theLoaderRejects(_ c: SnapshotCorruption) throws {
     case .relocatingState: putWord(&b, entry(node), om.bodyOffset(node) | EntryState.relocatingBit)
     case .backReferenceMismatch: putWord(&b, body(node), BackRef.make(entryIndex: other.entryIndex, words: 3))
     case .sizeMismatch: putWord(&b, entry(node) + 8, Header(classIndex: 2, count: 1, isBytes: false).raw)
-    case .reservedHeaderBit: putWord(&b, entry(node) + 8, om.headerWord(node.raw) | Header.youngBit)
+    case .reservedHeaderBit: putWord(&b, entry(node) + 8, om.headerWord(node.raw) | 1 << 50)
     case .framePin: putWord(&b, entry(node) + 8, om.headerWord(node.raw) | Header.framePinBit)
     case .unregisteredClass: putWord(&b, entry(node) + 8, Header(classIndex: 3000, count: 2, isBytes: false).raw)
     case .danglingSlot: putWord(&b, body(node) + 8, Oop(entryIndex: om.highWater + 1).raw)

@@ -58,6 +58,7 @@ enum HeapCorruption: CaseIterable, Sendable {
     case backReferenceNamesAnotherEntry, sizeDisagreesWithHeader, relocatingState
     case reservedHeaderBit, unregisteredClass, freeEntryWithHeader, twoEntriesOneBody, offsetIntoAnotherBody
     case markLeftSet, usedEndsMidBody, usedNotAligned, freeBlockWithUsedBytes, badRoot, badClassTableEntry
+    case youngOutsideNursery, youngOnlyBitsInOld
 
     var needle: String {
         switch self {
@@ -79,6 +80,8 @@ enum HeapCorruption: CaseIterable, Sendable {
         case .freeBlockWithUsedBytes: "free block"
         case .badRoot: "root"
         case .badClassTableEntry: "class table"
+        case .youngOutsideNursery: "nursery region"
+        case .youngOnlyBitsInOld: "young-only"
         }
     }
 }
@@ -105,7 +108,7 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
     case .sizeDisagreesWithHeader:
         om.setHeader(s.a, Header(classIndex: 2, count: 1, isBytes: false))
     case .relocatingState: om.setStateWord(s.a.raw, om.bodyOffset(s.a) | EntryState.relocatingBit)
-    case .reservedHeaderBit: om.setHeaderWord(s.a.raw, om.header(s.a).raw | Header.youngBit)
+    case .reservedHeaderBit: om.setHeaderWord(s.a.raw, om.header(s.a).raw | 1 << 49)
     case .unregisteredClass: om.setHeader(s.b, Header(classIndex: 999, count: 1, isBytes: false))
     case .freeEntryWithHeader: om.setHeaderWord(s.garbage.raw, Header(classIndex: 2, count: 0, isBytes: false).raw)
     case .twoEntriesOneBody:
@@ -125,6 +128,8 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
     case .freeBlockWithUsedBytes: om.heap.setUsed(s.freeBlock, 64)
     case .badRoot: om.setRoot(s.rootHandle, Oop(entryIndex: hw + 3))
     case .badClassTableEntry: om.setClassOop(3, s.garbage)
+    case .youngOutsideNursery: om.setHeader(s.a, om.header(s.a).youngIn(nursery: 0))
+    case .youngOnlyBitsInOld: om.setHeaderWord(s.a.raw, om.header(s.a).raw | 2 << Header.ageShift)
     }
     s.check(om.verifyHeap(), c.needle)
 }

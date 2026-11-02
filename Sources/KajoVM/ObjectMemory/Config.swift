@@ -47,8 +47,15 @@ enum VerifyFailurePolicy: Sendable {
 }
 
 struct ObjectMemoryConfig: Sendable {
-    /// A multiple of the block size, at most 4 GiB (the alias distance).
+    /// Old space's soft size: a multiple of the block size. Mutators may
+    /// fill this much; the blocks of `reserveBytes` beyond it are for
+    /// promotion only (module 4), so a scavenge never fails for lack of
+    /// space. Blocks, reserve and nurseries together fit in 4 GiB.
     var heapBytes = 64 << 20
+    /// The promotion reserve: blocks after the soft limit that only a
+    /// scavenge's promotion may take (module 4 sizes it from the nurseries,
+    /// `NurseryConfig.reserveBytes`). A multiple of the block size.
+    var reserveBytes = 0
     /// Entries reserved; the table never grows in module 1.
     var entryCapacity = 1 << 22
     /// Entries per refill of an allocation context.
@@ -63,7 +70,7 @@ struct ObjectMemoryConfig: Sendable {
     /// The configuration after the stress flags are applied.
     var effective: ObjectMemoryConfig {
         var c = self
-        if stress.contains(.oneBlockHeap) { c.heapBytes = BlockHeap.blockBytes }
+        if stress.contains(.oneBlockHeap) { c.heapBytes = BlockHeap.blockBytes; c.reserveBytes = 0 }
         if stress.contains(.tinyEntryChunks) { c.entryChunk = 2 }
         return c
     }

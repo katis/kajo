@@ -116,20 +116,29 @@ extension ObjectMemory {
         let e = unsafe c.pointee.freeEntry
         unsafe c.pointee.top = off &+ bytes
         unsafe c.pointee.freeEntry = stateWord(e) & EntryState.nextMask
+        initializeObject(e, at: off, header: header.raw, bytes: bytes, fill: fill.raw)
+        unsafe c.pointee.counters.allocations &+= 1
+        unsafe c.pointee.counters.allocatedBytes &+= bytes
+        return Oop(raw: e)
+    }
+
+    /// Write a new object: its body at `off` (back reference, then `fill`
+    /// in every slot word; a byte object's words are zero, `fill` 0) and
+    /// its entry (header, then the state word). Module 4's eden allocation
+    /// shares it.
+    @inline(__always)
+    func initializeObject(_ e: UInt64, at off: UInt64, header: UInt64, bytes: UInt64, fill: UInt64) {
         let words = bytes &>> 3
         let body = Int(truncatingIfNeeded: off)
         unsafe heapBase.storeBytes(of: BackRef.make(entryIndex: e &>> 4, words: words), toByteOffset: body, as: UInt64.self)
         var i = 1
         let n = Int(truncatingIfNeeded: words)
         while i < n {
-            unsafe heapBase.storeBytes(of: fill.raw, toByteOffset: body &+ i &<< 3, as: UInt64.self)
+            unsafe heapBase.storeBytes(of: fill, toByteOffset: body &+ i &<< 3, as: UInt64.self)
             i &+= 1
         }
-        setHeaderWord(e, header.raw)
+        setHeaderWord(e, header)
         setStateWord(e, off)
-        unsafe c.pointee.counters.allocations &+= 1
-        unsafe c.pointee.counters.allocatedBytes &+= bytes
-        return Oop(raw: e)
     }
 
     /// The one out-of-line call of the allocation path: refill the block or
@@ -151,9 +160,9 @@ extension ObjectMemory {
     /// A body of `bytes` with no entry, for an operation that repoints an
     /// existing entry (reshape). The back reference is the caller's to write.
     /// `nil` when no block has room.
-    func allocateBody(_ ctx: AllocContext, bytes: UInt64) -> UInt64? {
+    func allocateBody(_ ctx: AllocContext, bytes: UInt64, reserve: Bool = false) -> UInt64? {
         let c = unsafe ctx.state
-        if unsafe c.pointee.top &+ bytes > c.pointee.end, !refillBlock(ctx, bytes: bytes) {
+        if unsafe c.pointee.top &+ bytes > c.pointee.end, !refillBlock(ctx, bytes: bytes, reserve: reserve) {
             unsafe c.pointee.counters.allocationFailures &+= 1
             return nil
         }
@@ -163,16 +172,28 @@ extension ObjectMemory {
         return off
     }
 
-    private func refillBlock(_ ctx: AllocContext, bytes: UInt64) -> Bool {
+    /// Take a block from the pool for `ctx`. A mutator (`reserve: false`)
+    /// refuses a free block once the soft limit's worth are in use; a
+    /// scavenge's promotion (`reserve: true`) may take the reserve.
+    func refillBlock(_ ctx: AllocContext, bytes: UInt64, reserve: Bool = false) -> Bool {
         retire(ctx)
         let c = unsafe ctx.state
         lockPools()
         defer { unlockPools() }
-        while let b32 = unsafe pools.pointee.freeBlocks.popLast() {
+        while let b32 = unsafe pools.pointee.freeBlocks.last {
             let b = Int(b32)
             let start = BlockHeap.start(ofBlock: b)
             let used = heap.usedBytes(b)
+            let wasInUse = heap.isInUse(b)
+            if unsafe !wasInUse && !reserve && pools.pointee.blocksInUse >= pools.pointee.softLimitBlocks {
+                // At the soft limit: the rest is the promotion reserve. The
+                // caller collects (tails deeper in the pool wait for the
+                // next rebuild).
+                break
+            }
+            _ = unsafe pools.pointee.freeBlocks.popLast()
             heap.setInUse(b, true)
+            if unsafe !wasInUse { unsafe pools.pointee.blocksInUse += 1 }
             if used &+ bytes <= UInt64(BlockHeap.blockBytes) {
                 unsafe c.pointee.top = start &+ used
                 unsafe c.pointee.end = start &+ UInt64(BlockHeap.blockBytes)
@@ -181,6 +202,7 @@ extension ObjectMemory {
             }
             // A compaction tail too short for this body stays in use as is.
         }
+        if reserve { unsafe pools.pointee.reserveExhausted &+= 1 }
         return false
     }
 

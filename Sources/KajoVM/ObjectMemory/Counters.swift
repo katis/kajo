@@ -24,6 +24,11 @@ struct Counters: Sendable, Equatable {
     var referencesForwarded: UInt64 = 0
     var reshapedObjects: UInt64 = 0
     var snapshotsSaved: UInt64 = 0
+    /// Weak slots set to nil because their referent was reclaimed (full
+    /// collections; the scavenge counts its own).
+    var weakSlotsNiled: UInt64 = 0
+    /// Ephemerons queued for finalization (each at most once).
+    var ephemeronsQueued: UInt64 = 0
     var verifierRuns: UInt64 = 0
     var verifierFailures: UInt64 = 0
 }
