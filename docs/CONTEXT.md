@@ -21,11 +21,34 @@ as they are understood.
 
 ## Execution
 
-- **Worker**: an OS thread that executes Smalltalk processes. Many workers
-  share one heap.
-- **Process**: a Smalltalk-level thread of control, scheduled onto workers.
-- **Safepoint**: a point where a worker checks whether it must pause for the
-  collector. Reached at sends and backward jumps.
+- **Worker**: an OS thread that executes Smalltalk Processes, with its own
+  interpreter state, lookup cache and allocation context. Many workers share
+  one heap. Worker 0 is the **main worker**: the shell's main thread, inside
+  the VM only during a Turn. Background workers are threads of the VM at
+  user-initiated QoS; the host worker serves host calls. Idle workers wait
+  untimed.
+- **Process**: a Smalltalk-level thread of control, scheduled onto workers:
+  a heap object (class 13: priority, state, affinity, saved registers as
+  integers, result, exit Semaphore), a native record and its own stack. It
+  can leave one worker mid-method and resume on another. A **main-affine**
+  Process runs only on the main worker.
+- **Semaphore**: a heap object (class 14): excess signals and a FIFO list of
+  waiting Processes. The only way a Process waits; primitives never block.
+- **Safepoint**: a point where a worker checks whether it must pause for a
+  stop, and every `pollEvery` polls its budget. Reached at sends and
+  backward jumps. A **stop** brings every worker inside the VM to a
+  safepoint (parked) so one of them can collect, compact or become.
+- **Turn**: one call of the shell into the VM on the main thread
+  (`runMain`): main-affine Processes run until none is ready or the turn's
+  budget is spent; a Process that overruns is preempted at its next budget
+  check.
+- **Hop**: a primitive that must run on the main thread, called on another
+  worker, suspends its Process with the send rewound, makes it main-affine
+  and wakes the main worker, which retries the send.
+- **External signal**: a Semaphore signal from a thread outside the VM (a
+  completion handler, the shell), pushed onto a lock-free queue that workers
+  drain at budget checks, turns and when they wake. A **pending root** keeps
+  the Semaphore alive until it is drained.
 - **Primitive**: VM-implemented behaviour reachable from Smalltalk by send.
   The boundary where the VM checks bounds and types so Smalltalk code can
   never corrupt memory.
@@ -34,8 +57,8 @@ as they are understood.
   on. Word 0 is nil and every word up to sp is a valid oop, so the collector
   scans it uniformly. Module 3 gives one to each Process.
 - **Frame**: one activation on a stack: receiver, arguments, temps, then a
-  four-word header (method, caller pc, caller fp, caller hdr) and the
-  operand stack. The caller links are SmallIntegers holding a bytecode
+  five-word header (method, caller pc, caller fp, caller hdr, and the
+  frame's Context, nil until materialized: ADR 0009) and the operand stack. The caller links are SmallIntegers holding a bytecode
   offset and word indices, never addresses, so neither moving bytecodes
   nor a moving stack needs them fixed.
 - **Send**: finding and running the method for a receiver's class and a

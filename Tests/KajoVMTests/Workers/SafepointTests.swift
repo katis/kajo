@@ -127,8 +127,13 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
         case 1: rt.vm.compact()
         default:
             if ops == 2 {  // once: Pair gains a third instance variable
-                rt.vm.withWorldStopped(roots: true) { om, _ in
-                    _ = try? om.reshape(classIndex: pair, namedSlots: 3, layout: [0, 1, nil], fill: rt.image.nilObject)
+                // Reshape allocates every new body and does not collect: a
+                // collection first, in the same stop, gives it room.
+                rt.vm.withWorldStopped(roots: true) { om, roots in
+                    om.collect(extraRoots: roots)
+                    #expect(throws: Never.self) {
+                        try om.reshape(classIndex: pair, namedSlots: 2, layout: [0, 1, nil], fill: rt.image.nilObject)
+                    }
                     om.store(om.classOop(pair), ClassLayout.instSize, int(3))
                 }
             } else {
