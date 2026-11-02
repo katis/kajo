@@ -17,6 +17,13 @@
 #   p2quiet  1 MB/s for 60 s, stw and conc-utility, P2RUNS runs
 #   p3       idle: novm parked link tick tickalloc (2 MB/s, utility and
 #            user-initiated), 60 s each, P3RUNS runs
+#   p1x      added after p1: walk22x4 only, alone / t10000 / wfe / spin,
+#            P1XRUNS runs, to count slow-regime launches per configuration
+#            (p1's builds are reused)
+#   p2x      added after p2: 100 and 150 MB/s x the four configurations,
+#            P2RUNS runs, to place where conc-utility starts missing frames
+#   p3x      added after p3: parked and tick with KAJO_GC=stw (no marker
+#            thread), P3RUNS runs, to name the source of idle wakeups
 #   pull     copy Documents/*.txt from the phone into results/device-*.txt
 #
 # Usage: SCRATCH=<dir> ./bench-device.sh                 (everything)
@@ -178,9 +185,43 @@ if has p3; then
     p3 "$O" drift-end novm conc-utility 1
 fi
 
+if has p1x; then
+    O="$R/dev-p1x.txt"
+    echo "== p1x: walk22x4 x none t10000 wfe spin, ${P1XRUNS:-8} runs"
+    cooldown
+    for run in $(seq 1 "${P1XRUNS:-8}"); do
+        for c in none t10000 wfe spin; do walk "$O" matrix walk22x4 1 "$c" "$run"; done
+        echo "   run $run done ($(tail -1 "$O" | grep -o 'thermal_end=[a-z]*'))"
+        if (( run % 4 == 0 )); then cooldown; fi
+    done
+    walk "$O" drift-end walk22x4 1 none 1
+fi
+
+if has p2x; then
+    O="$R/dev-p2x.txt"
+    echo "== p2x: 100 150 MB/s x [$CFGS], ${SECONDS_P2} s, $P2RUNS runs"
+    cooldown
+    for run in $(seq 1 "$P2RUNS"); do
+        for r in 100 150; do
+            for c in $CFGS; do p2 "$O" matrix "$c" "$r" "$SECONDS_P2" "$run"; done
+        done
+        echo "   run $run/$P2RUNS done ($(tail -1 "$O" | grep -o 'thermal_end=[a-z]*'))"
+        cooldown
+    done
+fi
+
+if has p3x; then
+    O="$R/dev-p3x.txt"
+    echo "== p3x: parked, tick with no marker (stw), $P3RUNS runs"
+    for run in $(seq 1 "$P3RUNS"); do
+        p3 "$O" matrix parked stw "$run"
+        p3 "$O" matrix tick stw "$run"
+    done
+fi
+
 if has pull; then
     echo "== pull Documents"
-    for f in hello p1 p1chase p2 p3 cooldown unplugged; do
+    for f in hello p1 p1chase p2 p3 cooldown unplugged smoke; do
         xcrun devicectl device copy from --device "$DEVICE" --domain-type appDataContainer \
             --domain-identifier "$BUNDLE" --source "Documents/$f.txt" --destination "$R/device-$f.txt" > /dev/null 2>&1 || true
     done
