@@ -145,6 +145,21 @@ extension ObjectMemory {
         return place(ctx, header: header, bytes: bytes, fill: fill)
     }
 
+    /// A body of `bytes` with no entry, for an operation that repoints an
+    /// existing entry (reshape). The back reference is the caller's to write.
+    /// `nil` when no block has room.
+    func allocateBody(_ ctx: AllocContext, bytes: UInt64) -> UInt64? {
+        let c = unsafe ctx.state
+        if unsafe c.pointee.top &+ bytes > c.pointee.end, !refillBlock(ctx, bytes: bytes) {
+            unsafe c.pointee.counters.allocationFailures &+= 1
+            return nil
+        }
+        let off = unsafe c.pointee.top
+        unsafe c.pointee.top = off &+ bytes
+        unsafe c.pointee.counters.allocatedBytes &+= bytes
+        return off
+    }
+
     private func refillBlock(_ ctx: AllocContext, bytes: UInt64) -> Bool {
         retire(ctx)
         let c = unsafe ctx.state
