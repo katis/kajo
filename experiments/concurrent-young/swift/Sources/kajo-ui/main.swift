@@ -219,7 +219,7 @@ final class Controller: NSObject, NSApplicationDelegate {
             cfg.verify = opt.verify
             var y = ycConfigFromEnv()
             switch s {
-            case "Y1": y.mode = YoungMode.stw
+            case "Y1", "Y4s", "Y5s": y.mode = YoungMode.stw // Y4s, Y5s: baselines for Y4, Y5
             case "Y2", "Y4l", "Y5l": y.mode = YoungMode.local
             default: y.mode = YoungMode.offload
             }

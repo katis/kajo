@@ -133,7 +133,7 @@ def pauses(rows):
                     f(median(num(r, 'initial_p50') for r in rs), 3), f(max(num(r, 'initial_max') for r in rs), 3)))
     return '\n'.join(out)
 
-SC = ['Y0', 'Y1', 'Y2', 'Y3', 'Y4l', 'Y4o', 'Y5l', 'Y5o', 'Y6']
+SC = ['Y0', 'Y1', 'Y2', 'Y3', 'Y4l', 'Y4o', 'Y4s', 'Y5l', 'Y5o', 'Y5s', 'Y6']
 
 def scenarios(rows):
     out = ['\n### Scenarios (median run by missed120, then max gap; 10 s)\n',

@@ -16,7 +16,8 @@
 #   Part 3 (b): alloc survivors30 oldheap64 fragment share on 8 workers as
 #   localb / offloadb (KAJO_IM=scavenge, the forced global scavenge at the
 #   initial mark) against local / offload ((a), young-root scan).
-# Scenarios: Y0 Y1 Y2 Y3 Y4l Y4o Y5l Y5o Y6, SRUNS (3) runs x 10 s, then Y3
+# Scenarios: Y0 Y1 Y2 Y3 Y4l Y4o Y4s Y5l Y5o Y5s Y6 (Y4s, Y5s: the Y4 and Y5
+#   loads under the stop-the-world scavenge, baselines added after the first run), SRUNS (3) runs x 10 s, then Y3
 #   and Y6 once each with --verify.
 #
 # Usage: ./bench.sh            (everything)
@@ -32,7 +33,7 @@ SECONDS_PER=${SECONDS_PER:-10}
 PARTS=${PARTS:-"build kernels extras scenarios verify report"}
 KERNELS=${KERNELS:-"arith fib sends ivars storeheavy alloc churn survivors5 survivors30 oldheap64 fragment share"}
 CONFIGS=${CONFIGS:-"orig adr7 adr7b local offload nobarrier"}
-SCENARIOS=${SCENARIOS:-"Y0 Y1 Y2 Y3 Y4l Y4o Y5l Y5o Y6"}
+SCENARIOS=${SCENARIOS:-"Y0 Y1 Y2 Y3 Y4l Y4o Y4s Y5l Y5o Y5s Y6"}
 KRAW=${KRAW:-"$HERE/bench-raw-kernels.txt"}
 SRAW=${SRAW:-"$HERE/bench-raw-scenarios.txt"}
 PRAW=${PRAW:-"$HERE/bench-raw-pauses.txt"}
