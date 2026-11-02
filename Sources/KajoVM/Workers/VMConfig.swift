@@ -30,8 +30,8 @@ struct VMConfig: Sendable {
 /// Stress flags of this module (module 1's are in `StressFlags`).
 struct VMStress: OptionSet, Sendable {
     let rawValue: UInt8
-    /// Countdown 1 and a deadline that has always passed: every poll
-    /// preempts the running Process.
+    /// Countdown 1 and a deadline that has always passed: every poll but
+    /// the first of a slice preempts the running Process.
     static let preemptEveryPoll = VMStress(rawValue: 1)
     /// Countdown 1 and every poll slow path stops the world and collects.
     static let stopEveryPoll = VMStress(rawValue: 2)

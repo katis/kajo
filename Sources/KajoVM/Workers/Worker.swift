@@ -37,6 +37,10 @@ enum LeaveReason: UInt8, Sendable {
     var deadline: UInt64 = .max
     var pollEvery: Int
     var minPriority = 0
+    /// No poll of the current slice has run yet: `preemptEveryPoll` lets
+    /// the first one pass, or a Process resumed at a send would be
+    /// preempted at that send again and never progress.
+    var freshSlice = false
     /// Wait time, kept apart from work time (AGENTS.md): parked in someone
     /// else's stop, stopping the world itself, entering and leaving.
     var parkNs: UInt64 = 0

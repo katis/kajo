@@ -17,6 +17,7 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     unsafe w.pointee.leave = .none
     unsafe s.pointee.exit = .running
     unsafe s.pointee.countdown = w.pointee.pollEvery
+    unsafe w.pointee.freshSlice = true
     unsafe vm.count(.slices)
     let sp = intSlot(om, p, ProcessLayout.sp), pc = intSlot(om, p, ProcessLayout.pc)
     let start: Regs
