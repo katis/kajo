@@ -709,14 +709,11 @@ func ycCollect(_ vm: VMRef, _ c: WorkerRef, _ k: Int, verify: Bool = true) {
     for i in 0..<nur.pointee.deferred.count {
         let o = nur.pointee.deferred.ptr[i]
         let idx = Int(truncatingIfNeeded: o &>> 4)
-        let rw = vm.pointee.space.rem[idx].exchange(0, ordering: .sequentiallyConsistent) // DIAG
-        if rw != 0 {
-            diag(DiagEv.deferKept, k, UInt64(idx), UInt64(rw)) // DIAG
+        if vm.pointee.space.rem[idx].exchange(0, ordering: .sequentiallyConsistent) != 0 {
             nur.pointee.deferred.ptr[kept] = o
             kept += 1
             continue
         }
-        diag(DiagEv.deferFree, k, UInt64(idx), UInt64(k)) // DIAG
         atomicWord(vm.pointee.space.used + (idx &>> 6)).pointee.bitwiseAnd(~(UInt64(1) &<< UInt64(idx & 63)), ordering: .releasing)
     }
     st.deferredFrees = UInt64(nur.pointee.deferred.count - kept)
@@ -1059,13 +1056,8 @@ private func sweepCollection(_ vm: VMRef, _ nur: UnsafeMutablePointer<Nur>, _ k:
                 ent.pointee.store(ent.pointee.load(ordering: .relaxed) & ~(slotsMask &<< slotsShift), ordering: .releasing)
                 sp.rem[idx].store(0, ordering: .sequentiallyConsistent)
                 nur.pointee.deferred.push(UInt64(idx) &<< 4)
-                diag(DiagEv.deferPush, k, UInt64(idx), UInt64(k)) // DIAG
                 dead &= ~(UInt64(1) &<< UInt64(b))
             }
-        }
-        if dead != 0 && cmPhase(vm) == CMPhase.marking && gw < vm.pointee.cm.snapWords.pointee && vm.pointee.cm.snap[gw] & dead != 0 { // DIAG
-            var d2 = vm.pointee.cm.snap[gw] & dead
-            while d2 != 0 { let b = d2.trailingZeroBitCount; d2 &= d2 &- 1; diag(DiagEv.ycFreeSnap, k, UInt64(gw &* 64 &+ b), UInt64(k)) }
         }
         if dead != 0 { atomicWord(sp.used + gw).pointee.bitwiseAnd(~dead, ordering: .releasing) }
         freed &+= UInt64(dead.nonzeroBitCount)
