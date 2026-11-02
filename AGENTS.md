@@ -137,6 +137,22 @@ Safety:
  - ThreadSanitizer cannot see that two mappings of the same memory alias.
    Any protocol built on a double mapping is covered by tests and the
    ordering argument only; say so where the mapping is created.
+ - In a concurrent collector the roots are the problem, never the copying.
+   Any handshake protocol needs a barrier-on round before any stack is
+   scanned; a single round is unsound even under sequential consistency.
+   Write the lost-object test before the protocol.
+ - An owner that keeps allocating during its own collection is a root
+   source: its fresh eden must be scanned and stores into it snooped.
+ - Lists of heap references kept across a concurrent collection (remembered
+   sets, deletion records) can name entries freed and reallocated meanwhile.
+   Free such entries only after an epoch.
+ - Keep per-object atomics and side-table scans out of copy loops. One CAS,
+   one fence and one hazard-slot scan per object halved the copy rate.
+ - Interpreter registers are roots. The `result` register kept dead objects
+   alive and only a test that must fail without the rule found it.
+ - Pause maxima depend on the OS descheduling any VM thread. Report p50 and
+   p99 with the max, name the slowest participant, and re-measure on device
+   before trusting a maximum.
 
 ## Verification
 
@@ -158,7 +174,10 @@ generational collection with per-worker nurseries (proposed), 0006
 concurrent marking and lazy sweeping of old space (proposed; pauses no longer
 depend on heap size, given old-space headroom), 0007 age field with survivor
 spaces and concurrent relocation of old space through the entry table
-(proposed; old-space work is off the frame budget, scavenges remain). Read
+(proposed; old-space work is off the frame budget, scavenges remain), 0008
+young collection without stopping the world, offloaded for the main thread
+and local for background workers (proposed; no collector pause on the main
+thread exceeds a frame, acknowledgements and the initial mark remain). Read
 them before touching the areas they cover.
 
 ## Project structure
