@@ -255,6 +255,26 @@ Safety:
  - Class, Method and MethodDict are sealed from Smalltalk (no primitive
    reads, writes, creation or become; no ivar access in their methods) or a
    verified method's bytecodes could be rewritten at run time.
+ - A stress mode that preempts at every poll livelocks: a Process preempted
+   at a send is resumed at that send and preempted again. Every slice must
+   execute at least one instruction; the stress flag lets the first poll of
+   a slice through, and that configuration is its regression test.
+ - A lock-free push is not a lock-free wakeup. Waking an idle worker that
+   waits untimed needs the scheduler lock, or the signal can land between
+   its check and its wait and be lost. The push stays lock-free; the wake
+   takes the lock.
+ - Incremental builds hid 82 unmarked unsafe constructs; the strict memory
+   safety warnings appear only on a clean build. Clean-build before
+   counting or claiming the unsafe surface.
+ - A rule whose broken variant traps (register flush before a stop) cannot
+   live in the suite; run it by hand and record the trap message in the
+   module doc. Rules whose broken variants fail a verifier go in the suite
+   as test switches (parked count, publish order, result register).
+ - Verifiers at every stop (no parker returns while the stop works; workers
+   and Process records name each other) cost nothing measurable and are
+   what turns a broken-protocol test switch into a failing test.
+ - Put the interpreter state at offset 0 of the worker, so the interpreter's
+   state pointer is the worker pointer and the hot path pays no second load.
  - Device iteration is fast: about one second per launch over `devicectl`,
    with stdout streamed. Design device benchmarks as one kernel per launch
    so a crash costs one run and thermal state is logged per launch.
@@ -275,7 +295,8 @@ that produced its evidence. Current: 0001 Swift for the VM core, 0002
 repository layout, 0003 object table for object representation (accepted;
 2x per cache-missing hop and 1.8 to 2x marking against direct pointers,
 entry locality rejected), 0004 Smalltalk UI code on the main thread with
-budgeted preemption (proposed, pending a pause-bounded collector), 0005
+budgeted preemption (proposed, built headlessly in module 3; pending a
+pause-bounded collector and the shell's 120 Hz measurement), 0005
 generational collection with per-worker nurseries (proposed), 0006
 concurrent marking and lazy sweeping of old space (proposed; pauses no longer
 depend on heap size, given old-space headroom), 0007 age field with survivor
@@ -303,7 +324,10 @@ cover.
  * `Sources/KajoVM/` the VM core, one directory per module:
    `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`),
    `Interpreter/` and `Loader/` (module 2, built; `docs/modules/interpreter.md`),
-   `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   `Workers/` and `Processes/` (module 3, built; `docs/modules/workers.md`:
+   workers, safepoints, Process-owned stacks, scheduler, budgeted
+   preemption, external signals, the seeded random-program generator and
+   `just soak`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
    CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
    targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
