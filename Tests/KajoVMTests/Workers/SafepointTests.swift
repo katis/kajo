@@ -14,6 +14,12 @@ import Testing
 /// a stop's work runs; the broken protocol is a test switch.
 @Test(arguments: [false, true])
 func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
+    // The broken protocol lets a released worker run inside the next stop,
+    // which is a data race by construction: ThreadSanitizer reports it
+    // (the schedule verifier reading `current` while the worker writes it)
+    // and fails the gate. The stop verifier shows the bug in every other
+    // build; under the sanitizer only the rule-on case runs.
+    if broken && underThreadSanitizer { return }
     let rt = try Runtime(churnSrc, background: 7, heapBlocks: 512, configure: {
         $0.testSwitches.countReleasedAsParked = broken
     })

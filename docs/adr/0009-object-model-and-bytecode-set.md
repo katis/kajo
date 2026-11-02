@@ -63,6 +63,25 @@ external queue; a Process takes each ephemeron with primitive 37
 as strong, so a young key's finalization waits for the first full
 collection. Module 5 implements the key rule in the concurrent marker.
 
+**The concurrent marker (module 5, 2026-11-03).** The marker does not
+trace weak slots; it lists every weak object and every unresolved
+ephemeron it marks. An ephemeron is unresolved when its key is an unmarked
+snapshot entry (a key that is young or newer than the snapshot is live by
+construction); one whose key is marked is traced at once. At the final mark
+(world stopped): unresolved ephemerons whose key got marked are traced, to
+a fixpoint; the rest are fired (bit 48, the finalization queue, the
+Semaphore signalled after the stop) and traced, key included, so key and
+value survive the cycle; then every listed weak object's weak slots naming
+an unmarked snapshot entry become nil. Survivors (young at the snapshot)
+are scanned as roots with their weak and ephemeron slots strong. Because
+the marker runs while mutators do, `at:` on a weak slot records its
+referent while a cycle marks (a keep-alive read barrier): otherwise a
+referent read through a weak slot and stored elsewhere would be freed under
+a live reference. Ephemeron keys need no such barrier: a marked
+ephemeron's key is marked by the final mark either way. One consequence: an
+ephemeron whose key was reachable only through it at the snapshot is fired
+even if a mutator read the key through it during the cycle.
+
 ### 2. Immediates: SmallInteger, SmallFloat, Character (before module 4)
 
 The tag scheme of module 1 reserved the low-nibble patterns with bit 0 clear.

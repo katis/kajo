@@ -155,3 +155,50 @@ Re-measured on the iPhone (experiments/power/RESULTS.md, dated section):
 parked wakeups fell from 131.6 to 0.08 per second, the no-marker floor; the
 120 Hz tick fell from 216 to 76, also the floor. The production marker
 inherits the rule (docs/PLAN.md: idle threads wait untimed).
+
+## Built: module 5 (2026-11-03)
+
+Built in `Sources/KajoVM/Marking/` (docs/modules/concurrent-marking.md),
+on the production nursery of ADR 0005 and 0007. As decided, with these
+choices: the snapshot is a copy of an **old map** (one bit per entry, set
+when an entry becomes old: an old allocation, or a promotion seen by the
+scavenge's entry sweep), O(table words) to take; the barrier tests one
+VM-wide flag word before every pointer store and sends the store to one
+out-of-line call when it is set (two instructions in `store_ivar`; 1.4
+percent on `ivars` against module 4, interleaved, with marking off); marks
+are relaxed byte stores by the one marker participant; a keep-alive read
+barrier on `at:` of weak slots was needed (the marker does not trace them
+and SATB records stores, not loads); the sweeper requests its own short
+apply stop when no scavenge applied first; a module 1 operation abandons a
+marking cycle and finishes a sweep in its pause.
+
+The headless matrix (M2 Max, release, five interleaved runs, medians; old
+space 2N + 64 MiB, 4 MiB nurseries, N = 2):
+
+| live old data | workers | stop-the-world fulls, max | final mark p50 / max | initial mark added p50 / max | fallbacks |
+|---|--:|---|---|---|--:|
+| 64 MiB | 1 | 0 | 0.014 / 0.018 ms | 0.12 / 0.14 ms | 0 |
+| 64 MiB | 8 | 0 | 0.112 / 0.155 ms | 0.56 / 0.83 ms | 0 |
+| 256 MiB | 1 | 2, 35.8 ms | 0.013 / 0.056 ms | 0.08 / 0.16 ms | 0 |
+| 256 MiB | 8 | 2, 44.3 ms | 0.143 / 0.234 ms | 0.57 / 0.94 ms | 0 |
+| 512 MiB | 1 | 2, 69.2 ms | 0.010 / 0.037 ms | 0.09 / 0.20 ms | 0 |
+| 512 MiB | 8 | 2, 86.3 ms | 0.128 / 0.839 ms | 0.60 / 0.94 ms | 0 |
+
+The final mark does not grow with heap size; with eight workers it is
+mostly time to safepoint. The initial mark's addition to its scavenge is
+mostly the survivor scan (ADR 0007), single threaded. The allocation storm
+on eight workers: with a 256 MiB old space and N = 2, about 1 GB/s
+promoted and zero fallbacks; at N = 1 (2 GB/s) two fallbacks per run;
+into a 64 MiB old space at N = 1, 21 fallbacks per run (stop-the-world
+needed 32 full collections). The headroom condition stands.
+
+QoS policy as implemented: the marker thread starts at utility; the policy
+wants user-initiated from the scavenge whose end finds headroom below 25
+percent of the soft limit, and utility again from the apply of a cycle that
+ends above it; the marker changes its own QoS
+(`pthread_set_qos_class_self_np`) at its next poll or work period, counts
+each change and logs the QoS it marked at per cycle. In the storm with a
+64 MiB old space it marked at user-initiated in 12 to 13 of 13 to 15
+cycles. The escalation itself is still unmeasured on a phone (module 9).
+The marker waits untimed (0 ns of CPU and 0 wakeups in a parked second;
+cycles after idling finish in under 2 ms).
