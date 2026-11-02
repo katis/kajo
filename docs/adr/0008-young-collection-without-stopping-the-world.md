@@ -205,11 +205,27 @@ Amendment: on device the young collector thread stays at
 **user-initiated**; the marker goes to utility (ADR 0006). This is the
 "mixed" policy and it never missed a frame up to 200 MB/s.
 
-**Open defect.** The test `sharedYoungObjectsAreClaimedOnceByParallelScavengers`
-(parallel stop-the-world scavenge with shared young objects) failed under
-CPU contention in `experiments/power` twice out of two full-suite runs and
-1 of 20 alone, and 0 of 23 in the concurrent-young package itself; an
-earlier full run during concurrent-young showed 3 unnamed issues under
-load. A schedule-dependent claim bug in the parallel scavenge is likely.
-It is in the stop-the-world oracle path, so every checksum comparison in
-this ADR and 0007 leans on it. Diagnose before building on this collector.
+**Defect found and fixed (2026-11-02).** The test
+`sharedYoungObjectsAreClaimedOnceByParallelScavengers` failed under CPU
+contention (10 of 40 under load, 0 of 20 idle). The parallel stop-the-world
+scavenge was not at fault: the failing check was the concurrent-mark
+verifier, and the test runs the `local` mode by default; `stw` and `offload`
+passed 40 of 40 under the same load. Root cause (SPEC amendment 10 and 17,
+`experiments/concurrent-young/DIAGNOSIS-parallel-scavenge.md`): a dead
+remembered young holder whose `rem` word another nursery's collection
+re-armed keeps its entry used until its own nursery's next collection,
+during which it is in no young log. The initial-mark snapshot and the full
+sweep both read "used and in no young log" as an old object, so the
+nursery and the old-space collector both freed the entry, and the second
+free took the object that had reused it. The fix (commit 7484f9b, 28
+lines, no hot-path change) makes the nursery the only owner of a deferred
+entry: the snapshot excludes deferred entries, the full sweep hides their
+bits, and the scavenge verifier skips them as the other verifiers already
+did. Two deterministic regression tests fail 20 of 20 without the fix and
+pass 50 of 50 with it; the full suite passes under load and under
+ThreadSanitizer. The oracle (`stw`) never defers a free, so no stop-the-world
+number changes; `local` and `offload` old-space counts (snapshot entries,
+sweep frees, floating garbage) in concurrent-young's RESULTS.md and the
+tables above could differ by the kept entries and were not re-run. All
+published checksums were equal, so no run lost an object that a checksum
+saw. The verifier found the defect; the checksum did not.

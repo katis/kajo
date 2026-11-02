@@ -203,9 +203,23 @@ Safety:
    for zero.
  - An empty Smalltalk turn on every 120 Hz frame costs nothing beyond the
    display link itself.
- - A test that fails only when three test targets run at once is a real
-   schedule-dependent bug, not noise; the parallel stop-the-world scavenge
-   has one (ADR 0008, open defect). Run suites under CPU load on purpose.
+ - A test that fails only under CPU load is a real schedule-dependent bug.
+   Run the suite under load on purpose (a dozen busy loops) as part of the
+   gate; the lost-object bug in ADR 0008's deferred entry frees was idle-safe
+   in 20 runs and failed 1 in 4 under load.
+ - Read the `verify:` message before naming the suspect. The test was
+   called "parallel scavengers" and the failing check was the concurrent
+   mark verifier in a different collector mode; the brief pointed at the
+   wrong protocol and the agent had to find that out first.
+ - Every entry state between generations needs exactly one owner. An entry
+   that is "used but in no young log" is read as old by the snapshot and
+   the sweep; deferring a free without hiding the entry from the old-space
+   collector let two collectors free it. Whenever a protocol adds an
+   in-between state, list every reader of the entry table and every
+   verifier's skip rule and make them agree in the same commit.
+ - Checksums do not see every lost object; the mark verifier does. Keep
+   the verifiers running in at least one scenario per benchmark and treat
+   one failure as a bug, never as noise.
  - `mach_vm.h` is unsupported in the iOS SDK; use the `vm_map` family with
    the same arguments. The double heap mapping needs no entitlement.
  - Device iteration is fast: about one second per launch over `devicectl`,
