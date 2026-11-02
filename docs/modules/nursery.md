@@ -810,13 +810,13 @@ the no-nursery oracle's; each configuration checks that its stress happened.
 
 ## Unsafe surface
 
-432 lines with `unsafe` in `Nursery/` (code lines, counted after a clean
-build with no warning): Scavenge 228, NurseryState 64, YoungAllocation 64,
+433 lines with `unsafe` in `Nursery/` (code lines, counted after a clean
+build with no warning): Scavenge 229, NurseryState 64, YoungAllocation 64,
 NurseryVerifier 27, NurseryHost 23, Finalization 14, Barrier 12, Claim 0,
 NurseryConfig 0. Module 1's new `Generations.swift` has 66 (stashes, the
 promotion bump, the finalization queue's own allocation), and its other
-files went from 211 to 251 (the reserve, stashes and weak marking; 317
-in `ObjectMemory/` in all). The surface
+files went from 211 to 252 (the reserve, stashes, weak marking and the
+fill of `RawArray`; 318 in `ObjectMemory/` in all). The surface
 is the raw pointers to the per-worker and VM-wide nursery state, the
 header word read and compare-and-swapped as `Atomic<UInt64>` in the table,
 the remembered markers as `Atomic<UInt16>` over a zero-filled reservation,
