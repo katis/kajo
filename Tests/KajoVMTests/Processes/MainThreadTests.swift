@@ -156,21 +156,27 @@ final class FakeMain: @unchecked Sendable {
     let rt = try Runtime(hogSrc + churnSrc, background: 3, heapBlocks: 256, pollEvery: 1024)
     let hog = rt.spawn("hog", priority: Priority.normal, main: true)
     for _ in 0..<2 { rt.spawn("churn:", [int(1 << 40)]) }
-    var overruns: [Double] = []
+    var overruns: [Double] = [], cpuOverruns: [Double] = []
     var stopped = 0
     let budget: UInt64 = 1_000_000
     for _ in 0..<300 {
         let st = rt.vm.runMain(budgetNs: budget)
         if st.parkNs > 0 || st.stopNs > 0 || st.enterWaitNs > 1000 { stopped += 1 }
         overruns.append(Double(Int64(bitPattern: st.ns &- st.pausedNs &- budget)) / 1e6)
+        cpuOverruns.append(Double(Int64(bitPattern: st.cpuNs &- budget)) / 1e6)
         usleep(500)
     }
     overruns.sort()
-    let p50 = overruns[overruns.count / 2], p99 = overruns[overruns.count * 99 / 100], max = overruns.last!
-    print("turn overrun ms p50=\(p50) p99=\(p99) max=\(max) turnsWithAStop=\(stopped) collections=\(rt.image.om.counters.collections)")
-    // The max depends on the OS descheduling the thread (AGENTS.md); under
-    // load or ThreadSanitizer it is reported, the p99 is the bound.
-    #expect(p99 <= 0.2)
+    cpuOverruns.sort()
+    func q(_ a: [Double], _ f: Double) -> Double { a[min(a.count - 1, Int(Double(a.count) * f))] }
+    print("turn overrun ms wall p50=\(q(overruns, 0.5)) p99=\(q(overruns, 0.99)) max=\(overruns.last!) "
+          + "cpu p50=\(q(cpuOverruns, 0.5)) p99=\(q(cpuOverruns, 0.99)) max=\(cpuOverruns.last!) "
+          + "turnsWithAStop=\(stopped) collections=\(rt.image.om.counters.collections)")
+    // The VM's share is bounded: CPU time past the budget, which excludes
+    // stops (blocked) and the OS descheduling the thread (AGENTS.md:
+    // maxima depend on it; the wall figures are reported, and alone on the
+    // machine their max was 0.064 ms).
+    #expect(cpuOverruns.last! <= 0.2)
     #expect(rt.vm.counters.preemptions >= 250)
     rt.vm.terminate(hog)
     rt.vm.terminateAll()

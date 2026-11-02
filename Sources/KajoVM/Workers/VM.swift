@@ -365,17 +365,15 @@ import Synchronization
         (unsafe 0..<state.pointee.workerCount).map { i in
             let port = unsafe state.shared(i).pointee.machThread.load(ordering: .relaxed)
             if port == 0 { return 0 }
-            var info = thread_basic_info()
-            var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+            var info = thread_extended_info()
+            var count = mach_msg_type_number_t(MemoryLayout<thread_extended_info>.size / MemoryLayout<integer_t>.size)
             let kr = unsafe withUnsafeMutablePointer(to: &info) {
                 unsafe $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
-                    unsafe thread_info(port, thread_flavor_t(THREAD_BASIC_INFO), $0, &count)
+                    unsafe thread_info(port, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &count)
                 }
             }
             if kr != KERN_SUCCESS { return 0 }
-            let u = UInt64(info.user_time.seconds) * 1_000_000_000 + UInt64(info.user_time.microseconds) * 1000
-            let s = UInt64(info.system_time.seconds) * 1_000_000_000 + UInt64(info.system_time.microseconds) * 1000
-            return u + s
+            return info.pth_user_time &+ info.pth_system_time
         }
     }
 

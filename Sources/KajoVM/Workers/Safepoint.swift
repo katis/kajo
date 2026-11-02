@@ -170,7 +170,7 @@ func gatherRoots(_ vm: UnsafeMutablePointer<VMState>, _ keeping: [Oop]) -> [Oop]
         let p = unsafe r.pointee.process
         if p == .none { continue }
         roots.append(p)
-        let base = unsafe r.pointee.base.unsafelyUnwrapped
+        guard let base = unsafe r.pointee.base else { preconditionFailure("gatherRoots: record \(i) of \(p) has no stack") }
         // A running Process's stack through its worker's saved sp, a
         // suspended one's through the sp saved in it: never both, never
         // a stale one (the worker clears `runningOn` before publishing).

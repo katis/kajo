@@ -234,22 +234,24 @@ func aSuspendedProcessIsPublishedAfterClearingCurrent(_ broken: Bool) throws {
     """
     let rt = try Runtime(src, background: 3, heapBlocks: 256, configure: {
         $0.testSwitches.publishBeforeClearing = broken
-        $0.perturb = Perturbation(seed: 7, probability: 0.05, maxSleepUs: 300)
+        $0.perturb = Perturbation(seed: 7, probability: broken ? 0.01 : 0.05, maxSleepUs: broken ? 1000 : 300)
     })
     var ps: [Oop] = []
-    for _ in 0..<2 { ps.append(rt.spawn("yieldLoop:", [int(400)])) }
+    let n: Int64 = broken ? 3000 : 400
+    for _ in 0..<2 { ps.append(rt.spawn("yieldLoop:", [int(n)])) }
     var stops = 0
-    while rt.vm.liveProcessCount > 0 && stops < 2000 {
+    while rt.vm.liveProcessCount > 0 && stops < 20_000 {
         rt.vm.collect()
         stops += 1
         if broken && rt.vm.counters.scheduleVerifierFailures > 0 { break }
     }
     if broken {
+        // No terminate: with records and workers disagreeing it would free
+        // a running Process's record. The Processes finish on their own.
         #expect(rt.vm.counters.scheduleVerifierFailures > 0)
-        rt.vm.terminateAll()
     } else {
         rt.waitAllTerminated()
-        for p in ps { #expect(rt.result(p) == 399 * 400 / 2) }
+        for p in ps { #expect(rt.result(p) == (n - 1) * n / 2) }
         #expect(rt.vm.counters.scheduleVerifierFailures == 0)
     }
     rt.waitAllTerminated()

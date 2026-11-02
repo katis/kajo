@@ -213,9 +213,13 @@ func terminateProcess(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     }
     let ri = intSlot(om, p, ProcessLayout.record)
     let r = unsafe records(vm, ri)
-    if unsafe r.pointee.runningOn >= 0 {
+    // By its state, not only `runningOn`: a running Process is never
+    // unlinked and freed under the worker running it.
+    if unsafe r.pointee.runningOn >= 0 || intSlot(om, p, ProcessLayout.state) == Int(ProcessState.running.rawValue) {
         unsafe r.pointee.terminateRequested = true
-        unsafe vm.shared(r.pointee.runningOn).pointee.attention.store(ri + 1, ordering: .relaxed)
+        if unsafe r.pointee.runningOn >= 0 {
+            unsafe vm.shared(r.pointee.runningOn).pointee.attention.store(ri + 1, ordering: .relaxed)
+        }
         schedUnlock(vm)
         unsafe vm.count(.terminateRequests)
         return

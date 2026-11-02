@@ -8,6 +8,8 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     let om = unsafe vm.pointee.om
     let s = unsafe w.pointer(to: \Worker.interp)!
     let ri = intSlot(om, p, ProcessLayout.record)
+    precondition(unsafe ri >= 0 && records(vm, ri).pointee.process == p && records(vm, ri).pointee.base != nil,
+                 "runSlice: Process \(p) state \(intSlot(om, p, ProcessLayout.state)) record \(ri)")
     let r = unsafe records(vm, ri)
     let base = unsafe r.pointee.base.unsafelyUnwrapped
     unsafe w.pointee.current = p
@@ -125,6 +127,9 @@ func backgroundLoop(_ vm: VMPointer, _ w: WorkerPointer) {
 /// kept apart (AGENTS.md).
 struct TurnStats: Sendable {
     var ns: UInt64 = 0
+    /// The calling thread's CPU time in the turn: wall time minus the time
+    /// the OS had it descheduled (and minus blocked waits).
+    var cpuNs: UInt64 = 0
     var enterWaitNs: UInt64 = 0
     var leaveWaitNs: UInt64 = 0
     /// Parked in another worker's stop.
@@ -144,7 +149,7 @@ struct TurnStats: Sendable {
 func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnStats {
     let w = unsafe vm.worker(0)
     var st = TurnStats()
-    let t0 = nanoseconds()
+    let t0 = nanoseconds(), cpu0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     let park0 = unsafe w.pointee.parkNs, stop0 = unsafe w.pointee.stopNs
     st.enterWaitNs = unsafe enterVM(vm, w)
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }
@@ -172,6 +177,7 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
     st.stopNs = unsafe w.pointee.stopNs &- stop0
     st.leaveWaitNs = unsafe leaveVM(vm, w)
     st.ns = nanoseconds() &- t0
+    st.cpuNs = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) &- cpu0
     return st
 }
 
