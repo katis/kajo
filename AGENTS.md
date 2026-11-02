@@ -275,6 +275,21 @@ Safety:
    what turns a broken-protocol test switch into a failing test.
  - Put the interpreter state at offset 0 of the worker, so the interpreter's
    state pointer is the worker pointer and the hot path pays no second load.
+ - The relocation model (docs/models/relocation.md) found four things the
+   SPEC left to the code: `enterVM` must store epoch 0 before the current
+   epoch or a block is freed under an entering worker's pointer; the
+   relocator's scan of epoch words wants seq_cst, not acquire, for the
+   argument to hold under C++ rules; "the relocator polls only between
+   objects" is a liveness rule (a park between the CAS and the switch
+   deadlocks every spinner in the post-store and hazard slow paths, so
+   to-space allocation stays before the CAS); and reads of a new body rest
+   on an address dependency the compiler does not promise, so the body
+   address is always computed from the offset just loaded. Both halves of
+   the post-store check must be seq_cst, each on its own.
+ - A model with switches is believed only when each switch off finds its
+   violation. The first run's "violation" of a claim was a modelling bug (a
+   buffered revert at a pause) that also exposed an unstated fence in the
+   SPEC; write both kinds of finding down.
  - Device iteration is fast: about one second per launch over `devicectl`,
    with stdout streamed. Design device benchmarks as one kernel per launch
    so a crash costs one run and thermal state is logged per launch.
@@ -344,6 +359,11 @@ cover.
  * `experiments/` throwaway spikes with a design brief and results each.
  * `docs/PLAN.md` the module order for building the production core from
    the experiments; `docs/modules/` one brief, later description, per module.
+ * `models/` a separate SwiftPM package holding the exhaustive interleaving
+   models of the concurrent protocols (`cd models && swift test`;
+   `docs/models/` one brief, later description, per model). The relocation
+   model precedes module 6 and is updated in the same commit as any change
+   to the protocol.
  * `docs/CONTEXT.md` domain vocabulary. `docs/adr/` one decision per file.
    `docs/VERIFICATION.md` how the experiments become the production core
    and what verification that core needs beyond tests and ThreadSanitizer.
