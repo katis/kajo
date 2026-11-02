@@ -42,6 +42,7 @@ final class Image {
         for _ in WellKnown.classes { om.registerClass(.none) }
         nilObject = try allocate(WellKnown.undefinedObject, slots: 0, fill: Oop(smallInteger: 0))
         om.addRoot(nilObject)
+        om.nilObject = nilObject
         trueObject = try allocate(WellKnown.trueClass, slots: 0)
         om.addRoot(trueObject)
         falseObject = try allocate(WellKnown.falseClass, slots: 0)
@@ -112,7 +113,9 @@ final class Image {
         return s
     }
 
-    private func fillClass(_ index: UInt64, name: String, superclass: Oop, instSize: Int) throws(LoadError) {
+    private func fillClass(_ index: UInt64, name: String, superclass: Oop, instSize: Int,
+                           format: ClassFormat? = nil) throws(LoadError) {
+        om.setClassFormat(index, format ?? ClassFormat(namedSlots: instSize))
         let nameSym = try intern(name)
         let c = om.classOop(index)
         om.store(c, ClassLayout.superclass, superclass)
@@ -145,7 +148,8 @@ final class Image {
             }
             for c in f.classes {
                 let sup = om.classOop(classesByName[c.superclass]!)
-                try fillClass(classesByName[c.name]!, name: c.name, superclass: sup, instSize: c.instSize)
+                try fillClass(classesByName[c.name]!, name: c.name, superclass: sup, instSize: c.instSize,
+                              format: ClassFormat(namedSlots: c.instSize, weak: c.weak, ephemeron: c.ephemeron))
             }
             for m in f.methods {
                 let cls = classesByName[m.className]!

@@ -37,7 +37,7 @@ private let queueCount = Priority.count * Affinity.count
 /// Put `p` at the back of its ready queue. Answers whether the main worker
 /// must be woken; wakes an idle background worker for an "any" Process.
 @discardableResult
-func makeReadyLocked(_ vm: VMPointer, _ p: Oop, fromBlocked: Bool) -> Bool {
+func makeReadyLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, fromBlocked: Bool) -> Bool {
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     let main = intSlot(om, p, ProcessLayout.affinity) == Affinity.main
@@ -45,12 +45,12 @@ func makeReadyLocked(_ vm: VMPointer, _ p: Oop, fromBlocked: Bool) -> Bool {
     setIntSlot(om, p, ProcessLayout.state, Int(ProcessState.ready.rawValue))
     let r = unsafe records(vm, intSlot(om, p, ProcessLayout.record))
     if unsafe fromBlocked && r.pointee.runnableSince == 0 { unsafe r.pointee.runnableSince = ticks() }
-    om.store(p, ProcessLayout.next, nilObject)
+    om.store(p, ProcessLayout.next, nilObject)  // nil: never young
     let tail = unsafe Oop(raw: vm.pointee.queues[queueCount + q])
     if tail == .none {
         unsafe vm.pointee.queues[q] = p.raw
     } else {
-        om.store(tail, ProcessLayout.next, p)
+        unsafe barrierStore(w, tail, ProcessLayout.next, p, .readyQueueLink)
     }
     unsafe vm.pointee.queues[queueCount + q] = p.raw
     if main { return true }
@@ -71,7 +71,7 @@ func dequeueLocked(_ vm: VMPointer, main: Bool, minPriority: Int, for w: WorkerP
             let next = om.load(head, ProcessLayout.next)
             unsafe vm.pointee.queues[q] = next == nilObject ? 0 : next.raw
             if next == nilObject { unsafe vm.pointee.queues[queueCount + q] = 0 }
-            om.store(head, ProcessLayout.next, nilObject)
+            om.store(head, ProcessLayout.next, nilObject)  // nil: never young
             setIntSlot(om, head, ProcessLayout.state, Int(ProcessState.running.rawValue))
             unsafe records(vm, intSlot(om, head, ProcessLayout.record)).pointee.runningOn = w.pointee.index
             return head
@@ -89,7 +89,7 @@ func anyReadyLocked(_ vm: VMPointer, main: Bool) -> Bool {
 }
 
 /// Unlink `p` from the list with the given head and tail words.
-private func unlinkLocked(_ vm: VMPointer, head: inout Oop, tail: inout Oop, _ p: Oop) {
+private func unlinkLocked(_ vm: VMPointer, _ w: WorkerPointer, head: inout Oop, tail: inout Oop, _ p: Oop) {
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     var prev = Oop.none
@@ -97,9 +97,9 @@ private func unlinkLocked(_ vm: VMPointer, head: inout Oop, tail: inout Oop, _ p
     while cur != .none && cur != nilObject {
         let next = om.load(cur, ProcessLayout.next)
         if cur == p {
-            if prev == .none { head = next } else { om.store(prev, ProcessLayout.next, next) }
+            if prev == .none { head = next } else { unsafe barrierStore(w, prev, ProcessLayout.next, next, .unlinkLink) }
             if tail == p { tail = prev == .none ? nilObject : prev }
-            om.store(p, ProcessLayout.next, nilObject)
+            om.store(p, ProcessLayout.next, nilObject)  // nil: never young
             return
         }
         prev = cur
@@ -141,7 +141,9 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
     setIntSlot(om, p, ProcessLayout.pc, -1)
     setIntSlot(om, p, ProcessLayout.fp, 0)
     setIntSlot(om, p, ProcessLayout.hdr, 0)
-    om.store(p, ProcessLayout.exitSemaphore, exit == .none ? nilObject : exit)
+    // p was allocated above with no safepoint since: young (or old with
+    // nothing young, without a nursery); the barrier is kept anyway.
+    unsafe barrierStore(w, p, ProcessLayout.exitSemaphore, exit == .none ? nilObject : exit, .exitSemaphore)
     unsafe schedLock(vm)
     var ri = unsafe vm.pointee.sched.pointee.recordFree
     if ri >= 0 {
@@ -160,7 +162,7 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
     unsafe vm.pointee.sched.pointee.nextId += 1
     om.store(p, ProcessLayout.id, Oop(smallInteger: id))
     unsafe vm.pointee.sched.pointee.liveProcesses += 1
-    let needMain = unsafe makeReadyLocked(vm, p, fromBlocked: true)
+    let needMain = unsafe makeReadyLocked(vm, w, p, fromBlocked: true)
     unsafe schedUnlock(vm)
     unsafe vm.count(.forks)
     unsafe wake(vm, w, needMain)
@@ -171,21 +173,21 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
 
 /// Terminate `p`, which is in no list and runs nowhere. Answers its stack
 /// (to free after unlocking) and whether main must be woken.
-private func finishLocked(_ vm: VMPointer, _ p: Oop, _ result: Oop) -> (UnsafeMutablePointer<UInt64>?, Bool) {
+private func finishLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, _ result: Oop) -> (UnsafeMutablePointer<UInt64>?, Bool) {
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     let ri = intSlot(om, p, ProcessLayout.record)
     let base = unsafe records(vm, ri).pointee.base
-    om.store(p, ProcessLayout.result, result)
+    unsafe barrierStore(w, p, ProcessLayout.result, result, .processResult)
     setIntSlot(om, p, ProcessLayout.state, Int(ProcessState.terminated.rawValue))
     setIntSlot(om, p, ProcessLayout.record, -1)
-    om.store(p, ProcessLayout.waitingOn, nilObject)
+    om.store(p, ProcessLayout.waitingOn, nilObject)  // nil: never young
     unsafe records(vm, ri).pointee = ProcessRecord(nextFree: vm.pointee.sched.pointee.recordFree)
     unsafe vm.pointee.sched.pointee.recordFree = ri
     unsafe vm.pointee.sched.pointee.liveProcesses -= 1
     if unsafe vm.pointee.sched.pointee.liveProcesses == 0 { unsafe pthread_cond_broadcast(vm.pointee.doneCond) }
     let sem = om.load(p, ProcessLayout.exitSemaphore)
-    let needMain = unsafe sem != nilObject ? signalLocked(vm, sem) : false
+    let needMain = unsafe sem != nilObject ? signalLocked(vm, w, sem) : false
     return unsafe (base, needMain)
 }
 
@@ -195,7 +197,7 @@ func terminateCurrent(_ vm: VMPointer, _ w: WorkerPointer, result: Oop) {
     let p = unsafe w.pointee.current
     unsafe schedLock(vm)
     unsafe detachLocked(vm, w)
-    let (base, needMain) = unsafe finishLocked(vm, p, result)
+    let (base, needMain) = unsafe finishLocked(vm, w, p, result)
     unsafe schedUnlock(vm)
     unsafe base?.deallocate()
     unsafe vm.count(.terminations)
@@ -224,8 +226,8 @@ func terminateProcess(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
         unsafe vm.count(.terminateRequests)
         return
     }
-    unsafe unlinkLocked(vm, p)
-    let (base, needMain) = unsafe finishLocked(vm, p, vm.pointee.nilObject)
+    unsafe unlinkLocked(vm, w, p)
+    let (base, needMain) = unsafe finishLocked(vm, w, p, vm.pointee.nilObject)
     unsafe schedUnlock(vm)
     unsafe base?.deallocate()
     unsafe vm.count(.terminations)
@@ -233,21 +235,21 @@ func terminateProcess(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
 }
 
 /// Unlink a ready or waiting Process from its list.
-private func unlinkLocked(_ vm: VMPointer, _ p: Oop) {
+private func unlinkLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     if intSlot(om, p, ProcessLayout.state) == Int(ProcessState.waiting.rawValue) {
         let sem = om.load(p, ProcessLayout.waitingOn)
         var head = om.load(sem, SemaphoreLayout.firstWaiter), tail = om.load(sem, SemaphoreLayout.lastWaiter)
-        unsafe unlinkLocked(vm, head: &head, tail: &tail, p)
-        om.store(sem, SemaphoreLayout.firstWaiter, head)
-        om.store(sem, SemaphoreLayout.lastWaiter, head == nilObject ? nilObject : tail)
+        unsafe unlinkLocked(vm, w, head: &head, tail: &tail, p)
+        unsafe barrierStore(w, sem, SemaphoreLayout.firstWaiter, head, .unlinkFirstWaiter)
+        unsafe barrierStore(w, sem, SemaphoreLayout.lastWaiter, head == nilObject ? nilObject : tail, .unlinkLastWaiter)
     } else {
         let q = queueIndex(main: intSlot(om, p, ProcessLayout.affinity) == Affinity.main,
                            priority: intSlot(om, p, ProcessLayout.priority))
         var head = unsafe Oop(raw: vm.pointee.queues[q]), tail = unsafe Oop(raw: vm.pointee.queues[queueCount + q])
         if head == .none { head = nilObject }
-        unsafe unlinkLocked(vm, head: &head, tail: &tail, p)
+        unsafe unlinkLocked(vm, w, head: &head, tail: &tail, p)
         unsafe vm.pointee.queues[q] = head == nilObject ? 0 : head.raw
         unsafe vm.pointee.queues[queueCount + q] = head == nilObject ? 0 : tail.raw
     }
@@ -321,7 +323,7 @@ func suspendAfterPrimitiveLocked(_ vm: VMPointer, _ w: WorkerPointer, argc: Int,
 // MARK: - Semaphores
 
 /// Signal with the lock held. Answers whether main must be woken.
-func signalLocked(_ vm: VMPointer, _ sem: Oop) -> Bool {
+func signalLocked(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop) -> Bool {
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     let first = om.load(sem, SemaphoreLayout.firstWaiter)
@@ -330,17 +332,17 @@ func signalLocked(_ vm: VMPointer, _ sem: Oop) -> Bool {
         return false
     }
     let next = om.load(first, ProcessLayout.next)
-    om.store(sem, SemaphoreLayout.firstWaiter, next)
-    if next == nilObject { om.store(sem, SemaphoreLayout.lastWaiter, nilObject) }
+    unsafe barrierStore(w, sem, SemaphoreLayout.firstWaiter, next, .firstWaiterOnSignal)
+    if next == nilObject { om.store(sem, SemaphoreLayout.lastWaiter, nilObject) }  // nil: never young
     om.store(first, ProcessLayout.next, nilObject)
     om.store(first, ProcessLayout.waitingOn, nilObject)
-    return unsafe makeReadyLocked(vm, first, fromBlocked: true)
+    return unsafe makeReadyLocked(vm, w, first, fromBlocked: true)
 }
 
 func signalSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop) {
     unsafe perturb(vm, w)
     unsafe schedLock(vm)
-    let needMain = unsafe signalLocked(vm, sem)
+    let needMain = unsafe signalLocked(vm, w, sem)
     unsafe schedUnlock(vm)
     unsafe vm.count(.signals)
     unsafe wake(vm, w, needMain)
@@ -368,11 +370,15 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     unsafe records(vm, w.pointee.record).pointee.runnableSince = 0
     unsafe suspendAfterPrimitiveLocked(vm, w, argc: argc, result: sem)
     setIntSlot(om, p, ProcessLayout.state, Int(ProcessState.waiting.rawValue))
-    om.store(p, ProcessLayout.waitingOn, sem)
-    om.store(p, ProcessLayout.next, nilObject)
+    unsafe barrierStore(w, p, ProcessLayout.waitingOn, sem, .waitingOn)
+    om.store(p, ProcessLayout.next, nilObject)  // nil: never young
     let last = om.load(sem, SemaphoreLayout.lastWaiter)
-    if last == nilObject { om.store(sem, SemaphoreLayout.firstWaiter, p) } else { om.store(last, ProcessLayout.next, p) }
-    om.store(sem, SemaphoreLayout.lastWaiter, p)
+    if last == nilObject {
+        unsafe barrierStore(w, sem, SemaphoreLayout.firstWaiter, p, .firstWaiterOnWait)
+    } else {
+        unsafe barrierStore(w, last, ProcessLayout.next, p, .waiterLink)
+    }
+    unsafe barrierStore(w, sem, SemaphoreLayout.lastWaiter, p, .lastWaiterOnWait)
     unsafe schedUnlock(vm)
     unsafe finishSuspend(vm, w, .suspended)
     unsafe vm.count(.waits)
@@ -402,7 +408,7 @@ func requeueCurrent(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int, affin
         unsafe suspendLocked(vm, w, sp: sp, pc: pc)
     }
     if let affinity { setIntSlot(om, p, ProcessLayout.affinity, affinity) }
-    let needMain = unsafe makeReadyLocked(vm, p, fromBlocked: false)
+    let needMain = unsafe makeReadyLocked(vm, w, p, fromBlocked: false)
     unsafe schedUnlock(vm)
     unsafe finishSuspend(vm, w, reason)
     unsafe wake(vm, w, needMain)

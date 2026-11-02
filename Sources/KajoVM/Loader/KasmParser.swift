@@ -2,7 +2,7 @@
 /// ".kasm text format"):
 ///
 ///     ; comment to end of line
-///     class <Name> <Superclass> <instSize>
+///     class <Name> <Superclass> <instSize> [weak | ephemeron]
 ///     method <Class> <selector> temps=<n> [prim=<k>]
 ///       <label>:
 ///       <opname> [operands]
@@ -17,6 +17,10 @@ struct KasmClass {
     let superclass: String
     let instSize: Int
     let line: Int
+    /// ADR 0009 section 6: `weak` (indexed slots weak) or `ephemeron` (slot
+    /// 0 the key); neither is inherited.
+    var weak = false
+    var ephemeron = false
 }
 
 struct KasmMethod {
@@ -88,12 +92,24 @@ func parseKasm(_ text: String, file: String, limits: LoaderLimits = LoaderLimits
         }
         switch head {
         case "class":
-            if tokens.count != 4 { throw fail(.syntax, "expected: class <Name> <Superclass> <instSize>") }
+            if tokens.count != 4 && tokens.count != 5 {
+                throw fail(.syntax, "expected: class <Name> <Superclass> <instSize> [weak | ephemeron]")
+            }
             if !isIdentifier(tokens[1]) || !isIdentifier(tokens[2]) { throw fail(.syntax, "bad class name") }
             guard let n = Int(tokens[3]), n >= 0, n <= Header.maxSlots else {
                 throw fail(.badOperand, "instSize must be 0...\(Header.maxSlots)")
             }
-            out.classes.append(KasmClass(name: tokens[1], superclass: tokens[2], instSize: n, line: lineNo))
+            var c = KasmClass(name: tokens[1], superclass: tokens[2], instSize: n, line: lineNo)
+            if tokens.count == 5 {
+                switch tokens[4] {
+                case "weak": c.weak = true
+                case "ephemeron":
+                    guard n >= 1 else { throw fail(.badOperand, "an ephemeron class has a key: instSize at least 1") }
+                    c.ephemeron = true
+                default: throw fail(.syntax, "expected 'weak' or 'ephemeron', got '\(tokens[4])'")
+                }
+            }
+            out.classes.append(c)
         case "method":
             if tokens.count < 4 || tokens.count > 5 { throw fail(.syntax, "expected: method <Class> <selector> temps=<n> [prim=<k>]") }
             if !isIdentifier(tokens[1]) { throw fail(.syntax, "bad class name") }

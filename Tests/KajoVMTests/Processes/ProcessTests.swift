@@ -673,11 +673,14 @@ end
     var keepers: [Oop] = []
     for _ in 0..<40 { keepers.append(rt.spawn("keeper:", [int(200)])) }
     #expect(eventually { keepers.allSatisfy { rt.state($0) == .waiting } })
-    let collections = rt.image.om.counters.collections
+    // Module 4: with a nursery the churn scavenges (each a stop scanning
+    // the parked stacks); without one it collects.
+    func pauses() -> UInt64 { rt.image.om.counters.collections + rt.vm.nurseryCounters.scavenges }
+    let collections = pauses()
     rt.spawn("churn:", [int(checkedBuild ? 60_000 : 300_000)])
     rt.spawn("churn:", [int(checkedBuild ? 60_000 : 300_000)])
     #expect(eventually(120) { rt.vm.liveProcessCount == 40 })
-    #expect(rt.image.om.counters.collections - collections >= 3)
+    #expect(pauses() - collections >= 3)
     for _ in 0..<40 { rt.vm.signal(sem) }
     rt.waitAllTerminated()
     for k in keepers { #expect(rt.result(k) == 199 * 200 / 2) }

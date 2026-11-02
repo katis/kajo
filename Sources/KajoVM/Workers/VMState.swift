@@ -51,7 +51,12 @@ import Synchronization
     let errorsLock: UnsafeMutablePointer<pthread_mutex_t>
 
     let counters: UnsafeMutablePointer<Atomic<UInt64>>
+    /// The finalization Semaphore (ADR 0009 section 1), rooted in the
+    /// pending-root table. Under `pendingLock`.
+    let finalization: UnsafeMutablePointer<FinalizationState>
     var hooks = unsafe VMHooks()
+    /// Module 4: the nurseries, nil when they are off.
+    var nursery: NurseryPointer? = nil
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -81,6 +86,25 @@ struct WorkerShared: ~Copyable {
     var stops: UnsafeMutablePointer<StopRecord>
     var stopCount = 0
     static let stopLog = 1 << 16
+    /// Module 4: a parallel phase of the current stop's work (a scavenge).
+    /// Parked workers join while it is open: `parts[0..<joined]` are the
+    /// participants (the stopper first), `done` counts the ones finished.
+    var phaseOpen = false
+    var phaseSeq: UInt64 = 0
+    var joined = 0
+    var done = 0
+    var parts: UnsafeMutablePointer<Int>
+    /// The worker running the current stop's work (-1 outside a stop).
+    var stopper = -1
+    /// What the current stop does (`StopKind`), for its record.
+    var kind = StopKind.other
+}
+
+/// What a stop did, in its record.
+enum StopKind: UInt8, Sendable {
+    case other
+    case scavenge
+    case full
 }
 
 struct StopRecord: Sendable {
@@ -91,6 +115,7 @@ struct StopRecord: Sendable {
     /// The worker that parked last (-1: none had to).
     var slowest: Int
     var requester: Int
+    var kind = StopKind.other
 }
 
 /// Guarded by the scheduler lock.
@@ -120,6 +145,12 @@ struct SchedulerState {
     var stuckReported = false
     var terminateRequested = false
     var nextFree = -1
+}
+
+/// Guarded by the pending-root mutex.
+struct FinalizationState {
+    var semaphore = Oop.none
+    var handle = -1
 }
 
 /// Guarded by the pending-root mutex.

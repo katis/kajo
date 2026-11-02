@@ -1,0 +1,565 @@
+import Darwin
+import Synchronization
+
+// The stop-the-world scavenge (docs/modules/nursery.md "The scavenge";
+// experiments/generational-gc SPEC "Scavenge" and concurrent-relocation
+// SPEC "Part 1"). Every nursery is collected; the stopper and every worker
+// parked at the stop take part. Roots are values (oops never change), so
+// nothing but entries and the copied bodies is written: no root, no slot.
+//
+// Phases: prep (stopper), copy (parallel: root and remembered-holder
+// tasks, then each participant drains its own stack, sharing packets),
+// the copy barrier, the entry sweep (parallel, one task per nursery), the
+// join, then weak slots, the flip and the verifiers (stopper).
+
+/// The stopper's part: world stopped, safepoint mutex not held. `roots`
+/// are the stop's roots (module 3); module 1's own roots are added here.
+func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Bool, timeToSafepointNs: UInt64 = 0) {
+    guard let n = unsafe vm.pointee.nursery else { return }
+    let t0 = nanoseconds()
+    let om = unsafe n.pointee.om
+    let config = unsafe n.pointee.config
+    let ph = unsafe n.pointee.phase
+    let log = unsafe n.pointee.state
+    let count = unsafe n.pointee.count
+
+    // --- prep
+    let number = unsafe log.pointee.counters.scavenges &+ 1
+    unsafe ph.pointee.number = number
+    unsafe ph.pointee.tag = claimTag(scavenge: number, sameTag: config.testSwitches.sameClaimTag)
+    unsafe ph.pointee.ageLimit = UInt64(config.age)
+    unsafe ph.pointee.promoteAll = promoteAll || config.stress.contains(.promoteAll)
+    unsafe ph.pointee.dropCarried = config.testSwitches.dropCarriedHolders
+    unsafe ph.pointee.forgetPromoted = config.testSwitches.forgetPromotedHolders
+    unsafe ph.pointee.formats = om.gc.pointee.classFormats.baseAddress
+    unsafe ph.pointee.classCount = om.classCount
+    unsafe ph.pointee.roots.removeAll()
+    for v in roots where v.isObject { unsafe ph.pointee.roots.append(v.raw) }
+    om.forEachRoot(extraRoots: []) { v in if v.isObject { unsafe ph.pointee.roots.append(v.raw) } }
+    unsafe ph.pointee.tasks.removeAll()
+    let rootCount = unsafe ph.pointee.roots.count
+    if let rbase = unsafe ph.pointee.roots.baseAddress {
+        var off = 0
+        while off < rootCount {
+            unsafe ph.pointee.tasks.append(ScavengeTask(words: rbase + off, count: Swift.min(NurseryShared.rootTaskWords, rootCount - off),
+                                                        remembered: false))
+            off += NurseryShared.rootTaskWords
+        }
+    }
+    var youngBytes: UInt64 = 0
+    var remHolders: UInt64 = 0
+    for k in 0..<count {
+        let a = unsafe n.alloc(k)
+        let used = unsafe a.pointee.top &- a.pointee.edenStart
+        youngBytes &+= used &+ (unsafe a.pointee.survFromTop &- a.pointee.survFromStart)
+        unsafe a.pointee.youngAllocations &+= UInt64(a.pointee.stash.next)
+        unsafe a.pointee.youngBytes &+= used
+        let rc = unsafe a.pointee.rem.count
+        remHolders &+= UInt64(rc)
+        if let rb = unsafe a.pointee.rem.baseAddress {
+            var off = 0
+            while off < rc {
+                unsafe ph.pointee.tasks.append(ScavengeTask(words: rb + off, count: Swift.min(NurseryShared.remTaskHolders, rc - off),
+                                                            remembered: true))
+                off += NurseryShared.remTaskHolders
+            }
+        }
+        let s = unsafe n.scav(k)
+        unsafe s.pointee.survCur = a.pointee.survToStart
+        unsafe s.pointee.survEnd = a.pointee.survToStart &+ n.pointee.survivorBytes
+        unsafe s.pointee.stack.removeAll()
+        unsafe s.pointee.nextRem.removeAll()
+        unsafe s.pointee.survLog.removeAll()
+        unsafe s.pointee.weak.removeAll()
+        unsafe s.pointee.stats = ParticipantStats()
+    }
+    var expect: ScavengeExpectation? = nil
+    if om.config.verify { expect = unsafe verifyBeforeScavenge(n, roots: ph.pointee.roots) }
+    unsafe n.pointee.taskNext.pointee.store(0, ordering: .relaxed)
+    unsafe n.pointee.sweepNext.pointee.store(0, ordering: .relaxed)
+    unsafe n.pointee.inCopy.pointee.store(0, ordering: .relaxed)
+    unsafe n.pointee.idle.pointee.store(0, ordering: .relaxed)
+    unsafe n.pointee.copyEnd.pointee.store(0, ordering: .relaxed)
+    unsafe n.pointee.poolCount.pointee.store(0, ordering: .relaxed)
+    let tp = nanoseconds()
+
+    // --- parallel phase
+    let parts = unsafe runParallelPhase(vm, w)
+    let tj = nanoseconds()
+
+    // --- finish
+    let niled = unsafe processWeakSlots(n, parts: parts)
+    var rec = ScavengeRecord()
+    rec.number = number
+    rec.promoteAll = unsafe ph.pointee.promoteAll
+    rec.participants = parts.count
+    rec.timeToSafepointNs = timeToSafepointNs
+    rec.youngBytes = youngBytes
+    rec.remHolders = remHolders
+    for p in parts {
+        let st = unsafe n.scav(p).pointee.stats
+        rec.promotedBytes &+= st.promotedBytes
+        rec.survivedBytes &+= st.survivedBytes
+        rec.overflowBytes &+= st.overflowBytes
+        rec.remSlots &+= st.remSlots
+        rec.entriesFreed &+= st.entriesFreed
+        rec.packets &+= st.packetsExported
+        rec.copiedBytesPerParticipant.append(st.copiedBytes)
+        rec.busyNsPerParticipant.append(st.busyNs)
+        if st.busyNs >= rec.critCopyBusyNs {
+            rec.critCopyBusyNs = st.busyNs
+            rec.critRootsNs = st.rootsNs
+            rec.critRemNs = st.remNs
+            rec.slowestParticipant = p
+        }
+        rec.maxSweepNs = Swift.max(rec.maxSweepNs, st.sweepNs)
+        unsafe log.pointee.counters.promotedObjects &+= st.promotedObjects
+        unsafe log.pointee.counters.promotedBytes &+= st.promotedBytes
+        unsafe log.pointee.counters.survivedObjects &+= st.survivedObjects
+        unsafe log.pointee.counters.survivedBytes &+= st.survivedBytes
+        unsafe log.pointee.counters.overflowObjects &+= st.overflowObjects
+        unsafe log.pointee.counters.overflowBytes &+= st.overflowBytes
+        unsafe log.pointee.counters.rememberedSlots &+= st.remSlots
+        unsafe log.pointee.counters.entriesSwept &+= st.entriesSwept
+        unsafe log.pointee.counters.entriesFreed &+= st.entriesFreed
+    }
+    var copied: UInt64 = 0
+    for p in parts { copied &+= unsafe n.scav(p).pointee.stats.promotedObjects &+ n.scav(p).pointee.stats.survivedObjects }
+    for k in 0..<count {
+        let a = unsafe n.alloc(k)
+        let s = unsafe n.scav(k)
+        unsafe a.pointee.top = a.pointee.edenStart
+        // The holders that still name young objects and the survivors'
+        // entries carry over to the next scavenge.
+        unsafe swap(&a.pointee.rem, &s.pointee.nextRem)
+        unsafe s.pointee.nextRem.removeAll()
+        unsafe swap(&a.pointee.survLog, &s.pointee.survLog)
+        unsafe s.pointee.survLog.removeAll()
+        // Flip: survivor-to becomes survivor-from.
+        unsafe a.pointee.survFromTop = s.pointee.survCur
+        unsafe a.pointee.survTo = 1 &- a.pointee.survTo
+    }
+    unsafe log.pointee.counters.scavenges = number
+    if unsafe ph.pointee.promoteAll { unsafe log.pointee.counters.promoteAllScavenges &+= 1 }
+    unsafe log.pointee.counters.youngBytesScavenged &+= youngBytes
+    unsafe log.pointee.counters.rememberedHolders &+= remHolders
+    unsafe log.pointee.counters.weakSlotsNiled &+= niled
+    let tf = nanoseconds()
+    if let e = expect {
+        unsafe log.pointee.counters.verifierRuns &+= 1
+        unsafe verifyAfterScavenge(n, roots: ph.pointee.roots, expected: e, copied: copied)
+    }
+    let tv = nanoseconds()
+    // Old space past its soft limit: a full collection in its own pause, at
+    // the next poll or instead of the next scavenge (never in this stop).
+    if om.isOverSoftLimit, unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
+        unsafe log.pointee.counters.fullCollectionsRequested &+= 1
+    }
+    let ce = unsafe n.pointee.copyEnd.pointee.load(ordering: .relaxed)
+    rec.prepNs = tp &- t0
+    rec.copyWallNs = ce > tp ? ce &- tp : tj &- tp
+    rec.sweepWallNs = ce > tp ? tj &- ce : 0
+    rec.finishNs = tf &- tj
+    rec.verifyNs = tv &- tf
+    rec.workNs = tv &- t0
+    unsafe log.pointee.counters.scavengeNs &+= tv &- t0
+    unsafe log.pointee.records.append(rec)
+}
+
+/// One participant (the stopper or a parked worker): copy, then sweep.
+/// Safepoint mutex not held.
+func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
+    guard let n = unsafe vm.pointee.nursery else { return }
+    let me = unsafe w.pointee.index
+    let sw = unsafe n.scav(me)
+    let ph = unsafe n.pointee.phase.pointee
+    var sc = unsafe Scavenger(n: n, om: n.pointee.om, ctx: w.pointee.interp.context, me: me, tag: ph.tag, ageLimit: ph.ageLimit,
+                              promoteAll: ph.promoteAll, dropCarried: ph.dropCarried, forgetPromoted: ph.forgetPromoted,
+                              formats: ph.formats.unsafelyUnwrapped, rem: n.pointee.rem, nilRaw: n.pointee.om.nilObject.raw,
+                              w: sw.pointee)
+    unsafe n.pointee.inCopy.pointee.wrappingAdd(1, ordering: .acquiringAndReleasing)
+    let ntasks = ph.tasks.count
+    while true {
+        let i = unsafe n.pointee.taskNext.pointee.wrappingAdd(1, ordering: .relaxed).oldValue
+        if i >= ntasks { break }
+        let t = ph.tasks[i]
+        let a = nanoseconds()
+        if t.remembered {
+            unsafe sc.scanRemembered(t.words, t.count)
+            sc.w.stats.remNs &+= nanoseconds() &- a
+        } else {
+            var k = 0
+            while k < t.count {
+                _ = unsafe sc.scanWord(t.words[k])
+                k &+= 1
+            }
+            sc.w.stats.rootsNs &+= nanoseconds() &- a
+        }
+        let b = nanoseconds()
+        sc.drain()
+        sc.w.stats.copyNs &+= nanoseconds() &- b
+    }
+    // Tasks are exhausted: help with exported packets until no participant
+    // is copying. Packets are pushed only by a counted (`inCopy`)
+    // participant; a participant stops being counted only after finding the
+    // pool empty; a taker is counted before it pops; nobody re-counts itself
+    // once `inCopy` reached 0. So `inCopy == 0` means no packet is left and
+    // no copy is in flight: the copy barrier.
+    let b = nanoseconds()
+    while sc.takePacket() { sc.drain() }
+    sc.w.stats.copyNs &+= nanoseconds() &- b
+    unsafe n.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+    let wa = nanoseconds()
+    var spins = 0
+    unsafe n.pointee.idle.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+    while true {
+        var c = unsafe n.pointee.inCopy.pointee.load(ordering: .sequentiallyConsistent)
+        if c == 0 { break }
+        if unsafe n.pointee.poolCount.pointee.load(ordering: .sequentiallyConsistent) > 0 {
+            var counted = false
+            while c > 0 {
+                let (ok, cur) = unsafe n.pointee.inCopy.pointee.compareExchange(expected: c, desired: c &+ 1,
+                                                                                ordering: .sequentiallyConsistent)
+                if ok { counted = true; break }
+                c = cur
+            }
+            if counted {
+                unsafe n.pointee.idle.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+                let t = nanoseconds()
+                while sc.takePacket() { sc.drain() }
+                sc.w.stats.copyNs &+= nanoseconds() &- t
+                unsafe n.pointee.inCopy.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+                unsafe n.pointee.idle.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+                continue
+            }
+        }
+        spins &+= 1
+        if spins & 63 == 0 { sched_yield() }
+    }
+    unsafe n.pointee.idle.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+    let ce = nanoseconds()
+    _ = unsafe n.pointee.copyEnd.pointee.compareExchange(expected: 0, desired: ce, ordering: .relaxed)
+    sc.w.stats.waitNs = ce &- wa
+    // Entry sweep: one task per nursery.
+    let count = unsafe n.pointee.count
+    while true {
+        let k = unsafe n.pointee.sweepNext.pointee.wrappingAdd(1, ordering: .relaxed).oldValue
+        if k >= count { break }
+        unsafe sc.sweepNursery(k)
+    }
+    sc.w.stats.sweepNs = nanoseconds() &- ce
+    unsafe sw.pointee = sc.w
+}
+
+/// A participant's working state during the phase: the constants it reads
+/// and its own `ScavengeWorker`, kept in registers and written back once.
+/// Plain values and pointers only: no ARC in the copy loop.
+@unsafe struct Scavenger {
+    let n: NurseryPointer
+    let om: ObjectMemory
+    let ctx: AllocContext
+    let me: Int
+    let tag: UInt64
+    let ageLimit: UInt64
+    let promoteAll: Bool
+    let dropCarried: Bool
+    let forgetPromoted: Bool
+    let formats: UnsafeMutablePointer<UInt64>
+    let rem: UnsafeMutablePointer<Atomic<UInt16>>
+    let nilRaw: UInt64
+    var w: ScavengeWorker
+
+    @inline(__always)
+    func headerAtomic(_ v: UInt64) -> UnsafeMutablePointer<Atomic<UInt64>> {
+        unsafe (om.table + Int(truncatingIfNeeded: v &+ 8)).assumingMemoryBound(to: Atomic<UInt64>.self)
+    }
+
+    /// Scan one word: copy the young object it names if this participant
+    /// claims it first. Answers the nursery bit of the object if it is
+    /// young after this scavenge (its holder must then be remembered), else 0.
+    @inline(__always)
+    mutating func scanWord(_ v: UInt64) -> UInt16 {
+        if v & Oop.objectTagMask != 0 || v == 0 { return 0 }
+        let h = unsafe headerAtomic(v).pointee.load(ordering: .relaxed)
+        if h & Header.youngBit == 0 { return 0 }
+        if h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
+        return unsafe evacuate(v, h)
+    }
+
+    /// Claim and copy a young object (docs/modules/nursery.md "Claiming").
+    @inline(never)
+    mutating func evacuate(_ v: UInt64, _ h0: UInt64) -> UInt16 {
+        let hp = unsafe headerAtomic(v)
+        var h = h0
+        let size = Header(raw: h0).bodyBytes
+        var decision = ClaimDecision.promote
+        while true {
+            if h & Header.youngBit == 0 { return 0 }  // promoted by another participant
+            if h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
+            let room = w.survCur &+ size <= w.survEnd
+            let (nh, d) = claimedHeader(h, tag: tag, ageLimit: ageLimit, participant: me, promoteAll: promoteAll, hasRoom: room)
+            let (won, cur) = unsafe hp.pointee.compareExchange(expected: h, desired: nh, ordering: .relaxed)
+            if won {
+                h = nh
+                decision = d
+                break
+            }
+            h = cur
+        }
+        let dst: UInt64
+        if decision == .survive {
+            dst = w.survCur
+            w.survCur = dst &+ size
+        } else {
+            guard let d = om.bumpPromotion(ctx, bytes: size) else {
+                preconditionFailure("kajo: promotion found no block: the promotion reserve is exhausted (counted in reserveExhaustions)")
+            }
+            dst = d
+        }
+        let src = om.bodyOffset(Oop(raw: v))
+        if size <= 128 {
+            // Most bodies are a few words: a word loop beats a memmove call.
+            let s = unsafe (om.heapBase + Int(truncatingIfNeeded: src)).assumingMemoryBound(to: UInt64.self)
+            let d = unsafe (om.heapBase + Int(truncatingIfNeeded: dst)).assumingMemoryBound(to: UInt64.self)
+            let words = Int(truncatingIfNeeded: size &>> 3)
+            var i = 0
+            while i < words {
+                unsafe d[i] = s[i]
+                i &+= 1
+            }
+        } else {
+            unsafe memcpy(om.heapBase + Int(truncatingIfNeeded: dst), om.heapBase + Int(truncatingIfNeeded: src),
+                          Int(truncatingIfNeeded: size))
+        }
+        om.setStateWord(v, dst)
+        if decision == .survive {
+            w.stats.survivedBytes &+= size
+            w.stats.survivedObjects &+= 1
+            w.survLog.append(UInt32(truncatingIfNeeded: v &>> 4))
+        } else {
+            w.stats.promotedBytes &+= size
+            w.stats.promotedObjects &+= 1
+            if decision == .promoteOverflow {
+                w.stats.overflowBytes &+= size
+                w.stats.overflowObjects &+= 1
+            }
+        }
+        if h & Header.bytesBit == 0 { w.stack.append(v) }
+        return decision == .survive ? UInt16(truncatingIfNeeded: 1 &<< me) : 0
+    }
+
+    /// Scan the slots of copied objects until the stack is empty. A promoted
+    /// object that names a young one joins the remembered set. Every 1024
+    /// objects, if a participant is idle and the pool is empty, export the
+    /// bottom half of the stack.
+    mutating func drain() {
+        var k = 0
+        while let o = w.stack.popLast() {
+            // Claimed by this participant. An atomic load: losers' failed
+            // compare-and-swaps on this header are atomic accesses to
+            // ThreadSanitizer, so a plain load would be reported.
+            let h = unsafe headerAtomic(o).pointee.load(ordering: .relaxed)
+            let bits = unsafe scanSlots(o, h)
+            if bits != 0 && h & Header.youngBit == 0 && !forgetPromoted {
+                unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(bits, ordering: .relaxed)
+                w.nextRem.append(o)
+            }
+            k &+= 1
+            if unsafe k & 1023 == 0 && w.stack.count >= 8
+                && n.pointee.idle.pointee.load(ordering: .relaxed) > 0
+                && n.pointee.poolCount.pointee.load(ordering: .relaxed) == 0 {
+                exportPacket()
+            }
+        }
+    }
+
+    /// Scan the slots of `o` (header `h`): every slot of an ordinary or an
+    /// ephemeron object (the scavenge treats ephemerons as strong, the v0
+    /// rule), only the named slots of a weak one (then remembered for the
+    /// weak pass). Answers the nursery bits of the young objects it names.
+    @inline(__always)
+    mutating func scanSlots(_ o: UInt64, _ h: UInt64) -> UInt16 {
+        var count = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
+        let f = unsafe formats[Int(truncatingIfNeeded: h & Header.classMask)]
+        if _slowPath(f & ClassFormat.weakBit != 0) {
+            let named = Int(truncatingIfNeeded: f & ClassFormat.namedMask)
+            if count > named {
+                w.weak.append(o)
+                count = named
+            }
+        }
+        let base = unsafe (om.heapBase + Int(truncatingIfNeeded: om.bodyOffset(Oop(raw: o))) + 8)
+            .assumingMemoryBound(to: UInt64.self)
+        var bits: UInt16 = 0
+        var i = 0
+        while i < count {
+            bits |= unsafe scanWord(base[i])
+            i &+= 1
+        }
+        return bits
+    }
+
+    /// Remembered holders (old): scan, then keep the ones that still name a
+    /// young object (carried to the next scavenge), drop the rest.
+    mutating func scanRemembered(_ holders: UnsafeMutablePointer<UInt64>, _ count: Int) {
+        var k = 0
+        while k < count {
+            let o = unsafe holders[k]
+            let h = om.headerWord(o)  // old: never written during a scavenge
+            var bits: UInt16 = 0
+            if h & Header.bytesBit == 0 {
+                bits = unsafe scanSlots(o, h)
+                w.stats.remSlots &+= (h & Header.countMask) &>> Header.countShift
+            }
+            if bits != 0 && !dropCarried {
+                unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(bits, ordering: .relaxed)
+                w.nextRem.append(o)
+            } else {
+                unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(0, ordering: .relaxed)
+            }
+            k &+= 1
+        }
+        w.stats.remHolders &+= UInt64(count)
+    }
+
+    // MARK: work sharing
+
+    mutating func exportPacket() {
+        let pool = unsafe n.pointee.packets
+        let words = Swift.min(w.stack.count / 2, PacketPool.words)
+        if words == 0 { return }
+        unsafe pthread_mutex_lock(n.pointee.packetLock)
+        guard let slot = unsafe pool.pointee.free.popLast() else {
+            unsafe pthread_mutex_unlock(n.pointee.packetLock)
+            return
+        }
+        let st = unsafe w.stack.baseAddress.unsafelyUnwrapped
+        let dst = unsafe pool.pointee.storage + Int(slot) * PacketPool.words
+        unsafe dst.update(from: st, count: words)
+        unsafe st.update(from: st + words, count: w.stack.count - words)
+        w.stack.truncate(w.stack.count - words)
+        unsafe pool.pointee.length[Int(slot)] = words
+        unsafe pool.pointee.full.append(slot)
+        unsafe n.pointee.poolCount.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+        unsafe pthread_mutex_unlock(n.pointee.packetLock)
+        w.stats.packetsExported &+= 1
+    }
+
+    /// Move one exported packet onto this participant's stack. The caller is
+    /// counted in `inCopy`.
+    mutating func takePacket() -> Bool {
+        if unsafe n.pointee.poolCount.pointee.load(ordering: .sequentiallyConsistent) == 0 { return false }
+        let pool = unsafe n.pointee.packets
+        unsafe pthread_mutex_lock(n.pointee.packetLock)
+        guard let slot = unsafe pool.pointee.full.popLast() else {
+            unsafe pthread_mutex_unlock(n.pointee.packetLock)
+            return false
+        }
+        let len = unsafe pool.pointee.length[Int(slot)]
+        let src = unsafe pool.pointee.storage + Int(slot) * PacketPool.words
+        for i in 0..<len { unsafe w.stack.append(src[i]) }
+        unsafe pool.pointee.free.append(slot)
+        unsafe n.pointee.poolCount.pointee.wrappingSubtract(1, ordering: .sequentiallyConsistent)
+        unsafe pthread_mutex_unlock(n.pointee.packetLock)
+        return true
+    }
+
+    // MARK: entry sweep
+
+    /// Free the entries of nursery `k`'s young objects that died: the ones
+    /// handed out of its stash since the last scavenge and the survivors of
+    /// the last one. A dead entry is young without this scavenge's tag; it
+    /// goes back to the stash, which keeps its unused entries after them.
+    /// Touches only what was allocated since the last scavenge, never the
+    /// whole table.
+    mutating func sweepNursery(_ k: Int) {
+        let a = unsafe n.alloc(k)
+        var st = unsafe a.pointee.stash
+        var swept: UInt64 = 0, freed: UInt64 = 0
+        if let base = st.base {
+            var j = 0
+            let taken = st.next
+            var i = 0
+            while i < taken {
+                let e = unsafe base[i]
+                let raw = UInt64(e) &<< 4
+                let h = om.headerWord(raw)
+                if h & Header.youngBit != 0 && h & tag == 0 {
+                    om.setStateWord(raw, EntryState.free(next: 0))
+                    om.setHeaderWord(raw, 0)
+                    unsafe base[j] = e
+                    j &+= 1
+                    freed &+= 1
+                }
+                i &+= 1
+            }
+            swept &+= UInt64(taken)
+            let unused = st.count &- taken
+            if unused > 0 && j < taken { unsafe (base + j).update(from: base + taken, count: unused) }
+            st.next = 0
+            st.count = j &+ unused
+        }
+        let log = unsafe a.pointee.survLog
+        for i in 0..<log.count {
+            let e = log[i]
+            let raw = UInt64(e) &<< 4
+            let h = om.headerWord(raw)
+            if h & Header.youngBit != 0 && h & tag == 0 {
+                om.setStateWord(raw, EntryState.free(next: 0))
+                om.setHeaderWord(raw, 0)
+                st.append(e)
+                freed &+= 1
+            }
+        }
+        swept &+= UInt64(log.count)
+        unsafe a.pointee.survLog.removeAll()
+        unsafe a.pointee.stash = st
+        // A stash that grew past what an eden can use gives the rest back.
+        let keep = Int(truncatingIfNeeded: unsafe n.pointee.edenBytes / 16) &+ 4096
+        if st.count > keep { unsafe om.trimStash(a.pointer(to: \NurseryAlloc.stash)!, keep: keep) }
+        w.stats.entriesSwept &+= swept
+        w.stats.entriesFreed &+= freed
+    }
+}
+
+/// Stopper, after the phase: every weak slot that named a young object
+/// that died this scavenge (its entry is now free) becomes nil; a weak
+/// holder that is old and still names a young object is remembered.
+/// Answers the slots nil'ed.
+private func processWeakSlots(_ n: NurseryPointer, parts: [Int]) -> UInt64 {
+    let om = unsafe n.pointee.om
+    let nilObj = om.nilObject
+    let keep = unsafe n.pointee.config.testSwitches.keepDeadWeakSlots
+    var niled: UInt64 = 0
+    for p in parts {
+        let s = unsafe n.scav(p)
+        let weak = unsafe s.pointee.weak
+        for i in 0..<weak.count {
+            let o = Oop(raw: weak[i])
+            let h = om.header(o)
+            var bits: UInt16 = 0
+            var j = om.classFormat(h.classIndex).namedSlots
+            let count = Int(h.count)
+            while j < count {
+                let v = om.load(o, j)
+                if v.isObject {
+                    if EntryState.isFree(om.stateWord(v.raw)) {
+                        if !keep {
+                            om.store(o, j, nilObj)  // nil: never young
+                            niled &+= 1
+                        }
+                    } else {
+                        let hv = om.header(v)
+                        if hv.isYoung { bits |= UInt16(truncatingIfNeeded: 1 &<< hv.nurseryIndex) }
+                    }
+                }
+                j &+= 1
+            }
+            if bits != 0 && !h.isYoung {
+                let r = unsafe n.remMarker(o.raw)
+                if unsafe r.pointee.bitwiseOr(bits, ordering: .relaxed).oldValue == 0 { unsafe s.pointee.nextRem.append(o.raw) }
+            }
+        }
+    }
+    return niled
+}

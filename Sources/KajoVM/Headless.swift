@@ -18,6 +18,13 @@ public enum Headless {
         public var vmStress = ""
         /// 0: no background time slice (kernel cost isolation).
         public var sliceMs = 5.0
+        /// Module 4: nursery per worker in KiB (0: none, every object old),
+        /// one survivor half in KiB (0: an eighth), the age N.
+        public var nurseryKB = 4096
+        public var survivorKB = 0
+        public var age = 2
+        /// Module 4's stress flags: `tinynursery`, `promoteall`, `scavenge`.
+        public var nurseryStress = ""
 
         public init() {}
     }
@@ -53,8 +60,19 @@ public enum Headless {
     public static func run(_ files: [(path: String, text: String)], options: Options = Options()) -> Outcome {
         func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: [], report: []) }
         if options.workers < 1 || options.workers > 255 { return failed(.unsupported("--workers: 1 to 255")) }
+        var vc = VMConfig()
+        vc.backgroundWorkers = options.workers
+        vc.stackWords = options.stackWords
+        vc.stress = VMStress(parsing: options.vmStress)
+        vc.sliceNs = UInt64(options.sliceMs * 1e6)
+        vc.nursery.bytes = options.nurseryKB << 10
+        vc.nursery.survivorBytes = options.survivorKB << 10
+        vc.nursery.age = options.age
+        vc.nursery.stress = NurseryStress(parsing: options.nurseryStress)
+        if let problem = vc.nursery.validate(workers: options.workers + 2) { return failed(.unsupported("nursery: \(problem)")) }
         var config = ObjectMemoryConfig()
         config.heapBytes = options.heapMiB << 20
+        config.reserveBytes = vc.nursery.reserveBytes(workers: options.workers + 2)
         config.entryCapacity = options.entries
         config.stress = StressFlags(parsing: options.stress)
         config.verify = options.verify
@@ -73,11 +91,6 @@ public enum Headless {
         } catch {
             return failed(.load("\(error)"))
         }
-        var vc = VMConfig()
-        vc.backgroundWorkers = options.workers
-        vc.stackWords = options.stackWords
-        vc.stress = VMStress(parsing: options.vmStress)
-        vc.sliceNs = UInt64(options.sliceMs * 1e6)
         let vm = VM(image: image, config: vc)
         defer {
             vm.shutdown()
@@ -114,20 +127,56 @@ public enum Headless {
         }
         let worst = stops.max { $0.pauseNs < $1.pauseNs }
         let qos = (1...n).map { "\(vm.workerQoS($0).rawValue)" }.joined(separator: ",")
-        let report: [(String, String)] = [
+        var report: [(String, String)] = [
             ("qos", qos), ("stops", "\(stops.count)"), ("pauseP50ms", pct(0.5)), ("pauseP99ms", pct(0.99)),
             ("pauseMaxMs", pauses.last.map { unsafe String(format: "%.3f", Double($0) / 1e6) } ?? "-"),
             ("slowestParticipant", worst.map { "\($0.slowest)" } ?? "-"),
         ]
+        report += nurseryReport(vm, stops: stops, ms: ms)
         return Outcome(checksum: checksum, milliseconds: ms, counters: [
             ("sends", c.sends), ("cacheMisses", c.cacheMisses), ("cacheFlushes", c.cacheFlushes),
             ("primitiveCalls", c.primitiveCalls), ("primitiveFailures", c.primitiveFailures),
             ("specialSendFallbacks", c.specialSendFallbacks), ("errors", c.errors),
             ("safepointPolls", c.safepointPolls), ("collectionsTriggered", c.collectionsTriggered),
             ("collections", m.collections), ("compactions", m.compactions), ("allocations", m.allocations),
-            ("allocatedBytes", m.allocatedBytes),
+            ("allocatedBytes", m.allocatedBytes), ("weakSlotsNiled", m.weakSlotsNiled), ("ephemeronsQueued", m.ephemeronsQueued),
         ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors"].contains($0.name) },
         report: report)
     }
+}
+
+/// Module 4's line: scavenge pauses (p50, p99, max and the slowest
+/// participant of the longest), promotion, survival, overflow, full
+/// collections, the copy rate per participant, the barrier's slow path.
+func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, String)] {
+    guard vm.hasNursery else { return [("nursery", "off")] }
+    let c = vm.nurseryCounters
+    let log = vm.scavengeLog
+    let scav = stops.filter { $0.kind == .scavenge }
+    let fulls = stops.filter { $0.kind == .full }
+    let p = scav.map(\.pauseNs).sorted()
+    func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
+    func pct(_ q: Double) -> String { p.isEmpty ? "-" : f(Double(p[min(p.count - 1, Int(Double(p.count) * q))]) / 1e6) }
+    let worst = scav.max { $0.pauseNs < $1.pauseNs }
+    let mb = { (b: UInt64) in f(Double(b) / 1e6) }
+    var copied: UInt64 = 0, busy: UInt64 = 0, parts = 0
+    for r in log {
+        copied &+= r.copiedBytesPerParticipant.reduce(0, &+)
+        busy &+= r.busyNsPerParticipant.reduce(0, &+)
+        parts += r.participants
+    }
+    let rate = busy == 0 ? "-" : f(Double(copied) / Double(busy) * 1e3)  // MB/s per participant
+    let fullMax = fulls.map(\.pauseNs).max().map { f(Double($0) / 1e6) } ?? "-"
+    return [
+        ("scavenges", "\(c.scavenges)"), ("scavP50ms", pct(0.5)), ("scavP99ms", pct(0.99)),
+        ("scavMaxMs", p.last.map { f(Double($0) / 1e6) } ?? "-"), ("scavSlowest", worst.map { "\($0.slowest)" } ?? "-"),
+        ("participantsMean", log.isEmpty ? "-" : f(Double(parts) / Double(log.count))),
+        ("promotedMB", mb(c.promotedBytes)), ("promotedMBs", ms > 0 ? f(Double(c.promotedBytes) / 1e3 / ms) : "-"),
+        ("survivedMB", mb(c.survivedBytes)), ("overflowMB", mb(c.overflowBytes)),
+        ("fullCollections", "\(fulls.count)"), ("fullMaxMs", fullMax), ("fullRequested", "\(c.fullCollectionsRequested)"),
+        ("copyMBsPerParticipant", rate), ("youngAllocations", "\(c.youngAllocations)"),
+        ("largeAllocations", "\(c.largeAllocations)"), ("barrierSlow", "\(c.barrierSlowCalls)"),
+        ("remHolders", "\(c.rememberedHolders)"), ("entriesFreed", "\(c.entriesFreed)"),
+    ]
 }

@@ -1,0 +1,13 @@
+; Module 4's primitives (docs/modules/nursery.md, "Primitives"). Loaded after
+; processes.kasm.
+
+; A scavenge in a stop of its own.
+method UndefinedObject scavenge temps=0 prim=35
+end
+; nil finalizationSemaphore: aSemaphore  -- signalled when a full collection
+; queues ephemerons whose keys died (ADR 0009 section 1).
+method UndefinedObject finalizationSemaphore: temps=0 prim=36
+end
+; nil nextMourner  -> the oldest queued ephemeron, or nil.
+method UndefinedObject nextMourner temps=0 prim=37
+end

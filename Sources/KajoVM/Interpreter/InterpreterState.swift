@@ -104,6 +104,10 @@ struct CacheEntry {
     /// Module 3: the length of the send instruction whose primitive is
     /// running, so a primitive that suspends can rewind to it (hop).
     var sendLength = 0
+    /// Module 4: this worker's nursery (eden, entry stash, remembered
+    /// buffer); nil without one (module 2's standalone interpreter, or a VM
+    /// whose nursery is off): every object is then allocated old.
+    var young: UnsafeMutablePointer<NurseryAlloc>? = nil
 
     static let cacheEntries = 1024
 }
@@ -131,7 +135,11 @@ struct CacheEntry {
     /// the heap is full of live objects: the error is recorded.
     @inline(__always)
     func allocate(_ cls: UInt64, slots: Int, keeping extra: Oop = .none) -> Oop {
-        if unsafe !state.pointee.collectAtEveryAllocation {
+        if let y = unsafe state.pointee.young {
+            // Module 4: in this worker's eden.
+            let o = unsafe tryAllocateYoung(y, om, classIndex: cls, slots: slots, fill: nilObject)
+            if o != .none { return o }
+        } else if unsafe !state.pointee.collectAtEveryAllocation {
             let o = om.tryAllocate(unsafe state.pointee.context, classIndex: cls, slots: slots, fill: nilObject)
             if o != .none { return o }
         }
@@ -141,15 +149,27 @@ struct CacheEntry {
     /// A byte object, zeroed; as `allocate`.
     @inline(__always)
     func allocateBytes(_ cls: UInt64, count: Int) -> Oop {
-        if unsafe !state.pointee.collectAtEveryAllocation {
+        if let y = unsafe state.pointee.young {
+            let o = unsafe tryAllocateYoungBytes(y, om, classIndex: cls, count: count)
+            if o != .none { return o }
+        } else if unsafe !state.pointee.collectAtEveryAllocation {
             let o = om.tryAllocateBytes(unsafe state.pointee.context, classIndex: cls, count: count)
             if o != .none { return o }
         }
         return allocateSlow(cls, count: count, bytes: true, keeping: .none)
     }
 
+    /// The one out-of-line call of the allocation path.
     @inline(never)
     func allocateSlow(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop) -> Oop {
+        if unsafe state.pointee.young != nil { return allocateYoungSlow(cls, count: count, bytes: bytes, keeping: extra) }
+        return allocateOld(cls, count: count, bytes: bytes, keeping: extra)
+    }
+
+    /// An old object (no nursery, or one too large for eden): the context's
+    /// block, else a stop that collects (module 1's policy; module 4's hook
+    /// promotes everything first).
+    func allocateOld(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop) -> Oop {
         let ctx = unsafe state.pointee.context
         if let vm = unsafe workerOf(state).pointee.vm {
             // Module 3: another worker may be stopping the world already;
@@ -246,14 +266,14 @@ struct CacheEntry {
         return true
     }
 
-    private func pauseCount() -> UInt64 {
+    func pauseCount() -> UInt64 {
         let c = om.counters
         return c.collections &+ c.compactions
     }
 
     /// Every pause flushes the lookup cache (its entries are oops) and
     /// tells the loop to re-derive its cached bases.
-    private func afterPause(collections: UInt64) {
+    func afterPause(collections: UInt64) {
         flushCache()
         unsafe state.pointee.pauses &+= 1
         unsafe state.pointee.counters.collectionsTriggered &+= collections

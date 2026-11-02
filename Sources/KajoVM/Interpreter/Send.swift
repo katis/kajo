@@ -331,11 +331,13 @@ func doesNotUnderstand(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsa
     if args == .none { return unsafe failedAllocation(s, sel, rcv, length) }
     let base = unsafe s.pointee.stackBase
     let top = unsafe s.pointee.regs.sp
-    for i in 0..<argc { unsafe m.om.store(args, i, Oop(raw: base[top - argc + 1 + i])) }
+    // Fresh objects with no safepoint since: young holders (or old with
+    // nothing young). The barrier is kept: it costs one test each.
+    for i in 0..<argc { unsafe m.store(args, i, Oop(raw: base[top - argc + 1 + i]), .messageArgument) }
     let message = m.allocate(WellKnown.message, slots: MessageLayout.size, keeping: args)
     if message == .none { return unsafe failedAllocation(s, sel, rcv, length) }
-    m.om.store(message, MessageLayout.selector, Oop(raw: sel))
-    m.om.store(message, MessageLayout.arguments, args)
+    m.store(message, MessageLayout.selector, Oop(raw: sel), .messageSelector)
+    m.store(message, MessageLayout.arguments, args, .messageArguments)
     unsafe base[top - argc + 1] = message.raw
     unsafe s.pointee.regs.sp = top - argc + 1
     let r = unsafe restore(s)

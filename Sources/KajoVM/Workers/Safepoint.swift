@@ -64,7 +64,25 @@ private func parkLocked(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer)
     unsafe sp.pointee.parked += 1
     unsafe sp.pointee.lastParker = w.pointee.index
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
-    while unsafe sp.pointee.epoch == epoch { unsafe pthread_cond_wait(vm.pointee.safepointCond, vm.pointee.safepointLock) }
+    var seen = unsafe sp.pointee.phaseSeq
+    while unsafe sp.pointee.epoch == epoch {
+        // Module 4: join the stop's parallel phase (a scavenge) while it is
+        // open. Still parked: the stop verifier counts returns, not this.
+        if unsafe sp.pointee.phaseOpen && sp.pointee.phaseSeq != seen {
+            seen = unsafe sp.pointee.phaseSeq
+            unsafe sp.pointee.parts[sp.pointee.joined] = w.pointee.index
+            unsafe sp.pointee.joined += 1
+            unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+            let g0 = nanoseconds()
+            unsafe participateInScavenge(vm, w)
+            unsafe w.pointee.collectorNs &+= nanoseconds() &- g0
+            unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+            unsafe sp.pointee.done += 1
+            unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
+            continue
+        }
+        unsafe pthread_cond_wait(vm.pointee.safepointCond, vm.pointee.safepointLock)
+    }
     // Not `parked -= 1`: the stopper zeroed the count when it released
     // the world. Decrementing here, whenever this thread gets to run, let a
     // stop requested right after the previous one count a released worker
@@ -92,6 +110,7 @@ private func noteEpoch(_ w: WorkerPointer, _ epoch: UInt64) {
 @safe struct StopContext {
     let vm: UnsafeMutablePointer<VMState>
     let keeping: [Oop]
+    var timeToSafepointNs: UInt64 = 0
 
     /// Every root outside the object memory's own: live records' Processes
     /// and stacks, the workers' oop registers, ready queues, pending roots,
@@ -117,6 +136,7 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
         }
     }
     unsafe sp.pointee.requested = true
+    unsafe sp.pointee.stopper = w.pointee.index
     unsafe sp.pointee.lastParker = -1
     unsafe vm.pointee.flag.pointee.store(1, ordering: .relaxed)
     while unsafe sp.pointee.parked + 1 < sp.pointee.active {
@@ -128,21 +148,28 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 
     // The world is stopped.
-    work(unsafe StopContext(vm: vm, keeping: keeping))
+    work(unsafe StopContext(vm: vm, keeping: keeping, timeToSafepointNs: t1 &- t0))
     if unsafe vm.pointee.config.verifyStops { unsafe verifySchedule(vm) }
+    // A full collection fired ephemerons: signal the finalization
+    // Semaphore through the external queue (module 4, ADR 0009 section 1).
+    if unsafe vm.pointee.om.takeFinalizationSignal() { unsafe signalFinalization(vm) }
 
     unsafe lockCounted(vm.pointee.safepointLock, vm, contended: .safepointContended)
     if unsafe vm.pointee.config.verifyStops && sp.pointee.wakeups != wakeups {
         unsafe verifierFailed(vm, .stopVerifierFailures, "a parked worker left its park while the stop's work ran")
     }
-    unsafe vm.pointee.flag.pointee.store(0, ordering: .relaxed)
+    // Module 4: a full collection a scavenge requested keeps every poll on
+    // its slow path until a worker runs it in a stop of its own.
+    unsafe vm.pointee.flag.pointee.store(fullCollectionDue(vm) ? 1 : 0, ordering: .relaxed)
     unsafe sp.pointee.requested = false
+    unsafe sp.pointee.stopper = -1
     unsafe sp.pointee.epoch &+= 1
     if unsafe !vm.pointee.config.testSwitches.countReleasedAsParked { unsafe sp.pointee.parked = 0 }
     let t2 = nanoseconds()
     let i = unsafe sp.pointee.stopCount
     unsafe sp.pointee.stops[i & (SafepointState.stopLog - 1)] = StopRecord(
-        timeToSafepointNs: t1 &- t0, pauseNs: t2 &- t0, slowest: slowest, requester: w.pointee.index)
+        timeToSafepointNs: t1 &- t0, pauseNs: t2 &- t0, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind)
+    unsafe sp.pointee.kind = .other
     unsafe sp.pointee.stopCount = i &+ 1
     let epoch = unsafe sp.pointee.epoch
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
@@ -153,6 +180,37 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe vm.count(.stopNs, t2 &- t0)
     unsafe vm.count(.timeToSafepointNs, t1 &- t0)
     return true
+}
+
+/// The stopper, world stopped, mutex not held: open a parallel phase (a
+/// scavenge's copy and sweep), take part, close it and wait for every
+/// worker that joined. Answers the participants, the stopper first.
+func runParallelPhase(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> [Int] {
+    let sp = unsafe vm.pointee.safepoint
+    unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    unsafe sp.pointee.phaseSeq &+= 1
+    unsafe sp.pointee.phaseOpen = true
+    unsafe sp.pointee.parts[0] = w.pointee.index
+    unsafe sp.pointee.joined = 1
+    unsafe sp.pointee.done = 0
+    unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
+    unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    unsafe participateInScavenge(vm, w)
+    unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    unsafe sp.pointee.phaseOpen = false
+    while unsafe sp.pointee.done < sp.pointee.joined - 1 {
+        unsafe pthread_cond_wait(vm.pointee.safepointCond, vm.pointee.safepointLock)
+    }
+    let parts = unsafe (0..<sp.pointee.joined).map { unsafe sp.pointee.parts[$0] }
+    unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    return parts
+}
+
+/// Record what the current stop does (stopper, world stopped).
+func markStop(_ vm: UnsafeMutablePointer<VMState>, _ kind: StopKind) {
+    unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    unsafe vm.pointee.safepoint.pointee.kind = kind
+    unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 }
 
 /// World stopped. See `StopContext.roots`.

@@ -68,7 +68,7 @@ func registerPending(_ vm: VMPointer, _ sem: Oop) -> Int {
     return h
 }
 
-private func unregisterPending(_ vm: VMPointer, _ h: Int) {
+func unregisterPending(_ vm: VMPointer, _ h: Int) {
     if h < 0 { return }
     unsafe lockCounted(vm.pointee.pendingLock, vm, contended: .pendingContended)
     unsafe vm.pointee.pendingSlots[h] = 0

@@ -47,6 +47,8 @@ enum LeaveReason: UInt8, Sendable {
     var stopNs: UInt64 = 0
     var enterWaitNs: UInt64 = 0
     var leaveWaitNs: UInt64 = 0
+    /// Module 4: time spent in scavenges' parallel phases while parked.
+    var collectorNs: UInt64 = 0
     /// The stop epoch whose pause this worker's lookup cache has seen.
     var seenEpoch: UInt64 = 0
     /// Perturbation generator state (xorshift).

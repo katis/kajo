@@ -136,6 +136,9 @@ struct TurnStats: Sendable {
     var parkNs: UInt64 = 0
     /// Stopping the world itself (an allocation that collected).
     var stopNs: UInt64 = 0
+    /// Module 4: of `parkNs`, the time this worker spent copying and
+    /// sweeping in a scavenge's parallel phase (CPU work, not waiting).
+    var collectorNs: UInt64 = 0
     var slices = 0
     var preempted = false
 
@@ -150,7 +153,7 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
     let w = unsafe vm.worker(0)
     var st = TurnStats()
     let t0 = nanoseconds(), cpu0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
-    let park0 = unsafe w.pointee.parkNs, stop0 = unsafe w.pointee.stopNs
+    let park0 = unsafe w.pointee.parkNs, stop0 = unsafe w.pointee.stopNs, gc0 = unsafe w.pointee.collectorNs
     st.enterWaitNs = unsafe enterVM(vm, w)
     // The main worker runs at whatever QoS the shell's thread has: logged
     // per turn, as the background workers log theirs at start.
@@ -177,6 +180,7 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
         }
     }
     st.parkNs = unsafe w.pointee.parkNs &- park0
+    st.collectorNs = unsafe w.pointee.collectorNs &- gc0
     st.stopNs = unsafe w.pointee.stopNs &- stop0
     st.leaveWaitNs = unsafe leaveVM(vm, w)
     st.ns = nanoseconds() &- t0

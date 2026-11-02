@@ -18,6 +18,8 @@ struct VMConfig: Sendable {
     /// Pending-root slots: the most outstanding operations (Delays) at once.
     var pendingCapacity = 1 << 16
     var stress: VMStress = []
+    /// Module 4: the nurseries (`bytes` 0: none, every object old).
+    var nursery = NurseryConfig()
     /// Injected yields and sleeps, seeded (docs/VERIFICATION.md layer 5).
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).

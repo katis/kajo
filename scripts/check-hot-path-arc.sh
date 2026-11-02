@@ -5,6 +5,8 @@
 #     paths, and the primitives (including the ones that allocate);
 #     module 3's poll slow path, park, enter and leave, suspension and
 #     resumption (runSlice) and the scheduler's queue operations;
+#     module 4's barrier slow path, the eden allocation (inlined into
+#     Machine.allocate) and the scavenge's copy, scan, packet and sweep loops;
 #  2. the dispatch loop `interpret` is one jump table: one indirect branch
 #     and one jump-table relocation.
 # Internal functions are dead-stripped from a plain release build, so this
@@ -17,7 +19,7 @@ swift build -c release -Xswiftc -enable-testing --scratch-path .build/release-te
 objs=.build/release-testing/out/Intermediates.noindex/kajo.build/Release/KajoVM-t.build/Objects-normal/arm64
 typeset -A wanted
 wanted=(
-  Allocation 'ObjectMemory.tryAllocate(_:classIndex:slots:fill:)|ObjectMemory.tryAllocateBytes(_:classIndex:count:)|ObjectMemory.allocate(_:header:bytes:fill:)|ObjectMemory.place(_:header:bytes:fill:)|ObjectMemory.allocateSlow(_:header:bytes:fill:)|ObjectMemory.refillBlock(_:bytes:)|ObjectMemory.refillEntries(_:)|ObjectMemory.allocateBody(_:bytes:)|ObjectMemory.retire(_:)'
+  Allocation 'ObjectMemory.tryAllocate(_:classIndex:slots:fill:)|ObjectMemory.tryAllocateBytes(_:classIndex:count:)|ObjectMemory.allocate(_:header:bytes:fill:)|ObjectMemory.place(_:header:bytes:fill:)|ObjectMemory.allocateSlow(_:header:bytes:fill:)|ObjectMemory.refillBlock(_:bytes:reserve:)|ObjectMemory.refillEntries(_:)|ObjectMemory.allocateBody(_:bytes:reserve:)|ObjectMemory.retire(_:)'
   ObjectMemory 'ObjectMemory.store(_:_:_:)|ObjectMemory.load(_:_:)|ObjectMemory.storeByte(_:_:_:)|ObjectMemory.loadByte(_:_:)|ObjectMemory.lockPools()|ObjectMemory.unlockPools()|ObjectMemory.bytesBase(_:)|ObjectMemory.slotsBase(_:)'
   Dispatch 'interpret(_:_:)'
   Send 'lookupMiss(_:_:_:)|pollAndSend(_:_:_:_:_:_:_:_:)|pollAtJump(_:_:_:_:_:)|specialSend(_:_:_:_:_:_:)|primitiveSend(_:_:_:_:_:_:_:_:)|bottomReturn(_:_:_:_:_:)|stackOverflow(_:_:_:_:_:_:_:)|failAt(_:_:_:_:_:_:_:_:_:)|doesNotUnderstand(_:_:_:_:_:_:_:_:)'
@@ -26,9 +28,12 @@ wanted=(
   Image 'lookupMethod(_:nilObject:classIndex:selector:)'
   Poll 'pollSlow(_:rewind:)|stopIfStressed(_:_:)'
   Safepoint 'park(_:_:)|enterVM(_:_:)|leaveVM(_:_:)'
-  Scheduling 'requeueCurrent(_:_:sp:pc:affinity:result:reason:hop:)|suspendLocked(_:_:sp:pc:)|suspendAfterPrimitiveLocked(_:_:argc:result:)|finishSuspend(_:_:_:)|detachLocked(_:_:unconditionally:)|makeReadyLocked(_:_:fromBlocked:)|dequeueLocked(_:main:minPriority:for:)|waitSemaphore(_:_:_:argc:)|signalSemaphore(_:_:_:)|signalLocked(_:_:)|terminateCurrent(_:_:result:)'
+  Scheduling 'requeueCurrent(_:_:sp:pc:affinity:result:reason:hop:)|suspendLocked(_:_:sp:pc:)|suspendAfterPrimitiveLocked(_:_:argc:result:)|finishSuspend(_:_:_:)|detachLocked(_:_:unconditionally:)|makeReadyLocked(_:_:_:fromBlocked:)|dequeueLocked(_:main:minPriority:for:)|waitSemaphore(_:_:_:argc:)|signalSemaphore(_:_:_:)|signalLocked(_:_:)|terminateCurrent(_:_:result:)'
   Run 'runSlice(_:_:_:)'
   External 'drainExternal(_:_:)'
+  Generations 'ObjectMemory.promotionRefill(_:bytes:)'
+  Barrier 'rememberSlow(_:_:_:_:)'
+  Scavenge 'Scavenger.evacuate(_:_:)|Scavenger.drain()|Scavenger.scanRemembered(_:_:)|Scavenger.sweepNursery(_:)|Scavenger.exportPacket()|Scavenger.takePacket()|participateInScavenge(_:_:)'
 )
 fail=0
 found=0

@@ -41,16 +41,18 @@ import Synchronization
         unsafe state = raw.bindMemory(to: VMState.self, capacity: 1)
         unsafe state.initialize(to: VMState(
             om: om, image: image, config: config, nilObject: image.nilObject, workers: workers, workerCount: workerCount,
-            flag: flag, safepoint: boxed(SafepointState(stops: stops)), safepointLock: makeMutex(), safepointCond: makeCond(),
+            flag: flag, safepoint: boxed(SafepointState(stops: stops, parts: .allocate(capacity: workerCount))), safepointLock: makeMutex(), safepointCond: makeCond(),
             sched: boxed(SchedulerState()), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
             doneCond: makeCond(), externalHead: boxed(Atomic<UInt>(0)), pending: boxed(PendingState()),
             pendingSlots: pendingSlots, pendingNext: pendingNext, pendingLock: makeMutex(), hostLock: makeMutex(),
-            workerShared: shared, errors: boxed(ErrorLog()), errorsLock: makeMutex(), counters: counters))
+            workerShared: shared, errors: boxed(ErrorLog()), errorsLock: makeMutex(), counters: counters,
+            finalization: boxed(FinalizationState())))
         let seed = config.perturb?.seed ?? 0x9E37_79B9_7F4A_7C15
         for i in 0..<workerCount {
             unsafe workers[i] = Worker.make(image: image, vm: state, index: i, isMain: i == 0, flag: flag,
                                             pollEvery: config.pollEvery, seed: seed &+ UInt64(i) &* 0x9E37_79B9)
         }
+        unsafe NurseryShared.install(state)
     }
 
     var config: VMConfig { unsafe state.pointee.config }
@@ -115,6 +117,7 @@ import Synchronization
             node = unsafe n.pointee.next
             unsafe n.deallocate()
         }
+        unsafe NurseryShared.uninstall(state)
         for i in unsafe 0..<s.workerCount { unsafe Worker.destroy(s.workers[i]) }
         unsafe s.workers.deallocate()
         for i in unsafe 0..<s.workerCount {
@@ -124,11 +127,13 @@ import Synchronization
         unsafe s.flag.deinitialize(count: 1)
         unsafe s.flag.deallocate()
         unsafe s.safepoint.pointee.stops.deallocate()
+        unsafe s.safepoint.pointee.parts.deallocate()
         unsafe unbox(s.safepoint)
         unsafe unbox(s.sched)
         unsafe unbox(s.externalHead)
         unsafe unbox(s.pending)
         unsafe unbox(s.errors)
+        unsafe unbox(s.finalization)
         unsafe s.queues.deallocate()
         unsafe s.records.deallocate()
         unsafe s.pendingSlots.deallocate()
@@ -145,7 +150,7 @@ import Synchronization
 
     /// Run `body` on the host worker, inside the VM, one host thread at a
     /// time.
-    private func host<T>(_ body: (WorkerPointer) -> T) -> T {
+    func host<T>(_ body: (WorkerPointer) -> T) -> T {
         unsafe pthread_mutex_lock(state.pointee.hostLock)
         let w = unsafe state.hostWorker
         unsafe enterVM(state, w)
@@ -155,7 +160,7 @@ import Synchronization
         return r
     }
 
-    private func machine(_ w: WorkerPointer) -> Machine { unsafe Machine(state: w.pointer(to: \Worker.interp)!) }
+    func machine(_ w: WorkerPointer) -> Machine { unsafe Machine(state: w.pointer(to: \Worker.interp)!) }
 
     /// Root `o` for the host (host lock held, inside the VM).
     private func keep(_ o: Oop) {
@@ -331,7 +336,11 @@ import Synchronization
     func become(_ a: Oop, _ b: Oop) -> Bool { unsafe host { w in unsafe machine(w).become(a, b) } }
 
     func global(_ i: Int) -> Oop { inspect { $0.load(image.globals, i - 1) } }
-    func setGlobal(_ i: Int, _ v: Oop) { withWorldStopped { image.om.store(image.globals, i - 1, v) } }
+    func setGlobal(_ i: Int, _ v: Oop) {
+        unsafe host { w in
+            _ = unsafe stopWorld(state, w, retry: true) { _ in unsafe barrierStore(w, image.globals, i - 1, v, .hostGlobal) }
+        }
+    }
 
     // MARK: - turns and steps
 

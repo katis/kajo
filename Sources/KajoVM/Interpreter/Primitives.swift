@@ -45,6 +45,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 18: return c.argc == 1 ? (c.receiver == c.arg0 ? m.trueObject : m.falseObject) : .none
     case 19: return c.argc == 0 ? primIdentityHash(c.receiver) : .none
     case 20...34: return processPrimitive(n, m, c)  // module 3, Processes/ProcessPrimitives.swift
+    case 35...37: return nurseryPrimitive(n, m, c)  // module 4, Nursery/Finalization.swift
     default: return .none
     }
 }
@@ -74,7 +75,7 @@ private func primAtPut(_ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard c.arg1.isSmallInteger, c.arg1.smallIntegerValue >= 0, c.arg1.smallIntegerValue <= 255 else { return .none }
         m.om.storeByte(c.receiver, i, UInt8(c.arg1.smallIntegerValue))
     } else {
-        m.om.store(c.receiver, i, c.arg1)
+        m.store(c.receiver, i, c.arg1, .atPut)
     }
     return c.arg1
 }
@@ -114,7 +115,7 @@ private func primGlobal(_ m: Machine, _ c: PrimitiveCall, put: Bool) -> Oop {
     let i = c.arg0.smallIntegerValue
     guard i >= 1, i <= Int64(Image.globalCount) else { return .none }
     if put {
-        m.om.store(m.globals, Int(i - 1), c.arg1)
+        m.store(m.globals, Int(i - 1), c.arg1, .globalAtPut)
         return c.arg1
     }
     return m.om.load(m.globals, Int(i - 1))

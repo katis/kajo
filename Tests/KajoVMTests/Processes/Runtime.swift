@@ -14,8 +14,15 @@ final class Runtime {
     init(_ src: String, background: Int, heapBlocks: Int = 2048, entries: Int = 1 << 20, sliceMs: Double = 5,
          pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true,
          configure: (inout VMConfig) -> Void = { _ in }, before: (Image) -> Void = { _ in }) throws {
+        var vc = VMConfig()
+        vc.backgroundWorkers = background
+        vc.sliceNs = UInt64(sliceMs * 1e6)
+        vc.pollEvery = pollEvery
+        vc.verifyStops = true  // the stop and schedule verifiers, in release builds too
+        configure(&vc)
         var c = ObjectMemoryConfig()
         c.heapBytes = heapBlocks * BlockHeap.blockBytes
+        c.reserveBytes = vc.nursery.reserveBytes(workers: background + 2)
         c.entryCapacity = entries
         c.entryChunk = 256
         c.stress = stress
@@ -23,14 +30,8 @@ final class Runtime {
         c.onVerifyFailure = .record
         image = try Image(memory: ObjectMemory(c))
         before(image)
-        try image.load(["prelude", "lib", "processes"].map { (file: "\($0).kasm", text: kernel($0)) }
+        try image.load(["prelude", "lib", "processes", "nursery"].map { (file: "\($0).kasm", text: kernel($0)) }
                        + [(file: "test.kasm", text: src)])
-        var vc = VMConfig()
-        vc.backgroundWorkers = background
-        vc.sliceNs = UInt64(sliceMs * 1e6)
-        vc.pollEvery = pollEvery
-        vc.verifyStops = true  // the stop and schedule verifiers, in release builds too
-        configure(&vc)
         vm = VM(image: image, config: vc)
         if start { vm.start() }
     }

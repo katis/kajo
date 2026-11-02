@@ -24,6 +24,8 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
     if flagged {
         unsafe s.pointee.counters.safepointPolls &+= 1
         unsafe park(vm, w)
+        // Module 4: a scavenge left old space past its soft limit.
+        if unsafe fullCollectionDue(vm) { unsafe runDueFullCollection(vm, w) }
     }
     if unsafe s.pointee.countdown != 0 { return false }
     unsafe s.pointee.countdown = w.pointee.pollEvery

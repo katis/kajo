@@ -2,8 +2,9 @@ import Foundation
 import KajoVM
 
 let usage = """
-usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N] [--stress every,tiny,oneblock,preempt,stop]
-                [--slice-ms 5] [--verify]
+usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
+                [--stress every,tiny,oneblock,preempt,stop,tinynursery,promoteall,scavenge]
+                [--slice-ms 5] [--nursery KiB] [--survivor KiB] [--age N] [--verify]
        kajo version
 
 Loads the files in order into a fresh image, runs one Process per worker
@@ -41,6 +42,10 @@ case "run":
             let v = value().split(separator: ",")
             options.stress = v.filter { ["every", "tiny", "oneblock", "all"].contains($0) }.joined(separator: ",")
             options.vmStress = v.filter { ["preempt", "stop"].contains($0) }.joined(separator: ",")
+            options.nurseryStress = v.filter { ["tinynursery", "promoteall", "scavenge"].contains($0) }.joined(separator: ",")
+        case "--nursery": options.nurseryKB = Int(value()) ?? -1
+        case "--survivor": options.survivorKB = Int(value()) ?? -1
+        case "--age": options.age = Int(value()) ?? 0
         case "--slice-ms": options.sliceMs = Double(value()) ?? 5
         case "--verify": options.verify = true
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")

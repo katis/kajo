@@ -163,7 +163,10 @@ final class FakeMain: @unchecked Sendable {
         let st = rt.vm.runMain(budgetNs: budget)
         if st.parkNs > 0 || st.stopNs > 0 || st.enterWaitNs > 1000 { stopped += 1 }
         overruns.append(Double(Int64(bitPattern: st.ns &- st.pausedNs &- budget)) / 1e6)
-        cpuOverruns.append(Double(Int64(bitPattern: st.cpuNs &- budget)) / 1e6)
+        // Module 4: a parked main worker copies in a scavenge's parallel
+        // phase (until ADR 0008 takes it off the pause): CPU, but the
+        // stop's, not the turn's.
+        cpuOverruns.append(Double(Int64(bitPattern: st.cpuNs &- st.collectorNs &- budget)) / 1e6)
         usleep(500)
     }
     overruns.sort()

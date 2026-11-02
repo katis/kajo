@@ -150,7 +150,10 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
     var src = sumSource
     for i in 0..<k {
         src += "method UndefinedObject task\(i): temps=4\n  push_int 0\n  store_temp 1\n"
-        src += (halves[i].first + halves[i].second).map { $0.hasSuffix(":") ? $0 : "  \($0)" }.joined(separator: "\n")
+        // A scavenge between the halves (module 4): every program scavenges
+        // while the other tasks run, whatever its nursery size.
+        let scavenge = ["push_nil", "send scavenge 0", "pop"]
+        src += (halves[i].first + scavenge + halves[i].second).map { $0.hasSuffix(":") ? $0 : "  \($0)" }.joined(separator: "\n")
         src += "\n  push_nil\n  push_int 12\n  send globalAt: 1\n  push_int \(i + 1)\n  push_temp 1\n  send at:put: 2\n  pop\n"
         src += "  push_temp 1\n  return_top\nend\n"
     }
@@ -234,28 +237,53 @@ end
 
 """
 
-/// The configurations every seed runs under.
+/// The configurations every seed runs under. Module 3's seven run with the
+/// default nursery (4 MiB per worker, N = 2); module 4 adds the oracle
+/// without a nursery, tiny nurseries (one worker, every verifier), tiny
+/// nurseries that promote everything (eight workers), and a scavenge before
+/// every young allocation (eight workers). Every answer is the model's,
+/// which is also the no-nursery oracle's.
 enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     case oneWorker, eightWorkers, collectEveryAllocation, tinyEntryChunks, stopEveryPoll, preemptEveryPoll, perturbed
+    case noNursery, tinyNurseries, promoteAll, scavengeEveryAllocation
 
     var testDescription: String { rawValue }
 
+    var workers: Int { self == .oneWorker || self == .tinyNurseries ? 1 : 8 }
+
     func runtime(_ p: RandomProgram) throws -> Runtime {
-        let verify = self == .oneWorker || self == .eightWorkers || self == .perturbed
+        let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll].contains(self)
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
-        return try Runtime(p.source, background: self == .oneWorker ? 1 : 8, heapBlocks: 256, stress: stress, verify: verify,
+        return try Runtime(p.source, background: workers, heapBlocks: 256, stress: stress, verify: verify,
                            configure: { c in
                                switch self {
                                case .stopEveryPoll: c.stress = .stopEveryPoll
                                case .preemptEveryPoll: c.stress = .preemptEveryPoll
                                case .perturbed: c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
+                               case .noNursery: c.nursery.bytes = 0
+                               case .tinyNurseries, .promoteAll:
+                                   // Smaller than `tinyNurseries`: these programs
+                                   // allocate tens of KiB in all.
+                                   c.nursery.bytes = 24 << 10
+                                   c.nursery.survivorBytes = 2 << 10
+                                   if self == .promoteAll { c.nursery.stress = .promoteAll }
+                               case .scavengeEveryAllocation: c.nursery.stress = .scavengeAtEveryAllocation
                                default: break
                                }
                            })
     }
 }
+
+/// Scavenges seen by the current tiny-nursery configuration's seeds.
+final class ScavengeTally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n: [String: UInt64] = [:]
+    func add(_ c: RandomConfig, _ v: UInt64) { lock.lock(); n[c.rawValue, default: 0] += v; lock.unlock() }
+    func take(_ c: RandomConfig) -> UInt64 { lock.lock(); defer { n[c.rawValue] = 0; lock.unlock() }; return n[c.rawValue] ?? 0 }
+}
+let randomScavenges = ScavengeTally()
 
 /// Run one program under one configuration: its answer, or nil after
 /// recording why not.
@@ -279,6 +307,9 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     case .stopEveryPoll: #expect(c.stops > 10)
     case .preemptEveryPoll: #expect(c.preemptions > 10)
     case .collectEveryAllocation: #expect(rt.image.om.counters.stressCollections > 10)
+    case .noNursery: #expect(!rt.vm.hasNursery)
+    case .tinyNurseries, .promoteAll: randomScavenges.add(config, rt.vm.nurseryCounters.scavenges)
+    case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     default: break
     }
     rt.stop()
@@ -290,7 +321,7 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
 /// seed, ten (two with stopEveryPoll).
 func randomSeedCount(_ config: RandomConfig) -> Int {
     if let n = Int(ProcessInfo.processInfo.environment["KAJO_SEEDS"] ?? "") { return n }
-    return underThreadSanitizer ? (config == .stopEveryPoll ? 2 : 10) : 100
+    return underThreadSanitizer ? (config == .stopEveryPoll || config == .scavengeEveryAllocation ? 2 : 10) : 100
 }
 let randomSeedBase = UInt64(ProcessInfo.processInfo.environment["KAJO_SEED_BASE"] ?? "") ?? 1
 
@@ -309,6 +340,10 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
         }
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
+    if config == .tinyNurseries || config == .promoteAll {
+        // Small programs: not every seed scavenges, the configuration must.
+        #expect(randomScavenges.take(config) > 0)
+    }
     #expect(failed.isEmpty, "failing seeds: \(failed)")
 }
 
