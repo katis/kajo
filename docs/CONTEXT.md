@@ -88,9 +88,10 @@ as they are understood.
   63 set) and the header word. Entry 0 is never used.
 - **Header**: the object's header word, kept in its entry, not in the body.
   Bits 0..21 class index, 22..45 slot or byte count, 46 mark (reserved;
-  marks live in a side byte map), 47 byte object, 52..55 nursery index, 56
-  young, 57..59 age, 60 pinned for good, 61 frame pin, 62..63 scavenge
-  claim tag. Written only with the world stopped.
+  marks live in a side byte map), 47 byte object, 48 fired ephemeron,
+  52..55 nursery index, 56 young, 57..59 age, 60 pinned for good, 61 frame
+  pin, 62..63 scavenge claim tag. Written only with the world stopped, or
+  by the allocating worker before the oop escapes.
   docs/modules/object-memory.md has the full layout and which bits each
   module uses.
 - **Body**: an object's storage in the heap: a back reference (entry index
@@ -101,3 +102,45 @@ as they are understood.
 - **Pin**: a header bit that keeps a body from moving. Pinned for good:
   objects the interpreter holds raw pointers into. Frame pin: objects a
   running frame names, for the current collection only.
+- **Nursery**: a worker's region for young objects (module 4): an eden
+  and two survivor halves, beyond the block range. Every worker has one;
+  all are collected together by a scavenge.
+- **Eden**: the part of a nursery new objects are bump-allocated in; empty
+  after every scavenge.
+- **Survivor**: a young object that lived through a scavenge, copied into
+  the copying participant's survivor-to half; survivor-from holds the
+  previous scavenge's survivors. The halves swap roles at every scavenge.
+- **Young / old**: young objects live in a nursery (header bit 56); old ones
+  in blocks. Promotion copies a young object into old space; its oop stays.
+- **Age**: the scavenges a young object survived (header bits 57..59). At
+  N (default 2) it is promoted; earlier when survivor-to is full (an
+  overflow promotion).
+- **Scavenge**: a stop-the-world young collection: every participant
+  copies the young objects reachable from the roots and the remembered
+  holders, then the dead young entries are freed.
+- **Claim tag**: header bits 62..63; scavenge s claims a young object by
+  setting bit 62 + (s & 1) in one compare-and-swap that also writes the
+  decision (survive or promote). A loser reads the decision.
+- **Remembered set**: the old objects that may name a young one: a 16-bit
+  marker per entry beside the table (one bit per nursery) and per-worker
+  buffers of holders. Never a header bit; never a young holder.
+- **Barrier**: the check after every store of an oop into a heap object:
+  a young value stored into an object not young in the same nursery calls
+  the slow path, which remembers an old holder.
+- **Promotion reserve**: blocks beyond old space's soft limit that only
+  promotion may take, so a scavenge never fails for lack of space.
+- **Entry stash**: an array of free entries owned by one nursery; young
+  objects take entries from it in order, and the entry sweep returns the
+  dead ones to it.
+- **Weak slot**: an indexed slot of an object whose class format is weak:
+  not traced; nil once its referent is reclaimed.
+- **Ephemeron**: an object whose slot 0 (the key) is traced only if the key
+  is reachable some other way; when it is not, a full collection fires the
+  ephemeron once: queues it for finalization and keeps key and value alive
+  for that collection.
+- **Format**: a class's format word beside the class table: named slots,
+  and weak or ephemeron (ADR 0009 section 6). The header keeps only
+  pointers or bytes.
+- **Finalization queue**: the fired ephemerons, a root, taken one at a
+  time by a Process that a Semaphore wakes; finalizers never run on a
+  collector thread.

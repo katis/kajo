@@ -48,6 +48,21 @@ standard answer and cheapest when the marker is designed for them: modules
 4 to 7 add weak slot treatment to the scavenge, the SATB marker and the
 relocation pass as they are built, not afterwards.
 
+**v0 (module 4, 2026-11-02).** A class's format word (below, section 6)
+marks it weak or ephemeron; kasm's `class` directive takes `weak` or
+`ephemeron`. Weak: the indexed slots (past the named ones) are not traced;
+the scavenge nils those whose young referent died, module 1's mark-sweep
+those whose referent is unmarked. Ephemeron: slot 0 is the key; module 1's
+mark defers an ephemeron whose key is unmarked, traces those whose keys get
+marked, then fires the rest at once: header bit 48 set (a fired ephemeron
+is strong, so it is queued once), appended to the finalization queue (a
+root) and traced, so key and value survive that collection. After the
+stop the Semaphore registered with primitive 36 is signalled through the
+external queue; a Process takes each ephemeron with primitive 37
+`nextMourner` and sends `mourn`. The v0 rule: a scavenge treats ephemerons
+as strong, so a young key's finalization waits for the first full
+collection. Module 5 implements the key rule in the concurrent marker.
+
 ### 2. Immediates: SmallInteger, SmallFloat, Character (before module 4)
 
 The tag scheme of module 1 reserved the low-nibble patterns with bit 0 clear.
@@ -138,6 +153,11 @@ temp) allocation free apart from the closure itself.
   Process and Semaphore from module 3) stay sealed from `instVarAt:put:`,
   `become:` and `basicNew`; the kernel changes them through primitives
   that keep the VM's invariants.
+
+**v0 (module 4, 2026-11-02).** The format word lives beside the class
+table (`ClassFormat`: bits 0..15 named slots, 16 weak, 17 ephemeron), is
+set by the loader from kasm and saved in the snapshot (version 2). Only the
+collectors read it yet; no metaclasses, no 16/32/64-bit word formats.
 
 ### 7. Integers
 

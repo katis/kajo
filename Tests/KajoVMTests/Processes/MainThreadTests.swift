@@ -131,7 +131,9 @@ final class FakeMain: @unchecked Sendable {
     let t0 = now()
     while now() - t0 < 400_000_000 {
         let st = rt.vm.runMain(budgetNs: 1_000_000)
-        #expect(st.ns &- st.pausedNs < 20_000_000)
+        // CPU, not wall time: under load the OS deschedules the thread for
+        // tens of ms (AGENTS.md: a wall-clock assertion fails under load).
+        #expect(st.cpuNs &- st.collectorNs < 20_000_000)
         turns += 1
         usleep(2000)
     }

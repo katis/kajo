@@ -378,7 +378,8 @@ end
 }
 
 /// Semaphores held only by the pending-root table survive collections and
-/// are signalled when their timers fire.
+/// are signalled when their timers fire. (1.5 s timers: with 80 ms ones the
+/// suite under load fired some before the count was read.)
 @Test func pendingRootsSurviveACollection() throws {
     let src = """
     ; t0 = n, t1 = i
@@ -391,7 +392,7 @@ end
       lt
       jump_if_false done
       push_nil
-      push_int 80
+      push_lit 1500
       push_nil
       send newSemaphore 0
       send delay:signal: 2
