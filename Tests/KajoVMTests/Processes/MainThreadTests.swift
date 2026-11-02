@@ -176,7 +176,9 @@ final class FakeMain: @unchecked Sendable {
     // stops (blocked) and the OS descheduling the thread (AGENTS.md:
     // maxima depend on it; the wall figures are reported, and alone on the
     // machine their max was 0.064 ms).
-    #expect(cpuOverruns.last! <= 0.2)
+    // Under ThreadSanitizer the 1024 polls between clock reads take ten
+    // times longer: reported, not asserted.
+    #expect(underThreadSanitizer || cpuOverruns.last! <= 0.2)
     #expect(rt.vm.counters.preemptions >= 250)
     rt.vm.terminate(hog)
     rt.vm.terminateAll()

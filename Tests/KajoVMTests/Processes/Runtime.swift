@@ -84,6 +84,10 @@ final class Runtime {
     }
 }
 
+/// The suite runs under ThreadSanitizer as a gate; a few timing bounds and
+/// seed counts depend on it.
+let underThreadSanitizer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "__tsan_init") != nil
+
 func now() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
 
 /// Wait (with a timeout) until `cond` holds.

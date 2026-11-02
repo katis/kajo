@@ -152,6 +152,9 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
     let t0 = nanoseconds(), cpu0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     let park0 = unsafe w.pointee.parkNs, stop0 = unsafe w.pointee.stopNs
     st.enterWaitNs = unsafe enterVM(vm, w)
+    // The main worker runs at whatever QoS the shell's thread has: logged
+    // per turn, as the background workers log theirs at start.
+    unsafe vm.shared(0).pointee.qos.store(qos_class_self().rawValue, ordering: .relaxed)
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }
     unsafe w.pointee.deadline = ticks() &+ nsToTicks(budgetNs)
     while unsafe ticks() < w.pointee.deadline {

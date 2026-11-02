@@ -263,7 +263,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
 func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     let rt = try config.runtime(p)
     let root = rt.spawn("root")
-    guard rt.waitAllTerminated(120) else {
+    guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
         Issue.record("seed \(p.seed) \(config): did not finish")
         rt.vm.terminateAll()
         rt.waitAllTerminated()
@@ -285,7 +285,13 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     return v.isSmallInteger ? v.smallIntegerValue : nil
 }
 
-let randomSeedCount = Int(ProcessInfo.processInfo.environment["KAJO_SEEDS"] ?? "") ?? 100
+/// A hundred seeds; under ThreadSanitizer, which makes everything 10 to 50
+/// times slower and a stop at every poll on eight workers minutes per
+/// seed, ten (two with stopEveryPoll).
+func randomSeedCount(_ config: RandomConfig) -> Int {
+    if let n = Int(ProcessInfo.processInfo.environment["KAJO_SEEDS"] ?? "") { return n }
+    return underThreadSanitizer ? (config == .stopEveryPoll ? 2 : 10) : 100
+}
 let randomSeedBase = UInt64(ProcessInfo.processInfo.environment["KAJO_SEED_BASE"] ?? "") ?? 1
 
 /// A hundred seeds (KAJO_SEEDS overrides; `just soak` runs a thousand)
@@ -293,7 +299,7 @@ let randomSeedBase = UInt64(ProcessInfo.processInfo.environment["KAJO_SEED_BASE"
 @Test(arguments: RandomConfig.allCases)
 func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     var failed: [UInt64] = []
-    for s in 0..<UInt64(randomSeedCount) {
+    for s in 0..<UInt64(randomSeedCount(config)) {
         let p = randomProgram(randomSeedBase &+ s)
         let v = try runRandom(p, config)
         if v != p.expected {
