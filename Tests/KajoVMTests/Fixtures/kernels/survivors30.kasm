@@ -1,0 +1,5 @@
+; survivors.kasm at 30 percent (experiments/generational-gc)
+method UndefinedObject survivalPercent temps=0
+  push_lit 30
+  return_top
+end

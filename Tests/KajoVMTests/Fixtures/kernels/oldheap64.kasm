@@ -1,0 +1,13 @@
+; oldheap.kasm at 64 MiB live (experiments/concurrent-marking)
+method UndefinedObject oldheapMB temps=0
+  push_lit 64
+  return_top
+end
+method UndefinedObject oldheapIters temps=0
+  push_lit 16000000
+  return_top
+end
+method UndefinedObject oldheapReplaceEvery temps=0
+  push_lit 4096
+  return_top
+end

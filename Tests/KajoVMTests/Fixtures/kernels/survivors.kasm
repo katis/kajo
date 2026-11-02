@@ -1,0 +1,199 @@
+; survivors: a steady fraction of every nursery survives, and every keeper is
+; stored into an old holder. Per iteration a fresh Point; with probability
+; p percent (i \\ 100 < p, p = `nil survivalPercent`, defined by the loader)
+; it is kept, else dropped. Keepers go into a store: an Array of 1024 Arrays
+; of 64 slots, allocated up front (old after the first scavenge). Keeper k
+; goes to chunk k \\ 1024 + 1, slot k // 1024 + 1, striped so consecutive
+; keepers land in different old holders. When 65 536 keepers are stored the
+; store is summed (reading every promoted keeper back) and replaced.
+; 16 000 000 iterations split between workers.
+class Point Object 2
+
+method Point x temps=0
+  push_ivar 0
+  return_top
+end
+
+method Point y temps=0
+  push_ivar 1
+  return_top
+end
+
+method Point x:y: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; nil newStore -> Array of 1024 Arrays of 64. t0 = spine, t1 = i
+method UndefinedObject newStore temps=2
+  push_lit @Array
+  push_lit 1024
+  send new: 1
+  store_temp 0
+  push_int 1
+  store_temp 1
+loop:
+  push_temp 1
+  push_lit 1024
+  le
+  jump_if_false done
+  push_temp 0
+  push_temp 1
+  push_lit @Array
+  push_lit 64
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump loop
+done:
+  push_temp 0
+  return_top
+end
+
+; nil sumStore: s -> sum of x over the stored keepers (nil slots skipped).
+; t0 = s, t1 = i, t2 = j, t3 = sum, t4 = chunk, t5 = e
+method UndefinedObject sumStore: temps=5
+  push_int 0
+  store_temp 3
+  push_int 1
+  store_temp 1
+outer:
+  push_temp 1
+  push_lit 1024
+  le
+  jump_if_false done
+  push_temp 0
+  push_temp 1
+  send at: 1
+  store_temp 4
+  push_int 1
+  store_temp 2
+inner:
+  push_temp 2
+  push_int 64
+  le
+  jump_if_false next
+  push_temp 4
+  push_temp 2
+  send at: 1
+  store_temp 5
+  push_temp 5
+  push_nil
+  identical
+  jump_if_true skip
+  push_temp 3
+  push_temp 5
+  send x 0
+  add
+  store_temp 3
+skip:
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump inner
+next:
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump outer
+done:
+  push_temp 3
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = reps, t3 = sum, t4 = store, t5 = k,
+; t6 = pct, t7 = p
+method UndefinedObject run:of: temps=6
+  push_lit 16000000
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  send survivalPercent 0
+  store_temp 6
+  push_nil
+  send newStore 0
+  store_temp 4
+  push_int 0
+  store_temp 5
+  push_int 0
+  store_temp 3
+loop:
+  push_temp 2
+  push_int 0
+  gt
+  jump_if_false done
+  push_lit @Point
+  send basicNew 0
+  push_temp 2
+  push_int 1
+  send x:y: 2
+  store_temp 7
+  push_temp 3
+  push_temp 7
+  send y 0
+  add
+  store_temp 3
+  push_temp 2
+  push_lit 100
+  send \\ 1
+  push_temp 6
+  lt
+  jump_if_false next
+  push_temp 4
+  push_temp 5
+  push_lit 1024
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 5
+  push_lit 1024
+  send // 1
+  push_int 1
+  add
+  push_temp 7
+  send at:put: 2
+  pop
+  push_temp 5
+  push_int 1
+  add
+  store_temp 5
+  push_temp 5
+  push_lit 65536
+  lt
+  jump_if_true next
+  push_temp 3
+  push_nil
+  push_temp 4
+  send sumStore: 1
+  add
+  store_temp 3
+  push_nil
+  send newStore 0
+  store_temp 4
+  push_int 0
+  store_temp 5
+next:
+  push_temp 2
+  push_int 1
+  sub
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  push_nil
+  push_temp 4
+  send sumStore: 1
+  add
+  return_top
+end

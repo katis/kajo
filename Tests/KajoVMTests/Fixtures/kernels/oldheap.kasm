@@ -1,0 +1,499 @@
+; oldheap: a large long-lived graph in old space, mutated slowly while young
+; garbage churns (SPEC.md "Kernels"). Loaded after the base sources; the
+; loader adds `UndefinedObject oldheapMB` answering the live size in MiB.
+;
+; Each worker builds (MB * 32) // n groups. A group is an Array of 256 nodes;
+; a node is an Array of 14 slots: slot 1 links to another node of the same
+; group (a ring at first), slot 2 holds a SmallInteger payload, the rest are
+; nil. One group is 256 * 120 + 2056 = 32 776 bytes of bodies, so 32 groups
+; are about 1 MiB. Groups hang off a two-level spine (Arrays of 256).
+;
+; Mutation loop, per iteration i (oldheapIters // n iterations per worker):
+;  - churn: a fresh OHPoint, read back and dropped (young garbage);
+;  - every 8th iteration, rewire: (g at: a) at: 1 put: (g at: b) for a
+;    pseudo-random group g and nodes a, b (a pointer store into an old
+;    object, the SATB barrier's case);
+;  - every oldheapReplaceEvery iterations, replace: the spine slot of the
+;    oldest group (FIFO) gets a freshly built group, so the old one becomes
+;    garbage in one piece and old space sees a steady promotion rate.
+; Checksum: the churn sum plus, over every node, the payload of the node its
+; link names (reads the whole graph back at the end).
+class OHPoint Object 2
+
+method OHPoint x:y: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+method OHPoint x temps=0
+  push_ivar 0
+  return_top
+end
+
+; Records when a build phase ended (cm-bench reports build and mutate time).
+; Kajo: no primitive (37 is nextMourner here); a no-op.
+method UndefinedObject ohBuilt temps=0
+  push_nil
+  return_top
+end
+
+; nil ohGroup: s -> a fresh group; node j has payload s + j and links to
+; node j \\ 256 + 1. t0 = s, t1 = g, t2 = j, t3 = node
+method UndefinedObject ohGroup: temps=3
+  push_lit @Array
+  push_lit 256
+  send new: 1
+  store_temp 1
+  push_int 1
+  store_temp 2
+fill:
+  push_temp 2
+  push_lit 256
+  le
+  jump_if_false link
+  push_lit @Array
+  push_int 14
+  send new: 1
+  store_temp 3
+  push_temp 3
+  push_int 2
+  push_temp 0
+  push_temp 2
+  add
+  send at:put: 2
+  pop
+  push_temp 1
+  push_temp 2
+  push_temp 3
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump fill
+link:
+  push_int 1
+  store_temp 2
+lloop:
+  push_temp 2
+  push_lit 256
+  le
+  jump_if_false done
+  push_temp 1
+  push_temp 2
+  send at: 1
+  push_int 1
+  push_temp 1
+  push_temp 2
+  push_lit 256
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump lloop
+done:
+  push_temp 1
+  return_top
+end
+
+; nil ohSpine: count -> Array of (count + 255) // 256 Arrays of 256.
+; t0 = count, t1 = spine, t2 = n, t3 = i
+method UndefinedObject ohSpine: temps=3
+  push_temp 0
+  push_lit 255
+  add
+  push_lit 256
+  send // 1
+  store_temp 2
+  push_lit @Array
+  push_temp 2
+  send new: 1
+  store_temp 1
+  push_int 1
+  store_temp 3
+loop:
+  push_temp 3
+  push_temp 2
+  le
+  jump_if_false done
+  push_temp 1
+  push_temp 3
+  push_lit @Array
+  push_lit 256
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump loop
+done:
+  push_temp 1
+  return_top
+end
+
+; nil ohAt: k in: spine -> group k (k from 0)
+method UndefinedObject ohAt:in: temps=0
+  push_temp 1
+  push_temp 0
+  push_lit 256
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 256
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  return_top
+end
+
+; nil ohAt: k in: spine put: g
+method UndefinedObject ohAt:in:put: temps=0
+  push_temp 1
+  push_temp 0
+  push_lit 256
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 256
+  send \\ 1
+  push_int 1
+  add
+  push_temp 2
+  send at:put: 2
+  return_top
+end
+
+; nil ohBuild: w of: n -> state Array: 1 spine, 2 count, 3 lcg, 4 fifo,
+; 5 seed. t0 = w, t1 = n, t2 = count, t3 = spine, t4 = k, t5 = seed, t6 = st
+method UndefinedObject ohBuild:of: temps=5
+  push_nil
+  send oldheapMB 0
+  push_int 32
+  mul
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  push_temp 2
+  send ohSpine: 1
+  store_temp 3
+  push_temp 0
+  push_lit 1000003
+  mul
+  push_int 1
+  add
+  store_temp 5
+  push_int 0
+  store_temp 4
+build:
+  push_temp 4
+  push_temp 2
+  lt
+  jump_if_false built
+  push_nil
+  push_temp 4
+  push_temp 3
+  push_nil
+  push_temp 5
+  push_temp 4
+  add
+  send ohGroup: 1
+  send ohAt:in:put: 3
+  pop
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump build
+built:
+  push_lit @Array
+  push_int 5
+  send new: 1
+  store_temp 6
+  push_temp 6
+  push_int 1
+  push_temp 3
+  send at:put: 2
+  pop
+  push_temp 6
+  push_int 2
+  push_temp 2
+  send at:put: 2
+  pop
+  push_temp 6
+  push_int 3
+  push_temp 5
+  send at:put: 2
+  pop
+  push_temp 6
+  push_int 4
+  push_int 0
+  send at:put: 2
+  pop
+  push_temp 6
+  push_int 5
+  push_temp 5
+  send at:put: 2
+  pop
+  push_temp 6
+  return_top
+end
+
+; nil ohMutate: st iters: m -> churn sum. Updates st's lcg and fifo.
+; t0 = st, t1 = m, t2 = spine, t3 = count, t4 = r, t5 = fifo, t6 = i,
+; t7 = sum, t8 = g, t9 = every, t10 = seed
+method UndefinedObject ohMutate:iters: temps=9
+  push_temp 0
+  push_int 1
+  send at: 1
+  store_temp 2
+  push_temp 0
+  push_int 2
+  send at: 1
+  store_temp 3
+  push_temp 0
+  push_int 3
+  send at: 1
+  store_temp 4
+  push_temp 0
+  push_int 4
+  send at: 1
+  store_temp 5
+  push_temp 0
+  push_int 5
+  send at: 1
+  store_temp 10
+  push_nil
+  send oldheapReplaceEvery 0
+  store_temp 9
+  push_int 0
+  store_temp 7
+  push_int 1
+  store_temp 6
+loop:
+  push_temp 6
+  push_temp 1
+  le
+  jump_if_false done
+  ; churn
+  push_temp 7
+  push_lit @OHPoint
+  send basicNew 0
+  push_temp 6
+  push_temp 4
+  send x:y: 2
+  send x 0
+  add
+  store_temp 7
+  ; every 8th: rewire
+  push_temp 6
+  push_int 8
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false noRewire
+  push_temp 4
+  push_lit 1103515245
+  mul
+  push_lit 12345
+  add
+  push_lit 2147483648
+  send \\ 1
+  store_temp 4
+  push_nil
+  push_temp 4
+  push_temp 3
+  send \\ 1
+  push_temp 2
+  send ohAt:in: 2
+  store_temp 8
+  push_temp 8
+  push_temp 4
+  push_lit 65536
+  send // 1
+  push_lit 256
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  push_int 1
+  push_temp 8
+  push_temp 4
+  push_lit 256
+  send // 1
+  push_lit 256
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  send at:put: 2
+  pop
+noRewire:
+  ; every `every`: replace the oldest group
+  push_temp 6
+  push_temp 9
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false next
+  push_nil
+  push_temp 5
+  push_temp 2
+  push_nil
+  push_temp 10
+  push_temp 6
+  add
+  send ohGroup: 1
+  send ohAt:in:put: 3
+  pop
+  push_temp 5
+  push_int 1
+  add
+  push_temp 3
+  send \\ 1
+  store_temp 5
+next:
+  push_temp 6
+  push_int 1
+  add
+  store_temp 6
+  jump loop
+done:
+  push_temp 0
+  push_int 3
+  push_temp 4
+  send at:put: 2
+  pop
+  push_temp 0
+  push_int 4
+  push_temp 5
+  send at:put: 2
+  pop
+  push_temp 7
+  return_top
+end
+
+; nil ohSum: st -> sum over every node of its link target's payload.
+; t0 = st, t1 = spine, t2 = count, t3 = k, t4 = g, t5 = j, t6 = sum
+method UndefinedObject ohSum: temps=6
+  push_temp 0
+  push_int 1
+  send at: 1
+  store_temp 1
+  push_temp 0
+  push_int 2
+  send at: 1
+  store_temp 2
+  push_int 0
+  store_temp 6
+  push_int 0
+  store_temp 3
+outer:
+  push_temp 3
+  push_temp 2
+  lt
+  jump_if_false done
+  push_nil
+  push_temp 3
+  push_temp 1
+  send ohAt:in: 2
+  store_temp 4
+  push_int 1
+  store_temp 5
+inner:
+  push_temp 5
+  push_lit 256
+  le
+  jump_if_false next
+  push_temp 6
+  push_temp 4
+  push_temp 5
+  send at: 1
+  push_int 1
+  send at: 1
+  push_int 2
+  send at: 1
+  add
+  store_temp 6
+  push_temp 5
+  push_int 1
+  add
+  store_temp 5
+  jump inner
+next:
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump outer
+done:
+  push_temp 6
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = st, t3 = sum
+method UndefinedObject run:of: temps=2
+  push_nil
+  push_temp 0
+  push_temp 1
+  send ohBuild:of: 2
+  store_temp 2
+  push_nil
+  send ohBuilt 0
+  pop
+  push_nil
+  push_temp 2
+  push_nil
+  send oldheapIters 0
+  push_temp 1
+  send // 1
+  send ohMutate:iters: 2
+  store_temp 3
+  push_temp 3
+  push_nil
+  push_temp 2
+  send ohSum: 1
+  add
+  return_top
+end
+
+; The app (C3, C4, C6): build, record "built" in slot w of the Array in
+; global 12, then mutate forever. t0 = w, t1 = st
+method UndefinedObject ohLoop: temps=1
+  push_nil
+  push_temp 0
+  push_int 7
+  send ohBuild:of: 2
+  store_temp 1
+  push_nil
+  push_int 12
+  send globalAt: 1
+  push_temp 0
+  push_int 1
+  send at:put: 2
+  pop
+loop:
+  push_nil
+  push_temp 1
+  push_lit 100000
+  send ohMutate:iters: 2
+  pop
+  jump loop
+end

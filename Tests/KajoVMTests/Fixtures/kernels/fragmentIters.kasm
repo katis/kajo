@@ -1,0 +1,5 @@
+; fragment.kasm's 2 000 000 iterations (experiments/concurrent-relocation)
+method UndefinedObject fragmentIters temps=0
+  push_lit 2000000
+  return_top
+end

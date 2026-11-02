@@ -1,0 +1,551 @@
+; fragment: medium-lived objects promoted into old space, 5 percent of them
+; kept for the whole run at scattered addresses, the rest dying there, so
+; old space fills with sparse blocks (SPEC.md "Kernels").
+;
+; Per iteration i (`nil fragmentIters` in total, split between workers; the
+; loader defines it: 2 000 000 for the benchmark, fewer in tests):
+;  - a node: an Array of 14 slots, slot 2 = i (120-byte body), stored in the
+;    worker's ring at slot i \\ 32768, evicting the node stored 32 768
+;    iterations earlier: medium-lived, promoted at N = 2;
+;  - when i \\ 20 = 0 the evicted node, already old, goes into the worker's
+;    keep store and lives to the end: 5 percent survivors. Keeping it only
+;    after promotion matters: a keeper reachable from the keep store while
+;    young would be copied next to the other keepers (the scavenge copies
+;    remembered holders' referents together) instead of between the ring
+;    nodes that die;
+;  - 4 FPoints of young garbage;
+;  - every 4th iteration a SmallInteger store into a pseudo-random kept node
+;    (slot 2 := i): stores into old objects that relocation moves;
+;  - every 64th iteration the newest keep chunk (1024 slots) is copied into
+;    the worker's mirror Array with replaceFrom:to:with:startingAt:, the
+;    primitive that holds two raw body pointers under hazard slots.
+; Rings and keep stores are spines of Arrays of 1024 (an object must fit a
+; 32 KiB block). Checksum: churn sum + every kept node's payload + every
+; ring node's payload, read at the end.
+class FPoint Object 2
+
+method FPoint x:y: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+method FPoint x temps=0
+  push_ivar 0
+  return_top
+end
+
+; Kajo: no arrayCopy primitive (38) yet; the body copies slot by slot.
+; t0 = start, t1 = stop, t2 = source, t3 = from, t4 = i
+method Object replaceFrom:to:with:startingAt: temps=1 prim=38
+  push_temp 0
+  store_temp 4
+loop:
+  push_temp 4
+  push_temp 1
+  le
+  jump_if_false done
+  push_self
+  push_temp 4
+  push_temp 2
+  push_temp 3
+  push_temp 4
+  add
+  push_temp 0
+  sub
+  send at: 1
+  send at:put: 2
+  pop
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump loop
+done:
+  return_self
+end
+
+method SmallInteger fmin: temps=0
+  push_self
+  push_temp 0
+  lt
+  jump_if_false other
+  push_self
+  return_top
+other:
+  push_temp 0
+  return_top
+end
+
+; nil fragSpine: count -> Array of (count + 1023) // 1024 Arrays of 1024.
+; t0 = count, t1 = spine, t2 = n, t3 = i
+method UndefinedObject fragSpine: temps=3
+  push_temp 0
+  push_lit 1023
+  add
+  push_lit 1024
+  send // 1
+  store_temp 2
+  push_lit @Array
+  push_temp 2
+  send new: 1
+  store_temp 1
+  push_int 1
+  store_temp 3
+loop:
+  push_temp 3
+  push_temp 2
+  le
+  jump_if_false done
+  push_temp 1
+  push_temp 3
+  push_lit @Array
+  push_lit 1024
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump loop
+done:
+  push_temp 1
+  return_top
+end
+
+; nil fkAt: idx in: spine -> element idx (from 0)
+method UndefinedObject fkAt:in: temps=0
+  push_temp 1
+  push_temp 0
+  push_lit 1024
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 1024
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  return_top
+end
+
+; nil fkAt: idx in: spine put: v
+method UndefinedObject fkAt:in:put: temps=0
+  push_temp 1
+  push_temp 0
+  push_lit 1024
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 1024
+  send \\ 1
+  push_int 1
+  add
+  push_temp 2
+  send at:put: 2
+  return_top
+end
+
+; nil fragState: w cap: cap -> state Array: 1 ring spine, 2 keep spine,
+; 3 keep count, 4 lcg, 5 keep capacity, 6 mirror. t0 = w, t1 = cap, t2 = st
+method UndefinedObject fragState:cap: temps=1
+  push_lit @Array
+  push_int 6
+  send new: 1
+  store_temp 2
+  push_temp 2
+  push_int 6
+  push_lit @Array
+  push_lit 1024
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 1
+  push_nil
+  push_lit 32768
+  send fragSpine: 1
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 2
+  push_nil
+  push_temp 1
+  send fragSpine: 1
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 3
+  push_int 0
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 4
+  push_temp 0
+  push_lit 1000003
+  mul
+  push_int 1
+  add
+  send at:put: 2
+  pop
+  push_temp 2
+  push_int 5
+  push_temp 1
+  send at:put: 2
+  pop
+  push_temp 2
+  return_top
+end
+
+; nil fragStep: st i: i -> churn value. t0 = st, t1 = i, t2 = node, t3 = k,
+; t4 = r, t5 = sum, t6 = evicted
+method UndefinedObject fragStep:i: temps=5
+  push_lit @Array
+  push_int 14
+  send new: 1
+  store_temp 2
+  push_temp 2
+  push_int 2
+  push_temp 1
+  send at:put: 2
+  pop
+  ; evict ring slot i \\ 32768, store the new node there
+  push_nil
+  push_temp 1
+  push_lit 32768
+  send \\ 1
+  push_temp 0
+  push_int 1
+  send at: 1
+  send fkAt:in: 2
+  store_temp 6
+  push_nil
+  push_temp 1
+  push_lit 32768
+  send \\ 1
+  push_temp 0
+  push_int 1
+  send at: 1
+  push_temp 2
+  send fkAt:in:put: 3
+  pop
+  ; every 20th: keep the evicted (old) node
+  push_temp 1
+  push_int 20
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false nokeep
+  push_temp 6
+  push_nil
+  identical
+  jump_if_true nokeep
+  push_temp 0
+  push_int 3
+  send at: 1
+  store_temp 3
+  push_nil
+  push_temp 3
+  push_temp 0
+  push_int 5
+  send at: 1
+  send \\ 1
+  push_temp 0
+  push_int 2
+  send at: 1
+  push_temp 6
+  send fkAt:in:put: 3
+  pop
+  push_temp 0
+  push_int 3
+  push_temp 3
+  push_int 1
+  add
+  send at:put: 2
+  pop
+nokeep:
+  ; churn: 4 FPoints
+  push_lit @FPoint
+  send basicNew 0
+  push_temp 1
+  push_int 1
+  send x:y: 2
+  send x 0
+  push_lit @FPoint
+  send basicNew 0
+  push_int 1
+  push_temp 1
+  send x:y: 2
+  send x 0
+  add
+  push_lit @FPoint
+  send basicNew 0
+  push_int 2
+  push_temp 1
+  send x:y: 2
+  send x 0
+  add
+  push_lit @FPoint
+  send basicNew 0
+  push_int 3
+  push_temp 1
+  send x:y: 2
+  send x 0
+  add
+  store_temp 5
+  push_temp 0
+  push_int 3
+  send at: 1
+  store_temp 3
+  push_temp 3
+  push_int 0
+  gt
+  jump_if_false done
+  ; every 64th: mirror the newest keep chunk (hazard-slot primitive)
+  push_temp 1
+  push_int 64
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false nocopy
+  push_temp 0
+  push_int 6
+  send at: 1
+  push_int 1
+  push_lit 1024
+  push_temp 0
+  push_int 2
+  send at: 1
+  push_temp 3
+  push_int 1
+  sub
+  push_temp 0
+  push_int 5
+  send at: 1
+  send \\ 1
+  push_lit 1024
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_int 1
+  send replaceFrom:to:with:startingAt: 4
+  pop
+nocopy:
+  ; every 4th: a SmallInteger store into a pseudo-random kept node
+  push_temp 1
+  push_int 4
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false done
+  push_temp 0
+  push_int 4
+  send at: 1
+  push_lit 1103515245
+  mul
+  push_lit 12345
+  add
+  push_lit 2147483648
+  send \\ 1
+  store_temp 4
+  push_temp 0
+  push_int 4
+  push_temp 4
+  send at:put: 2
+  pop
+  push_nil
+  push_temp 4
+  push_lit 65536
+  send // 1
+  push_temp 3
+  push_temp 0
+  push_int 5
+  send at: 1
+  send fmin: 1
+  send \\ 1
+  push_temp 0
+  push_int 2
+  send at: 1
+  send fkAt:in: 2
+  push_int 2
+  push_temp 1
+  send at:put: 2
+  pop
+done:
+  push_temp 5
+  return_top
+end
+
+; nil fragSum: st -> kept payloads + ring payloads. t0 = st, t1 = sum,
+; t2 = j, t3 = n, t4 = e
+method UndefinedObject fragSum: temps=4
+  push_int 0
+  store_temp 1
+  push_temp 0
+  push_int 3
+  send at: 1
+  push_temp 0
+  push_int 5
+  send at: 1
+  send fmin: 1
+  store_temp 3
+  push_int 0
+  store_temp 2
+kloop:
+  push_temp 2
+  push_temp 3
+  lt
+  jump_if_false ring
+  push_temp 1
+  push_nil
+  push_temp 2
+  push_temp 0
+  push_int 2
+  send at: 1
+  send fkAt:in: 2
+  push_int 2
+  send at: 1
+  add
+  store_temp 1
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump kloop
+ring:
+  push_int 0
+  store_temp 2
+rloop:
+  push_temp 2
+  push_lit 32768
+  lt
+  jump_if_false done
+  push_nil
+  push_temp 2
+  push_temp 0
+  push_int 1
+  send at: 1
+  send fkAt:in: 2
+  store_temp 4
+  push_temp 4
+  push_nil
+  identical
+  jump_if_true rnext
+  push_temp 1
+  push_temp 4
+  push_int 2
+  send at: 1
+  add
+  store_temp 1
+rnext:
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump rloop
+done:
+  push_temp 1
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = iters, t3 = st, t4 = i, t5 = sum
+method UndefinedObject run:of: temps=4
+  push_nil
+  send fragmentIters 0
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  push_temp 0
+  push_temp 2
+  push_int 20
+  send // 1
+  push_int 1
+  add
+  send fragState:cap: 2
+  store_temp 3
+  push_int 0
+  store_temp 5
+  push_int 1
+  store_temp 4
+loop:
+  push_temp 4
+  push_temp 2
+  le
+  jump_if_false done
+  push_temp 5
+  push_nil
+  push_temp 3
+  push_temp 4
+  send fragStep:i: 2
+  add
+  store_temp 5
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump loop
+done:
+  push_temp 5
+  push_nil
+  push_temp 3
+  send fragSum: 1
+  add
+  return_top
+end
+
+; The app (R5, R5n): the same steps forever, 500 per 10 ms; the keep store
+; holds 262 144 nodes and wraps around. t0 = w, t1 = st, t2 = i, t3 = sem,
+; t4 = b
+method UndefinedObject fragLoop: temps=4
+  push_nil
+  push_temp 0
+  push_lit 262144
+  send fragState:cap: 2
+  store_temp 1
+  push_nil
+  send newSemaphore 0
+  store_temp 3
+  push_int 1
+  store_temp 2
+outer:
+  push_int 0
+  store_temp 4
+inner:
+  push_temp 4
+  push_lit 500
+  lt
+  jump_if_false pace
+  push_nil
+  push_temp 1
+  push_temp 2
+  send fragStep:i: 2
+  pop
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump inner
+pace:
+  push_nil
+  push_int 10
+  push_temp 3
+  send delay:signal: 2
+  pop
+  push_temp 3
+  send wait 0
+  pop
+  jump outer
+end
