@@ -7,6 +7,10 @@
 #     resumption (runSlice) and the scheduler's queue operations;
 #     module 4's barrier slow path, the eden allocation (inlined into
 #     Machine.allocate) and the scavenge's copy, scan, packet and sweep loops;
+#     module 5's barrier with the flag word (inlined into interpret and the
+#     primitives), the SATB slow path and handover, the weak keep-alive, the
+#     marker's trace loop and poll, the final mark's drain, the lazy sweep
+#     and the apply;
 #  2. the dispatch loop `interpret` is one jump table: one indirect branch
 #     and one jump-table relocation.
 # Internal functions are dead-stripped from a plain release build, so this
@@ -34,6 +38,9 @@ wanted=(
   Generations 'ObjectMemory.promotionRefill(_:bytes:)'
   Barrier 'rememberSlow(_:_:_:_:)'
   Scavenge 'Scavenger.evacuate(_:_:)|Scavenger.drain()|Scavenger.scanRemembered(_:_:)|Scavenger.sweepNursery(_:)|Scavenger.exportPacket()|Scavenger.takePacket()|participateInScavenge(_:_:)'
+  SATB 'storeWithBarriers(_:_:_:_:_:)|handOver(_:_:_:)|weakReadBarrier(_:_:_:_:)|takeBufferLocked(_:)'
+  Marker 'markSome(_:_:limit:)|markerPoll(_:_:cycle:phase:)|drainStack(_:_:_:)|takeItem(_:_:_:_:)|popItem(_:)|returnBuffer(_:_:)'
+  Sweep 'sweepCycle(_:_:inPause:)|applyInStop(_:_:)'
 )
 fail=0
 found=0
