@@ -3,7 +3,7 @@ import Testing
 
 /// Ported from object-representation (B): a rooted list survives 200 000
 /// garbage allocations in a small heap; entries come back through the pool.
-@Test(arguments: [StressFlags(), .tinyEntryChunks])
+@Test(arguments: [StressFlags(), .oneBlockHeap, .tinyEntryChunks])
 func gcKeepsSurvivorsAndReclaimsGarbage(_ stress: StressFlags) throws {
     let om = try makeMemory(heapBlocks: 16, stress: stress)
     defer { om.destroy() }

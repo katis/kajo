@@ -56,6 +56,7 @@ struct ObjectMemoryConfig: Sendable {
     var stress: StressFlags = []
     var verify = checkedBuild
     var onVerifyFailure: VerifyFailurePolicy = checkedBuild ? .trap : .record
+    var testSwitches = TestSwitches()
 
     init() {}
 
@@ -71,4 +72,11 @@ struct ObjectMemoryConfig: Sendable {
 enum ObjectMemoryError: Error, Equatable {
     case invalidConfig(String)
     case reservationFailed(String)
+}
+
+/// Switches that turn a rule off so a test can show the rule matters. Never
+/// set outside tests.
+struct TestSwitches: Sendable {
+    /// Compaction moves pinned bodies.
+    var ignorePins = false
 }

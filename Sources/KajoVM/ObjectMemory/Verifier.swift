@@ -102,14 +102,13 @@ extension ObjectMemory {
             }
         }
 
-        let marks = unsafe shared.pointee.marks
         var e: UInt64 = 1
         while e < hw {
             defer { e &+= 1 }
             let raw = e &<< 4
             let s = stateWord(raw)
             let hd = Header(raw: headerWord(raw))
-            if unsafe marks[Int(e)] != 0 { out.fail("entry \(e) has its mark set outside a collection") }
+            if markByte(e) != 0 { out.fail("entry \(e) has its mark set outside a collection") }
             if EntryState.isFree(s) {
                 if hd.raw != 0 { out.fail("free entry \(e) has header 0x\(String(hd.raw, radix: 16))") }
                 continue
@@ -242,10 +241,9 @@ extension ObjectMemory {
             if hd.isBytes { continue }
             for i in 0..<Int(hd.count) { visit(load(o, i), from: "entry \(o.entryIndex) slot \(i)") }
         }
-        let marks = unsafe shared.pointee.marks
         var e: UInt64 = 1
         while e < hw {
-            let m = unsafe marks[Int(e)] != 0
+            let m = markByte(e) != 0
             let r = reached[Int(e)] != 0
             if r && !m { out.fail("entry \(e) is reachable but not marked") }
             if m && !r { out.fail("entry \(e) is marked but not reachable") }

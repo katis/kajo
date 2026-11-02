@@ -58,7 +58,10 @@ extension ObjectMemory {
     // MARK: - mark
 
     @inline(__always)
-    func isMarked(_ o: Oop) -> Bool { unsafe shared.pointee.marks[Int(truncatingIfNeeded: o.entryIndex)] != 0 }
+    func markByte(_ index: UInt64) -> UInt8 { unsafe shared.pointee.marks[Int(truncatingIfNeeded: index)] }
+
+    @inline(__always)
+    func isMarked(_ o: Oop) -> Bool { markByte(o.entryIndex) != 0 }
 
     @inline(__always)
     func setMark(_ index: UInt64, _ v: UInt8) {
@@ -113,15 +116,30 @@ extension ObjectMemory {
     /// Contexts' private entry lists are discarded (their entries are still
     /// free in the table and land in the new runs).
     func sweep() {
+        let h = heap
+        var live = sweepEntries()
+        defer { live.free() }
+        var freed: UInt64 = 0
+        for b in 0..<h.blockCount where h.isInUse(b) && !live[b] {
+            h.setInUse(b, false)
+            h.setUsed(b, 0)
+            freed &+= 1
+        }
+        rebuildBlockPool()
+        unsafe gc.pointee.counters.blocksFreed &+= freed
+    }
+
+    /// Free unmarked used entries, unmark the rest, rebuild the entry runs
+    /// from every free entry. Answers, per block, whether a live body is in
+    /// it. Contexts' private lists are discarded.
+    func sweepEntries() -> RawArray<Bool> {
         let hw = highWater
         lockPools()
         let nc = unsafe pools.pointee.contexts.count
         for i in 0..<nc { unsafe pools.pointee.contexts[i].pointee.freeEntry = 0 }
         unsafe pools.pointee.entryRuns.removeAll()
         unlockPools()
-        let h = heap
-        var live = RawArray<Bool>(repeating: false, count: h.blockCount)
-        defer { live.free() }
+        var live = RawArray<Bool>(repeating: false, count: heap.blockCount)
         var runs = RunBuilder(chunk: UInt64(config.entryChunk))
         var swept: UInt64 = 0
         var e: UInt64 = 1
@@ -130,7 +148,7 @@ extension ObjectMemory {
             let s = stateWord(raw)
             if EntryState.isFree(s) {
                 runs.add(raw, self)
-            } else if unsafe shared.pointee.marks[Int(truncatingIfNeeded: e)] != 0 {
+            } else if markByte(e) != 0 {
                 setMark(e, 0)
                 live[BlockHeap.block(ofOffset: s)] = true
             } else {
@@ -140,18 +158,11 @@ extension ObjectMemory {
             }
             e &+= 1
         }
-        var freed: UInt64 = 0
-        for b in 0..<h.blockCount where h.isInUse(b) && !live[b] {
-            h.setInUse(b, false)
-            h.setUsed(b, 0)
-            freed &+= 1
-        }
         lockPools()
         unsafe runs.finish(into: &pools.pointee.entryRuns)
         unlockPools()
-        rebuildBlockPool()
         unsafe gc.pointee.counters.entriesSwept &+= swept
-        unsafe gc.pointee.counters.blocksFreed &+= freed
+        return live
     }
 
     /// Every free block, and every in-use block with at least a minimum
