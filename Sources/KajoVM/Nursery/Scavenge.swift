@@ -90,7 +90,7 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
     // A small scavenge is the stopper's alone: waking every parked worker
     // costs more than the copying (docs/modules/nursery.md "Deviations").
     let parts: [Int]
-    if youngBytes < NurseryShared.soloYoungBytes && remHolders < UInt64(NurseryShared.remTaskHolders) {
+    if unsafe youngBytes < NurseryShared.soloYoungBytes && remHolders < UInt64(NurseryShared.remTaskHolders) {
         unsafe participateInScavenge(vm, w)
         parts = unsafe [w.pointee.index]
     } else {
