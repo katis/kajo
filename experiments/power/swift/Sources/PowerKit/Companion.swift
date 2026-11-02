@@ -23,6 +23,9 @@ public final class Companion: @unchecked Sendable {
     private let stop = Atomic<Bool>(false)
     private let started = Atomic<Bool>(false)
     private var tid: pthread_t? = nil
+    /// The companion thread's 64-bit id (ThreadCPU, ThreadCounts); written
+    /// by the thread before `started`, so valid once `init` returns.
+    public private(set) var threadId: UInt64 = 0
     // Written by the companion thread before it exits, read after join.
     private var cpuNs: UInt64 = 0
     private var wallNs: UInt64 = 0
@@ -51,6 +54,7 @@ public final class Companion: @unchecked Sendable {
     private func loop() {
         qosSeen = qos_class_self()
         let me = ThreadCPU.selfId()
+        threadId = me
         counts0 = ThreadCounts.of(me)
         let t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)

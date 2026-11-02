@@ -127,19 +127,39 @@ private func burn(ms: Double) -> UInt64 {
 }
 
 @Suite(.serialized) struct ThreadCountsTests {
+    /// The per-thread counts of a spinning thread, read from this thread by
+    /// its id, agree with the kernel's CPU time of that thread
+    /// (thread_info, the clock behind CLOCK_THREAD_CPUTIME_ID) read just
+    /// inside and just outside the same window, and the window lasts until
+    /// the spinner itself accrued 200 ms of CPU, however loaded the machine.
     @Test func perThreadCountsSeeASpinner() {
         let before = ThreadCPU.snapshot()
         let c = Companion(.spin)
-        let mid = ThreadCPU.snapshot()
-        let tid = ThreadCPU.newThreads(before, mid)[0]
+        let tid = c.threadId
+        // Other suites start threads meanwhile: the spinner is one of the
+        // new ones, not necessarily the first.
+        #expect(ThreadCPU.newThreads(before, ThreadCPU.snapshot()).contains(tid))
+        func cpu() -> UInt64 { ThreadCPU.snapshot()[tid]?.cpuNs ?? 0 }
+        let outer0 = cpu()
         let a = ThreadCounts.of(tid)
-        usleep(300_000)
+        let inner0 = cpu()
+        let deadline = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) + 30_000_000_000
+        var inner1 = inner0
+        repeat {
+            usleep(20_000)
+            inner1 = cpu()
+        } while inner1 &- inner0 < 200_000_000 && clock_gettime_nsec_np(CLOCK_UPTIME_RAW) < deadline
         let b = ThreadCounts.of(tid)
-        c.finish()
+        let outer1 = cpu()
+        let r = c.finish()
         #expect(a.ok && b.ok)
         let d = ThreadCounts.delta(a, b)
-        let cpu = d.p.cpuNs + d.e.cpuNs
-        #expect(cpu >= 200_000_000 && cpu <= 400_000_000)
+        let got = d.p.cpuNs + d.e.cpuNs
+        let lo = inner1 &- inner0, hi = outer1 &- outer0
+        #expect(lo >= 200_000_000, "spinner accrued only \(lo) ns in 30 s")
+        // 1 ms for the two sources' rounding.
+        #expect(got + 1_000_000 >= lo && got <= hi + 1_000_000, "counts \(got) ns, thread CPU \(lo)...\(hi) ns")
+        #expect(got <= r.cpuNs + 1_000_000, "counts \(got) ns, the spinner's own clock \(r.cpuNs) ns")
         #expect(d.p.cycles + d.e.cycles > 0)
         #expect(d.fields("x").contains("x_tc_ok=1"))
     }
