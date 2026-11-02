@@ -80,3 +80,44 @@ Also re-run `experiments/power/swift`'s full `swift test` once after the fix
   say which and do not re-run the matrix.
 - The Mac is free for this; use it. The phone is not needed.
 - Commit as you go, small commits; never rewrite history.
+
+## Record
+
+### Step 1: reproduce
+
+Harness: the debug test bundle (`swift build --build-tests`) run through
+`swiftpm-testing-helper --testing-library swift-testing --filter
+sharedYoungObjectsAreClaimedOnce`, several copies at once, with or without
+`yes > /dev/null` hogs. M2 Max class Mac, 12 cores (8 P + 4 E), otherwise idle.
+
+| condition | young mode | failed |
+|---|---|---|
+| 1 copy at a time, no hogs | `local` (test default) | 0 of 20 |
+| 4 copies at once, no hogs | `local` | 4 of 40 |
+| 4 copies at once + 12 `yes` | `local` | 10 of 40 (3 of 12 in a first trial) |
+| 4 copies at once + 12 `yes` | `stw` (`KAJO_TEST_YOUNG=stw`) | 0 of 40 |
+| 4 copies at once + 12 `yes` | `offload` | 0 of 40 |
+
+Verbatim messages (each failing run printed 1 to 7, entries differ per run):
+
+```
+verify: concurrent mark missed reachable entry 3317264 (class 14)
+verify: concurrent mark missed reachable entry 1771264 (class 14)
+verify: concurrent mark missed reachable entry 6446752 (class 14)
+verify young: reachable entry 30065 is free
+```
+
+30 of the 31 messages are the first; one run printed only the last. Class 14
+is `Pair` (the first user class; the base sources define none).
+
+First finding, before any minimisation: **this is not the stop-the-world
+scavenge's verifier and not the parallel scavenge.** The test's threaded
+runtime runs `KAJO_TEST_YOUNG`, whose default is `local` (Part 1 local
+collections), and the message is the concurrent-mark verifier
+(`verifyMarks`, Concurrent.swift, at every final mark): an entry that was
+in the marking snapshot is reachable at the final mark and unmarked. Under
+`stw` (the oracle the brief worries about) the same test under the same
+contention passed 40 of 40. The one `verify young` message is the young
+verifier finding a reachable object whose entry bit in `used` is clear.
+Both name a reachable object whose entry the collector treats as something
+else: a snapshot entry it never marked, or a free entry.
