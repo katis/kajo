@@ -241,18 +241,29 @@ end
 /// default nursery (4 MiB per worker, N = 2); module 4 adds the oracle
 /// without a nursery, tiny nurseries (one worker, every verifier), tiny
 /// nurseries that promote everything (eight workers), and a scavenge before
-/// every young allocation (eight workers). Every answer is the model's,
-/// which is also the no-nursery oracle's.
+/// every young allocation (eight workers). Module 5 adds a marking cycle at
+/// every scavenge (four workers, tiny nurseries, a marker thread, every
+/// verifier) and the same with the barrier's flag never cleared, and
+/// perturbation reaches the marker. Every answer is the model's, which is
+/// also the no-nursery oracle's.
 enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     case oneWorker, eightWorkers, collectEveryAllocation, tinyEntryChunks, stopEveryPoll, preemptEveryPoll, perturbed
     case noNursery, tinyNurseries, promoteAll, scavengeEveryAllocation
+    case cycleEveryScavenge, markingAlwaysOn
 
     var testDescription: String { rawValue }
 
-    var workers: Int { self == .oneWorker || self == .tinyNurseries ? 1 : 8 }
+    var workers: Int {
+        switch self {
+        case .oneWorker, .tinyNurseries: 1
+        case .cycleEveryScavenge, .markingAlwaysOn: 4
+        default: 8
+        }
+    }
 
     func runtime(_ p: RandomProgram) throws -> Runtime {
-        let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll].contains(self)
+        let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
+                      .cycleEveryScavenge, .markingAlwaysOn].contains(self)
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
@@ -268,12 +279,17 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                case .preemptEveryPoll: c.stress = .preemptEveryPoll
                                case .perturbed: c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                case .noNursery: c.nursery.bytes = 0
-                               case .tinyNurseries, .promoteAll:
+                               case .tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn:
                                    // Smaller than `tinyNurseries`: these programs
                                    // allocate tens of KiB in all.
                                    c.nursery.bytes = 24 << 10
                                    c.nursery.survivorBytes = 2 << 10
                                    if self == .promoteAll { c.nursery.stress = .promoteAll }
+                                   if self == .cycleEveryScavenge { c.marking.stress = .cycleAtEveryScavenge }
+                                   if self == .markingAlwaysOn {
+                                       c.marking.stress = [.cycleAtEveryScavenge, .markingAlwaysOn]
+                                       c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
+                                   }
                                case .scavengeEveryAllocation: c.nursery.stress = .scavengeAtEveryAllocation
                                default: break
                                }
@@ -317,6 +333,9 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     case .collectEveryAllocation: #expect(rt.image.om.counters.stressCollections > 10)
     case .noNursery: #expect(!rt.vm.hasNursery)
     case .tinyNurseries, .promoteAll: randomScavenges.add(config, rt.vm.nurseryCounters.scavenges)
+    case .cycleEveryScavenge, .markingAlwaysOn:
+        randomScavenges.add(config, rt.vm.markingCounters.cyclesCompleted)
+        #expect(rt.vm.markingCounters.missed == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     default: break
     }
@@ -348,8 +367,9 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
         }
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
-    if config == .tinyNurseries || config == .promoteAll {
-        // Small programs: not every seed scavenges, the configuration must.
+    if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn].contains(config) {
+        // Small programs: not every seed scavenges (or completes a marking
+        // cycle), the configuration must.
         #expect(randomScavenges.take(config) > 0)
     }
     #expect(failed.isEmpty, "failing seeds: \(failed)")
