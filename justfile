@@ -35,3 +35,7 @@ arc-check:
 # Fuzz a loader (kasm or snapshot) for SECONDS: libFuzzer if the toolchain has it, else replay and mutate
 fuzz TARGET SECONDS="60":
     scripts/fuzz.sh {{TARGET}} {{SECONDS}}
+
+# The fixture kernels through `kajo run` against their published single-worker checksums
+golden:
+    scripts/golden.sh
