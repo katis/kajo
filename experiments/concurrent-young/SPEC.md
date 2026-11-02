@@ -168,7 +168,8 @@ Round kinds:
   `collecting[k]` and the flag word (both stored before the round was
   opened; the acknowledgement acquires the mutex).
 - **H1 (roots).** Work: scan the worker's stack (current Process from its
-  base to the flushed `sp`, the `current` and `result` registers, the host
+  base to the flushed `sp`, the `current` register (not `result`: it is
+  consumed before any safepoint, and a stale one keeps a dead object), the host
   worker's host roots) for references into Y_k, mark the current Process
   scanned for k (below), publish `rem[k]` and `del[k]` (hand the buffers over,
   take empty ones).
