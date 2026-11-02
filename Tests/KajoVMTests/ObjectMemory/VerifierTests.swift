@@ -57,7 +57,7 @@ enum HeapCorruption: CaseIterable, Sendable {
     case misalignedOffset, offsetInFreeBlock, offsetBeyondUsed, offsetPastHeap
     case backReferenceNamesAnotherEntry, sizeDisagreesWithHeader, relocatingState
     case reservedHeaderBit, unregisteredClass, freeEntryWithHeader, twoEntriesOneBody, offsetIntoAnotherBody
-    case markLeftSet, usedEndsMidBody, freeBlockWithUsedBytes, badRoot, badClassTableEntry
+    case markLeftSet, usedEndsMidBody, usedNotAligned, freeBlockWithUsedBytes, badRoot, badClassTableEntry
 
     var needle: String {
         switch self {
@@ -75,6 +75,7 @@ enum HeapCorruption: CaseIterable, Sendable {
         case .offsetIntoAnotherBody: "start of a body"
         case .markLeftSet: "mark"
         case .usedEndsMidBody: "walk"
+        case .usedNotAligned: "invalid used count"
         case .freeBlockWithUsedBytes: "free block"
         case .badRoot: "root"
         case .badClassTableEntry: "class table"
@@ -118,6 +119,9 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
     case .usedEndsMidBody:
         let b = om.blockIndex(of: s.holder)
         om.heap.setUsed(b, om.heap.usedBytes(b) - 8)
+    case .usedNotAligned:
+        let b = om.blockIndex(of: s.holder)
+        om.heap.setUsed(b, om.heap.usedBytes(b) + 4)
     case .freeBlockWithUsedBytes: om.heap.setUsed(s.freeBlock, 64)
     case .badRoot: om.setRoot(s.rootHandle, Oop(entryIndex: hw + 3))
     case .badClassTableEntry: om.setClassOop(3, s.garbage)
@@ -127,7 +131,7 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
 
 enum FreeListCorruption: CaseIterable, Sendable {
     case usedEntryInARun, entryInTwoLists, cycle, leakedFreeEntry, usedEntryInAContextList
-    case blockInPoolTwice, fullBlockInPool, leakedFreeBlock, referenceOutsideTable
+    case blockInPoolTwice, fullBlockInPool, leakedFreeBlock, referenceOutsideTable, blockBeyondTheHeap
 
     var needle: String {
         switch self {
@@ -138,6 +142,7 @@ enum FreeListCorruption: CaseIterable, Sendable {
         case .fullBlockInPool: "no tail"
         case .leakedFreeBlock: "not in the pool"
         case .referenceOutsideTable: "outside"
+        case .blockBeyondTheHeap: "beyond the heap"
         }
     }
 }
@@ -171,6 +176,7 @@ func theFreeListVerifierCatches(_ c: FreeListCorruption) throws {
         unsafe p.pointee.freeBlocks[i] = p.pointee.freeBlocks[p.pointee.freeBlocks.count - 1]
         _ = unsafe p.pointee.freeBlocks.popLast()
     case .referenceOutsideTable: om.setStateWord(head0, EntryState.free(next: (om.highWater + 5) << 4))
+    case .blockBeyondTheHeap: unsafe p.pointee.freeBlocks.append(UInt32(om.heap.blockCount + 3))
     }
     s.check(om.verifyFreeLists(), c.needle)
 }
@@ -191,6 +197,14 @@ func theFreeListVerifierCatches(_ c: FreeListCorruption) throws {
     s.om.mark(extraRoots: [])
     s.om.setMark(g.entryIndex, 1)
     s.check(s.om.verifyMarks(extraRoots: []), "marked but not reachable")
+}
+
+@Test func theMarkVerifierCatchesAnInvalidReferenceItReaches() throws {
+    let s = try Scene()
+    defer { s.om.destroy() }
+    s.om.mark(extraRoots: [])
+    s.setSlotRaw(s.a, 0, s.garbage.raw)
+    s.check(s.om.verifyMarks(extraRoots: []), "not a used entry")
 }
 
 @Test func theMarkVerifierSeesExtraRoots() throws {

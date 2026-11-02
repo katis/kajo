@@ -137,7 +137,7 @@ enum SnapshotCorruption: CaseIterable, Sendable {
     case misalignedOffset, offsetPastHeap, offsetInFreeBlock, relocatingState
     case backReferenceMismatch, sizeMismatch, reservedHeaderBit, framePin, unregisteredClass
     case danglingSlot, reservedTagInSlot, noneInSlot, danglingRoot, danglingClass
-    case freeEntryWithHeader, twoEntriesOneBody, walkBreaks
+    case freeEntryWithHeader, twoEntriesOneBody, walkBreaks, offsetBeyondUsed, offsetIntoAnotherBody
 
     var needle: String {
         switch self {
@@ -163,6 +163,8 @@ enum SnapshotCorruption: CaseIterable, Sendable {
         case .danglingClass: "class table"
         case .freeEntryWithHeader: "free entry"
         case .walkBreaks: "walk"
+        case .offsetBeyondUsed: "used bytes"
+        case .offsetIntoAnotherBody: "start of a body"
         }
     }
 }
@@ -216,6 +218,17 @@ func theLoaderRejects(_ c: SnapshotCorruption) throws {
     case .twoEntriesOneBody:
         putWord(&b, entry(other), om.bodyOffset(node))
     case .walkBreaks: putWord(&b, body(node), BackRef.make(entryIndex: node.entryIndex, words: 0))
+    case .offsetBeyondUsed:
+        let blk = om.blockIndex(of: node)
+        putWord(&b, entry(node), BlockHeap.start(ofBlock: blk) + L.used[blk])
+    case .offsetIntoAnotherBody:
+        // A fake body for `other` inside the byte object's data.
+        let bytes = om.load(om.load(om.root(r), 0), 1)
+        let fake = om.bodyOffset(bytes) + 16
+        putWord(&b, L.heapAt(offset: fake), BackRef.make(entryIndex: other.entryIndex, words: 3))
+        putWord(&b, L.heapAt(offset: fake + 8), int(1).raw)
+        putWord(&b, L.heapAt(offset: fake + 16), int(2).raw)
+        putWord(&b, entry(other), fake)
     }
     #expect(b != good)
     #expect { try ObjectMemory.load(snapshot: b, config: config()) } throws: { e in

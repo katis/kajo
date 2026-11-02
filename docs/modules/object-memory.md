@@ -202,11 +202,11 @@ On in debug builds at every pause; one flag away in release
 
 | verifier | checks | corruption tests |
 |---|---|---|
-| `verifyHeap` | every used entry: no RELOCATING, aligned, inside the heap, in an in-use block, inside its `used`, back reference names it, size agrees with the header, is the start of a body in the block walk, no reserved header bit, registered class, every slot a SmallInteger or a reference to a used entry; free entries have header 0; no mark outside a collection; every in-use block walks exactly to `used`, every free block has none; class table and roots valid | 21 (`theHeapVerifierCatches`) |
-| `verifyFreeLists` | every free entry in exactly one list (pool run or context list), lists hold only free entries, no cycle; every free block in the pool once; an in-use pool block has a tail. The "one owner per entry" rule is concurrent-young's deferred-free lesson | 9 (`theFreeListVerifierCatches`) |
-| `verifyMarks` | from-scratch reachability against the mark map, both directions | 2 |
+| `verifyHeap` | every used entry: no RELOCATING, aligned, inside the heap, in an in-use block, inside its `used`, back reference names it, size agrees with the header, is the start of a body in the block walk, no reserved header bit, registered class, every slot a SmallInteger or a reference to a used entry; free entries have header 0; no mark outside a collection; every in-use block walks exactly to `used`, every free block has none; class table and roots valid | 22 (`theHeapVerifierCatches`) |
+| `verifyFreeLists` | every free entry in exactly one list (pool run or context list), lists hold only free entries, no cycle; every free block in the pool once; an in-use pool block has a tail. The "one owner per entry" rule is concurrent-young's deferred-free lesson | 10 (`theFreeListVerifierCatches`) |
+| `verifyMarks` | from-scratch reachability against the mark map, both directions; every reference it reaches is valid | 3 |
 | `verifyCompaction` | every live body where the plan put it (or where it was if unplanned), header and every body word unchanged (fingerprints) | 4 (`theCompactionVerifierCatches`) |
-| loader | everything in `verifyHeap` plus geometry, entry 0, class 0, frame pins | 28 (`theLoaderRejects`) and 3000 seeded mutations (`mutatedSnapshotsLoadCleanOrAreRejected`) |
+| loader | everything in `verifyHeap` plus geometry, entry 0, class 0, frame pins | 30 (`theLoaderRejects`) and 3000 seeded mutations (`mutatedSnapshotsLoadCleanOrAreRejected`) |
 
 Pauses run them as: collect (heap and free lists, marks, heap and free
 lists), compact (heap and free lists, marks, compaction, heap and free
@@ -314,7 +314,7 @@ an access to the whole struct racing with writes made under the lock.
 
 ## Tests
 
-60 test functions, 125 cases. Green under load (12 `yes` processes) and
+61 test functions, 130 cases. Green under load (12 `yes` processes) and
 under `swift test --sanitize=thread`, also under load.
 
 Ported: `oopsAreTaggedAndNonZero` (split into the encoding test and
