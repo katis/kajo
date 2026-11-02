@@ -370,6 +370,7 @@ func initialMark(_ vm: VMRef, _ rec: inout GCRecord, literal: Bool, youngScan: B
     // 3. Flip.
     let cyc = cm.cycle.pointee.load(ordering: .relaxed) &+ 1
     cm.cycle.pointee.store(cyc, ordering: .relaxed)
+    diag(DiagEv.initialMark, -1, cyc) // DIAG
     var satb0: UInt64 = 0, satbBuf0: UInt64 = 0
     if let ws = vm.pointee.workers {
         for i in 0..<vm.pointee.workerCount {
@@ -685,6 +686,7 @@ func finalMark(_ vm: VMRef, _ rec: inout GCRecord) {
     let om = vm.pointee.om
     let force = vm.pointee.cmConfig.force
     let ta = now()
+    diag(DiagEv.finalMark, -1, cm.cycle.pointee.load(ordering: .relaxed)) // DIAG
     let ds = cm.drain
     ds.pointee.count = 0
     var entries: UInt64 = 0
@@ -1019,6 +1021,7 @@ func verifyMarks(_ vm: VMRef) -> (UInt64, UInt64) {
                 let n = vm.metric(.verifyFailures)
                 vm.add(.verifyFailures, 1)
                 if n < 10 { FileHandleStderr.write("verify: concurrent mark missed reachable entry \(o) (class \(hdrClass(om.header(o))))\n") }
+                if n < 3 { diagDump(idx) } // DIAG
             } else if marked && !reach {
                 floating &+= UInt64(objectBytes(om.header(UInt64(idx) << 4)))
             }

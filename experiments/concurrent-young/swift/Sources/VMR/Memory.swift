@@ -263,6 +263,11 @@ private func refillEntries(_ vm: VMRef, _ w: WorkerRef) -> Bool {
                 if aw.pointee.load(ordering: .relaxed) != ~0 {
                     let free = ~aw.pointee.exchange(~0, ordering: .acquiring)
                     if free == 0 { continue }
+                    let cmx = vm.pointee.cm // DIAG
+                    if cmPhase(vm) == CMPhase.marking && gw < cmx.snapWords.pointee && cmx.snap[gw] & free != 0 {
+                        var d2 = cmx.snap[gw] & free
+                        while d2 != 0 { let b = d2.trailingZeroBitCount; d2 &= d2 &- 1; diag(DiagEv.reallocSnap, w.pointee.id, UInt64(gw &* 64 &+ b)) }
+                    }
                     w.pointee.ws.entFree = free
                     w.pointee.ws.entBase = UInt64(gw) &<< 10 // 64 entries x 16 bytes
                     w.pointee.ws.entWord = gw
