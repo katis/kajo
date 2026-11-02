@@ -404,7 +404,8 @@ The cross-check needs someone to pull the cable. The app has the mode
 `UIDevice.batteryState == .unplugged`, settles 20 s, then runs walk22x4 and
 walkbuild22 alone and with a spinning companion, twice, in one process).
 It was launched at the end of the session with a 15-minute wait; nobody
-unplugged the phone, so it timed out (see "Deviations"). Every line above
+unplugged the phone, so it timed out after 900 s at `battery=full`
+(`results/dev-unplugged.txt`). Every line above
 ran on the cable with the battery `full`, where the phone runs from the
 adapter; whether the regime frequency or the energies move on battery is
 open.

@@ -1,0 +1,3 @@
+part=unplugged run=1 battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal unplugged=waiting
+part=unplugged run=1 battery=full battery_level=1.0 low_power=0 cores=6 thermal_start=nominal unplugged=timeout waited_s=900 thermal_end=nominal footprint_mb=6.6 footprint_peak_mb=7.1 avail_mb=3369
+DONE
