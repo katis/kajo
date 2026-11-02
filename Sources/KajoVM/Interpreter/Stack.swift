@@ -43,7 +43,9 @@ import Darwin
 ///     hdr[1]                caller pc          SmallInteger: offset into the caller's bytecodes
 ///     hdr[2]                caller fp          SmallInteger: word index in the stack, 0 = the host
 ///     hdr[3]                caller hdr         SmallInteger: word index in the stack
-///     hdr[4 ...]            operand stack, at most the method's maxStack words
+///     hdr[4]                context            nil; reserved for the frame's materialized
+///                                              Context (ADR 0009, section 3), never read yet
+///     hdr[5 ...]            operand stack, at most the method's maxStack words
 ///
 /// The three links are SmallIntegers, so the collector scans them as
 /// integers. They are offsets and indices, not addresses: the bytecodes
@@ -53,7 +55,10 @@ enum Frame {
     static let callerPC = 1
     static let callerFP = 2
     static let callerHdr = 3
-    static let headerWords = 4
+    /// The frame's Context once materialized (ADR 0009); nil until then.
+    /// Written at activation, read by nothing yet.
+    static let context = 4
+    static let headerWords = 5
 
     /// The caller fp of a frame the host entered.
     static let hostFP = Oop(smallInteger: 0).raw

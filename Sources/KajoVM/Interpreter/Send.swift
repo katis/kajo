@@ -147,6 +147,7 @@ func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64
     unsafe hdr[Frame.callerPC] = tagged(r.pc - r.code)
     unsafe hdr[Frame.callerFP] = tagged(r.fp - base)
     unsafe hdr[Frame.callerHdr] = tagged(r.hdr - base)
+    unsafe hdr[Frame.context] = nilObject
     let code = unsafe om.bytesBase(om.load(mo, MethodLayout.bytecodes))
     let lits = unsafe om.slotsBase(om.load(mo, MethodLayout.literals))
     return unsafe Regs(pc: code, sp: hdr + (Frame.headerWords &- 1), fp: r.sp - argc, hdr: hdr, code: code, lits: lits)
