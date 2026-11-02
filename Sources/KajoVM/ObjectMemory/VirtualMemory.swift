@@ -4,6 +4,17 @@ import Darwin
 /// on first touch. Only the `vm_map.h` family is used: `mach_vm.h` is
 /// unsupported in the iOS SDK (AGENTS.md).
 enum VirtualMemory {
+    /// The task port. The macOS SDK imports `mach_task_self_` as a mutable
+    /// global (unsafe to read), the iOS SDK does not; one accessor keeps
+    /// both builds warning-free.
+    private static var task: mach_port_t {
+        #if os(macOS)
+        unsafe mach_task_self_
+        #else
+        mach_task_self_
+        #endif
+    }
+
     /// Distance between the heap and its alias (ADR 0007): an entry state word
     /// holding `offset + aliasDistance` (RELOCATING, module 6) still leads
     /// to the intact body.
@@ -11,7 +22,7 @@ enum VirtualMemory {
 
     static func reserve(_ bytes: Int) throws(ObjectMemoryError) -> UnsafeMutableRawPointer {
         var addr: vm_address_t = 0
-        let kr = unsafe vm_allocate(mach_task_self_, &addr, vm_size_t(bytes), VM_FLAGS_ANYWHERE)
+        let kr = unsafe vm_allocate(task, &addr, vm_size_t(bytes), VM_FLAGS_ANYWHERE)
         guard kr == KERN_SUCCESS, let p = unsafe UnsafeMutableRawPointer(bitPattern: UInt(addr)) else {
             throw .reservationFailed("vm_allocate \(bytes) bytes: \(kr)")
         }
@@ -19,7 +30,7 @@ enum VirtualMemory {
     }
 
     static func release(_ p: UnsafeMutableRawPointer, _ bytes: Int) {
-        _ = unsafe vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: p)), vm_size_t(bytes))
+        _ = vm_deallocate(task, vm_address_t(UInt(bitPattern: p)), vm_size_t(bytes))
     }
 
     /// Reserve `aliasDistance + bytes` and map one memory object of `bytes`
@@ -31,7 +42,6 @@ enum VirtualMemory {
     /// is covered by tests and its ordering argument only (AGENTS.md).
     static func reserveTwice(_ bytes: Int) throws(ObjectMemoryError) -> (UnsafeMutableRawPointer, mach_port_t) {
         precondition(bytes > 0 && UInt64(bytes) <= aliasDistance)
-        let task = unsafe mach_task_self_
         let span = vm_size_t(bytes)
         var addr: vm_address_t = 0
         var kr = unsafe vm_allocate(task, &addr, vm_size_t(aliasDistance) + span, VM_FLAGS_ANYWHERE)
@@ -61,8 +71,8 @@ enum VirtualMemory {
     }
 
     static func releaseTwice(_ p: UnsafeMutableRawPointer, _ bytes: Int, _ entry: mach_port_t) {
-        _ = unsafe vm_deallocate(mach_task_self_, vm_address_t(UInt(bitPattern: p)),
+        _ = vm_deallocate(task, vm_address_t(UInt(bitPattern: p)),
                                  vm_size_t(aliasDistance) + vm_size_t(bytes))
-        _ = unsafe mach_port_deallocate(mach_task_self_, entry)
+        _ = mach_port_deallocate(task, entry)
     }
 }
