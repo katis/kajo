@@ -31,6 +31,10 @@ method Pair x:y: temps=0
   store_ivar 1
   return_self
 end
+method Pair y temps=0
+  push_ivar 1
+  return_top
+end
 method UndefinedObject g: temps=0
   push_nil
   push_temp 0
@@ -204,6 +208,64 @@ done:
   push_temp 1
   return_top
 end
+; global 12 := a list of n Pairs (x = 1..n, linked through y). t0 = n,
+; t1 = i, t2 = head
+method UndefinedObject keep: temps=2
+  push_int 1
+  store_temp 1
+  push_nil
+  store_temp 2
+loop:
+  push_temp 1
+  push_temp 0
+  le
+  jump_if_false done
+  push_lit @Pair
+  send basicNew 0
+  push_temp 1
+  push_temp 2
+  send x:y: 2
+  store_temp 2
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump loop
+done:
+  push_nil
+  push_int 12
+  push_temp 2
+  send g:put: 2
+  pop
+  push_nil
+  return_top
+end
+; the sum of x over global 12's list. t0 = sum, t1 = node
+method UndefinedObject sumKeep temps=2
+  push_int 0
+  store_temp 0
+  push_nil
+  push_int 12
+  send g: 1
+  store_temp 1
+loop:
+  push_temp 1
+  push_nil
+  identical
+  jump_if_true done
+  push_temp 0
+  push_temp 1
+  send x 0
+  add
+  store_temp 0
+  push_temp 1
+  send y 0
+  store_temp 1
+  jump loop
+done:
+  push_temp 0
+  return_top
+end
 """
 
 /// A local-mode runtime stepped from the test thread, workers 1..3, the
@@ -243,6 +305,8 @@ nonisolated(unsafe) private var hookAction: ((Int) -> Void)? = nil
 private let testHook: YCHook = { _, k, point in if point == 1 { hookAction?(k) } }
 nonisolated(unsafe) private var hook0Action: ((Int) -> Void)? = nil
 private let testHook0: YCHook = { _, k, point in if point == 0 { hook0Action?(k) } }
+nonisolated(unsafe) private var hook2Action: ((Int) -> Void)? = nil
+private let testHook2: YCHook = { _, k, point in if point == 2 { hook2Action?(k) } }
 
 @Suite(.serialized) struct YoungCollection {
 // MARK: - deletion barrier and second handshake
@@ -540,5 +604,98 @@ private func newHalf(scan: Bool, snoop: Bool) throws -> UInt64 {
 
 @Test func withoutNewHalfScanAndSnoopTheValueIsLost() throws {
     #expect(try newHalf(scan: false, snoop: false) > 0)
+}
+
+// MARK: - deferred entry frees and old-space collection (SPEC.md amendment 17)
+
+
+/// H (nursery 2) holds Y (nursery 1), so it is remembered for nursery 1, and
+/// dies. Collecting nursery 2 finds H dead with a nonzero `rem` word: its
+/// free is deferred to the epoch. Meanwhile (hook point 2) a collection of
+/// nursery 1 re-arms H's membership bit, as its `foldCarried` does for a
+/// holder it kept from a stale list, so the free waits for nursery 2's next
+/// collection: H's entry is used, dead and in no young log.
+private func keptDeferredHolder() throws -> (Runtime, Oop) {
+    let rt = try yRuntime { $0.hook = testHook2 }
+    let vm = rt.vm
+    _ = spawnSel(rt, "mkY")
+    slice(rt, 1)
+    _ = spawnSel(rt, "hold")
+    slice(rt, 2)
+    let h = global(rt, 9)
+    let idx = Int(truncatingIfNeeded: h &>> 4)
+    #expect(vm.pointee.om.isYoung(h) && hdrNursery(vm.pointee.om.header(h)) == 2)
+    #expect(vm.pointee.space.rem[idx].load(ordering: .relaxed) & 2 != 0)
+    vm.pointee.globals[8] = vm.pointee.nilObj // H (and Y) dead
+    hook2Action = { k in
+        if k == 2 { vm.pointee.space.rem[idx].bitwiseOr(2, ordering: .sequentiallyConsistent) }
+    }
+    ycCollectNow(vm, rt.workers[2])
+    hook2Action = nil
+    #expect(deferredDead(vm).contains(idx) && entryUsed(vm, h))
+    return (rt, h)
+}
+
+/// Worker 2 allocates `n` Pairs kept in global 12. Answers whether one of
+/// them took entry `e`.
+private func keepOn2(_ rt: Runtime, _ n: Int, reusing e: Oop) -> Bool {
+    let vm = rt.vm
+    _ = spawnSel(rt, "keep:", mkInt(Int64(n)))
+    while liveProcessCount(vm) > 0 { slice(rt, 2) }
+    var node = global(rt, 12)
+    while node != vm.pointee.nilObj {
+        if node == e { return true }
+        node = vm.pointee.om.slot(node, 1)
+    }
+    return false
+}
+
+private func sumKeep(_ rt: Runtime) -> Int64 {
+    let p = spawnSel(rt, "sumKeep")
+    while liveProcessCount(rt.vm) > 0 { slice(rt, 2) }
+    return result(rt, p)
+}
+
+/// The initial mark comes while H's free is still deferred. Nursery 2's next
+/// collection frees the entry during marking and worker 2 reuses it for a
+/// live Pair. A snapshot that counted H's entry would report the Pair as a
+/// missed snapshot entry at the final mark and the sweep would free it.
+@Test func aDeferredEntryFreeIsNotASnapshotEntry() throws {
+    let (rt, h) = try keptDeferredHolder()
+    let vm = rt.vm
+    let m = makeMarker(vm, id: 0)
+    cmStart(vm)
+    #expect(cmPhaseNow(vm) == CMPhase.marking)
+    #expect(!vm.pointee.cm.inSnap(h))
+    ycCollectNow(vm, rt.workers[2]) // the deferred free
+    #expect(!entryUsed(vm, h))
+    let reused = keepOn2(rt, 200, reusing: h)
+    #expect(reused)
+    cmMark(vm, m, 10_000_000)
+    cmFinal(vm)
+    #expect(vm.metric(.cmMissed) == 0)
+    cmSweep(vm, m)
+    #expect(entryUsed(vm, h))
+    ycCollectNow(vm, rt.workers[2]) // applies nothing; the young verifier runs
+    youngVerifyNow(vm)
+    #expect(sumKeep(rt) == 200 * 201 / 2)
+    #expect(failures(rt) == 0)
+    rt.stop()
+}
+
+/// A full collection while H's free is deferred: the full sweep must leave
+/// the entry to nursery 2, whose next collection frees it once. Freeing it
+/// in the sweep as well let worker 2 reuse it before that second free.
+@Test func aFullCollectionLeavesADeferredEntryFreeToItsNursery() throws {
+    let (rt, h) = try keptDeferredHolder()
+    let vm = rt.vm
+    hostCollect(vm, full: true)
+    #expect(entryUsed(vm, h))
+    _ = keepOn2(rt, 200, reusing: h)
+    ycCollectNow(vm, rt.workers[2]) // the deferred free
+    youngVerifyNow(vm)
+    #expect(sumKeep(rt) == 200 * 201 / 2)
+    #expect(failures(rt) == 0)
+    rt.stop()
 }
 }

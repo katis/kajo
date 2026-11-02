@@ -52,7 +52,7 @@ public struct YCConfig {
     public var newHalfScan = true
     /// Called by a collector with (ctx, nursery, point); point 1: H1 done,
     /// before T1.
-    public var hook: YCHook? = nil
+    public var hook: YCHook? = nil // points: 0 before H0, 1 after H1, 2 after the entry sweep
     public var hookCtx: UnsafeMutableRawPointer? = nil
     public init() {}
 }
@@ -700,6 +700,8 @@ func ycCollect(_ vm: VMRef, _ c: WorkerRef, _ k: Int, verify: Bool = true) {
     nur.pointee.nextCarried.count = 0
     let t5 = now()
     st.sweepNs = t5 &- t4
+    // Test hook point 2: after the entry sweep, before the epoch rule.
+    if let h = cfg.hook { h(cfg.hookCtx, k, 2) }
     // Epoch rule (SPEC.md step 6).
     let s2 = vm.pointee.cm.epoch.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent).oldValue
     if cfg.epochRule { epochWait(vm, c, s2) }
