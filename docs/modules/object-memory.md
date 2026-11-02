@@ -117,6 +117,9 @@ om.allocateBytes(ctx, classIndex:, count:, extraRoots:) -> Oop?
 // access: the single load and store paths
 om.classIndex(of:), om.count(of:), om.isBytes(_:), om.header(_:)
 om.load(o, i), om.store(o, i, v), om.loadByte(o, i), om.storeByte(o, i, b)
+om.bytesBase(o), om.slotsBase(o)   // added by module 2: the interpreter's two cached
+                                   // body pointers (running method's bytecodes and
+                                   // literals), valid until the next pause
 
 // roots and classes
 om.addRoot(v) -> RootHandle, om.root(h), om.setRoot(h, v), om.removeRoot(h)
@@ -329,8 +332,10 @@ concurrent-relocation's pin tests without the interpreter
 and concurrent-young's entry-ownership lesson as the free-list verifier and
 its tests.
 
-Waiting: `smallProgramRuns`, `kernelsAssemble`, `interpreterSeesBecome`
-(module 2); `operationsWhileOtherWorkersRun`, the live-frames half of
-`compactionMovesMethodsUnderLiveFrames`, `aFramePinnedObjectIsNotMoved`
-with a real frame (module 3); everything generational, concurrent and young
-(modules 4 to 7). The libFuzzer target for the loader is module 2's.
+Waiting: `operationsWhileOtherWorkersRun` and `aFramePinnedObjectIsNotMoved`
+with a real frame (module 3); `smallProgramRuns`, `kernelsAssemble`,
+`interpreterSeesBecome` and the live-frames half of
+`compactionMovesMethodsUnderLiveFrames` were ported by module 2
+(docs/modules/interpreter.md); everything generational, concurrent and young
+(modules 4 to 7). The snapshot loader's libFuzzer target is module 2's
+(`just fuzz snapshot`).

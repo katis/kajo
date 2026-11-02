@@ -30,6 +30,29 @@ as they are understood.
   The boundary where the VM checks bounds and types so Smalltalk code can
   never corrupt memory.
 
+- **Stack**: a region of tagged words, outside the heap, that frames live
+  on. Word 0 is nil and every word up to sp is a valid oop, so the collector
+  scans it uniformly. Module 3 gives one to each Process.
+- **Frame**: one activation on a stack: receiver, arguments, temps, then a
+  four-word header (method, caller pc, caller fp, caller hdr) and the
+  operand stack. The caller links are SmallIntegers holding a bytecode
+  offset and word indices, never addresses, so neither moving bytecodes
+  nor a moving stack needs them fixed.
+- **Send**: finding and running the method for a receiver's class and a
+  selector: the lookup cache, else the superclass chain's method
+  dictionaries; then the method's primitive, or a new frame. With no
+  method, `doesNotUnderstand:` is sent with a Message if the class has it.
+- **Primitive failure**: a primitive refusing its receiver or arguments
+  (wrong type, bound or argument count). The method's bytecodes then run
+  as an ordinary activation; a method with none stops with a VMError.
+  Running out of heap is not a primitive failure.
+- **VMError**: what a program that cannot go on hands its caller: kind,
+  selector, receiver class, method and pc. The interpreter never exits or
+  traps on one and leaves the stack as it was for inspection.
+- **Structural class**: Class, Method and MethodDict, the objects whose
+  shape the interpreter trusts. No primitive reads, writes, creates or
+  exchanges their instances.
+
 ## Memory
 
 - **Oop**: a 64-bit tagged word. Low bit 1: a SmallInteger, 63-bit two's
