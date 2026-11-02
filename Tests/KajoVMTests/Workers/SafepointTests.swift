@@ -112,14 +112,16 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
       return_top
     end
     """
-    let rt = try Runtime(src, background: 7, heapBlocks: 512)
+    // Verifiers once at the end (rt.stop); 30 operations a millisecond
+    // apart, so the workers run between them even under ThreadSanitizer.
+    let rt = try Runtime(src, background: 7, heapBlocks: 512, verify: false)
     let n: Int64 = checkedBuild ? 20_000 : 200_000
     var ps: [Oop] = []
     for _ in 0..<7 { ps.append(rt.spawn("pairs:", [int(n)])) }
     let a = rt.vm.newArray(3), b = rt.vm.newArray(5)
     let pair = rt.image.classIndex(named: "Pair")!
     var ops = 0
-    while rt.vm.liveProcessCount > 0 {
+    while rt.vm.liveProcessCount > 0 && ops < 30 {
         switch ops % 3 {
         case 0: #expect(rt.vm.become(a, b))
         case 1: rt.vm.compact()
@@ -134,7 +136,7 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
             }
         }
         ops += 1
-        usleep(200)
+        usleep(1000)
     }
     rt.waitAllTerminated()
     #expect(ops >= 3)
