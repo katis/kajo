@@ -47,7 +47,7 @@ def kernels(rows):
     out = []
     for nkb in (4096, 16384):
         ks = KERNELS if nkb == 4096 else ['alloc', 'survivors30']
-        out.append('\n### Wall time, ms (median of runs), nursery %d KiB; checksum against adr7\n' % (nkb // 1024 * 1024 // 1024))
+        out.append('\n### Wall time, ms (median of runs), nursery %d MiB; checksum against adr7\n' % (nkb // 1024))
         out.append('| kernel | w | ' + ' | '.join(CFGS) + ' | checksums | barrier adr7b/adr7 | local/adr7b | offload/adr7b | orig/adr7 |')
         out.append('|---|--:|' + '--:|' * len(CFGS) + '---|--:|--:|--:|--:|')
         for k in ks:

@@ -749,7 +749,13 @@ private func epochWait(_ vm: VMRef, _ c: WorkerRef, _ s: UInt64) {
         var m = quiescent
         for i in 0..<vm.pointee.workerCount { m = min(m, worker(vm, i).pointee.hz[hzEpoch].load(ordering: .acquiring)) }
         if m > s { return }
-        if !c.pointee.isMarker && roundsOpen(vm) { serviceHandshakes(vm, c); advanceEpoch(vm, c) }
+        if !c.pointee.isMarker {
+            // Waiting holds no body pointer: keep this worker's epoch current,
+            // or two collectors waiting for each other's epochs stall until
+            // some round opens.
+            if roundsOpen(vm) { serviceHandshakes(vm, c) }
+            advanceEpoch(vm, c)
+        }
         spins &+= 1
         if spins & 15 == 0 { usleep(20) } else { sched_yield() }
     }
@@ -804,7 +810,10 @@ private func processHanded(_ vm: VMRef, _ c: WorkerRef, _ nur: UnsafeMutablePoin
     for i in 0..<roots.count { visit(vm, c, nur, k, roots.ptr[i], &st) }
     for i in 0..<pubs.count {
         let b = pubs.ptr[i]
-        if !c.pointee.isMarker { advanceEpoch(vm, c) }
+        if !c.pointee.isMarker {
+            advanceEpoch(vm, c)
+            if roundsOpen(vm) { serviceHandshakes(vm, c) }
+        }
         if b.rem {
             for j in 0..<b.count { scanHolder(vm, c, nur, k, b.ptr[j], &st) }
         } else {

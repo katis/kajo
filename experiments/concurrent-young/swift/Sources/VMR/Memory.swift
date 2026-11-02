@@ -496,7 +496,8 @@ func preStoreSlow(_ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
             let hv = om.header(v)
             if hv & youngBit != 0 && (om.header(o) ^ hv) & youngNurseryMask == 0 {
                 let n = hdrNursery(hv)
-                if vm.pointee.yc.collecting[n].load(ordering: .acquiring) && !inY(vm, n, o) && vm.pointee.ycConfig.snoop {
+                if vm.pointee.yc.collecting[n].load(ordering: .acquiring) && vm.pointee.ycConfig.snoop
+                    && inY(vm, n, v) && !inY(vm, n, o) {
                     w.pointee.snooped &+= 1
                     remember(vm, w, o, hv)
                 }

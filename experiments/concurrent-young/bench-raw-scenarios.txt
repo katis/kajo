@@ -1,0 +1,2 @@
+# machine: Apple M2 Max, 8 P-cores + 4 E-cores, macOS 27.0.1, no pinning
+# swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
