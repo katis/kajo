@@ -201,6 +201,24 @@ def part1():
         'equal' if len(ck) == 1 else 'DIFFER %s' % ck, failed('dev-p1.txt'), thermal_counts(rows)))
 
 
+def regime_freq():
+    rows = [r for r in parse('dev-p1.txt') + parse('dev-p1x.txt') if r.get('tag') == 'matrix']
+    if not parse('dev-p1x.txt'):
+        return
+    ph, _ = p1_perhop(rows)
+    print('\n### Part 1: slow-regime frequency, `dev-p1.txt` and `dev-p1x.txt` together (walk22x4, 1 worker)\n')
+    print('| configuration | launches | slow (> %d ns/hop) | ns/hop fast launches (median) | ns/hop slow launches (median) | nJ/hop process fast | nJ/hop process slow | nJ/hop worker, all launches |' % SLOW_NS)
+    print('|---|--:|--:|--:|--:|--:|--:|--:|')
+    for c in ['none', 't10000', 't1000', 't100', 'spinut', 'wfe', 'spin']:
+        xs = [x for x in ph if x[0] == c and x[1].get('workers', '1') == '1']
+        if not xs:
+            continue
+        fa = [x for x in xs if x[2] <= SLOW_NS]
+        sl = [x for x in xs if x[2] > SLOW_NS]
+        print('| %s | %d | %d | %s | %s | %s | %s | %s |' % (COMP_NAMES.get(c, c), len(xs), len(sl), f(med([x[2] for x in fa])),
+              f(med([x[2] for x in sl])), f(med([x[3] for x in fa])), f(med([x[3] for x in sl])), f(med([x[4] for x in xs]))))
+
+
 def chase():
     rows = [r for r in parse('dev-p1chase.txt') if r.get('tag') == 'matrix']
     if not rows:
@@ -230,7 +248,8 @@ CFGS = ['stw', 'conc-high', 'conc-utility', 'conc-mixed']
 
 def p2_group(name):
     g = defaultdict(list)
-    for r in parse(name):
+    names = name if isinstance(name, (list, tuple)) else [name]
+    for r in [r for n in names for r in parse(n)]:
         if r.get('tag') != 'matrix':
             continue
         g[(float(r.get('rate_mb_s', 0)), r.get('cfg'))].append(r)
@@ -246,7 +265,7 @@ def part2(name='dev-p2.txt', label='rate matrix'):
     if not g:
         return
     rates = sorted(set(k[0] for k in g))
-    print('\n### Part 2 (%s, `%s`): energy per MB allocated, medians of launches\n' % (label, name))
+    print('\n### Part 2 (%s, `%s`): energy per MB allocated, medians of launches\n' % (label, name if isinstance(name, str) else ', '.join(name)))
     print('mJ/MB = process energy over the window / MB the frames allocated (24-byte PPoint bodies and OHPoint churn). '
           'VM mJ/MB = main + collector + marker threads only (PROC_PIDTHREADCOUNTS).\n')
     print('| MB/s | ' + ' | '.join('%s mJ/MB' % c for c in CFGS) + ' | ' + ' | '.join('%s VM mJ/MB' % c for c in CFGS) + ' |')
@@ -315,17 +334,31 @@ def part2(name='dev-p2.txt', label='rate matrix'):
             cells.append(', '.join('%d/%d/%d' % (num(r, 'fallbacks', 0), num(r, 'missed120', 0), num(r, 'cycles_done', 0)) for r in rs))
         print('| %g | %s |' % (rt, ' | '.join(cells)))
     allrows = [r for v in g.values() for r in v]
-    print('\nFailed launches: %d; thermal at line ends: %s' % (failed(name), thermal_counts(allrows)))
+    names = name if isinstance(name, (list, tuple)) else [name]
+    print('\nFailed launches: %d; thermal at line ends: %s' % (sum(failed(n) for n in names), thermal_counts(allrows)))
+    print('\nPer marking cycle (rates with cycles; medians): energy of the marker thread per completed cycle, J\n')
+    for rt in rates:
+        for c in CFGS[1:]:
+            rs = [r for r in g.get((rt, c), []) if num(r, 'cycles_done', 0) > 0]
+            if rs:
+                print('- %g MB/s %s: %s J per cycle (%s cycles per run, marker on P %s)' % (
+                    rt, c, f(med([num(r, 'marker_energy_mj') / 1000 / num(r, 'cycles_done') for r in rs]), 3),
+                    f(med([num(r, 'cycles_done') for r in rs]), 0), f(med([num(r, 'marker_p_frac') for r in rs]), 2)))
 
 
 # ---------------------------------------------------------------- Part 3
 
 MODES = [('novm', 'conc-utility'), ('parked', 'conc-utility'), ('link', 'conc-utility'), ('tick', 'conc-utility'),
-         ('tickalloc', 'conc-utility'), ('tickalloc', 'conc-high')]
+         ('tickalloc', 'conc-utility'), ('tickalloc', 'conc-high'), ('parked-stw', 'stw'), ('tick-stw', 'stw')]
 
 
 def part3():
     rows = [r for r in parse('dev-p3.txt') if r.get('tag') == 'matrix']
+    for r in parse('dev-p3x.txt'):
+        if r.get('tag') == 'matrix':
+            r = dict(r)
+            r['mode'] = r['mode'] + '-stw'
+            rows.append(r)
     if not rows:
         return
     print('\n### Part 3: idle, 60 s windows, medians of launches (per second of window)\n')
@@ -333,7 +366,7 @@ def part3():
           'collector CPU ms/s | bg workers CPU ms/s | other threads CPU ms/s | frames/s |')
     print('|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|')
     for m, c in MODES:
-        rs = [r for r in rows if r.get('mode') == m and (m in ('novm', 'parked', 'link', 'tick') or r.get('cfg') == c)]
+        rs = [r for r in rows if r.get('mode') == m and (m != 'tickalloc' or r.get('cfg') == c)]
         if not rs:
             continue
         def ps(k, sc=1.0, d=1):
@@ -345,7 +378,7 @@ def part3():
             f(med([num(r, 'refresh_hz') for r in rs]), 1) if m not in ('novm', 'parked') else '-'))
     print('\nThreads that ran in the window (first launch of each mode; ms of CPU over the window):\n')
     for m, c in MODES:
-        rs = [r for r in rows if r.get('mode') == m and (m in ('novm', 'parked', 'link', 'tick') or r.get('cfg') == c)]
+        rs = [r for r in rows if r.get('mode') == m and (m != 'tickalloc' or r.get('cfg') == c)]
         if rs:
             print('- %s%s: `%s`' % (m, ' ' + c if m == 'tickalloc' else '', rs[0].get('threads', '')))
     print('\nFailed launches: %d; thermal at line ends: %s' % (failed('dev-p3.txt'), thermal_counts(rows)))
@@ -408,8 +441,9 @@ def unplugged():
 if __name__ == '__main__':
     hello()
     part1()
+    regime_freq()
     chase()
-    part2()
+    part2(['dev-p2.txt', 'dev-p2x.txt'], 'rate matrix with the supplementary 100 and 150 MB/s')
     part2('dev-p2quiet.txt', 'quiet app, 1 MB/s, 60 s')
     part3()
     drift()
