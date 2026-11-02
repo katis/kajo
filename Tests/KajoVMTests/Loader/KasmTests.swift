@@ -26,7 +26,8 @@ private func rejection(_ src: String) -> LoadError.Kind? {
 @Test func theOpcodeTableIsTheExperimentsSet() {
     // bytecode set v0: experiments/vm-language-bench/SPEC-SHARED.md "Bytecodes"
     #expect(Opcode.allCases.count == 27)
-    for (i, op) in Opcode.allCases.enumerated() { #expect(Int(op.rawValue) == i) }
+    for (i, op) in Opcode.allCases.enumerated() { #expect(Int(op.rawValue) == i && Opcode.decode(UInt8(i)) == op) }
+    for b in 27...255 { #expect(Opcode.decode(UInt8(b)) == nil) }
     #expect(Opcode.send.rawValue == 0x0C && Opcode.jump.rawValue == 0x0F && Opcode.identical.rawValue == 0x1A)
     #expect(Opcode(mnemonic: "push_temp") == .pushTemp && Opcode(mnemonic: "jump_if_false") == .jumpIfFalse)
     #expect(Opcode.send.length == 3 && Opcode.jump.length == 3 && Opcode.pushInt.length == 2 && Opcode.add.length == 1)

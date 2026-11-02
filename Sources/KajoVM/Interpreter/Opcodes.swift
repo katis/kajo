@@ -102,6 +102,17 @@ enum Opcode: UInt8, CaseIterable, Sendable {
         }
     }
 
+    /// Decode a byte: one compare. The synthesized `init(rawValue:)` was an
+    /// out-of-line call per bytecode. Valid because the raw values are the
+    /// case indices (`theOpcodeTableIsTheExperimentsSet` checks it), which
+    /// is how a payload-free enum is represented.
+    @_transparent
+    static func decode(_ b: UInt8) -> Opcode? {
+        b < Opcode.count ? unsafe unsafeBitCast(b, to: Opcode.self) : nil
+    }
+
+    static let count = UInt8(allCases.count)
+
     init?(mnemonic: String) {
         guard let op = Opcode.byMnemonic[mnemonic] else { return nil }
         self = op

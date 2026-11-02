@@ -4,6 +4,9 @@
 /// time.
 @safe struct AllocContext: Equatable, @unchecked Sendable {
     let state: UnsafeMutablePointer<ContextState>
+
+    /// Written out: the synthesized one compares unsafe pointers unmarked.
+    static func == (a: AllocContext, b: AllocContext) -> Bool { unsafe a.state == b.state }
 }
 
 /// One context's state, in its own 128-byte aligned allocation so contexts

@@ -14,7 +14,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
     while true {
         let byte = unsafe r.pc.pointee
         unsafe r.pc += 1
-        switch Opcode(rawValue: byte) {
+        switch Opcode.decode(byte) {
         case .pushTemp?:
             let n = unsafe Int(r.pc.pointee)
             unsafe r.pc += 1
