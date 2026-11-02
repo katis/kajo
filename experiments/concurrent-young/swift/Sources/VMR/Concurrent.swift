@@ -361,6 +361,10 @@ func initialMark(_ vm: VMRef, _ rec: inout GCRecord, literal: Bool, youngScan: B
             }
         }
     }
+    // Deferred entry frees are not snapshot entries (SPEC.md amendment 17):
+    // the nursery frees them during the cycle and the entry is reused; as a
+    // snapshot entry the new object would be unmarked and swept.
+    forEachDeferred(vm) { gw, bit in if gw < words { cm.snap[gw] &= ~bit } }
     cm.snapWords.pointee = words
     for b in 0..<heap.nblocks {
         cm.snapBlocks[b] = heap.inUse[b] ? 1 : 0

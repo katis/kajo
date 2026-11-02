@@ -1352,6 +1352,20 @@ public func entryUsed(_ vm: VMRef, _ o: Oop) -> Bool {
     return atomicWord(vm.pointee.space.used + (i &>> 6)).pointee.load(ordering: .relaxed) & (UInt64(1) &<< UInt64(i & 63)) != 0
 }
 
+/// Every entry whose free waits for an epoch (a dead remembered young
+/// holder, SPEC.md amendments 10 and 17), as (bitmap word, bit). Such an
+/// entry is used, dead and in no young log, and its nursery frees it later:
+/// it is neither a young object nor an old one. World stopped.
+func forEachDeferred(_ vm: VMRef, _ body: (Int, UInt64) -> Void) {
+    for k in 0..<vm.pointee.workerCount {
+        let nur = nurOf(vm, k)
+        for i in 0..<nur.pointee.deferred.count {
+            let idx = Int(truncatingIfNeeded: nur.pointee.deferred.ptr[i] &>> 4)
+            body(idx &>> 6, UInt64(1) &<< UInt64(idx & 63))
+        }
+    }
+}
+
 /// Entries whose free waits for an epoch (dead remembered young holders):
 /// dead, still marked used, their bodies may be reused (verifiers skip them).
 func deferredDead(_ vm: VMRef) -> Set<Int> {

@@ -645,7 +645,15 @@ func markSweep(_ vm: VMRef, _ w: WorkerRef) -> (UInt64, UInt64) {
     let t0 = now()
     markAll(vm, &w.pointee.gcStack)
     let t1 = now()
+    // Deferred entry frees belong to their nursery (SPEC.md amendment 17):
+    // hidden from the sweep, which would free them a second time.
+    var deferredBits: [(Int, UInt64)] = []
+    forEachDeferred(vm) { gw, bit in
+        deferredBits.append((gw, bit))
+        vm.pointee.space.used[gw] &= ~bit
+    }
     let (live, freed) = sweepTable(vm)
+    for (gw, bit) in deferredBits { vm.pointee.space.used[gw] |= bit }
     _ = vm.pointee.heap.rebuildPool()
     let t2 = now()
     vm.set(.liveBytes, UInt64(live))

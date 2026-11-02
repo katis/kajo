@@ -1011,7 +1011,9 @@ private func postVerify(_ vm: VMRef, expected: Int?, copied: UInt64) {
         }
     }
     let ageN = vm.pointee.cmConfig.ageN
+    let dd = deferredDead(vm) // dead, freed by their nursery later (amendment 17)
     forEachUsed(vm) { idx, e in
+        if dd.contains(idx) { return }
         let h = om.header(UInt64(idx) << 4)
         if h == 0 { failure(vm, "used entry \(idx) has no header"); return }
         let addr = om.heap &+ UInt(e[1])
