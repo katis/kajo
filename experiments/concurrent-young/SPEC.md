@@ -584,3 +584,21 @@ inline. These rules were added afterwards:
     slots for every copied object made local collection 2.7 times slower than
     stop-the-world on alloc at 8 workers. Collectors also advance their
     epoch word between objects and while waiting.
+17. **Deferred entry frees are neither young nor old.** A dead remembered
+    holder whose free amendment 10 postpones to its nursery's next
+    collection is used, dead and in no young log until then. The
+    initial-mark snapshot (`used` minus the young logs) counted it as an
+    old object: the nursery freed it during the cycle, a worker reused the
+    entry, and the new object was an unmarked snapshot entry that the mark
+    verifier reported and the lazy sweep freed under it (found by
+    `sharedYoungObjectsAreClaimedOnce...` under CPU contention, `local`;
+    DIAGNOSIS-parallel-scavenge.md). The full sweep freed it a second time
+    the same way. The re-arm that keeps the free is common: a collection
+    folds pending bits into membership bits after another nursery's sweep
+    zeroed the word. Rules: the snapshot excludes every nursery's deferred
+    entries; the full sweep leaves them used; the stop-the-world scavenge's
+    verifier skips them like the young and relocation verifiers. The
+    collector's test hook gets a point 2, after the entry sweep and before
+    the epoch rule, where a test plays the re-arm. Tests:
+    `aDeferredEntryFreeIsNotASnapshotEntry`,
+    `aFullCollectionLeavesADeferredEntryFreeToItsNursery`.
