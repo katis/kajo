@@ -1,0 +1,1 @@
+../../../../object-representation/swift/Sources/VMA/Image.swift
