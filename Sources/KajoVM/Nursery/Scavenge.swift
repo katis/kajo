@@ -73,6 +73,9 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         unsafe s.pointee.weak.removeAll()
         unsafe s.pointee.stats = ParticipantStats()
     }
+    // Nothing young and nothing remembered (a promote-all right after a
+    // scavenge, or a stress flag's stop): no scavenge at all.
+    if youngBytes == 0 && remHolders == 0 { return }
     var expect: ScavengeExpectation? = nil
     if om.config.verify { expect = unsafe verifyBeforeScavenge(n, roots: ph.pointee.roots) }
     unsafe n.pointee.taskNext.pointee.store(0, ordering: .relaxed)
@@ -84,7 +87,15 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
     let tp = nanoseconds()
 
     // --- parallel phase
-    let parts = unsafe runParallelPhase(vm, w)
+    // A small scavenge is the stopper's alone: waking every parked worker
+    // costs more than the copying (docs/modules/nursery.md "Deviations").
+    let parts: [Int]
+    if youngBytes < NurseryShared.soloYoungBytes && remHolders < UInt64(NurseryShared.remTaskHolders) {
+        unsafe participateInScavenge(vm, w)
+        parts = unsafe [w.pointee.index]
+    } else {
+        parts = unsafe runParallelPhase(vm, w)
+    }
     let tj = nanoseconds()
 
     // --- finish

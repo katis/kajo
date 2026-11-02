@@ -258,6 +258,11 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
         return try Runtime(p.source, background: workers, heapBlocks: 256, stress: stress, verify: verify,
                            configure: { c in
+                               // Programs allocate tens of KiB: 512 KiB
+                               // nurseries keep the promotion reserve (and
+                               // with it each full collection's block walk)
+                               // small.
+                               c.nursery.bytes = 512 << 10
                                switch self {
                                case .stopEveryPoll: c.stress = .stopEveryPoll
                                case .preemptEveryPoll: c.stress = .preemptEveryPoll
@@ -292,11 +297,14 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     let rt = try config.runtime(p)
     let root = rt.spawn("root")
     guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
-        Issue.record("seed \(p.seed) \(config): did not finish")
+        Issue.record("seed \(p.seed) \(config): did not finish (stops \(rt.vm.counters.stops), scavenges \(rt.vm.nurseryCounters.scavenges), collections \(rt.image.om.counters.collections))")
         rt.vm.terminateAll()
         rt.waitAllTerminated()
         rt.stop()
         return nil
+    }
+    if ProcessInfo.processInfo.environment["KAJO_RANDOM_STOPS"] != nil {
+        print("seed \(p.seed) \(config): stops \(rt.vm.counters.stops)")
     }
     let v = rt.vm.result(of: root)
     if let e = rt.vm.error(of: root) { Issue.record("seed \(p.seed) \(config): \(e)") }

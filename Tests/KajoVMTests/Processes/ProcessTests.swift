@@ -677,10 +677,10 @@ end
     // the parked stacks); without one it collects.
     func pauses() -> UInt64 { rt.image.om.counters.collections + rt.vm.nurseryCounters.scavenges }
     let collections = pauses()
-    rt.spawn("churn:", [int(checkedBuild ? 60_000 : 300_000)])
-    rt.spawn("churn:", [int(checkedBuild ? 60_000 : 300_000)])
+    rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
+    rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
     #expect(eventually(120) { rt.vm.liveProcessCount == 40 })
-    #expect(pauses() - collections >= 3)
+    #expect(pauses() - collections >= 3, "pauses \(pauses() - collections), errors \(rt.vm.counters.processErrors)")
     for _ in 0..<40 { rt.vm.signal(sem) }
     rt.waitAllTerminated()
     for k in keepers { #expect(rt.result(k) == 199 * 200 / 2) }

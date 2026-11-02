@@ -217,6 +217,9 @@ struct ScavengeRecord: Sendable {
 
     static let rootTaskWords = 4096
     static let remTaskHolders = 256
+    /// Below this many young bytes (and one remembered task) the stopper
+    /// scavenges alone.
+    static let soloYoungBytes: UInt64 = 64 << 10
 }
 
 /// Written by the stopper (with the world stopped) only.

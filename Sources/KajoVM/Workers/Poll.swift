@@ -45,7 +45,11 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
     }
     let fresh = unsafe w.pointee.freshSlice
     unsafe w.pointee.freshSlice = false
-    if unsafe ticks() >= w.pointee.deadline || (!fresh && vm.pointee.config.stress.contains(.preemptEveryPoll)) {
+    // The first budget check of a slice never preempts: a stop longer than
+    // the slice (a stop at every poll under ThreadSanitizer, module 4's
+    // random programs) otherwise preempts a resumed Process at the send it
+    // was rewound to, again and again, and it never progresses.
+    if unsafe !fresh && (ticks() >= w.pointee.deadline || vm.pointee.config.stress.contains(.preemptEveryPoll)) {
         let r = unsafe s.pointee.regs
         unsafe requeueCurrent(vm, w, sp: r.sp, pc: r.pc &- rewind, reason: .preempted)
         unsafe vm.count(.preemptions)

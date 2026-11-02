@@ -12,7 +12,8 @@ import Darwin
 
     init(repeating v: Element, count n: Int) {
         reserve(n)
-        for _ in 0..<n { append(v) }
+        if n > 0 { unsafe base.unsafelyUnwrapped.initialize(repeating: v, count: n) }
+        count = n
     }
 
     mutating func reserve(_ n: Int) {
