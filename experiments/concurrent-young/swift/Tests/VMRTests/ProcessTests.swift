@@ -648,11 +648,15 @@ final class FakeMain: @unchecked Sendable {
     var turns = 0
     let t0 = now()
     while now() - t0 < 400_000_000 {
+        let mw = rt.workers[0]
+        let gc0 = mw.pointee.ownPauseNs &+ mw.pointee.stwWaitNs &+ mw.pointee.collWaitNs
         let st = runMain(vm, budgetNs: 1_000_000)
-        // Budget preemption, not collector stops: time parked in a stop (the
-        // young verifier's pause after every collection, slow in a debug
-        // build beside the other tests) and blocked entering is excluded.
-        #expect(st.ns &- st.parkedNs &- st.enterWaitNs &- st.leaveWaitNs < 20_000_000)
+        let gc = mw.pointee.ownPauseNs &+ mw.pointee.stwWaitNs &+ mw.pointee.collWaitNs &- gc0
+        // Budget preemption, not the collector: time parked in a stop (the
+        // young verifier's pause, slow in a debug build beside the other
+        // tests), blocked entering, and the main worker's own young
+        // collection and its waits are excluded.
+        #expect(st.ns &- st.parkedNs &- st.enterWaitNs &- st.leaveWaitNs &- gc < 20_000_000)
         turns += 1
         usleep(2000)
     }

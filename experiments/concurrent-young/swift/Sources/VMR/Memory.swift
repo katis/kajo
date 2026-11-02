@@ -422,6 +422,11 @@ func postStoreSlow(_ w: WorkerRef, _ o: Oop, _ i: Int, _ v: Oop) {
 /// answers its body, valid until `hazardRelease`.
 @inline(never)
 func hazardAcquire(_ w: WorkerRef, _ om: OM, _ k: Int, _ o: Oop) -> UnsafeMutablePointer<UInt64> {
+    // Counted first (seq_cst): a young collector that reads 0 after its
+    // RELOCATING CAS skips scanning the slots, and then this thread's offset
+    // load below sees RELOCATING (same Dekker argument as the slots).
+    let vm = w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self)
+    vm.pointee.hazardsHeld.wrappingAdd(1, ordering: .sequentiallyConsistent)
     w.pointee.hz[k].store(o, ordering: .sequentiallyConsistent)
     var e = om.offsetWord(o).pointee.load(ordering: .sequentiallyConsistent)
     if e & relocBit != 0 {
@@ -439,6 +444,7 @@ func hazardAcquire(_ w: WorkerRef, _ om: OM, _ k: Int, _ o: Oop) -> UnsafeMutabl
 @inline(__always)
 func hazardRelease(_ w: WorkerRef, _ k: Int) {
     w.pointee.hz[k].store(0, ordering: .releasing)
+    w.pointee.vm.unsafelyUnwrapped.assumingMemoryBound(to: VMCore.self).pointee.hazardsHeld.wrappingSubtract(1, ordering: .releasing)
 }
 
 // MARK: - deletion barriers (SPEC.md "Barriers")

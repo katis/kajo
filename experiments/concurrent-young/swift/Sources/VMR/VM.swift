@@ -378,6 +378,9 @@ public struct VMCore: ~Copyable {
     /// Bit 0: old-space marking (SATB); bits 1..: 2 x nurseries being
     /// collected (young deletion barrier) (SPEC.md "Barriers").
     public let barrierWord: Atomic<UInt64>
+    /// Hazard slots in use, all workers (young collectors skip the scan of
+    /// every slot when 0).
+    public let hazardsHeld: Atomic<Int>
     var mutex: UnsafeMutablePointer<pthread_mutex_t>
     var cond: UnsafeMutablePointer<pthread_cond_t>
     /// Mutable state lives behind its own pointers, one per guarding lock:
@@ -505,7 +508,7 @@ public struct VMCore: ~Copyable {
         vm.initialize(to: VMCore(heap: heap, om: om, space: space, classTable: ct, special: special,
                                  globals: globals, roots: WordStack(capacity: 256),
                                  markStack: WordStack(capacity: 1 << 16),
-                                 attention: Atomic(0), barrierWord: Atomic(0),
+                                 attention: Atomic(0), barrierWord: Atomic(0), hazardsHeld: Atomic(0),
                                  mutex: mutex(), cond: condvar(), sync: boxed(SyncState()), metrics: metrics,
                                  gc: GCShared.make(), cm: CMShared.make(nblocks: heap.nblocks), gcLog: boxed(GCLog()),
                                  schedLock: mutex(), schedCond: condvar(), ready: ready,

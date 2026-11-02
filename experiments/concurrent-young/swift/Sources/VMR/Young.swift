@@ -804,6 +804,7 @@ private func processHanded(_ vm: VMRef, _ c: WorkerRef, _ nur: UnsafeMutablePoin
     for i in 0..<roots.count { visit(vm, c, nur, k, roots.ptr[i], &st) }
     for i in 0..<pubs.count {
         let b = pubs.ptr[i]
+        if !c.pointee.isMarker { advanceEpoch(vm, c) }
         if b.rem {
             for j in 0..<b.count { scanHolder(vm, c, nur, k, b.ptr[j], &st) }
         } else {
@@ -961,7 +962,7 @@ private func evacuate(_ vm: VMRef, _ c: WorkerRef, _ nur: UnsafeMutablePointer<N
         let (ok, cur) = ow.pointee.compareExchange(expected: off, desired: off | relocBit, ordering: .sequentiallyConsistent)
         if !ok { off = cur & ~relocBit; continue }
         atomicMemoryFence(ordering: .sequentiallyConsistent)
-        if vm.pointee.cmConfig.hazardRule && hazarded(vm, v) {
+        if vm.pointee.cmConfig.hazardRule && vm.pointee.hazardsHeld.load(ordering: .sequentiallyConsistent) != 0 && hazarded(vm, v) {
             // A primitive holds the body: revert, wait until it lets go, retry.
             ow.pointee.store(off, ordering: .releasing)
             st.hazardRetries &+= 1
@@ -1013,7 +1014,12 @@ private func drain(_ vm: VMRef, _ c: WorkerRef, _ nur: UnsafeMutablePointer<Nur>
         }
         if namesK && promoted { keepForNext(nur, vm.pointee.space.rem + Int(truncatingIfNeeded: o &>> 4), o, k) }
         count &+= 1
-        if count & 255 == 0 && !c.pointee.isMarker && roundsOpen(vm) { serviceHandshakes(vm, c) }
+        if count & 255 == 0 && !c.pointee.isMarker {
+            // Between objects the collector holds no body pointer: other
+            // collections' epoch waits must not wait for this loop.
+            advanceEpoch(vm, c)
+            if roundsOpen(vm) { serviceHandshakes(vm, c) }
+        }
     }
 }
 
