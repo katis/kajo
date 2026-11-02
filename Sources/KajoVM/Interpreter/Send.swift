@@ -129,7 +129,9 @@ func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64
     let temps = untagged(om.load(mo, MethodLayout.temps).raw)
     let maxStack = untagged(om.load(mo, MethodLayout.maxStack).raw)
     var sp = unsafe r.sp
-    if unsafe sp + (temps &+ Frame.headerWords &+ maxStack) >= s.pointee.stackEnd {
+    // One word more than the frame uses: a unary send that ends in
+    // doesNotUnderstand: pushes its Message above the deepest operand.
+    if unsafe sp + (temps &+ Frame.headerWords &+ maxStack &+ 1) >= s.pointee.stackEnd {
         return unsafe stackOverflow(s, r.pc, r.sp, r.fp, r.hdr, method, length)
     }
     let nilObject = unsafe s.pointee.nilObject.raw

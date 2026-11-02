@@ -75,7 +75,10 @@ import Synchronization
         let argc = arguments.count
         unsafe state.pointee.exit = .running
         unsafe state.pointee.regs = SavedRegisters()
-        if sel == .none || argc > 255 || argc + 2 >= stack.words {
+        if sel == .none {
+            return .failure(VMError(kind: .outOfMemory, selector: selector, receiverClass: nil, method: nil, pc: 0, primitive: 0))
+        }
+        if argc > 255 || argc + 3 >= stack.words {
             return .failure(VMError(kind: .stackOverflow, selector: selector, receiverClass: nil, method: nil, pc: 0, primitive: 0))
         }
         unsafe stack.base[0] = image.nilObject.raw

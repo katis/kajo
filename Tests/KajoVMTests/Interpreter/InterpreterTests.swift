@@ -236,3 +236,61 @@ func specialSends(_ op: String, _ a: Int64, _ b: Int64, _ expected: Int64) throw
     #expect(try h.value() == -1)
     #expect(h.interpreter.counters.primitiveFailures == 1)
 }
+
+/// The host's send can land on a primitive: its result comes back without
+/// a frame ever being pushed.
+@Test func theHostCanSendToAPrimitive() throws {
+    let h = try Harness("", base: ["prelude"])
+    defer { h.destroy() }
+    let cls = try h.interpreter.run(on: h.stack, receiver: h.image.nilObject, selector: "class", arguments: []).get()
+    #expect(cls == h.om.classOop(WellKnown.undefinedObject))
+    let r = h.interpreter.run(on: h.stack, receiver: Oop(smallInteger: 7), selector: "//", arguments: [Oop(smallInteger: 0)])
+    guard case .failure(let e) = r else { Issue.record("7 // 0 answered"); return }
+    #expect(e.kind == .primitiveFailed && e.primitive == 6)
+}
+
+/// A unary doesNotUnderstand: at the deepest operand-stack slot of the
+/// last frame that fits replaces nothing and pushes the Message: the stack
+/// must have room for it.
+@Test func aUnaryDoesNotUnderstandAtTheTopOfTheStack() throws {
+    let src = """
+    method SmallInteger doesNotUnderstand: temps=0
+      push_int 5
+      return_top
+    end
+    method UndefinedObject deep: temps=0
+      push_temp 0
+      push_int 0
+      eq
+      jump_if_true bottom
+      push_nil
+      push_temp 0
+      push_int 1
+      sub
+      send deep: 1
+      return_top
+    bottom:
+      push_nil
+      send bottom 0
+      return_top
+    end
+    ; maxStack 1, reached at the unary send
+    method UndefinedObject bottom temps=0
+      push_int 1
+      send foo 0
+      return_top
+    end
+    """
+    // every stack size from tight to roomy: some frame ends exactly at the top
+    for words in 64...96 {
+        let h = try Harness(src, base: [], stackWords: words)
+        defer { h.destroy() }
+        for depth: Int64 in 0...12 {
+            switch h.run("deep:", [depth]) {
+            case .success(let v): #expect(v == Oop(smallInteger: 5))
+            case .failure(let e): #expect(e.kind == .stackOverflow)
+            }
+            #expect(h.stack.guardIntact, "stack of \(words) words, depth \(depth)")
+        }
+    }
+}

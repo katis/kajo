@@ -16,11 +16,17 @@ import Darwin
     init(words: Int = 1 << 16) {
         precondition(words >= 64, "a stack holds at least 64 words")
         self.words = words
-        unsafe base = UnsafeMutablePointer<UInt64>.allocate(capacity: words)
+        unsafe base = UnsafeMutablePointer<UInt64>.allocate(capacity: words + 1)
         unsafe base.initialize(repeating: 1, count: words)  // SmallInteger 0
+        unsafe base[words] = Stack.guardWord
     }
 
     func destroy() { unsafe base.deallocate() }
+
+    /// One word past the end, never a valid oop. Tests check it after runs
+    /// that end at the top of the stack.
+    static let guardWord: UInt64 = 0xDEAD_5AFE_0000_0002
+    var guardIntact: Bool { unsafe base[words] == Stack.guardWord }
 
     subscript(i: Int) -> Oop {
         precondition(i >= 0 && i < words)
