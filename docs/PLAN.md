@@ -1,6 +1,7 @@
 # Build plan: from the experiments to `Sources/KajoVM`
 
-Status: started 2026-11-02; modules 1 to 3 built the same day. A step or two at a time; the order below is the
+Status: started 2026-11-02; modules 1 to 4 built the same day; the relocation and young-collection
+models (`docs/models/`) are checked. A step or two at a time; the order below is the
 current best guess, revised as modules land. `docs/VERIFICATION.md` says how
 each module is verified; this file says what is built and in what order.
 
@@ -43,10 +44,10 @@ each module is verified; this file says what is built and in what order.
 | 1 | **Object memory** (built 2026-11-02, `docs/modules/object-memory.md`): oops and tags, header word, entry table, block heap, allocation, stop-the-world mark, sweep and compaction, become and bulk forward, reshape and instance enumeration, snapshot save and load, verifiers, counters | object-representation (B), concurrent-young's final layout (SPEC "Header word") | this plan |
 | 2 | **Interpreter and loader** (built 2026-11-02, `docs/modules/interpreter.md`): bytecode set v0 (the experiments' set, behind the module; a real set is an open ADR), method and context representation, sends, primitives boundary, the kasm loader as the first loader | vm-language-bench, object-representation | module 1; the loader gets a fuzz target |
 | 3 | **Workers, safepoints, Processes, scheduler** (built 2026-11-02, `docs/modules/workers.md`): OS-thread workers, safepoint protocol, Process-owned stacks, the main-affine ready queue and budgeted preemption of ADR 0004 | ui-thread-scheduling, concurrent-young's Process.swift | module 2; randomized programs start here |
-| 4 | **Nursery**: per-worker eden and survivors, age field, remembered sets, write barrier, stop-the-world scavenge (ADR 0005, 0007 age) | generational-gc, concurrent-relocation | module 3 |
+| 4 | **Nursery** (built 2026-11-02, `docs/modules/nursery.md`): per-worker eden and survivors, age field, remembered sets, write barrier, stop-the-world scavenge (ADR 0005, 0007 age) | generational-gc, concurrent-relocation | module 3 |
 | 5 | **Concurrent marking and lazy sweep** (ADR 0006), marker at utility on device | concurrent-marking | module 4; schedule perturbation in place |
-| 6 | **Concurrent relocation** through the entry switch (ADR 0007) | concurrent-relocation | model check of the entry state machine and post-store check |
-| 7 | **Young collection without stopping the world** (ADR 0008), mixed QoS policy | concurrent-young, power | model check of the handshake and epoch freeing |
+| 6 | **Concurrent relocation** through the entry switch (ADR 0007) | concurrent-relocation | model check of the entry state machine and post-store check (done: `docs/models/relocation.md`) |
+| 7 | **Young collection without stopping the world** (ADR 0008), mixed QoS policy | concurrent-young, power | model check of the handshake and epoch freeing (done: `docs/models/young-collection.md`) |
 | 8 | **Kernel, compiler, image build**: Smalltalk sources under `kernel/`, a compiler in Smalltalk bootstrapped from a Swift one or from kasm, the first image | nothing yet; the bytecode-set ADR precedes it | module 3 at least |
 | 9 | **Shells and development protocol**: macOS and iOS apps, remote development | ui-thread-scheduling's kajo-ui, device-measurement app | module 8 |
 

@@ -178,3 +178,16 @@ N = 2 still promotes, a 16 MiB nursery is what cuts promotion (alloc 913
 to 56 MB/s), and copying survivors lengthens tails (survivors30 p99 1.55
 to 2.43 ms). Full collections on alloc at 4 MiB fell from 32 to 16 per run.
 Relocation (Part 2) is module 6.
+
+## Model checked (2026-11-02)
+
+`docs/models/relocation.md`, `cd models && swift test`. The relocation half is model checked before module 6 builds it: five claims
+(no lost store, no stale read, no hazarded move, no premature free, nothing
+RELOCATING at a pause) hold exhaustively for up to three mutators, and each
+rule turned off finds its violation. The model found four things the SPEC
+left to the code, which module 6's brief must state: `enterVM` stores epoch
+0 before the current epoch; the relocator's scan of epoch words is seq_cst;
+the relocator never parks between the CAS and the switch (to-space
+allocation stays before the CAS); body addresses are always computed from
+the offset just loaded. Both halves of the post-store check must be
+seq_cst, each on its own.

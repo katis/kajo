@@ -229,3 +229,16 @@ sweep frees, floating garbage) in concurrent-young's RESULTS.md and the
 tables above could differ by the kept entries and were not re-run. All
 published checksums were equal, so no run lost an object that a checksum
 saw. The verifier found the defect; the checksum did not.
+
+## Model checked (2026-11-02)
+
+`docs/models/young-collection.md`, `cd models && swift test`. The protocol is model checked before module 7 builds it: seven claims hold
+in nine configurations and each rule turned off finds its trace, including
+the single-round loss under sequential consistency and the deferred-entry
+double free of amendment 17. One real hole: the array-copy primitive's
+relaxed stores can be overtaken by the barrier's seq_cst load of the
+remembered word, so a concurrent clear-then-scan misses the store and the
+holder is never re-armed. Every store a barrier's load follows is seq_cst
+or fenced. Also: the owner's new-half scan alone covers amendment 7 (the
+snoop is redundant), and the wake from a quiescent wait must store epoch 0
+like `enterVM`.

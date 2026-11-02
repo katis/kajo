@@ -304,6 +304,24 @@ Safety:
  - In a shared working tree never `git mv`: it stages the rename for every
    agent, and another agent's commit by name can carry it. Move with plain
    `mv` and add the new path when committing.
+ - Sweeping young entries from a per-nursery stash costs about 0.07 ms per
+   4 MiB nursery, nearly all of a churn scavenge (p99 0.53 ms at 8 workers
+   against the experiment's 0.32 with chunk bitmaps). The choice is behind
+   the module boundary; the cost is a known item, not a surprise.
+ - A slice's first budget check never preempts. The stress-mode livelock
+   had a second form: a stop longer than the slice preempts the resumed
+   Process at the send it was rewound to, forever (187k stops in 600 s
+   under ThreadSanitizer). Any rule of the form "preempt when the deadline
+   passed" needs "but not before this slice ran one instruction".
+ - Parked workers join the parallel scavenge, so the main thread copies in
+   every scavenge it is parked in. Report that time (`collectorNs`) apart
+   from the turn's own CPU, and keep it out of the turn-overrun bound.
+ - Every module 1 operation that assumes nothing young (collect, compact,
+   become, forward, reshape, snapshot) runs a promote-all first through one
+   hook, rather than each caller remembering to.
+ - Timers in tests (pending-root delays) at 80 ms fired early under load
+   relative to the test's own clock; 1.5 s is the floor for a timer a test
+   waits on.
  - Device iteration is fast: about one second per launch over `devicectl`,
    with stdout streamed. Design device benchmarks as one kernel per launch
    so a crash costs one run and thermal state is logged per launch.
@@ -326,14 +344,18 @@ repository layout, 0003 object table for object representation (accepted;
 entry locality rejected), 0004 Smalltalk UI code on the main thread with
 budgeted preemption (proposed, built headlessly in module 3; pending a
 pause-bounded collector and the shell's 120 Hz measurement), 0005
-generational collection with per-worker nurseries (proposed), 0006
+generational collection with per-worker nurseries (proposed, built in module 4), 0006
 concurrent marking and lazy sweeping of old space (proposed; pauses no longer
 depend on heap size, given old-space headroom), 0007 age field with survivor
 spaces and concurrent relocation of old space through the entry table
-(proposed; old-space work is off the frame budget, scavenges remain), 0008
+(proposed; old-space work is off the frame budget, scavenges remain; the age
+half is built in module 4, the relocation half is model checked in
+`docs/models/relocation.md`), 0008
 young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
-thread exceeds a frame, acknowledgements and the initial mark remain), 0009 object
+thread exceeds a frame, acknowledgements and the initial mark remain; model
+checked in `docs/models/young-collection.md`, which found the array-copy
+store ordering hole), 0009 object
 model and bytecode set (proposed, accepted in principle: weak slots and
 ephemerons, immediate SmallFloat and Character, native frames materialized
 into Contexts on demand, compiled closures with temp vectors, frame-walk
@@ -356,7 +378,11 @@ cover.
    `Workers/` and `Processes/` (module 3, built; `docs/modules/workers.md`:
    workers, safepoints, Process-owned stacks, scheduler, budgeted
    preemption, external signals, the seeded random-program generator and
-   `just soak`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   `just soak`), `Nursery/` with `ObjectMemory/Generations.swift` (module 4,
+   built; `docs/modules/nursery.md`: per-worker eden and survivors, age and
+   claim tags, barrier and remembered set, parallel stop-the-world scavenge,
+   entry stashes, weak slots, ephemerons in the oracle, the finalization
+   queue, snapshot v2), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
    CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
    targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:

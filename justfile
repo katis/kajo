@@ -47,3 +47,7 @@ test-release:
 # A thousand randomized programs under every configuration, in a release build with -enable-testing (SEEDS, BASE override)
 soak SEEDS="1000" BASE="1":
     KAJO_SEEDS={{SEEDS}} KAJO_SEED_BASE={{BASE}} swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests --filter randomPrograms
+
+# Exhaustive interleaving models of the concurrent protocols (docs/models/).
+model-check:
+    cd models && swift test
