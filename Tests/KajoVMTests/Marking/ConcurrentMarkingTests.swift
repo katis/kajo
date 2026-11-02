@@ -308,3 +308,30 @@ func oldheapUnderConcurrentMarkingMatchesStopTheWorld(_ alwaysOn: Bool) throws {
     rt.noFailures()
     rt.stop()
 }
+
+/// `sweepNeverApplies`: every cycle sweeps but no pause publishes it, so
+/// old space only ever shrinks through fallbacks, which a module 1
+/// operation's hook applies first. The data stays intact and every free
+/// entry keeps one owner (the pending runs are a free list).
+@Test func aSweepThatNeverAppliesFallsBack() throws {
+    let rt = try markingRuntime(heapBlocks: 128) { $0.floor = 0.3; $0.stress = .sweepNeverApplies }
+    // The test is the marker: run each cycle the triggers start to its
+    // sweep, between the program's slices.
+    let p = rt.spawn("churnLists:", [int(200)])
+    while rt.vm.liveProcessCount > 0 {
+        _ = rt.vm.runOneSlice(worker: 1, budgetNs: 2_000_000)
+        if rt.phase == .marking {
+            _ = rt.vm.markStep(10_000_000)
+            rt.vm.finalMark()
+        }
+        if rt.phase == .sweeping { rt.vm.sweep() }
+    }
+    #expect(rt.result(p) == 10 * 2000 * 2001 / 2)
+    rt.vm.release(p)
+    let c = rt.marking
+    #expect(c.cycles >= 1 && c.applies >= 1 && c.fallbacks >= 1, "\(c)")
+    #expect(rt.vm.stops.filter { $0.kind == .apply }.isEmpty)
+    #expect(c.missed == 0)
+    rt.noFailures()
+    rt.stop()
+}

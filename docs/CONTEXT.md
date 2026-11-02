@@ -144,3 +144,60 @@ as they are understood.
 - **Finalization queue**: the fired ephemerons, a root, taken one at a
   time by a Process that a Semaphore wakes; finalizers never run on a
   collector thread.
+
+## Concurrent marking (module 5)
+
+- **Cycle**: one concurrent collection of old space: an initial mark, the
+  marker's tracing, a final mark, the lazy sweep and the apply. Started at
+  the end of a scavenge by occupancy (the floor), by the predictor or by a
+  stress flag; abandoned (an **abort**) by any module 1 operation that
+  moves, frees or exchanges objects, or by a failed verifier.
+- **Snapshot**: the old objects at the initial mark, as a bitmap of entries
+  copied from the **old map** (one bit per entry, set exactly while it holds
+  an old object). The marker and the barrier test membership with one bit;
+  nothing young is ever in it; no snapshot entry is freed or reused before
+  the sweep. Objects promoted or allocated old later are black by not being
+  in it.
+- **SATB record**: snapshot at the beginning: the value a store is about to
+  overwrite, pushed on the storing worker's 512-oop buffer while a cycle
+  marks, when the holder is old and the value an unmarked snapshot entry.
+  Full buffers go to the marker's queue.
+- **Flag word**: the VM-wide barrier word beside the safepoint flag; every
+  pointer store loads it once before storing. Bit 0: marking. Nonzero sends
+  the store to one out-of-line call with every barrier.
+- **Grey**: a marked snapshot entry whose slots are still to be scanned:
+  on the marker's stack or in a grey packet in its queue. Black: marked
+  and scanned. Marks live in the side byte map.
+- **Marker**: the one thread that traces a cycle and sweeps it; a VM
+  participant (it parks at stops, never joins a scavenge), at utility QoS
+  unless headroom is low. Waits untimed when it has nothing to do.
+- **Initial mark**: the snapshot taken at the end of a stop-the-world
+  scavenge: the snapshot copy, the roots marked grey, and the survivor
+  spaces scanned as roots.
+- **Final mark**: a stop the marker requests when it has nothing left:
+  every partial SATB buffer and queued item drained, dead holders filtered
+  out of the remembered set, ephemerons resolved, weak slots naming dead
+  snapshot entries nil'ed, the verifier run.
+- **Lazy sweep**: the marker freeing the unmarked snapshot entries after the
+  final mark, while the world runs, into **pending runs** owned by a list of
+  their own; the snapshot map is cleared word by word. A used entry the
+  sweep has not reached yet and will free is **pending dead**: the
+  verifiers skip its slots.
+- **Apply**: publishing a finished sweep at the next scavenge or full
+  collection, or in a short stop the sweeper requests: pending runs to the
+  allocators, blocks without a live body (and not taken since the
+  snapshot) freed.
+- **Fallback**: a full stop-the-world collection forced by space while
+  concurrent marking is configured (old space past its soft limit after a
+  scavenge, or the table full). A provisioning failure, counted by the
+  phase it found, never hidden.
+- **Headroom**: the free fraction of old space's soft limit. The marker is
+  raised to user-initiated QoS while it is below a threshold, and the
+  predictor compares the time the promotion rate takes to fill it with a
+  cycle's duration.
+- **Floating garbage**: objects that died during a cycle but were marked
+  (reachable at the snapshot): freed by the next cycle. Counted in bytes by
+  the verifier.
+- **Weak keep-alive**: the read barrier on `at:` of a weak slot while a
+  cycle marks: the referent is recorded like an overwritten value, since
+  the marker never traces weak slots.

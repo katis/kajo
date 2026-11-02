@@ -147,7 +147,7 @@ private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? 
 /// next poll; a cycle that ends with headroom above it lowers it again. The
 /// QoS in effect is logged in each cycle's record.
 @Test func theMarkerIsRaisedWhenHeadroomShrinksAndLoweredWhenItRecovers() throws {
-    let rt = try Runtime(sparseSrc, background: 1, heapBlocks: 256, pollEvery: 64, configure: { c in
+    let rt = try Runtime(sparseSrc, background: 1, heapBlocks: 96, pollEvery: 64, configure: { c in
         c.nursery.bytes = 1 << 20
         c.nursery.age = 1
         c.marking.enabled = true
@@ -168,13 +168,13 @@ private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? 
     let first = cycle()
     #expect(first?.markerQoS == QOS_CLASS_UTILITY.rawValue)
     #expect(rt.marking.qosEscalations == 0)
-    // 200 000 Pairs, old: about 4.8 MB of an 8 MiB soft limit.
-    let p = rt.spawn("mkBig:", [int(200_000)])
-    rt.waitAllTerminated()
+    // 90 000 Pairs, old: about 2.2 MB of a 3 MiB soft limit.
+    let p = rt.spawn("mkBig:", [int(90_000)])
+    rt.waitAllTerminated(underThreadSanitizer ? 600 : 60)
     rt.vm.release(p)  // its result is the list
     rt.scavenge()
     let low = cycle()
-    #expect(rt.marking.qosEscalations == 1)
+    #expect(rt.marking.qosEscalations == 1, "in use \(low?.inUseBytes ?? 0) of \(low?.softLimitBytes ?? 0)")
     #expect(low?.markerQoS == QOS_CLASS_USER_INITIATED.rawValue, "\(String(describing: low))")
     rt.vm.setGlobal(8, rt.image.nilObject)
     _ = cycle()   // frees the list: ends with headroom above the threshold
