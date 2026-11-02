@@ -400,8 +400,9 @@ alone and does not depend on VMR.
 Published numbers: `stw` (the ADR 0007 reference and the checksum oracle)
 never defers a free, so nothing it measured can change. In `local` and
 `offload` the initial-mark pause and full collections gain one walk over
-the deferred lists, which hold only kept entries (yc_deferred is 0 in 697
-of the bench's kernel lines and at most single digits otherwise), so no
+the deferred lists, which at a pause hold only kept entries, a subset of
+the deferred frees (`yc_deferred`, the count of deferred frees, is 0 in 697
+of the bench's kernel lines and in the single digits otherwise), so no
 pause, wall time or checksum in RESULTS.md or ADR 0008 should move
 measurably; old-space sweep counts (`snap_entries`, freed entries) can
 differ by those few entries. The matrices were not re-run. The bug could
