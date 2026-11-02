@@ -31,7 +31,7 @@ private func rejection(_ src: String) -> LoadError.Kind? {
     #expect(Opcode(mnemonic: "push_temp") == .pushTemp && Opcode(mnemonic: "jump_if_false") == .jumpIfFalse)
     #expect(Opcode.send.length == 3 && Opcode.jump.length == 3 && Opcode.pushInt.length == 2 && Opcode.add.length == 1)
     #expect(Opcode.add.specialSelector == "+" && Opcode.eq.specialSelector == "=" && Opcode.pop.specialSelector == nil)
-    #expect(specialSelectors == ["+", "-", "*", "<", ">", "<=", ">=", "=", "=="])
+    #expect(specialSelectorNames == ["+", "-", "*", "<", ">", "<=", ">=", "=", "=="])
 }
 
 @Test func selectorArity() {

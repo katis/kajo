@@ -49,8 +49,8 @@ struct LoadError: Error, Equatable, CustomStringConvertible {
 struct LoaderLimits: Sendable {
     /// Bytes of kasm text per file.
     var maxSourceBytes = 16 << 20
-    /// Class table entries in total, well-known classes included.
-    var maxClasses = 1 << 16
+    /// The highest class index the loader assigns.
+    var maxClassIndex = 1 << 16
     /// Methods per class: the method dictionary is one object, so it must
     /// fit a block (2 x capacity slots, capacity a power of two >= 2 x count).
     var maxMethodsPerClass = 512

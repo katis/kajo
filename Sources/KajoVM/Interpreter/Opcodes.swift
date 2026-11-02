@@ -147,7 +147,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
 
 /// The special selectors in intern order (SPEC-SHARED "Boot order", step 3):
 /// the eight special-send bytecodes in opcode order, then `==`.
-let specialSelectors: [String] = Opcode.allCases.compactMap(\.specialSelector)
+let specialSelectorNames: [String] = Opcode.allCases.compactMap(\.specialSelector)
 
 /// Operand decoding: the one place that knows how operands are encoded.
 enum OperandDecoding {
