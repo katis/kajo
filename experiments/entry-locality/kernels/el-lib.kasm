@@ -1,0 +1,221 @@
+; entry-locality library, loaded after prelude and lib (SPEC.md "Part 3
+; kernels"). Big3: a 0-based array of n elements in 2048-slot leaf Arrays
+; held by 2048-slot mid Arrays held by a top Array, so 2^23 elements fit
+; (lib's 2-level Big would need a 4096-slot top Array, more than a 32 KiB
+; block). buildGraph3:garbage: is lib's buildGraph: on Big3, optionally
+; allocating dead WNodes between the live ones.
+class Big3 Object 1
+
+method Big3 setTop: temps=0
+  push_temp 0
+  store_ivar 0
+  return_self
+end
+
+; nil big3New: n. t0 = n, t1 = nleaves, t2 = top, t3 = i, t4 = nmids
+method UndefinedObject big3New: temps=4
+  push_temp 0
+  push_lit 2047
+  add
+  push_lit 2048
+  send // 1
+  store_temp 1
+  push_temp 1
+  push_lit 2047
+  add
+  push_lit 2048
+  send // 1
+  store_temp 4
+  push_lit @Array
+  push_temp 4
+  send new: 1
+  store_temp 2
+  push_int 1
+  store_temp 3
+mids:
+  push_temp 3
+  push_temp 4
+  le
+  jump_if_false leaves0
+  push_temp 2
+  push_temp 3
+  push_lit @Array
+  push_lit 2048
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump mids
+leaves0:
+  push_int 0
+  store_temp 3
+leaves:
+  push_temp 3
+  push_temp 1
+  lt
+  jump_if_false done
+  push_temp 2
+  push_temp 3
+  push_lit 2048
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 3
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  push_lit @Array
+  push_lit 2048
+  send new: 1
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump leaves
+done:
+  push_lit @Big3
+  send basicNew 0
+  push_temp 2
+  send setTop: 1
+  return_top
+end
+
+; t0 = index
+method Big3 get: temps=0
+  push_ivar 0
+  push_temp 0
+  push_lit 4194304
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 2048
+  send // 1
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 0
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  return_top
+end
+
+; t0 = value, t1 = index
+method Big3 put:at: temps=0
+  push_ivar 0
+  push_temp 1
+  push_lit 4194304
+  send // 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 1
+  push_lit 2048
+  send // 1
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  send at: 1
+  push_temp 1
+  push_lit 2048
+  send \\ 1
+  push_int 1
+  add
+  push_temp 0
+  send at:put: 2
+  return_top
+end
+
+; nil buildGraph3: m garbage: g -> a Big3 of m WNodes, node i linked to node
+; (1664525 i + 1013904223) mod m. g > 0: a dead WNode is allocated before
+; every g-th live one (i mod g = 0), so a third of the objects are dead at
+; g = 2. (One dead per live node would need 2^24 + entries at 2^23 nodes,
+; more than B's fixed 16 Mi-entry table, and B would collect mid-build.)
+; t0 = m, t1 = g, t2 = nodes, t3 = i
+method UndefinedObject buildGraph3:garbage: temps=2
+  push_nil
+  push_temp 0
+  send big3New: 1
+  store_temp 2
+  push_int 0
+  store_temp 3
+alloc:
+  push_temp 3
+  push_temp 0
+  lt
+  jump_if_false link0
+  push_temp 1
+  push_int 0
+  gt
+  jump_if_false live
+  push_temp 3
+  push_temp 1
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false live
+  push_lit @WNode
+  send basicNew 0
+  pop
+live:
+  push_temp 2
+  push_lit @WNode
+  send basicNew 0
+  push_temp 3
+  send put:at: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump alloc
+link0:
+  push_int 0
+  store_temp 3
+link:
+  push_temp 3
+  push_temp 0
+  lt
+  jump_if_false done
+  push_temp 2
+  push_temp 3
+  send get: 1
+  push_temp 2
+  push_lit 1664525
+  push_temp 3
+  mul
+  push_lit 1013904223
+  add
+  push_temp 0
+  send \\ 1
+  send get: 1
+  push_temp 3
+  push_lit 1024
+  send \\ 1
+  push_int 1
+  add
+  send setNext:val: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump link
+done:
+  push_temp 2
+  return_top
+end

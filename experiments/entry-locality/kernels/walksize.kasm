@@ -1,0 +1,46 @@
+; walksize: each worker builds walkNodes / n WNodes (buildGraph3:garbage: 0),
+; no garbage.
+; then follows next around the whole cycle walkReps times summing val * hop
+; (as walk.kasm). walkNodes and walkReps are generated per kernel name by
+; KernelFiles.swift (walkN / walkbuildN etc.).
+; args: t0 = w, t1 = n. temps: t2 = m, t3 = nodes, t4 = reps, t5 = sum
+method UndefinedObject run:of: temps=4
+  push_nil
+  send walkNodes 0
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  push_temp 2
+  push_int 0
+  send buildGraph3:garbage: 2
+  store_temp 3
+
+  push_int 0
+  store_temp 5
+  push_nil
+  send walkReps 0
+  store_temp 4
+loop:
+  push_temp 4
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 5
+  push_nil
+  push_temp 3
+  push_int 0
+  send get: 1
+  push_temp 2
+  send walk:hops: 2
+  add
+  store_temp 5
+  push_temp 4
+  push_int 1
+  sub
+  store_temp 4
+  jump loop
+done:
+  push_temp 5
+  return_top
+end

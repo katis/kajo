@@ -1,0 +1,1 @@
+../../../../object-representation/swift/Sources/VMC/Image.swift
