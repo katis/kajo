@@ -371,7 +371,7 @@ private func enterWindow(zero: Bool) throws -> (heldBlockFreed: Bool, inUseAfter
     // Free a selected block without relocating it: its live objects now
     // lie in a free block.
     let b = try #require(rt.vm.relocationSet.first { $0 == rt.vm.block(of: rt.kept(0)) })
-    rt.vm.freeBlockForTest(b)
+    rt.vm.freeBlockForTest(b)  // a stop of its own: verified too
     rt.scavenge()
     #expect(rt.relocation.verifierFailures > 0)
     #expect(rt.image.om.verifierReports.contains { $0.contains("relocation verifier") && $0.contains("which is free") })

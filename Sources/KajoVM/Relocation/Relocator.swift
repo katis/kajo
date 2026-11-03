@@ -97,6 +97,7 @@ func relocationAtFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64)
     rec.selectNs = nanoseconds() &- t0
     unsafe st.pointee.current = rec
     unsafe st.pointee.hasCurrent = true
+    unsafe st.pointee.verifyDue = true
     unsafe st.pointee.counters.candidates &+= rec.candidates
     unsafe st.pointee.counters.blocksSelected &+= rec.blocksSelected
     unsafe st.pointee.counters.capped &+= rec.capped
@@ -393,9 +394,16 @@ func relocationAtPauseStart(_ vm: VMPointer) {
 }
 
 /// At every pause, after its work: the relocation verifier (when the
-/// object memory verifies).
+/// object memory verifies), from the final mark that selected a relocation
+/// set to the first pause after the cycle that ended it. Between cycles
+/// nothing it checks can change (module 1's and module 4's verifiers keep
+/// checking the rest), and an O(entries) walk at every host stop made a
+/// test that polls the host every 0.5 ms too slow under ThreadSanitizer.
 func relocationAtPauseEnd(_ vm: VMPointer) {
     guard let r = unsafe vm.pointee.relocation, unsafe r.pointee.om.config.verify else { return }
+    let st = unsafe r.pointee.state
+    guard unsafe st.pointee.verifyDue else { return }
+    if unsafe !st.pointee.hasCurrent && st.pointee.pendingBlocks.count == 0 { unsafe st.pointee.verifyDue = false }
     let issues = unsafe verifyRelocation(vm, r)
     unsafe r.pointee.state.pointee.counters.verifierRuns &+= 1
     unsafe r.pointee.state.pointee.counters.verifierFailures &+= UInt64(issues.count)
