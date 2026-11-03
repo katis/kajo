@@ -47,7 +47,9 @@ extension VM {
 
     var relocationLog: [RelocationCycleRecord] {
         guard let r = unsafe state.pointee.relocation else { return [] }
-        return inspect { _ in unsafe r.pointee.state.pointee.records }
+        return inspect { _ in
+            unsafe r.pointee.state.pointee.records + (r.pointee.state.pointee.hasCurrent ? [r.pointee.state.pointee.current] : [])
+        }
     }
 
     /// The current relocation set, block indices in order.

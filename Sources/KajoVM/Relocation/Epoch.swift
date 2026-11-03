@@ -108,10 +108,9 @@ func tryFreePending(_ vm: VMPointer, _ r: RelocationPointer, atPause: Bool) -> I
     unsafe st.pointee.pendingTimes.truncate(kept)
     unsafe st.pointee.counters.freedByEpoch &+= byEpoch
     unsafe st.pointee.counters.freedAtPause &+= byPause
-    let ri = unsafe st.pointee.current
-    if ri >= 0 {
-        unsafe st.pointee.records[ri].freedByEpoch &+= byEpoch
-        unsafe st.pointee.records[ri].freedAtPause &+= byPause
+    if unsafe st.pointee.hasCurrent {
+        unsafe st.pointee.current.freedByEpoch &+= byEpoch
+        unsafe st.pointee.current.freedAtPause &+= byPause
     }
     return freed
 }

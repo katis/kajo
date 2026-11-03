@@ -95,8 +95,8 @@ func relocationAtFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64)
         rec.framePins = unsafe UInt64(pinFrames(vm, r))
     }
     rec.selectNs = nanoseconds() &- t0
-    unsafe st.pointee.records.append(rec)
-    unsafe st.pointee.current = st.pointee.records.count - 1
+    unsafe st.pointee.current = rec
+    unsafe st.pointee.hasCurrent = true
     unsafe st.pointee.counters.candidates &+= rec.candidates
     unsafe st.pointee.counters.blocksSelected &+= rec.blocksSelected
     unsafe st.pointee.counters.capped &+= rec.capped
@@ -157,9 +157,11 @@ func relocationAtCycleEnd(_ vm: VMPointer, completed: Bool) {
     unsafe st.pointee.selected.removeAll()
     unsafe st.pointee.cursor = 0
     unsafe st.pointee.plannedCycle = 0
-    let ri = unsafe st.pointee.current
-    if ri >= 0 { unsafe st.pointee.records[ri].completed = completed }
-    unsafe st.pointee.current = -1
+    if unsafe st.pointee.hasCurrent {
+        unsafe st.pointee.current.completed = completed
+        unsafe st.pointee.records.append(st.pointee.current)
+        unsafe st.pointee.hasCurrent = false
+    }
 }
 
 // MARK: - the pass (the marker inside the VM, phase sweeping)
@@ -260,17 +262,16 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
     unsafe st.pointee.counters.passCpuNs &+= cpu
     if noSpace { unsafe st.pointee.counters.noSpace &+= 1 }
     if aborted { unsafe st.pointee.counters.passesAborted &+= 1 }
-    let ri = unsafe st.pointee.current
-    if ri >= 0 {
-        unsafe st.pointee.records[ri].objectsMoved &+= moved
-        unsafe st.pointee.records[ri].bytesMoved &+= movedBytes
-        unsafe st.pointee.records[ri].skippedPinned &+= pinned
-        unsafe st.pointee.records[ri].skippedHazard &+= hazards
-        unsafe st.pointee.records[ri].blocksEvacuated &+= evacuated
-        unsafe st.pointee.records[ri].passWallNs &+= wall
-        unsafe st.pointee.records[ri].passCpuNs &+= cpu
-        if noSpace { unsafe st.pointee.records[ri].noSpace = true }
-        if aborted { unsafe st.pointee.records[ri].aborted = true }
+    if unsafe st.pointee.hasCurrent {
+        unsafe st.pointee.current.objectsMoved &+= moved
+        unsafe st.pointee.current.bytesMoved &+= movedBytes
+        unsafe st.pointee.current.skippedPinned &+= pinned
+        unsafe st.pointee.current.skippedHazard &+= hazards
+        unsafe st.pointee.current.blocksEvacuated &+= evacuated
+        unsafe st.pointee.current.passWallNs &+= wall
+        unsafe st.pointee.current.passCpuNs &+= cpu
+        if noSpace { unsafe st.pointee.current.noSpace = true }
+        if aborted { unsafe st.pointee.current.aborted = true }
     }
     return !aborted
 }

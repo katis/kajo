@@ -11,8 +11,14 @@
 #     primitives), the SATB slow path and handover, the weak keep-alive, the
 #     marker's trace loop and poll, the final mark's drain, the lazy sweep
 #     and the apply;
+#     module 6's post-store slow paths and conflict call, the hazard
+#     acquire and the array copy primitive with its copy loop, the epoch
+#     enter and the pending-block free, the relocation pass and its copy;
 #  2. the dispatch loop `interpret` is one jump table: one indirect branch
-#     and one jump-table relocation.
+#     and one jump-table relocation;
+#  3. module 6's post-store check is inline in `interpret`'s store_ivar:
+#     an `stlr` of the slot directly followed by an `ldar` of the state
+#     word, then the compare and the branches (printed).
 # Internal functions are dead-stripped from a plain release build, so this
 # builds -O with -enable-testing, which keeps every internal function as an
 # optimized symbol, and disassembles each one with relocations shown, so
@@ -41,6 +47,10 @@ wanted=(
   SATB 'storeWithBarriers(_:_:_:_:_:)|handOver(_:_:_:)|weakReadBarrier(_:_:_:_:)|takeBufferLocked(_:)'
   Marker 'markSome(_:_:limit:)|markerPoll(_:_:cycle:phase:)|drainStack(_:_:_:)|takeItem(_:_:_:_:)|popItem(_:)|returnBuffer(_:_:)'
   Sweep 'sweepCycle(_:_:inPause:)|applyInStop(_:_:)'
+  PostStore 'postStoreSlow(_:_:_:_:)|postStoreSlowByte(_:_:_:_:)|storeConflict(_:_:_:_:_:)'
+  Hazard 'hazardAcquire(_:_:_:_:)|primReplace(_:_:)|copySlots(_:_:_:_:_:_:_:_:_:)'
+  Epoch 'epochEnter(_:_:)|tryFreePending(_:_:atPause:)|addPending(_:_:)'
+  Relocator 'relocatePass(_:_:cycle:)|relocCopy(_:_:_:_:)'
 )
 fail=0
 found=0
@@ -65,6 +75,10 @@ for obj in ${(k)wanted}; do
       tables=$(print -- "$body" | grep -oE 'lJTI[0-9_]+' | sort -u | wc -l | tr -d ' ')
       printf '%-46s indirect branches %d, jump tables %d\n' "  dispatch" "$branches" "$tables"
       (( branches == 1 && tables == 1 )) || { echo "FAIL: the dispatch loop is not one jump table"; fail=1; }
+      check=$(print -- "$body" | grep -A6 -B3 -E '	stlr	' | grep -E '^ +[0-9a-f]+:' | sed 's/^ *[0-9a-f]*: *//' | tr '\t' ' ' | tr '\n' ';')
+      pairs=$(print -- "$body" | grep -A1 -E '	stlr	' | grep -cE '	ldar	')
+      printf '%-46s %s\n' "  post-store check (store_ivar)" "$check"
+      (( pairs >= 1 )) || { echo "FAIL: no stlr directly followed by ldar in interpret (the post-store check)"; fail=1; }
     fi
   done
 done

@@ -115,9 +115,12 @@ struct RelocationCounters: Sendable {
     /// the soft limit).
     let context: AllocContext
     var counters = RelocationCounters()
+    /// Finished cycles' records (appended at the cycle's end, with the
+    /// world stopped), and the current cycle's (a plain value: the pass
+    /// never touches a Swift array).
     var records: [RelocationCycleRecord] = []
-    /// The current cycle's record (index in `records`), -1 when none.
-    var current = -1
+    var current = RelocationCycleRecord()
+    var hasCurrent = false
     /// Density at the last final mark: marked bytes over in-use bytes.
     var lastDensity = 0.0
     var haveDensity = false
