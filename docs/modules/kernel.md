@@ -226,3 +226,9 @@ compared against the bootstrap.
 5. JUnit XML for CI; NDJSON streaming as the core event protocol.
 6. Scope at my judgement; a Temporal-style date and time API later, no
    legacy Date-style API.
+
+8a's open questions, answered the same evening (ADR 0009 "Built (8a)"):
+`class`, `isNil`, `notNil` stay inline and non-overridable; the read-only
+failure is `modificationForbiddenAt:value:`; the symbol table is weak (built
+in 8b); the read-only check's `storeheavy` cost is accepted; images hold
+Processes (module 8c, after 8b).

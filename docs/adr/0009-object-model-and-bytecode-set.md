@@ -331,19 +331,25 @@ VM; section 12 is the kernel's (8b). What each became:
   `respondsTo:` as primitives, installation in a stop with every worker's
   cache flushed before it runs again.
 
-Open questions for the owner:
+Open questions for the owner, answered 2026-11-03:
 
-- Is it acceptable that `class`, `isNil` and `notNil` can never be
-  overridden (no proxies that answer `isNil` true)? Pharo inlines `==`
-  and `class` only.
-- `attemptToModify:at:value:` is sent to the object with the object again
-  as its first argument, following the selector literally; a two-argument
-  `modificationForbiddenAt:value:` would be shorter. Which spelling does
-  the kernel want?
-- The symbol table is strong; the ADR's weak set needs weak buckets with
-  tombstones. Is a strong table acceptable until the image grows large?
-- A Process cannot be saved in an image in 8a (the third open question
-  below is still open).
+- `class`, `isNil` and `notNil` stay inline and can never be overridden
+  (no proxies that answer `isNil` true). Pharo inlines `==` and `class`
+  only; Kajo adds the two nil tests. Accepted.
+- The read-only failure is sent as a two-argument
+  `modificationForbiddenAt:value:` to the object (the ADR's first draft
+  said `attemptToModify:at:value:`, which 8a sent with the object as its
+  own first argument). The kernel's Object signals ModificationForbidden.
+  Built in 8b.
+- The symbol table is **weak**, as this ADR says; 8a's strong table is
+  replaced in 8b (weak slots, tombstoned buckets reused by interning).
+- The read-only check's cost on `storeheavy` (1.07 on one worker, 1.10 on
+  eight; parity with the bit out of the store mask; the kernels that load
+  as well do not see it) is accepted.
+- **Images hold Processes** (the third open question below is decided):
+  saved Process stacks, their waits and the ready queues are part of the
+  image format. Not in 8a or 8b; module 8c builds it before module 9's
+  live development needs it.
 
 ## Consequences
 
@@ -367,5 +373,6 @@ Open questions for the owner:
   a property test against Swift `Double` decides).
 - 16-bit `String` variants for Core Text and UIKit attributed strings, if
   conversion at the boundary ever shows in a profile.
-- Whether a Process snapshot (section 3) is part of the image format or a
-  separate developer-tool format.
+- ~~Whether a Process snapshot (section 3) is part of the image format or
+  a separate developer-tool format.~~ Decided 2026-11-03: part of the image
+  format (module 8c).

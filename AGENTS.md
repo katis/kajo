@@ -507,10 +507,10 @@ module 5 and module 3 reserves the frame's Context slot; sections 2 to 11
 built in module 8a: SmallFloat round-trips bit for bit against `Double`,
 the dispatch loop keeps module 7's register budget with the v1 fast paths
 out of line, the hot kernels are within noise of module 7 and `storeheavy`
-is 1.07 to 1.10 from the read-only check, and the Built note holds the
-open questions for the owner: inline `class`/`isNil`/`notNil`, the
-`attemptToModify:at:value:` spelling, the strong symbol table, Processes
-in images). ADRs
+is 1.07 to 1.10 from the read-only check; the owner's answers to 8a's
+questions are in the Built note: inline `class`/`isNil`/`notNil` stay,
+the read-only failure is `modificationForbiddenAt:value:`, the symbol
+table is weak (8b), and images hold Processes (module 8c)). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
