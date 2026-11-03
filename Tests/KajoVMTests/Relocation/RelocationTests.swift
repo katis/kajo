@@ -179,7 +179,10 @@ private func framePin(rule: Bool) throws {
         #expect(rt.relocation.skippedPinned >= 2)
     } else {
         #expect(rt.vm.stateWord(of: a) != before)
-        #expect(rt.vm.stateWord(of: code) != codeBefore)
+        // Pinned for good stays pinned: the switch turns off frame pins
+        // only (moving the running bytecodes lets the worker execute a
+        // freed block's next contents).
+        #expect(rt.vm.stateWord(of: code) == codeBefore)
     }
     rt.vm.terminate(p)
     t.join()

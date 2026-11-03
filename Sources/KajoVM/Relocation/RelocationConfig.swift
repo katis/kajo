@@ -52,7 +52,7 @@ struct RelocationStress: OptionSet, Sendable {
 /// Switches that turn a rule off so a test can show the rule matters.
 /// Never set outside tests.
 struct RelocationTestSwitches: Sendable {
-    /// Pinned objects (for good, or by a frame) are skipped.
+    /// Frame-pinned objects are skipped (objects pinned for good always are).
     var pinRule = true
     /// The relocator checks the hazard slots after its CAS.
     var hazardRule = true

@@ -184,7 +184,10 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
     let heap = om.heap
     let mw = unsafe mk.pointee.markerWorker
     let snap = unsafe mk.pointee.snapshot
-    let pinRule = unsafe r.pointee.config.testSwitches.pinRule
+    // Without the frame-pin rule (a test switch) objects pinned for good
+    // still stay: moving the running method's bytecodes lets the worker
+    // execute a freed block's next contents (ThreadSanitizer showed it).
+    let pins = unsafe r.pointee.config.testSwitches.pinRule ? Header.pinnedForGoodBit | Header.framePinBit : Header.pinnedForGoodBit
     let flag = unsafe vm.pointee.flag
     let w0 = nanoseconds(), c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     var aborted = false, noSpace = false
@@ -218,7 +221,7 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
             if e == 0 || !snap.contains(e) || om.markRelaxed(e) == 0 { continue }
             let o = e &<< 4
             if om.stateWord(o) != here { continue }
-            if pinRule && om.headerWord(o) & (Header.pinnedForGoodBit | Header.framePinBit) != 0 {
+            if om.headerWord(o) & pins != 0 {
                 skipped = true
                 pinned &+= 1
                 continue
