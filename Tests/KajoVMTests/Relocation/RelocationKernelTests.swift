@@ -112,8 +112,12 @@ private func underRelocation(_ src: String, heapBlocks: Int, _ name: String) thr
     let (src, heap) = (fragmentKernel(800_000), 512 * 32)
     #endif
     let (_, rt) = try runKernel(src, heapBlocks: heap, relocate: true, perturb: true)
+    // The pass's totals are added when it ends; under load the utility-QoS
+    // marker can still be in its first pass when the kernel finishes (one
+    // loaded run: a 20 s final mark, 3357 objects copied, none counted yet),
+    // so the progress check counts the copies perturbation reached.
     let r = rt.relocation
-    #expect(r.objectsMoved > 1000 && r.perturbedCopies >= 2 * r.objectsMoved, "\(r) \(rt.marking)")
+    #expect(r.perturbedCopies >= 200 && r.perturbedCopies >= 2 * r.objectsMoved, "\(r) \(rt.marking)")
     #expect(r.parksWhileRelocating == 0)
     #expect(rt.vm.counters.stops > 10)
     rt.noFailures()

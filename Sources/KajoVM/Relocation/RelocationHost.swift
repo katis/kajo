@@ -188,7 +188,12 @@ extension VM {
 
     /// Test: free block `b` at a pause as if it were evacuated (the
     /// verifier must catch the bodies left in it).
-    func freeBlockForTest(_ b: Int) { withWorldStopped { image.om.releaseEvacuatedBlock(b) } }
+    func freeBlockForTest(_ b: Int) {
+        withWorldStopped {
+            image.om.releaseEvacuatedBlock(b)
+            if let r = unsafe state.pointee.relocation { unsafe r.pointee.state.pointee.verifyDue = true }
+        }
+    }
 
     /// Test: worker `i` enters or leaves the VM on this thread.
     func enter(worker i: Int) { unsafe enterVM(state, state.worker(i)) }

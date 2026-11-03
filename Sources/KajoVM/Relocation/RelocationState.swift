@@ -121,8 +121,9 @@ struct RelocationCounters: Sendable {
     var records: [RelocationCycleRecord] = []
     var current = RelocationCycleRecord()
     var hasCurrent = false
-    /// The verifier is due at the next pause: a relocation set exists or
-    /// existed since the last pause that verified.
+    /// The verifier is due at the next pause: the relocator selected a
+    /// set, moved or reverted an object, or freed a block since the last
+    /// pause that verified.
     var verifyDue = false
     /// Density at the last final mark: marked bytes over in-use bytes.
     var lastDensity = 0.0

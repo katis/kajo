@@ -162,6 +162,7 @@ func relocationAtCycleEnd(_ vm: VMPointer, completed: Bool) {
         unsafe st.pointee.current.completed = completed
         unsafe st.pointee.records.append(st.pointee.current)
         unsafe st.pointee.hasCurrent = false
+        unsafe st.pointee.verifyDue = true
     }
 }
 
@@ -338,6 +339,7 @@ func relocBegin(_ vm: VMPointer, _ r: RelocationPointer, _ mw: WorkerPointer, _ 
 func relocRevert(_ r: RelocationPointer, _ mw: WorkerPointer, _ o: UInt64, _ off: UInt64) {
     unsafe r.pointee.om.stateWordAtomic(o).pointee.store(off, ordering: .releasing)
     unsafe mw.pointee.inRelocation = false
+    unsafe r.pointee.state.pointee.verifyDue = true
 }
 
 /// The copy: the body word by word, back reference included (it names the
@@ -360,6 +362,7 @@ func relocSwitch(_ r: RelocationPointer, _ mw: WorkerPointer, _ o: UInt64, _ dst
     unsafe mw.pointee.inRelocation = false
     let c = unsafe r.pointee.state.pointee.context.state
     unsafe c.pointee.top = dst &+ bytes
+    unsafe r.pointee.state.pointee.verifyDue = true
 }
 
 /// A perturbation point inside an object's copy: a yield or a sleep, never
@@ -393,17 +396,19 @@ func relocationAtPauseStart(_ vm: VMPointer) {
     if unsafe inUse > st.pointee.counters.peakBlocksInUse { unsafe st.pointee.counters.peakBlocksInUse = inUse }
 }
 
-/// At every pause, after its work: the relocation verifier (when the
-/// object memory verifies), from the final mark that selected a relocation
-/// set to the first pause after the cycle that ended it. Between cycles
-/// nothing it checks can change (module 1's and module 4's verifiers keep
-/// checking the rest), and an O(entries) walk at every host stop made a
-/// test that polls the host every 0.5 ms too slow under ThreadSanitizer.
+/// At the end of every pause that follows relocation work (a selection, a
+/// moved or reverted object, a freed block, the end of a cycle) since the
+/// last one that verified: the relocation verifier (when the object memory
+/// verifies). Nothing it checks changes without such work (module 1's,
+/// 4's and 5's verifiers keep checking the rest). An O(entries) walk at
+/// every stop made a host that polls every 0.5 ms (module 5's marker-thread
+/// tests) stop the world most of the time, and a utility-QoS marker under
+/// load could not finish a cycle within their bounds.
 func relocationAtPauseEnd(_ vm: VMPointer) {
     guard let r = unsafe vm.pointee.relocation, unsafe r.pointee.om.config.verify else { return }
     let st = unsafe r.pointee.state
     guard unsafe st.pointee.verifyDue else { return }
-    if unsafe !st.pointee.hasCurrent && st.pointee.pendingBlocks.count == 0 { unsafe st.pointee.verifyDue = false }
+    unsafe st.pointee.verifyDue = false
     let issues = unsafe verifyRelocation(vm, r)
     unsafe r.pointee.state.pointee.counters.verifierRuns &+= 1
     unsafe r.pointee.state.pointee.counters.verifierFailures &+= UInt64(issues.count)
