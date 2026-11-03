@@ -401,18 +401,21 @@ end
 method Class removeSelector: temps=0 prim=98
 end
 ; send `answer` until it answers 99 (global 10 := 1 once it has run), at
-; most 200 million times
-method UndefinedObject spinAsk temps=1
+; most 20 million times; it allocates nothing in the loop, so no
+; collection's stop flushes its cache for it
+method UndefinedObject spinAsk temps=2
   push_int 0
   store_temp 0
+  push_lit @Q
+  send basicNew 0
+  store_temp 1
 loop:
   push_nil
   push_int 10
   push_int 1
   send g:put: 2
   pop
-  push_lit @Q
-  send basicNew 0
+  push_temp 1
   send answer 0
   push_int 99
   eq
@@ -422,7 +425,7 @@ loop:
   add
   store_temp 0
   push_temp 0
-  push_lit 200000000
+  push_lit 20000000
   lt
   jump_if_true loop
   push_int -1
@@ -446,11 +449,16 @@ end
 /// A Process spinning on `answer` on one worker sees the method removed by
 /// another worker's Process (its cached line would keep answering 1).
 @Test func aRemovedMethodIsGoneFromEveryWorkersCache() throws {
-    let rt = try Runtime(installSrc, background: 2, start: true)
+    // The spinner runs on worker 1 (its own thread, no deadline), the
+    // remover on worker 2 (this thread): only the stop reaches worker 1.
+    let rt = try Runtime(installSrc, background: 2, start: false)
     let spinner = rt.spawn("spinAsk")
+    let vm = rt.vm
+    let t = TestThread { _ = vm.runOneSlice(worker: 1, budgetNs: .max) }
     #expect(eventually { rt.global(10) != rt.image.nilObject })
     let remover = rt.spawn("removeAnswer")
-    rt.waitAllTerminated()
+    while rt.vm.runOneSlice(worker: 2) {}
+    t.join()
     #expect(rt.result(remover) == 0)
     #expect(rt.result(spinner) >= 0)  // -1: it never saw the removal
     rt.stop()
