@@ -190,24 +190,35 @@ collectors read it yet; no metaclasses, no 16/32/64-bit word formats.
 
 ### 8. Strings, Symbols and Characters
 
-- `String` is a byte object holding **UTF-8**. `size` and `at:` count
-  Unicode scalars; an ASCII-only string, the common case, is detected once
-  (a flag the kernel keeps in a header-free place: a second class,
-  `AsciiString`, with the same protocol and constant-time indexing).
-  Grapheme iteration is a kernel library.
-- `Symbol` is an interned `String` subclass; interning is a kernel table
-  with a weak set; `==` on Symbols is identity.
+- There is **one `String` class**, a byte object holding **UTF-8**, with
+  Swift's and Rust's string design as the inspiration rather than
+  Smalltalk-80's: a String is an immutable sequence of Unicode scalars
+  stored as bytes, not an integer-indexed array of characters. Positions
+  are byte offsets valid only at scalar boundaries (Rust), iteration is by
+  scalar (`do:` yields Characters), the bytes are reachable as a read-only
+  view (`utf8`, constant-time `at:` and `size`), and strings are built with
+  streams and concatenation, never with `at:put:`. Grapheme clusters and
+  normalization are later kernel libraries (Swift's `Character` is a
+  grapheme; Kajo's is a scalar, section 2, until the Unicode tables exist).
+- `Symbol` is an interned `String` subclass with identity `==`; it is the
+  representation of selectors and literal `#foo`, with the same bytes and
+  the same protocol, not a second text representation. Interning is a
+  kernel table with a weak set.
 - `Character` is immediate (section 2); there is no Character table.
 
 Why: every native API on the two targets takes UTF-8 or converts to it;
 Swift `String` is UTF-8; a 32-bit-per-character string crosses the shell
-boundary four times as large. Constant-time `at:` matters only to code that
-indexes strings by integer, which modern Smalltalk code rarely does, and the
-ASCII fast path keeps it for the strings that do.
+boundary four times as large. The owner asked for a single String type
+(2026-11-03), which rules out the earlier `AsciiString` fast path: an
+integer-indexed protocol over UTF-8 is either O(n) or a lie, so the
+protocol is index-free in Swift's and Rust's way instead. Constant-time
+positional access is on the byte view, for code that knows what it holds.
 
 ### 9. Read-only objects
 
-- Header bit 48 marks an object **read-only**. `at:put:`, `instVarAt:put:`,
+- Header bit 50 marks an object **read-only** (bit 48 is the fired
+  ephemeron of section 1 and module 4, bit 49 module 7's deferred free;
+  the first draft of this section said 48). `at:put:`, `instVarAt:put:`,
   `become:`, `reshape` and every store bytecode check it; a store into a
   read-only object fails the primitive or the bytecode's slow path, which
   sends `attemptToModify:at:value:` to the object. The kernel decides what
@@ -216,7 +227,7 @@ ASCII fast path keeps it for the strings that do.
   displaying so a background Process cannot mutate them unnoticed.
 - The bit is set and cleared by a primitive at a bytecode boundary, with
   one relaxed store; a concurrent store check that sees the old value is a
-  race in the program, not in the VM. The collectors never read bit 48.
+  race in the program, not in the VM. The collectors never read bit 50.
 
 ### 10. Bytecode set v1
 
