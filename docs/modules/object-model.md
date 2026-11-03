@@ -551,6 +551,21 @@ printed by the test); `mutatedImagesLoadCleanOrAreRejected` flips bits in
 300 copies; `FuzzEntry.image` is the fuzz entry, reached by `fuzz-snapshot`
 for inputs with the image magic.
 
+The fuzzer found two crashes, both one bit from a valid input and both now
+regression fixtures in `Fixtures/fuzz/snapshot/` (`fuzzFoundInputsNeverTrap`):
+`crash-wellknown-name.img`, an image whose well-known class name was a
+Character that the loader read as an object (every slot read in the image
+loader is now guarded by the holder's size and kind), and
+`crash-marker-offset.img`, a snapshot whose entry 52 carried a young
+deferred-free header and a body offset with bit 48 set; the heap verifier
+skips a deferred free's body (it may be reused), so the offset went
+unchecked and the marker read it. The snapshot loader now refuses any young
+or deferred-free entry (a snapshot follows a promote-all, so neither can
+be in one). The first crash came from the fallback mutation driver, the
+second from the first coverage-guided libFuzzer run of the target (3.8
+million inputs in 600 s), which the fallback had not reached in the same
+time.
+
 ## Measurements
 
 Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS 27,
@@ -643,6 +658,9 @@ Module 1 (`ObjectMemory/`):
   initializer keeps its meaning (variable unless ephemeron).
 - Snapshot version 3 (the wider format word; formats checked with
   `isValid`); versions 1 and 2 are refused, the fuzz seed regenerated.
+- The snapshot loader refuses a used entry whose header is young or a
+  deferred free, next to its frame-pin check (the fuzzer's second crash,
+  under "The image format").
 - The heap verifier and the load/store asserts accept valid immediates and
   refuse the spare tags.
 - `reshape` refuses read-only instances (`ReshapeError.readOnlyInstance`)
@@ -781,7 +799,7 @@ From the brief (kernel.md) and ADR 0009, each with its reason:
 
 ## Tests
 
-296 test functions in the suite (module 7: 250), 46 of them new in
+297 test functions in the suite (module 7: 250), 47 of them new in
 `Tests/KajoVMTests/ObjectModel/`:
 
 | file | tests |
@@ -793,7 +811,7 @@ From the brief (kernel.md) and ADR 0009, each with its reason:
 | ReadOnlyTests | **a store bytecode into a read-only object sends attemptToModify:at:value: and drops its answer**, the store primitives refuse (at:put:, the special at:put:, instVarAt:put:, replaceFrom:to:with:startingAt:), literals read-only, become: and reshape refuse |
 | ObjectModelVMTests | **immediates through every collector (stw, local, offload)**, **the Context frame pin (broken variant `pinWalkSkipsContext`)**, **stack growth preserving frame links** and the overflow past the maximum, **read-only flips during young collections**, **a removed method gone from another worker's cache** |
 | LoaderV1Tests | **41 rejections of malformed v1 constructs**, the shapes the loader builds (blocks, pragmas, formats, metaclasses) |
-| ImageFileTests | an image round trip that runs and loads more kasm, **21 rejected corruptions**, 300 mutated images |
+| ImageFileTests | an image round trip that runs and loads more kasm, **21 rejected corruptions**, 300 mutated images, **the two inputs the snapshot fuzzer crashed on, refused** |
 | SeedTests | every kasm fuzz seed loads |
 
 Changed elsewhere: `aBarrierSiteSwitchedOff` (two new caught sites),
@@ -883,6 +901,32 @@ line and not on the list.
   optimisation behind the primitive.
 - Stack segment chaining (the brief's choice: copying only).
 - A barrier-site scenario for a Context detached into an old Context.
+
+## Gates
+
+On the final commit (`45c18bc`, after the fuzzer's second crash was fixed),
+the whole sequence once more, on the Mac mini (M2 Pro) with the swift.org
+6.4.2 toolchain, every output in a file:
+
+| gate | result |
+|---|---|
+| `swift test` | 297 passed, 92 s |
+| under load (12 busy loops) | 297 passed, 115 s |
+| ThreadSanitizer | 297 passed, 0 reports, 375 s |
+| ThreadSanitizer under load | 297 passed, 0 reports, 560 s |
+| `just ios-check` | 0 warnings |
+| `just arc-check` | OK: no retain or release, `interpret` 1056 instructions, one jump table |
+| `just golden` | 9 of 9 checksums |
+| `just test-release` | 297 passed |
+| `just model-check` | 28 + 15 passed |
+| `just soak` | passed |
+| `just fuzz kasm 600` | libFuzzer, 2.46 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer, 6.98 million runs, no crash |
+| clean build | 0 warnings |
+
+The run before it, on `6390ff2`, was the same except for the two findings
+that made `45c18bc`: the hog test's CPU bound under the sanitizer (24 ms
+against 20 in the full suite) and the snapshot fuzzer's crash.
 
 ## Commands
 

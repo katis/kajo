@@ -207,7 +207,11 @@ Safety:
    readings of the same quantity, or run until a CPU budget is spent. The
    idle test's CPU probe was the latest instance: a 50 ms window gave the
    spinner 23 ms under ThreadSanitizer and twelve busy loops; it now spins
-   until the probe has seen 30 ms.
+   until the probe has seen 30 ms. A CPU bound is not safe either when the
+   sanitizer inflates the work it bounds: the main-thread hog's turn, bounded
+   at 20 ms of CPU for a 1 ms budget, cost 24 and 28 ms in the full suite
+   under ThreadSanitizer (alone it passes every run on two commits); such a
+   bound gets a sanitizer value of its own through `underThreadSanitizer`.
  - "Wait until the Process is running" is not "wait until its frame holds
    the object": the state is set before the frame is installed. Tests that
    need a value on a stack wait on a flag the program sets after the store.
@@ -412,6 +416,49 @@ Safety:
    outlives the agent when the line never comes, and the session counts
    the agent as still waiting. Waits in agent sessions are bounded or
    rely on the harness's own completion notice.
+ - A bigger dispatch loop costs register allocation before it costs
+   instructions: with the 50-case v1 switch, inline fast paths spilled the
+   heap and table bases and the loop loaded `fp` and `hdr` as one vector
+   pair and unpacked them at every dispatch (5 to 23 percent on every v0
+   kernel). The remedy was the disassembly, not the instruction count:
+   fast paths that need extra live values run out of line as one call from
+   their own case, hot pointers are not neighbours in the register struct,
+   and an empty frame's context word is an immediate so the return compares
+   against a constant. The loop keeps one jump table.
+ - A header-bit test in the store path costs about two cycles per store and
+   shows only on a kernel that does nothing but store (`storeheavy` 1.07 on
+   one worker, 1.10 on eight, parity with the bit out of the mask); the
+   kernels that load as well do not see it. The read-only bit is that cost;
+   ADR 0009's Built note raises it for the owner.
+ - `just arc-check` depends on the toolchain: swift.org 6.4.2 hoists the
+   jump table's address into a register (named by a section label) and
+   inlined a Swift array append into `runRound`, so module 7's own commit
+   failed the check on the toolchain the mini uses while passing Xcode's.
+   The script reads both forms now and the append is out of line. Run the
+   gates on the toolchain first on PATH and say which one in the doc.
+ - Once immediates beyond SmallInteger exist, every "is this a reference"
+   test is the full low-nibble pattern. Six insertion-barrier sites tested
+   `raw & 1`; with one put back the VM dies with signal 11 under the random
+   programs. Test the SmallInteger bit first (one `tbnz`), then the rest, so
+   the common case stays one instruction.
+ - A collector's compare-and-swap on a live header must expect a concurrent
+   atomic bit flip from a mutator (the read-only primitive's `or`): keep the
+   foreign bit, retry, and count any other change as the bug it is. The
+   "mutators never set bits in a live header" rule is about non-atomic
+   writes.
+ - An image loader guards every slot read by the holder's size and kind
+   before trusting it: the snapshot fuzzer flipped one bit, a well-known
+   class's name became a Character, and the loader dereferenced it (signal
+   11 in release). The runtime verifier is not the loader's trust boundary:
+   it skips a deferred free's body on purpose (the body may be reused), so
+   a snapshot with a deferred-free entry whose offset lay outside the heap
+   passed it and the marker read the offset; the loader now refuses what a
+   promote-all makes impossible (young and deferred-free entries). And a
+   fuzz run can silently be the fallback driver: the libFuzzer build failed
+   because swiftly refuses `TOOLCHAINS`, so 600 s of "fuzzing" was replay
+   and mutation without coverage, and the first coverage-guided run found
+   the second crash in 3.8 million inputs. Read the "libFuzzer build: ok"
+   line before counting a fuzz gate.
 
 ## Verification
 
@@ -456,7 +503,14 @@ ephemerons, immediate SmallFloat and Character, native frames materialized
 into Contexts on demand, compiled closures with temp vectors, frame-walk
 unwinding, classic metaclasses, UTF-8 strings, read-only bit, bytecode set
 v1, unsynchronized kernel collections; its first three sections precede
-module 5 and module 3 reserves the frame's Context slot). ADRs
+module 5 and module 3 reserves the frame's Context slot; sections 2 to 11
+built in module 8a: SmallFloat round-trips bit for bit against `Double`,
+the dispatch loop keeps module 7's register budget with the v1 fast paths
+out of line, the hot kernels are within noise of module 7 and `storeheavy`
+is 1.07 to 1.10 from the read-only check, and the Built note holds the
+open questions for the owner: inline `class`/`isNil`/`notNil`, the
+`attemptToModify:at:value:` spelling, the strong symbol table, Processes
+in images). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -496,7 +550,17 @@ cover.
    lists, deferred entry frees owned by their nursery, the epoch rule with
    the quiescent wake's zero, the young collector thread, the initial
    mark's young-root scan, the young verifier, the model-step table;
-   `kajo run --young stw|local|offload --main-ms`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   `kajo run --young stw|local|offload --main-ms`), `ObjectModel/` with
+   the v1 parts of `Interpreter/` and `Loader/` (module 8a, built;
+   `docs/modules/object-model.md`: SmallFloat and Character immediates,
+   the class format word and classic metaclasses, bytecode set v1 with
+   the `ext` prefix and one bytecode verifier, closures, temp vectors,
+   Contexts materialized on demand and detached on return, non-local
+   return and the unwind and handler walks, super and the `perform:`
+   family, method installation in a stop, LargeIntegers and boxed Float,
+   the UTF-8 String and interned Symbol primitives, read-only bit 50 in
+   every store path, stack growth by copying, pragma literals, the image
+   format and its loader; 8b, the Smalltalk side, is next), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
    CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
    targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:

@@ -5,6 +5,7 @@ references/*
 # Build outputs
 target/
 .build/
+.swiftpm/
 *.xcuserstate
 DerivedData/
 .DS_Store
