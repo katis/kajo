@@ -86,6 +86,40 @@ final class Image {
         }
     }
 
+    /// An image restored from a verified snapshot (`Image.load(image:)`):
+    /// the well-known objects from the special-objects Array, the host
+    /// tables rebuilt from the class table and the method dictionaries.
+    init(memory: ObjectMemory, limits: LoaderLimits, restoring special: Oop) throws(ImageError) {
+        om = memory
+        self.limits = limits
+        pinsForGood = true
+        context = memory.makeContext()
+        specialObjects = special
+        nilObject = om.load(special, SpecialObjects.nilObject)
+        trueObject = om.load(special, SpecialObjects.trueObject)
+        falseObject = om.load(special, SpecialObjects.falseObject)
+        globals = om.load(special, SpecialObjects.globals)
+        symbolTable = om.load(special, SpecialObjects.symbolTable)
+        doesNotUnderstand = om.load(special, SpecialObjects.doesNotUnderstand)
+        let sels = om.load(special, SpecialObjects.selectors)
+        specialSelectors = (0..<Int(om.count(of: sels))).map { om.load(sels, $0) }
+        for i in 1..<UInt64(om.classCount) {
+            let c = om.classOop(i)
+            instSizes[i] = om.classFormat(i).namedSlots
+            if om.classIndex(of: c) != WellKnown.metaclass, let n = symbolName(om.load(c, ClassLayout.name)) {
+                classesByName[n] = i
+            }
+            let d = om.load(c, ClassLayout.methodDict)
+            if d == nilObject { continue }
+            for k in 0..<Int(om.count(of: d) / 2) {
+                let key = om.load(d, 2 * k)
+                if key == nilObject { continue }
+                methods[i, default: []].append((key, om.load(d, 2 * k + 1)))
+                if let n = symbolName(key) { methodKeys.insert("\(i) \(n)") }
+            }
+        }
+    }
+
     private func specialSelectorsInOrder() throws(LoadError) -> [Oop] {
         var r: [Oop] = []
         for s in specialSelectorNames + VMSelector.names { r.append(try intern(s)) }

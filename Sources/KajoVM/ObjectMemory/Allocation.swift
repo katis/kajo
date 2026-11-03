@@ -45,6 +45,10 @@ extension ObjectMemory {
         defer { unlockPools() }
         let n = unsafe pools.pointee.contexts.count
         for i in 0..<n where unsafe pools.pointee.contexts[i] == ctx.state {
+            // Module 8: the private free list goes back to the pool as a
+            // run (it was lost until the next sweep, and the free-list
+            // verifier, run before a snapshot, reported its entries).
+            if unsafe ctx.state.pointee.freeEntry != 0 { unsafe pools.pointee.entryRuns.append(ctx.state.pointee.freeEntry) }
             unsafe pools.pointee.contexts[i] = pools.pointee.contexts[n - 1]
             _ = unsafe pools.pointee.contexts.popLast()
             unsafe pools.pointee.retiredCounters.add(ctx.state.pointee.counters)

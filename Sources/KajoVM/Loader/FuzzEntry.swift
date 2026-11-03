@@ -46,6 +46,61 @@ public enum FuzzEntry {
         return true
     }
 
+    /// Load the bytes as an image (module 8: the snapshot plus the method
+    /// table and the object-model rules), then run the heap verifiers and a
+    /// collection. Snapshot-format bytes go to `snapshot`, so the one fuzz
+    /// target covers both loaders.
+    @discardableResult
+    public static func image(_ data: [UInt8]) -> Bool {
+        guard let image = try? Image.load(image: data, config: config()) else { return false }
+        defer { image.destroy() }
+        image.om.retireAllContexts()
+        let issues = image.om.verifyHeap() + image.om.verifyFreeLists()
+        precondition(issues.isEmpty, "a loaded image failed the verifiers: \(issues)")
+        image.om.collect()
+        return true
+    }
+
+    /// The snapshot target's entry: an image when the bytes start with the
+    /// image magic, else a module 1 snapshot.
+    @discardableResult
+    public static func snapshotOrImage(_ data: [UInt8]) -> Bool {
+        if data.count >= 8 && data[0..<8].elementsEqual([0x4B, 0x41, 0x4A, 0x4F, 0x49, 0x4D, 0x47, 0]) { return image(data) }
+        return snapshot(data)
+    }
+
+    /// A valid image to seed the snapshot corpus with: a small program with
+    /// a class, a closure and a temp vector.
+    public static func imageSeed() -> [UInt8] {
+        let image = try! Image(memory: ObjectMemory(config()))
+        defer { image.destroy() }
+        try! image.load([(file: "seed.kasm", text: """
+        class Node Object 2
+        method Node next temps=0
+          push_ivar 0
+          return_top
+        end
+        method UndefinedObject run:of: temps=1
+          push_new_array 1
+          store_temp 2
+          push_temp 2
+          push_closure b 1
+          value
+          return_top
+        block b args=0 copied=1 temps=0
+          push_tv_slot 0 0
+          push_lit 'añ'
+          push_lit 1.5
+          push_lit $x
+          pop
+          pop
+          pop
+          block_return
+        end
+        """)])
+        return image.saveImage()
+    }
+
     /// A valid snapshot to seed the snapshot corpus with: an image with a
     /// small program loaded.
     public static func snapshotSeed() -> [UInt8] {
