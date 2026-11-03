@@ -277,7 +277,7 @@ that makes a CompiledMethod from Smalltalk (Not done).
    all or nothing.
 
 Any compile, define or install error refuses the whole build. The kernel
-builds in about 3.3 s (debug) to a 2.5 MB image. Compiling and installing
+builds in 0.55 s (debug; 56 ms in release) to a 2.5 MB image. Compiling and installing
 is deterministic to the byte; the initialization runs in a VM, where which
 worker allocates decides entry placement and so identity hashes, and two
 builds differ in a few bytes (4 of 900 000 in one comparison) at the same
@@ -350,7 +350,95 @@ text).
 
 ## Measurements
 
-MEASUREMENTS
+Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS 27,
+swift.org Swift 6.4.2, 2026-11-03 20:23 to 20:28 (load average 3.3 to 4.0
+1-minute, the agent session the busiest other process). The starting
+commit's `kajo` (d5179ce, from a worktree) against this module's, both
+built `-c release -Xswiftc -enable-testing` with
+`-align-all-nofallthru-blocks=5 -align-loops=32`; five runs interleaved,
+`--slice-ms 0`; median (min to max) ms. The checksums are the published
+ones and equal on both sides.
+
+### The kasm kernels against the starting commit
+
+| kernel | workers | d5179ce ms | 8b ms | 8b / start | checksum |
+|---|--:|--:|--:|--:|---|
+| fib | 1 | 1705.8 (1693 to 1712) | 1702.3 (1693 to 1708) | **0.998** | 24682992 |
+| fib | 8 | 226.8 (218 to 230) | 223.0 (217 to 250) | **0.983** | 24682992 |
+| arith | 1 | 2558.2 (2546 to 2564) | 2552.4 (2543 to 2575) | **0.998** | 372800000 |
+| arith | 8 | 347.9 (341 to 355) | 349.4 (336 to 374) | **1.004** | 372800000 |
+| sends | 1 | 2578.7 (2571 to 2629) | 2573.3 (2560 to 2610) | **0.998** | 1066666666666668 |
+| sends | 8 | 341.2 (335 to 394) | 337.0 (329 to 390) | **0.988** | 133333335000001 |
+| ivars | 1 | 1981.4 (1974 to 2018) | 1975.5 (1968 to 2015) | **0.997** | 36383626 |
+| ivars | 8 | 279.5 (255 to 304) | 261.8 (254 to 290) | **0.937** | 71714128 |
+| storeheavy | 1 | 2422.0 (2414 to 2425) | 2419.3 (2404 to 2462) | **0.999** | 512000 |
+| storeheavy | 8 | 312.2 (308 to 323) | 332.3 (311 to 335) | **1.064** | 512000 |
+| alloc | 1 | 2973.4 (2928 to 3024) | 2971.4 (2965 to 3092) | **0.999** | 41950911 |
+| alloc | 8 | 484.5 (435 to 514) | 467.1 (457 to 585) | **0.964** | 42008248 |
+
+Within noise: 0.997 to 0.999 on one worker; on eight 0.94 to 1.06, where
+the runs' ranges overlap (storeheavy 1.064: 308 to 323 against 311 to 335;
+ivars 0.937). `interpret` is the same code: its disassembly in both aligned
+builds is identical instruction for instruction (1326 lines, 217 stack
+loads), 1056 instructions in `just arc-check`'s build, one jump table.
+
+**A first A/B with plain aligned builds** (`-c release` with the two
+alignment flags, no `-enable-testing`; 20:15 to 20:20) was not: the 8b
+binary ran every kernel 12 to 36 percent slower (fib 1.158, arith 1.232,
+ivars 1.316 on one worker). Its `interpret` is the same code as the
+starting commit's too, and the plain release builds without the alignment
+flags run fib at 1696 and 1703 ms (start, 8b), as do the `-enable-testing`
+aligned ones (above). So it is where that one link put the hot code, not
+the code; reported here because AGENTS.md says not to read one layout as a
+verdict, and because a future A/B may land on it again:
+
+| kernel | workers | d5179ce ms | 8b ms | 8b / start | checksum |
+|---|--:|--:|--:|--:|---|
+| fib | 1 | 1700.8 (1690 to 1702) | 1970.3 (1967 to 1977) | **1.158** | 24682992 |
+| fib | 8 | 225.3 (217 to 240) | 260.4 (253 to 270) | **1.156** | 24682992 |
+| arith | 1 | 2543.3 (2529 to 2547) | 3133.2 (3130 to 3141) | **1.232** | 372800000 |
+| arith | 8 | 337.6 (336 to 350) | 426.8 (414 to 436) | **1.264** | 372800000 |
+| sends | 1 | 2584.8 (2570 to 2637) | 2934.6 (2924 to 2942) | **1.135** | 1066666666666668 |
+| sends | 8 | 348.9 (338 to 372) | 389.3 (377 to 400) | **1.116** | 133333335000001 |
+| ivars | 1 | 1970.5 (1968 to 1974) | 2593.1 (2592 to 2599) | **1.316** | 36383626 |
+| ivars | 8 | 256.5 (252 to 270) | 348.2 (332 to 356) | **1.358** | 71714128 |
+| storeheavy | 1 | 2401.9 (2394 to 2418) | 3095.4 (3092 to 3107) | **1.289** | 512000 |
+| storeheavy | 8 | 331.4 (308 to 339) | 406.6 (398 to 429) | **1.227** | 512000 |
+| alloc | 1 | 2947.2 (2937 to 2951) | 3305.2 (3289 to 3320) | **1.121** | 41950911 |
+| alloc | 8 | 470.9 (440 to 502) | 530.1 (470 to 538) | **1.126** | 42008248 |
+
+### Kernels written in Smalltalk against their kasm twins
+
+The same algorithm compiled by the bootstrap compiler from Tonel
+(`Fixtures/smalltalk/`), run from an image built with the kernel
+(`kajo run <image>`: the entry point forwards `run:of:` to nil), against
+the kasm kernel, both on the 8b binary, same session:
+
+| kernel | workers | kasm ms | Smalltalk ms | Smalltalk / kasm | checksums |
+|---|--:|--:|--:|--:|---|
+| sends | 1 | 2587.5 (2549 to 2600) | 2285.6 (2257 to 2323) | **0.883** | 1066666666666668 / 1066666666666668 |
+| sends | 8 | 335.4 (330 to 350) | 311.8 (289 to 322) | **0.930** | 133333335000001 / 133333335000001 |
+| ivars | 1 | 1980.7 (1969 to 1982) | 1977.0 (1970 to 2163) | **0.998** | 36383626 / 36383626 |
+| ivars | 8 | 264.5 (253 to 300) | 266.5 (252 to 289) | **1.008** | 71714128 / 71714128 |
+| closures | 1 | 3748.5 (3742 to 3814) | 3847.0 (3819 to 3929) | **1.026** | 210210000 / 210210000 |
+| closures | 8 | 499.3 (487 to 514) | 498.2 (495 to 518) | **0.998** | 209214000 / 209214000 |
+
+- `sends` is 12 percent faster in Smalltalk: the kasm kernel sends `at:`
+  and `\\` as full sends (`send at: 1`), the compiler uses the special
+  `at` and `mod` opcodes, whose fast paths answer an Array's `at:` inline.
+- `ivars` is the same code (the store and load bytecodes the compiler emits
+  are the kasm kernel's, with the loop counter in a temp instead of the
+  argument).
+- `closures` is 2.6 percent slower on one worker: the block answers its
+  assignment (`dup`, `store_tv_slot`) where the kasm block pushed nil, and
+  `\\` goes through the special send's tier.
+
+### The image build and the tests
+
+The kernel builds in 0.55 s in a debug build and 56 ms in release (123
+classes, 1368 methods, 2.5 MB image); `kajo test` runs the 126 kernel tests
+in 11.6 s in a debug build, 11 of which are CompilerTest's whole-image
+comparison.
 
 ## Changes to module 8a
 
