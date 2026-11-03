@@ -119,8 +119,11 @@ four of the seven spare patterns to keep a 9-bit exponent; a 7-bit exponent
   names its Process and frame, and reads and writes go through the frame
   while it lives. When the frame returns, the Context is detached and keeps
   a copy of its state, so a debugger or an inspector can hold it.
-- Nothing is ever de-materialized back into a frame except by resuming a
-  Process from a snapshot, which rebuilds frames from Contexts.
+- Nothing is ever de-materialized back into a frame. A Process saved in a
+  snapshot keeps its frames as they are: its stack words are copied into
+  heap Arrays (frame links are indices, so they need no fixing) and copied
+  back into a fresh stack when the image resumes; materialized Contexts
+  keep their frame indices (module 8c, Built (8c) below).
 
 Why: Smalltalk-80's heap contexts made every send an allocation; Cog and
 friends made frames native and reify lazily, and it is the only design in
@@ -379,6 +382,33 @@ above ask of it, the owner's two answers that were 8b's, and section 12:
   Mutex, Monitor and SharedQueue in Smalltalk over the VM's Semaphore; the
   kernel's process tests share state only through them. Main-thread
   affinity is a pragma the kernel declares; nothing checks it yet.
+
+## Built (8c, 2026-11-04)
+
+Module 8c (`docs/modules/image-processes.md`) built the owner's answer
+"images hold Processes" (Built (8a)):
+
+- **3**: a Process is saved as its Process object and its stack words
+  `[0, sp]` copied verbatim into Arrays of at most one block (every word is
+  already an oop or a SmallInteger index), under special object 8 with the
+  ready queues, the finalization Semaphore and the next id. Frames are not
+  rebuilt from Contexts: the frame needs no de-materialization, Contexts
+  keep their indices. The sentence of section 3 that said otherwise is
+  amended above.
+- The loader checks every saved frame against its method: the method in
+  the method table, fp from its argument and temp counts, the receiver of
+  a class that inherits the method, a block's closure, the context word
+  (empty, a return marker, or this frame's Context), and the pc and operand
+  depth against the bytecode verifier's traced depth there (now exposed per
+  instruction; it was already unique per instruction). Every list the
+  scheduler walks is checked acyclic and consistent with its Processes'
+  states, all or nothing.
+- The save holds the scheduler until every other Process has left its
+  worker at a poll (a new protocol, model-checked in
+  `docs/models/save-hold.md`), then saves in a stop as the method install
+  does. `Smalltalk snapshot:` answers false where it saved and true where
+  the image resumes; Delays are re-armed by the kernel for the time they
+  had left.
 
 ## Consequences
 

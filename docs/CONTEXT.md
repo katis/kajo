@@ -241,6 +241,29 @@ as they are understood.
   it reads with a class-side `<consumesPragmas: #(...)>`; any other pragma
   is a compile warning.
 
+## Saved Processes (module 8c)
+
+- **Saved Process**: a live Process in an image: its Process object (state
+  ready or waiting, `record` -1) and its **saved stack**, the stack words
+  `[0, sp]` copied into Arrays of at most one block. Frame links, saved pcs
+  and Context frame numbers are indices and offsets, so they are saved as
+  they are.
+- **Scheduler state**: special object 8 of an image with saved Processes:
+  the ready queues' heads and tails, the finalization Semaphore, the list
+  of saved Processes with their stacks, the saver, the next id. nil once a
+  VM has resumed them.
+- **Saver**: the Process that sent `Smalltalk snapshot:`; it resumes after
+  the send with true (false where the image was saved).
+- **Hold** (on the scheduler): while a save is in progress no Process is
+  dequeued and a running one leaves its worker at its next poll, as a
+  preemption does, so every saved register is exact.
+- **Resume**: a VM over an image with saved Processes installs them
+  (records, stacks, queues) before any worker starts; `kajo run` runs them
+  until nothing can happen without the host.
+- **Saved-frame rules**: the loader's checks of every saved frame against
+  its method and the bytecode verifier's **traced depth** at its pc (the
+  operand depth the verifier computed for that instruction on every path).
+
 ## Concurrent marking (module 5)
 
 - **Cycle**: one concurrent collection of old space: an initial mark, the

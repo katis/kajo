@@ -122,3 +122,43 @@ func resumeScenario(_ bytes: [UInt8], id: Int64, workers: Int = 3) throws -> (an
         #expect(try outcome.checksum.get() == 0)
     }
 }
+
+/// Module 8c's measurements (`KAJO_MEASURE_SNAPSHOT=1`, release build): the
+/// save's stop with a few hundred Processes in the kernel image, the
+/// image's size with and without them, the load and the resume.
+@Test func measureTheSave() throws {
+    guard ProcessInfo.processInfo.environment["KAJO_MEASURE_SNAPSHOT"] != nil else { return }
+    func ms(_ ns: UInt64) -> String { String(format: "%.2f", Double(ns) / 1e6) }
+    for n in [0, 300] {
+        var pauses: [UInt64] = [], works: [UInt64] = [], loads: [UInt64] = [], installs: [UInt64] = [], sizes: [Int] = []
+        for _ in 0..<5 {
+            let (img, vm) = try scenarioVM(scenarioImage, workers: 4)
+            let cls = img.om.classOop(img.classIndex(named: "SnapshotScenarios")!)
+            let p = try #require(vm.spawn(receiver: cls, selector: "manyProcesses:", arguments: [Oop(smallInteger: Int64(n))]))
+            vm.waitUntilTerminated(p)
+            let work = vm.counters[.snapshotNs]
+            let stop = vm.stops.filter { $0.pauseNs >= work }.map(\.pauseNs).max() ?? 0
+            let bytes = try #require(vm.takeSavedImages().first)
+            endVM(img, vm)
+            var o = Headless.Options()
+            o.heapMiB = 256
+            let (vc, c) = try Headless.configs(o).get()
+            let t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            let loaded = try Image.load(image: bytes, config: c)
+            let t1 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            let vm2 = VM(image: loaded, config: vc)
+            let t2 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            vm2.destroy()
+            loaded.destroy()
+            pauses.append(stop); works.append(work); loads.append(t1 - t0); installs.append(t2 - t1); sizes.append(bytes.count)
+        }
+        func med(_ xs: [UInt64]) -> String { ms(xs.sorted()[xs.count / 2]) }
+        print("SNAPSHOT n=\(n) processes: stop ms \(med(pauses)) (\(pauses.map(ms))), save work ms \(med(works)), image bytes \(sizes), load ms \(med(loads)) (\(loads.map(ms))), VM with install ms \(med(installs)); kernel image \(scenarioImage.count) bytes")
+    }
+    let t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+    var o = Headless.Options()
+    o.heapMiB = 256
+    let (_, c) = try Headless.configs(o).get()
+    for _ in 0..<5 { try Image.load(image: scenarioImage, config: c).destroy() }
+    print("SNAPSHOT plain kernel image load ms \(ms((clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 5))")
+}

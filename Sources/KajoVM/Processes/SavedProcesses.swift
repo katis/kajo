@@ -310,6 +310,8 @@ func savePrimitive(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 
 /// At a slow poll with `VMConfig.snapshotAtPoll` set: the n-th one (VM
 /// wide) saves, its Process saved as preempted at this poll. Registers saved.
+/// Out of line: the save's Swift arrays stay out of `pollSlow` (ARC).
+@inline(never)
 func snapshotAtPoll(_ vm: VMPointer, _ w: WorkerPointer, rewind: Int) {
     let n = unsafe vm.pointee.slowPolls.pointee.wrappingAdd(1, ordering: .relaxed).newValue
     guard unsafe n == vm.pointee.config.snapshotAtPoll else { return }

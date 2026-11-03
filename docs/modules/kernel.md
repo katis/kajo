@@ -5,7 +5,9 @@ Status: 8a (the VM side) built 2026-11-03, described in
 described in `docs/modules/kernel-image.md` (the bootstrap compiler, the
 kernel, the image build, SUnit and the event stream, the compiler in
 Smalltalk, the weak symbol table and `modificationForbiddenAt:value:`);
-saved Processes in images are 8c, next. The six questions of the proposal were answered by the owner the
+saved Processes in images (8c) built 2026-11-04, described in
+`docs/modules/image-processes.md` (`Smalltalk snapshot:`, the Delay list
+re-armed on resume, `kajo run` resuming an image's Processes). The six questions of the proposal were answered by the owner the
 same day and the answers are folded in below. 8a's deviations from this
 brief are listed in object-model.md; the String section below holds as
 written for the VM side.
