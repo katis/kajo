@@ -6,7 +6,7 @@
 // broken, and nothing is kept.
 //
 //     word 0   magic "KAJOIMG\0"
-//     word 1   version (1)
+//     word 1   version (2; 1 is still read: 8b's images, 8 special objects)
 //     word 2   the special-objects Array (`SpecialObjects`), a root
 //     word 3   method count M
 //     word 4   snapshot length L in bytes
@@ -27,13 +27,17 @@
 //    method dictionaries of Symbols and Methods compiled for that class;
 //    the well-known classes with their names and formats;
 //  - every object admitted by its class's format (pointers or bytes, fixed
-//    or variable, whole elements); no Process (a Process cannot be saved
-//    in 8a), no live Context (only detached ones), every closure the shape
-//    of its block method;
+//    or variable, whole elements); every closure the shape of its block
+//    method;
 //  - the method table equal to the set of CompiledMethods in the heap, and
 //    every method passing `verifyHeapMethod` for its class, pinned for good
 //    with its bytecodes and literal Array (the interpreter caches pointers
-//    into them), its bytecodes and literals read-only.
+//    into them), its bytecodes and literals read-only;
+//  - module 8c: the saved Processes and the scheduler state (special object
+//    8; `SavedProcessRules.swift`): every Process in the heap saved (ready
+//    or waiting, its stack's frames checked against their methods and the
+//    traced depths) or terminated; every list acyclic and consistent; every
+//    live Context named by a saved frame (or of a terminated Process).
 
 enum ImageError: Error, Equatable, CustomStringConvertible {
     case badMagic
@@ -55,7 +59,10 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
 
 enum ImageFile {
     static let magic: UInt64 = 0x0047_4D49_4F4A_414B  // "KAJOIMG\0"
-    static let version: UInt64 = 1
+    /// Module 8c: 2 (the special objects gained the scheduler state). An
+    /// image of version 1 (module 8b's, 8 special objects, no saved
+    /// Process) still loads.
+    static let version: UInt64 = 2
     static let headerWords = 5
 }
 
@@ -68,13 +75,19 @@ extension Image {
         // entries of destroyed allocation contexts (interpreters that ran on
         // this image) return to the pool's runs.
         om.collect()
-        let snap = om.snapshot()
+        return encodedImage(snapshot: om.snapshot())
+    }
+
+    /// Module 1's snapshot bytes with the image header and method table
+    /// around them (a stop or no VM: the heap does not change meanwhile).
+    func encodedImage(snapshot snap: [UInt8]) -> [UInt8] {
         let methods = om.allInstances(of: WellKnown.method)
         var out: [UInt8] = []
         out.reserveCapacity(8 * (ImageFile.headerWords + methods.count) + snap.count)
         func word(_ v: UInt64) { for k in 0..<8 { out.append(UInt8(truncatingIfNeeded: v >> (8 * UInt64(k)))) } }
         word(ImageFile.magic)
-        word(ImageFile.version)
+        // A version 1 image (8 special objects) is written back as one.
+        word(om.count(of: specialObjects) > UInt64(SpecialObjects.scheduler) ? ImageFile.version : 1)
         word(specialObjects.raw)
         word(UInt64(methods.count))
         word(UInt64(snap.count))
@@ -95,7 +108,8 @@ extension Image {
         }
         guard b.count >= 8 * ImageFile.headerWords else { throw .malformed("shorter than its header") }
         guard word(0) == ImageFile.magic else { throw .badMagic }
-        guard word(1) == ImageFile.version else { throw .unsupportedVersion(word(1)) }
+        guard word(1) == ImageFile.version || word(1) == 1 else { throw .unsupportedVersion(word(1)) }
+        let version = word(1)
         let special = Oop(raw: word(2))
         let m = word(3), l = word(4)
         guard m <= UInt64(b.count / 8), l <= UInt64(b.count) else { throw .malformed("counts larger than the image") }
@@ -109,7 +123,7 @@ extension Image {
             throw .snapshot(error)
         }
         do {
-            try verifyImage(om, special: special, methodTable: table, limits: limits)
+            try verifyImage(om, special: special, methodTable: table, limits: limits, version: version)
             return try Image(restoring: om, special: special, limits: limits)
         } catch {
             om.destroy()
@@ -119,7 +133,8 @@ extension Image {
 }
 
 /// The object-model rules (above) on a loaded snapshot.
-func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: LoaderLimits) throws(ImageError) {
+func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: LoaderLimits,
+                 version: UInt64 = ImageFile.version) throws(ImageError) {
     func fail(_ s: String) -> ImageError { .rule(s) }
     let hw = om.highWater
     func used(_ o: Oop) -> Bool { om.isUsedReference(o) }
@@ -134,8 +149,10 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         throw fail("class \(i) has an invalid format")
     }
     // Special objects.
-    guard isA(special, WellKnown.array), om.count(of: special) == UInt64(SpecialObjects.size) else {
-        throw fail("the special objects are not an Array of \(SpecialObjects.size)")
+    // Version 1 (module 8b) had no scheduler state.
+    let specialCount = version == 1 ? SpecialObjects.scheduler : SpecialObjects.size
+    guard isA(special, WellKnown.array), om.count(of: special) == UInt64(specialCount) else {
+        throw fail("the special objects are not an Array of \(specialCount)")
     }
     var isRoot = false
     om.forEachRegisteredRoot { if $0 == special { isRoot = true } }
@@ -229,6 +246,7 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
     }
     // Every object.
     var methods = Set<Oop>()
+    var processObjects = HeapProcessObjects()
     var e: UInt64 = 1
     while e < hw {
         let o = Oop(raw: e &<< 4)
@@ -240,9 +258,13 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
             throw fail("object \(o) does not fit class \(ci)'s format")
         }
         switch ci {
-        case WellKnown.process: throw fail("a Process: Processes are not saved in an image")
+        // Module 8c: Processes, Semaphores and live Contexts are checked
+        // against the saved Processes below.
+        case WellKnown.process: processObjects.processes.append(o)
+        case WellKnown.semaphore: processObjects.semaphores.append(o)
         case WellKnown.context:
-            guard om.load(o, ContextLayout.frame) == nilObj else { throw fail("a live Context") }
+            guard !h.isBytes, h.count >= UInt64(ContextLayout.size) else { throw fail("Context \(o)'s shape") }
+            if om.load(o, ContextLayout.frame) != nilObj { processObjects.liveContexts.append(o) }
         case WellKnown.blockClosure:
             let bm = om.load(o, ClosureLayout.method)
             guard isMethod(bm), om.load(bm, MethodLayout.flags).isSmallInteger,
@@ -275,6 +297,8 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         guard om.header(meth).isPinnedForGood, om.header(bc).isPinnedForGood, om.header(lits).isPinnedForGood,
               om.isReadOnly(bc), om.isReadOnly(lits) else { throw fail("method \(meth) is not pinned and read-only") }
     }
+    try verifySavedProcesses(om, special: special, nilObj: nilObj, trueObj: om.load(special, SpecialObjects.trueObject),
+                             methods: methods, heap: processObjects, limits: limits)
 }
 
 extension Image {

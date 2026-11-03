@@ -65,6 +65,8 @@ func makeReadyLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, fromBlocked:
 /// Take the highest-priority ready Process of one affinity at or above
 /// `minPriority` and mark it running on `w`.
 func dequeueLocked(_ vm: VMPointer, main: Bool, minPriority: Int, for w: WorkerPointer) -> Oop {
+    // Module 8c: a save holds the scheduler.
+    if unsafe vm.pointee.sched.pointee.saveHold { return .none }
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     var prio = Priority.count - 1

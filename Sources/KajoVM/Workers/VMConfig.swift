@@ -36,6 +36,10 @@ struct VMConfig: Sendable {
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).
     var verifyStops = checkedBuild
+    /// Module 8c (tests and `kajo run --snapshot-at`): the n-th slow poll
+    /// (VM wide) saves the image with every Process in it for the host
+    /// (`VM.takeSavedImages`); 0 never.
+    var snapshotAtPoll = 0
     var testSwitches = VMTestSwitches()
 
     init() {}

@@ -75,6 +75,13 @@ import Synchronization
     /// Module 7: young collection without stopping the world, nil in the
     /// stop-the-world configuration.
     var young: YoungPointer? = nil
+    /// Module 8c: a save holds the scheduler (`SchedulerState.saveHold`,
+    /// mirrored here for the poll slow path, which reads it without the
+    /// lock); the slow polls counted for `VMConfig.snapshotAtPoll`; the
+    /// images saved for the host. Each in its own line.
+    let saveHold: UnsafeMutablePointer<Atomic<Bool>>
+    let slowPolls: UnsafeMutablePointer<Atomic<Int>>
+    let savedImages: SavedImages
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -173,6 +180,9 @@ struct SchedulerState {
     /// has terminated.
     var watchedId: Int64 = -1
     var watchedDone = false
+    /// Module 8c: a save is in progress: no Process is dequeued, and a
+    /// running one leaves its worker at its next poll.
+    var saveHold = false
 }
 
 /// A Process's native record (fixed table, free list under the scheduler
@@ -226,6 +236,12 @@ enum Counter: Int, CaseIterable {
     case stackGrowths
     /// Module 8b: events emitted by primitive 140.
     case events
+    /// Module 8c: images saved with their Processes, saves refused (another
+    /// in progress, or the heap full), stops that found a Process still
+    /// running and tried again, the time of the saves' work in their stops,
+    /// Processes that left a worker at a poll because a save held the
+    /// scheduler, and Processes resumed from an image.
+    case snapshots, snapshotsRefused, snapshotRetries, snapshotNs, holdPreemptions, processesResumed
 }
 
 /// A snapshot of the counters.

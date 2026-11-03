@@ -49,6 +49,12 @@ struct VerifiedCode {
     /// Block literals the code creates closures from.
     let closures: [Int]
     let returnsNonLocally: Bool
+    /// Module 8c: the traced operand depth before each instruction (-1 for
+    /// one no path reaches). Unique per instruction: two paths that meet
+    /// with different depths are refused above, so a saved frame's pc and
+    /// depth can be checked against it (the image loader's saved-Process
+    /// rules).
+    var depths: [Int] = []
 }
 
 func verifyBytecodes(_ bytes: [UInt8], _ shape: CodeShape, literal: (Int) -> LiteralInfo) throws(BytecodeIssue)
@@ -113,7 +119,7 @@ func verifyBytecodes(_ bytes: [UInt8], _ shape: CodeShape, literal: (Int) -> Lit
             break
         }
     }
-    if ins.isEmpty { return VerifiedCode(maxStack: 0, instructions: [], closures: [], returnsNonLocally: false) }
+    if ins.isEmpty { return VerifiedCode(maxStack: 0, instructions: [], closures: [], returnsNonLocally: false, depths: []) }
 
     // The stack-depth tracer.
     var depth = [Int](repeating: -1, count: ins.count)
@@ -141,5 +147,5 @@ func verifyBytecodes(_ bytes: [UInt8], _ shape: CodeShape, literal: (Int) -> Lit
         if i.op.isJump { try reach(targets[k], after, i.offset) }
         if !i.op.endsBlock { try reach(k + 1, after, i.offset) }
     }
-    return VerifiedCode(maxStack: maxStack, instructions: ins, closures: closures, returnsNonLocally: nonLocal)
+    return VerifiedCode(maxStack: maxStack, instructions: ins, closures: closures, returnsNonLocally: nonLocal, depths: depth)
 }

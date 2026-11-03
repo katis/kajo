@@ -566,7 +566,10 @@ enum SpecialObjects {
     /// Module 8b: the object `kajo run` and `kajo test` start at (nil in a
     /// kasm image).
     static let entryPoint = 7
-    static let size = 8
+    /// Module 8c: the saved scheduler state (`SavedScheduler`) of an image
+    /// with saved Processes, nil otherwise (and once a VM resumed them).
+    static let scheduler = 8
+    static let size = 9
 }
 
 /// Lookup through the superclass chain's method dictionaries; `.none` when
@@ -801,6 +804,15 @@ extension Image {
 
     /// The entry point (special object 7), nil if none.
     var entryPoint: Oop { om.load(specialObjects, SpecialObjects.entryPoint) }
+
+    /// Module 8c: the saved scheduler state (special object 8), nil when the
+    /// image holds no saved Process (or a VM has resumed them).
+    var savedScheduler: Oop {
+        om.count(of: specialObjects) > UInt64(SpecialObjects.scheduler) ? om.load(specialObjects, SpecialObjects.scheduler) : nilObject
+    }
+
+    /// Whether the image carries saved Processes to resume.
+    package var hasSavedProcesses: Bool { savedScheduler != nilObject }
 
     /// The image as bytes (module 8a's format).
     package func imageBytes() -> [UInt8] { saveImage() }

@@ -172,7 +172,7 @@ private func corrupt(_ c: Corruption) throws -> [UInt8] {
     func put(_ i: Int, _ v: UInt64) { for k in 0..<8 { b[8 * i + k] = UInt8(truncatingIfNeeded: v >> (8 * UInt64(k))) } }
     switch c {
     case .badMagic: b[0] ^= 1
-    case .badVersion: put(1, 2)
+    case .badVersion: put(1, 3)
     case .truncated: b.removeLast(9)
     case .methodMissingFromTable:
         // drop the first table entry and shrink the count

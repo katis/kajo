@@ -30,8 +30,21 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
         unsafe park(vm, w)
         // Module 4: a scavenge left old space past its soft limit.
         if unsafe fullCollectionDue(vm) { unsafe runDueFullCollection(vm, w) }
+        // Module 8c: a save holds the scheduler: the running Process leaves
+        // here as a preemption does (its registers exact in its Process),
+        // and nothing is dequeued until the save is done.
+        if unsafe vm.pointee.saveHold.pointee.load(ordering: .relaxed) && w.pointee.current != .none {
+            let r = unsafe s.pointee.regs
+            unsafe requeueCurrent(vm, w, sp: r.sp, pc: r.pc &- rewind, reason: .preempted)
+            unsafe vm.count(.holdPreemptions)
+            return true
+        }
     }
     if attention > 1 { unsafe serviceRounds(vm, w) }
+    // Module 8c (tests, `kajo run --snapshot-at`): the n-th slow poll saves.
+    if unsafe vm.pointee.config.snapshotAtPoll != 0 && w.pointee.current != .none {
+        unsafe snapshotAtPoll(vm, w, rewind: rewind)
+    }
     // While rounds are open every poll reaches this slow path (the word
     // stays nonzero until the slowest participant acknowledges), so polls
     // cost more: the budget is checked at every 64th of them too, or a

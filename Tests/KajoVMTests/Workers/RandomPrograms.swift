@@ -501,3 +501,117 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     #expect(randomProgram(42).source == randomProgram(42).source)
     #expect(randomProgram(42).source != randomProgram(43).source)
 }
+
+// MARK: - module 8c: snapshot mode
+
+/// The random programs saved mid-run: the n-th slow poll (VM wide) saves
+/// the image with every Process in it (`VMConfig.snapshotAtPoll`), the run
+/// goes on to its end, and the saved image is loaded into a fresh VM (with
+/// a different worker count) and resumed to its end. Both answers must be
+/// the model's: the main oracle of module 8c. With the stress flags the
+/// saving and the resumed VM stop the world at every poll, collect at
+/// every allocation, or preempt at every poll.
+enum SnapshotMode: String, CaseIterable, CustomTestStringConvertible {
+    case eightWorkers, oneWorker, stopEveryPoll, collectEveryAllocation, preemptEveryPoll, perturbed
+    var testDescription: String { rawValue }
+
+    var workers: (save: Int, resume: Int) {
+        switch self {
+        case .oneWorker: (1, 3)
+        case .eightWorkers, .perturbed: (8, 2)
+        default: (4, 1)
+        }
+    }
+
+    func configure(_ c: inout VMConfig, _ seed: UInt64) {
+        c.nursery.bytes = 512 << 10
+        switch self {
+        case .stopEveryPoll: c.stress = .stopEveryPoll
+        case .preemptEveryPoll: c.stress = .preemptEveryPoll
+        case .perturbed: c.perturb = Perturbation(seed: seed, probability: 0.02, maxSleepUs: 30)
+        default: break
+        }
+    }
+
+    var stress: StressFlags { self == .collectEveryAllocation ? .collectAtEveryAllocation : [] }
+    /// Every verifier at every collection, except where every poll or
+    /// allocation collects (as `RandomConfig` does).
+    var verify: Bool { self != .stopEveryPoll && self != .collectEveryAllocation }
+}
+
+/// The slow poll a seed saves at: early enough that most programs are
+/// still running (a program polls slowly every 64 polls, at every poll
+/// under the stress flags).
+func snapshotPoll(_ p: RandomProgram, _ mode: SnapshotMode) -> Int {
+    let range = [.stopEveryPoll, .preemptEveryPoll].contains(mode) ? 400 : [.oneWorker, .collectEveryAllocation].contains(mode) ? 6 : 12
+    return 1 + Int(p.seed &* 0x9E37_79B9 % UInt64(range))
+}
+
+/// One program in snapshot mode: the saving run's answer, the resumed
+/// run's (nil when the poll came after the program's end, so nothing was
+/// saved).
+func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode) throws -> (saved: Int64?, resumed: Int64?, didSave: Bool) {
+    let n = snapshotPoll(p, mode)
+    let rt = try Runtime(p.source + snapshotSrc, background: mode.workers.save, heapBlocks: 256, stress: mode.stress,
+                         verify: mode.verify, configure: { c in
+                             mode.configure(&c, p.seed)
+                             c.snapshotAtPoll = n
+                         })
+    let root = rt.spawn("root")
+    guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
+        Issue.record("seed \(p.seed) \(mode): the saving run did not finish")
+        rt.vm.terminateAll()
+        rt.waitAllTerminated()
+        rt.stop()
+        return (nil, nil, false)
+    }
+    let a = rt.vm.result(of: root)
+    if let e = rt.vm.error(of: root) { Issue.record("seed \(p.seed) \(mode): \(e)") }
+    let rootId = processId(rt, root)
+    let images = rt.vm.takeSavedImages()
+    rt.stop()
+    let saved = a.isSmallInteger ? a.smallIntegerValue : nil
+    guard let bytes = images.first else { return (saved, nil, false) }
+    let r = try Resumed(bytes, background: mode.workers.resume, heapBlocks: 256, stress: mode.stress,
+                        verify: mode.verify, configure: { c in mode.configure(&c, p.seed &+ 1) })
+    guard r.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
+        Issue.record("seed \(p.seed) \(mode): the resumed run did not finish")
+        r.vm.terminateAll()
+        r.waitAllTerminated()
+        r.stop()
+        return (saved, nil, true)
+    }
+    var resumed: Int64? = nil
+    if let q = r.process(id: rootId) {
+        if let e = r.vm.error(of: q) { Issue.record("seed \(p.seed) \(mode) resumed: \(e)") }
+        resumed = r.result(q)
+    } else {
+        Issue.record("seed \(p.seed) \(mode): the root was not saved")
+    }
+    r.stop()
+    return (saved, resumed, true)
+}
+
+/// A hundred seeds per mode (KAJO_SEEDS overrides; `just soak` runs a
+/// thousand): both runs answer the model's, and most seeds really saved.
+@Test(arguments: SnapshotMode.allCases)
+func randomProgramsResumeFromASnapshot(_ mode: SnapshotMode) throws {
+    let count = Int(ProcessInfo.processInfo.environment["KAJO_SEEDS"] ?? "")
+        ?? (underThreadSanitizer ? ([.stopEveryPoll, .collectEveryAllocation].contains(mode) ? 2 : 10) : 100)
+    var failed: [UInt64] = []
+    var saves = 0
+    let t0 = now()
+    for s in 0..<UInt64(count) {
+        let p = randomProgram(randomSeedBase &+ s)
+        let (a, b, didSave) = try runRandomSnapshot(p, mode)
+        if didSave { saves += 1 }
+        if a != p.expected || (didSave && b != p.expected) {
+            failed.append(p.seed)
+            Issue.record("seed \(p.seed) \(mode): saved run \(String(describing: a)), resumed \(String(describing: b)), the model \(p.expected)")
+            if failed.count > 3 { break }
+        }
+    }
+    print("random programs resumed \(mode): \(count) seeds from \(randomSeedBase), \(saves) saved, failing \(failed), \(Double(now() - t0) / 1e9) s")
+    #expect(saves * 2 > count, "only \(saves) of \(count) seeds saved")
+    #expect(failed.isEmpty, "failing seeds: \(failed)")
+}

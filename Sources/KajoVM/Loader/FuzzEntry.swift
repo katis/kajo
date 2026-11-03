@@ -57,6 +57,20 @@ public enum FuzzEntry {
         image.om.retireAllContexts()
         let issues = image.om.verifyHeap() + image.om.verifyFreeLists()
         precondition(issues.isEmpty, "a loaded image failed the verifiers: \(issues)")
+        if image.hasSavedProcesses {
+            // Module 8c: the resume up to, not including, running Smalltalk:
+            // a VM installs the saved Processes (records, stacks, queues),
+            // then goes away without starting (which frees the stacks).
+            var vc = VMConfig()
+            vc.backgroundWorkers = 1
+            vc.nursery.bytes = 0
+            vc.marking.enabled = false
+            vc.relocation.enabled = false
+            vc.young.mode = .stw
+            let vm = VM(image: image, config: vc)
+            precondition(vm.resumedProcesses.count == vm.liveProcessCount, "a resumed VM lost a Process")
+            vm.destroy()
+        }
         image.om.collect()
         return true
     }

@@ -189,7 +189,9 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     }
     // Module 4: a full collection a scavenge requested keeps every poll on
     // its slow path until a worker runs it in a stop of its own.
-    if unsafe fullCollectionDue(vm) {
+    // Module 8c: so does a save's hold on the scheduler (every running
+    // Process leaves at its next poll).
+    if unsafe fullCollectionDue(vm) || vm.pointee.saveHold.pointee.load(ordering: .relaxed) {
         unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .relaxed)
     } else {
         unsafe vm.pointee.flag.pointee.bitwiseAnd(~1, ordering: .relaxed)

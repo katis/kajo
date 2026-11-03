@@ -26,6 +26,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         if !config.stress.isEmpty { config.pollEvery = 1 }
         let om = image.om
         let workerCount = config.backgroundWorkers + 2
+        // Module 8c: room for every saved Process the image holds.
+        if image.hasSavedProcesses { config.recordCapacity = max(config.recordCapacity, savedProcessCount(image) + 1024) }
         // The safepoint flag and (word 2) module 5's barrier word, one line.
         let flag = unsafe makeFlagLine()
         let workers = UnsafeMutablePointer<WorkerPointer>.allocate(capacity: workerCount)
@@ -57,7 +59,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             pendingSlots: pendingSlots, pendingNext: pendingNext, pendingLock: makeMutex(), hostLock: makeMutex(),
             workerShared: shared, errors: boxed(ErrorLog()), errorsLock: makeMutex(), counters: counters,
             finalization: boxed(FinalizationState()), epoch: boxed(Atomic<UInt64>(1)), hazardsHeld: boxed(Atomic<Int>(0)),
-            enterWindow: boxed(EnterWindowHook())))
+            enterWindow: boxed(EnterWindowHook()), saveHold: boxed(Atomic<Bool>(false)), slowPolls: boxed(Atomic<Int>(0)),
+            savedImages: SavedImages()))
         let seed = config.perturb?.seed ?? 0x9E37_79B9_7F4A_7C15
         for i in 0..<workerCount {
             unsafe workers[i] = Worker.make(image: image, vm: state, index: i, isMain: i == 0, flag: flag,
@@ -68,7 +71,24 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe RelocationShared.install(state)
         unsafe YoungShared.install(state)
         unsafe state.pointee.epochsOn = state.pointee.relocation != nil || state.pointee.young != nil
+        // Module 8c: an image with saved Processes resumes them: installed
+        // before any worker starts, rooted for the host.
+        if image.hasSavedProcesses {
+            let (ps, saver) = unsafe host { w in unsafe installSavedProcesses(state, w) }
+            unsafe host { _ in for p in ps { keep(p) } }
+            resumedProcesses = ps
+            resumedSaver = saver == image.nilObject ? nil : saver
+        }
     }
+
+    /// Module 8c: the Processes this VM resumed from its image (rooted for
+    /// the host), in the image's order, and the one that saved it.
+    private(set) var resumedProcesses: [Oop] = []
+    private(set) var resumedSaver: Oop? = nil
+
+    /// Module 8c: the images this VM saved for its host (`Smalltalk
+    /// snapshot: nil`, the poll trigger), oldest first; taking clears them.
+    func takeSavedImages() -> [[UInt8]] { unsafe state.pointee.savedImages.take() }
 
     var config: VMConfig { unsafe state.pointee.config }
     var ref: VMRef { unsafe VMRef(vm: state) }
@@ -153,6 +173,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe s.safepoint.pointee.inside.deallocate()
         unsafe s.safepoint.pointee.blocking.deallocate()
         unsafe unbox(s.epoch)
+        unsafe unbox(s.saveHold)
+        unsafe unbox(s.slowPolls)
         unsafe unbox(s.hazardsHeld)
         unsafe unbox(s.enterWindow)
         unsafe unbox(s.safepoint)

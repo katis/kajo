@@ -260,7 +260,8 @@ private func installInDictionary(_ m: Machine, _ cls: Oop, _ sel: Oop, _ method:
 /// heap (the image loader's check, and the install primitive's): nil when
 /// it may run as a method of class `classIndex`, else why not.
 func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nilObject: Oop,
-                      limits: LoaderLimits = LoaderLimits(), depth: Int = 0) -> String? {
+                      limits: LoaderLimits = LoaderLimits(), depth: Int = 0,
+                      traced: ((VerifiedCode) -> Void)? = nil) -> String? {
     if depth > 64 { return "blocks nested deeper than 64 (or a cycle)" }
     guard method.isObject, om.isUsedReference(method), om.classIndex(of: method) == WellKnown.method, !om.isBytes(method),
           om.count(of: method) == UInt64(MethodLayout.size) else { return "not a CompiledMethod" }
@@ -326,6 +327,8 @@ func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nil
             return .other
         }
         if v.maxStack > maxStack { return "maxStack \(maxStack) below the traced \(v.maxStack)" }
+        // Module 8c: the traced depths, for the saved-frame rules.
+        traced?(v)
         // Block methods in the literal frame are verified as blocks of the
         // same class.
         for k in Set(v.closures) {

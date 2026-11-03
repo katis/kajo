@@ -119,7 +119,10 @@ func backgroundLoop(_ vm: VMPointer, _ w: WorkerPointer) {
         unsafe leaveVM(vm, w)
         let t0 = nanoseconds()
         unsafe schedLock(vm)
-        while unsafe !vm.pointee.sched.pointee.shutdown && !anyReadyLocked(vm, main: false) && !externalPending(vm) {
+        // Module 8c: while a save holds the scheduler, ready Processes are
+        // not work (its release broadcasts).
+        while unsafe !vm.pointee.sched.pointee.shutdown
+            && (vm.pointee.sched.pointee.saveHold || !anyReadyLocked(vm, main: false)) && !externalPending(vm) {
             unsafe vm.count(.idleWaits)
             unsafe pthread_cond_wait(vm.pointee.schedCond, vm.pointee.schedLock)
             unsafe vm.count(.idleWakeups)
