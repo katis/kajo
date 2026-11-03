@@ -1,7 +1,7 @@
 /// Why a kasm source was refused. The loader reads untrusted text: every
 /// malformed input is one of these, never a trap.
-struct LoadError: Error, Equatable, CustomStringConvertible {
-    enum Kind: Equatable, Sendable {
+package struct LoadError: Error, Equatable, CustomStringConvertible {
+    package enum Kind: Equatable, Sendable {
         /// A line that is not a class, method, end, label or instruction
         /// where one is expected.
         case syntax
@@ -30,23 +30,23 @@ struct LoadError: Error, Equatable, CustomStringConvertible {
         case inputTooLarge
     }
 
-    let kind: Kind
-    let message: String
-    let file: String
-    let line: Int
+    package let kind: Kind
+    package let message: String
+    package let file: String
+    package let line: Int
 
-    init(_ kind: Kind, _ message: String, file: String = "", line: Int = 0) {
+    package init(_ kind: Kind, _ message: String, file: String = "", line: Int = 0) {
         self.kind = kind
         self.message = message
         self.file = file
         self.line = line
     }
 
-    var description: String { "\(file):\(line): \(message)" }
+    package var description: String { "\(file):\(line): \(message)" }
 }
 
 /// What the loader accepts. Each is checked before it is relied on.
-struct LoaderLimits: Sendable {
+package struct LoaderLimits: Sendable {
     /// Bytes of kasm text per file.
     var maxSourceBytes = 16 << 20
     /// The highest class index the loader assigns.
@@ -64,5 +64,5 @@ struct LoaderLimits: Sendable {
     /// Operand-stack words one activation may use.
     var maxStack = 1024
 
-    init() {}
+    package init() {}
 }

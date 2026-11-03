@@ -269,14 +269,14 @@ func parseKasm(_ text: String, file: String, limits: LoaderLimits = LoaderLimits
     return out
 }
 
-func isIdentifier(_ s: String) -> Bool {
+package func isIdentifier(_ s: String) -> Bool {
     guard let f = s.unicodeScalars.first, f.properties.isAlphabetic || f == "_" else { return false }
     return s.unicodeScalars.allSatisfy { $0.properties.isAlphabetic || $0.properties.numericType != nil || $0 == "_" }
 }
 
 private let binaryCharacters = Set("+-*/\\<>=~&|@%,?!".unicodeScalars)
 
-func isSelector(_ s: String) -> Bool {
+package func isSelector(_ s: String) -> Bool {
     guard let f = s.unicodeScalars.first else { return false }
     if binaryCharacters.contains(f) { return s.unicodeScalars.allSatisfy { binaryCharacters.contains($0) } }
     if !s.contains(":") { return isIdentifier(s) }

@@ -13,7 +13,7 @@
 /// the first operand of the instruction that follows `hi << 8 | operand`;
 /// the assembler emits it when an index does not fit a byte, and the
 /// dispatch loop runs an extended instruction out of line.
-enum Opcode: UInt8, CaseIterable, Sendable {
+package enum Opcode: UInt8, CaseIterable, Sendable {
     case pushTemp = 0x00      // u8 n: push temp n (arguments are temps 0..argc-1)
     case pushLiteral          // u8 n: push literal n
     case pushSelf
@@ -66,7 +66,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     case nonlocalReturn       // return the top from the block's home method
     case ext                  // u8 hi: the next instruction's first operand is hi << 8 | operand
 
-    enum Operands: Sendable, Equatable {
+    package enum Operands: Sendable, Equatable {
         case none
         /// An unsigned byte: a temp, literal, slot index or count.
         case index
@@ -84,7 +84,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
         case prefix
     }
 
-    var operands: Operands {
+    package var operands: Operands {
         switch self {
         case .pushTemp, .pushLiteral, .pushIvar, .storeTemp, .storeIvar, .pushNewArray: .index
         case .pushInt: .int8
@@ -98,7 +98,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     }
 
     /// Instruction length in bytes, opcode included.
-    var length: Int {
+    package var length: Int {
         switch operands {
         case .none: 1
         case .index, .int8, .prefix: 2
@@ -107,7 +107,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     }
 
     /// The first operand may be extended by `ext`.
-    var isExtensible: Bool {
+    package var isExtensible: Bool {
         switch self {
         case .pushTemp, .pushLiteral, .pushIvar, .storeTemp, .storeIvar, .pushNewArray, .send, .sendSuper,
              .pushClosure, .pushTempVectorSlot, .storeTempVectorSlot: true
@@ -116,7 +116,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     }
 
     /// The kasm name.
-    var mnemonic: String {
+    package var mnemonic: String {
         switch self {
         case .pushTemp: "push_temp"
         case .pushLiteral: "push_lit"
@@ -192,7 +192,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     /// The selector a special-send bytecode sends when its fast path does
     /// not apply (the inline ones, `==`, `~~`, `class`, `isNil`, `notNil`,
     /// have one too, for the compiler and the tables).
-    var specialSelector: String? {
+    package var specialSelector: String? {
         switch self {
         case .add: "+"
         case .sub: "-"
@@ -236,7 +236,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     }()
 
     /// Arguments of a special send (receiver excluded).
-    var specialArgc: Int {
+    package var specialArgc: Int {
         switch self {
         case .atPut, .value2: 2
         case .size, .classOf, .value, .isNil, .notNil: 0
@@ -284,7 +284,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
     var endsBlock: Bool {
         self == .returnTop || self == .returnSelf || self == .jump || self == .blockReturn || self == .nonlocalReturn
     }
-    var isJump: Bool { operands == .jump }
+    package var isJump: Bool { operands == .jump }
     var isReturn: Bool { self == .returnTop || self == .returnSelf || self == .blockReturn || self == .nonlocalReturn }
 }
 
@@ -350,7 +350,7 @@ func decodeInstruction(_ bytes: [UInt8], at offset: Int) -> DecodedInstruction? 
 
 /// Arguments a selector takes: binary (first character not a letter) 1,
 /// keyword the number of colons, unary 0.
-func arity(of selector: String) -> Int {
+package func arity(of selector: String) -> Int {
     guard let c = selector.unicodeScalars.first else { return 0 }
     if !(c.properties.isAlphabetic || c == "_") { return 1 }
     return selector.unicodeScalars.reduce(0) { $0 + ($1 == ":" ? 1 : 0) }

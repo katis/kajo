@@ -6,6 +6,7 @@ let package = Package(
     platforms: [.macOS(.v15), .iOS(.v18)],
     products: [
         .library(name: "KajoVM", targets: ["KajoVM"]),
+        .library(name: "KajoCompiler", targets: ["KajoCompiler"]),
         .executable(name: "kajo", targets: ["kajo"]),
     ],
     targets: [
@@ -16,11 +17,20 @@ let package = Package(
             name: "KajoVM",
             swiftSettings: [.strictMemorySafety()]
         ),
+        // Module 8b: the bootstrap compiler (Smalltalk method syntax and
+        // Tonel class files to bytecode set v1), the kernel image build.
+        // Not the trusted base: everything it makes goes through the VM's
+        // bytecode verifier. No unsafe code.
+        .target(
+            name: "KajoCompiler",
+            dependencies: ["KajoVM"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
         // Headless command line: boot an image, run tests, serve the
         // development protocol. No UI here.
         .executableTarget(
             name: "kajo",
-            dependencies: ["KajoVM"]
+            dependencies: ["KajoVM", "KajoCompiler"]
         ),
         // libFuzzer targets for the kasm and snapshot loaders (`just fuzz`).
         // Built plainly they replay a corpus and mutate it.
@@ -34,9 +44,20 @@ let package = Package(
             dependencies: ["KajoVM"],
             swiftSettings: [.strictMemorySafety()]
         ),
+        // Module 8b: the Smalltalk syntax (scanner, parser, compiler, Tonel).
+        .executableTarget(
+            name: "fuzz-syntax",
+            dependencies: ["KajoVM", "KajoCompiler"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
         .testTarget(
             name: "KajoVMTests",
             dependencies: ["KajoVM"],
+            exclude: ["Fixtures"]
+        ),
+        .testTarget(
+            name: "KajoCompilerTests",
+            dependencies: ["KajoVM", "KajoCompiler"],
             exclude: ["Fixtures"]
         ),
     ]

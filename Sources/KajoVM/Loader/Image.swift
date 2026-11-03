@@ -7,7 +7,7 @@
 /// Every object the image creates is reachable from the class table or a
 /// root before the next allocation, so a collection may run at any
 /// allocation (the stress flag `collectAtEveryAllocation` checks it).
-final class Image {
+package final class Image {
     let om: ObjectMemory
     let limits: LoaderLimits
     let context: AllocContext
@@ -397,6 +397,21 @@ final class Image {
         case .string(let b): return try readOnlyBytes(WellKnown.string, b)
         case .largeInteger(let negative, let mag):
             return try readOnlyBytes(negative ? WellKnown.largeNegativeInteger : WellKnown.largePositiveInteger, mag)
+        case .byteArray(let b): return try readOnlyBytes(WellKnown.byteArray, b)
+        case .array(let elements):
+            // Elements first, each held by a root until the Array holds it.
+            var handles: [RootHandle] = []
+            defer { for h in handles { om.removeRoot(h) } }
+            var values: [Oop] = []
+            for e in elements {
+                let v = try literalValue(e)
+                if v.isObject { handles.append(om.addRoot(v)) }
+                values.append(v)
+            }
+            let a = try allocatePinned(WellKnown.array, slots: values.count)
+            for (i, v) in values.enumerated() { om.store(a, i, v) }
+            om.setReadOnly(a, true)
+            return a
         case .block, .pragma: preconditionFailure("made by makeMethod")
         }
     }
@@ -536,6 +551,9 @@ enum SpecialObjects {
     static let symbolTable = 4
     static let selectors = 5
     static let doesNotUnderstand = 6
+    /// Module 8b: the object `kajo run` and `kajo test` start at (nil in a
+    /// kasm image).
+    static let entryPoint = 7
     static let size = 8
 }
 
@@ -564,4 +582,218 @@ func lookupMethod(_ om: ObjectMemory, nilObject: Oop, classIndex: UInt64, select
         steps &-= 1
     }
     return .none
+}
+
+// MARK: - module 8b: the kernel image build
+
+/// A class of the kernel as the bootstrap compiler read it from its Tonel
+/// file: the instance size includes the inherited slots.
+package struct KernelClassDefinition: Sendable {
+    package let name: String
+    /// nil only for Object.
+    package let superclass: String?
+    package let instSize: Int
+    /// `fixed`, `variable`, `bytes`, `words16`, `words32`, `words64`,
+    /// `weak` or `ephemeron`.
+    package let kind: String
+    /// Class-side instance variables, inherited included.
+    package let metaSlots: Int
+    package let file: String
+    package let line: Int
+
+    package init(name: String, superclass: String?, instSize: Int, kind: String, metaSlots: Int, file: String, line: Int) {
+        self.name = name
+        self.superclass = superclass
+        self.instSize = instSize
+        self.kind = kind
+        self.metaSlots = metaSlots
+        self.file = file
+        self.line = line
+    }
+
+    var format: ClassFormat? {
+        switch kind {
+        case "fixed": ClassFormat(namedSlots: instSize, kind: .fixed)
+        case "variable": ClassFormat(namedSlots: instSize, kind: .variable)
+        case "bytes": instSize == 0 ? ClassFormat(namedSlots: 0, kind: .bytes) : nil
+        case "words16": instSize == 0 ? ClassFormat(namedSlots: 0, kind: .words16) : nil
+        case "words32": instSize == 0 ? ClassFormat(namedSlots: 0, kind: .words32) : nil
+        case "words64": instSize == 0 ? ClassFormat(namedSlots: 0, kind: .words64) : nil
+        case "weak": ClassFormat(namedSlots: instSize, kind: .variable, weak: true)
+        case "ephemeron": instSize >= 1 ? ClassFormat(namedSlots: instSize, kind: .fixed, ephemeron: true) : nil
+        default: nil
+        }
+    }
+}
+
+extension Image {
+    /// The number of slots of a class object before its class-side
+    /// instance variables.
+    package static let classLayoutSize = ClassLayout.size
+
+    /// A fresh image for the kernel build: the well-known classes and
+    /// nothing else, in an object memory of `heapMiB`.
+    package static func bootForKernel(heapMiB: Int = 512) throws(LoadError) -> Image {
+        var config = ObjectMemoryConfig()
+        config.heapBytes = heapMiB << 20
+        let om: ObjectMemory
+        do { om = try ObjectMemory(config) } catch { throw LoadError(.heapFull, "the object memory: \(error)") }
+        return try Image(memory: om)
+    }
+
+    /// The well-known classes by name, with their instance size and format
+    /// kind (the kernel's class files must agree with them).
+    package static var wellKnownClasses: [(name: String, instSize: Int, kind: String)] {
+        WellKnown.definitions.map { d in
+            let f = d.format
+            let kinds: [ClassFormat.Kind: String] = [.fixed: "fixed", .variable: "variable", .bytes: "bytes", .words16: "words16",
+                                                     .words32: "words32", .words64: "words64"]
+            let k = f.isWeak ? "weak" : f.isEphemeron ? "ephemeron" : kinds[f.kind]!
+            return (d.name, f.namedSlots, k)
+        }
+    }
+
+    /// Define the kernel's classes, superclasses first. A well-known class
+    /// keeps its index, format and metaclass and takes the superclass its
+    /// file names (SmallInteger under Integer, String under
+    /// ArrayedCollection); every other class gets two new indices. Checked
+    /// as the kasm loader checks classes: no subclass of a sealed class
+    /// other than the well-known ones, no pointers under bytes, at least
+    /// the superclass's instance variables on both sides, no duplicate.
+    package func defineKernelClasses(_ defs: [KernelClassDefinition]) throws(LoadError) {
+        var seen = Set<String>()
+        for d in defs {
+            func fail(_ m: String) -> LoadError { LoadError(.badClass, m, file: d.file, line: d.line) }
+            if !seen.insert(d.name).inserted { throw LoadError(.duplicateClass, "class \(d.name) defined twice", file: d.file, line: d.line) }
+            guard let format = d.format else { throw fail("\(d.name): format \(d.kind) with \(d.instSize) named slots") }
+            var sup: UInt64? = nil
+            if let s = d.superclass {
+                guard let si = classesByName[s], seen.contains(s) || WellKnown.definitions.contains(where: { $0.name == s }) else {
+                    throw LoadError(.unknownClass, "\(d.name): superclass \(s) not defined before it", file: d.file, line: d.line)
+                }
+                sup = si
+                if (instSizes[si] ?? 0) > d.instSize { throw fail("\(d.name) has fewer instance variables than \(s)") }
+                if (instSizes[metaclassIndex(of: si)] ?? 0) > ClassLayout.size + d.metaSlots {
+                    throw fail("\(d.name) has fewer class-side instance variables than \(s)")
+                }
+            } else if d.name != "Object" {
+                throw fail("only Object has no superclass")
+            }
+            if let wk = WellKnown.definitions.first(where: { $0.name == d.name }) {
+                let f = wk.format
+                guard f.namedSlots == format.namedSlots, f.kind == format.kind, f.isWeak == format.isWeak,
+                      f.isEphemeron == format.isEphemeron else {
+                    throw fail("\(d.name) is well known with \(f.namedSlots) named slots of kind \(f.kind), its file says \(d.instSize) \(d.kind)")
+                }
+                guard d.metaSlots == 0 else { throw fail("\(d.name) is well known: no class-side instance variables") }
+                guard (d.superclass == nil) == (wk.superclass == nil) else { throw fail("\(d.name)'s superclass") }
+                if let si = sup {
+                    // A cycle through a well-known class is refused here: the
+                    // superclass must not have this class in its chain.
+                    var s = si, steps = om.classCount
+                    while steps > 0 {
+                        if s == wk.index { throw fail("superclass cycle through \(d.name)") }
+                        let o = om.load(om.classOop(s), ClassLayout.superclass)
+                        if o == nilObject { break }
+                        s = UInt64(om.load(o, ClassLayout.classIndex).smallIntegerValue)
+                        steps -= 1
+                    }
+                    om.store(om.classOop(wk.index), ClassLayout.superclass, om.classOop(si))
+                    om.store(om.classOop(WellKnown.metaclass(of: wk.index)), ClassLayout.superclass, om.classOop(metaclassIndex(of: si)))
+                }
+                continue
+            }
+            guard let si = sup else { throw fail("only Object has no superclass") }
+            let sf = om.classFormat(si)
+            if sf.isSealed { throw fail("\(d.name) cannot subclass the sealed \(d.superclass!)") }
+            if !sf.kind.isPointers && format.kind.isPointers { throw fail("\(d.name) cannot be pointers under \(d.superclass!)") }
+            if UInt64(om.classCount) + 2 > UInt64(limits.maxClassIndex) {
+                throw LoadError(.tooManyClasses, "more than \(limits.maxClassIndex) classes", file: d.file, line: d.line)
+            }
+            let index = om.registerClass(.none)
+            let meta = om.registerClass(.none)
+            om.setClassFormat(meta, WellKnown.metaclassFormat(classSlots: ClassLayout.size + d.metaSlots))
+            om.setClassOop(meta, try allocatePinned(WellKnown.metaclass, slots: MetaclassLayout.size))
+            om.setClassOop(index, try allocatePinned(meta, slots: ClassLayout.size + d.metaSlots))
+            try fillClass(index, meta: meta, name: d.name, superclass: si, format: format, metaSlots: d.metaSlots)
+        }
+        loads += 1
+    }
+
+    /// Install compiled methods (the bootstrap compiler's, verified by the
+    /// assembler): the instance-variable rules and duplicate checks of the
+    /// kasm loader, then the methods and new method dictionaries.
+    package func installKernelMethods(_ ms: [AssembledMethod]) throws(LoadError) {
+        var keys = methodKeys
+        var counts: [UInt64: Int] = methods.mapValues(\.count)
+        var planned: [(UInt64, AssembledMethod)] = []
+        for m in ms {
+            guard var cls = classesByName[m.className] else {
+                throw LoadError(.unknownClass, "unknown class \(m.className)", file: m.file, line: m.line)
+            }
+            if m.classSide { cls = metaclassIndex(of: cls) }
+            if m.maxIvar >= 0 {
+                let f = om.classFormat(cls)
+                let isMeta = m.classSide || f.instancesAreBehaviors
+                let lowest = isMeta ? ClassLayout.size : 0
+                let allowed = f.isSealed && !isMeta ? false : m.minIvar >= lowest
+                if !allowed || m.maxIvar >= f.namedSlots {
+                    throw LoadError(.badClass, "\(m.className)>>\(m.selector) names instance variable \(m.maxIvar), outside the class",
+                                    file: m.file, line: m.line)
+                }
+            }
+            func classRefs(_ l: Literal) -> [String] {
+                switch l {
+                case .classRef(let c): return [c]
+                case .array(let xs): return xs.flatMap(classRefs)
+                default: return []
+                }
+            }
+            for c in (m.literals + m.blocks.flatMap(\.literals) + m.pragmas.flatMap(\.arguments)).flatMap(classRefs)
+                where classesByName[c] == nil {
+                throw LoadError(.unknownClass, "unknown class \(c)", file: m.file, line: m.line)
+            }
+            if !keys.insert("\(cls) \(m.selector)").inserted {
+                throw LoadError(.duplicateMethod, "\(m.className)\(m.classSide ? " class" : "")>>\(m.selector) defined twice",
+                                file: m.file, line: m.line)
+            }
+            counts[cls, default: 0] += 1
+            if counts[cls]! > limits.maxMethodsPerClass {
+                throw LoadError(.tooManyMethods, "\(m.className) has more than \(limits.maxMethodsPerClass) methods", file: m.file, line: m.line)
+            }
+            planned.append((cls, m))
+        }
+        var temporaryRoots: [RootHandle] = []
+        defer { for h in temporaryRoots { om.removeRoot(h) } }
+        var touched: [UInt64] = []
+        for (cls, m) in planned {
+            let sel = try intern(m.selector)
+            let meth = try makeMethod(m, selector: sel, methodClass: om.classOop(cls))
+            temporaryRoots.append(om.addRoot(meth))
+            methods[cls, default: []].append((sel, meth))
+            methodKeys.insert("\(cls) \(m.selector)")
+            methodNames[meth] = "\(m.className)\(m.classSide ? " class" : "")>>\(m.selector)"
+            if !touched.contains(cls) { touched.append(cls) }
+        }
+        for cls in touched.sorted() { try installMethodDictionary(cls) }
+        loads += 1
+    }
+
+    /// Name the entry point: the class `kajo run` and `kajo test` send
+    /// `run:of:`, `setup:` and `test:` to (special object 7).
+    package func setEntryPoint(className: String) throws(LoadError) {
+        guard let i = classesByName[className] else { throw LoadError(.unknownClass, "no class \(className) for the entry point") }
+        om.store(specialObjects, SpecialObjects.entryPoint, om.classOop(i))
+    }
+
+    /// The entry point (special object 7), nil if none.
+    var entryPoint: Oop { om.load(specialObjects, SpecialObjects.entryPoint) }
+
+    /// The image as bytes (module 8a's format).
+    package func imageBytes() -> [UInt8] { saveImage() }
+
+    /// Whether `name` is a class of the image.
+    package func hasClass(_ name: String) -> Bool { classesByName[name] != nil }
+
+    package func destroyImage() { destroy() }
 }

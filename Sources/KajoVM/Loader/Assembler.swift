@@ -1,5 +1,5 @@
 /// A literal of an assembled method, resolved to an object at load time.
-enum Literal: Hashable, Sendable {
+package enum Literal: Hashable, Sendable {
     case integer(Int64)
     /// Beyond the SmallInteger range: a LargePositiveInteger or
     /// LargeNegativeInteger, magnitude little-endian.
@@ -18,50 +18,232 @@ enum Literal: Hashable, Sendable {
     case block(Int)
     /// Pragma `k` of the method's `pragmas`.
     case pragma(Int)
+    /// Module 8b: a literal Array (`#(1 $a 'b' #c (2 3))`), read-only with
+    /// its elements, and a literal ByteArray (`#[1 2 3]`).
+    case array([Literal])
+    case byteArray([UInt8])
 }
 
-struct AssembledPragma {
-    let selector: String
-    let arguments: [Literal]
+package struct AssembledPragma: Sendable {
+    package let selector: String
+    package let arguments: [Literal]
 }
 
 /// A method or a block method as bytes and a literal frame, verified, not
 /// yet in the heap.
-struct AssembledMethod {
-    let file: String
-    let line: Int
-    let className: String
+package struct AssembledMethod: Sendable {
+    package let file: String
+    package let line: Int
+    package let className: String
     /// A method of the class's metaclass.
-    let classSide: Bool
+    package let classSide: Bool
     /// The selector; a block's name for a block method.
-    let selector: String
-    let argc: Int
+    package let selector: String
+    package let argc: Int
     /// Frame words between the arguments and the header (`MethodLayout.temps`).
-    let temps: Int
-    let primitive: Int
-    let bytecodes: [UInt8]
-    let literals: [Literal]
-    let maxStack: Int
+    package let temps: Int
+    package let primitive: Int
+    package let bytecodes: [UInt8]
+    package let literals: [Literal]
+    package let maxStack: Int
     /// Highest and lowest receiver slot any push_ivar or store_ivar names, or -1.
-    let maxIvar: Int
-    let minIvar: Int
-    let flags: Int64
-    let copied: Int
+    package let maxIvar: Int
+    package let minIvar: Int
+    package let flags: Int64
+    package let copied: Int
     /// The method's block methods (empty in a block), each referenced by
     /// one `.block(k)` literal of the method or another block.
-    let blocks: [AssembledMethod]
-    let pragmas: [AssembledPragma]
+    package let blocks: [AssembledMethod]
+    package let pragmas: [AssembledPragma]
 
-    var isBlock: Bool { flags & MethodFlags.block != 0 }
+    package var isBlock: Bool { flags & MethodFlags.block != 0 }
 }
 
-/// Assemble one parsed method and its blocks: resolve labels, build each
-/// literal frame in first-use order with duplicates merged (block methods
-/// and pragmas are literals too), encode with the `ext` prefix where an
-/// operand does not fit a byte, and run the bytecode verifier
-/// (`verifyBytecodes`) on every body. Everything the interpreter trusts
-/// about the bytecodes is established there.
+/// One line of an assembler body: what the kasm parser's text lowers to,
+/// and what the bootstrap compiler (`KajoCompiler`) emits directly. Operands
+/// are values, not text; labels are names local to the body.
+package struct AsmLine: Sendable {
+    package enum Content: Sendable {
+        case label(String)
+        /// Any opcode whose operands are plain numbers: none, an index, a
+        /// signed byte, a vector slot and temp, `push_new_array`'s size.
+        case op(Opcode, Int, Int)
+        case pushLiteral(Literal)
+        /// `send` or `send_super`: the selector and its argument count.
+        case send(Opcode, String, Int)
+        /// A block of the method by name, and its copied-value count.
+        case pushClosure(String, Int)
+        /// `jump`, `jump_if_true` or `jump_if_false` to a label.
+        case jump(Opcode, String)
+    }
+
+    package let line: Int
+    package let content: Content
+
+    package init(_ content: Content, line: Int) {
+        self.content = content
+        self.line = line
+    }
+}
+
+/// A block method of an `AsmMethod`: made by exactly one `push_closure`.
+package struct AsmBlock: Sendable {
+    package let name: String
+    package let line: Int
+    package let args: Int
+    package let copied: Int
+    package let temps: Int
+    package var body: [AsmLine]
+
+    package init(name: String, line: Int, args: Int, copied: Int, temps: Int, body: [AsmLine]) {
+        self.name = name
+        self.line = line
+        self.args = args
+        self.copied = copied
+        self.temps = temps
+        self.body = body
+    }
+}
+
+/// A method for the assembler: kasm lowered, or the bootstrap compiler's
+/// output.
+package struct AsmMethod: Sendable {
+    package var file: String
+    package var line: Int
+    package var className: String
+    package var selector: String
+    package var temps: Int
+    package var primitive: Int
+    package var classSide = false
+    package var unwind = false
+    package var handler = false
+    /// Selector, arguments and source line of each pragma.
+    package var pragmas: [(selector: String, arguments: [Literal], line: Int)] = []
+    package var body: [AsmLine] = []
+    package var blocks: [AsmBlock] = []
+
+    package init(file: String, line: Int, className: String, selector: String, temps: Int, primitive: Int) {
+        self.file = file
+        self.line = line
+        self.className = className
+        self.selector = selector
+        self.temps = temps
+        self.primitive = primitive
+    }
+}
+
+/// Lower a parsed kasm method to the assembler's input: opcodes by
+/// mnemonic, operands parsed and range-checked against the body's shape.
+func lower(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(LoadError) -> AsmMethod {
+    let argc = arity(of: m.selector)
+    func fail(_ kind: LoadError.Kind, _ msg: String, _ line: Int) -> LoadError {
+        LoadError(kind, "\(m.className)>>\(m.selector): \(msg)", file: m.file, line: line)
+    }
+    var blockIndex: [String: Int] = [:]
+    for (k, b) in m.blocks.enumerated() { blockIndex[b.name] = k }
+    func lowerBody(_ lines: [KasmLine], addressable: Int) throws(LoadError) -> [AsmLine] {
+        var out: [AsmLine] = []
+        for l in lines {
+            switch l.content {
+            case .label(let name):
+                out.append(AsmLine(.label(name), line: l.line))
+            case .instruction(let name, let args):
+                guard let op = Opcode(mnemonic: name), op != .ext else {
+                    throw fail(.unknownOpcode, "unknown instruction '\(name)'", l.line)
+                }
+                let expected: Int
+                switch op.operands {
+                case .none, .prefix: expected = 0
+                case .index, .int8, .jump: expected = 1
+                case .send, .closure, .vectorSlot: expected = 2
+                }
+                if args.count != expected { throw fail(.badOperand, "\(op.mnemonic) takes \(expected) operand(s)", l.line) }
+                func int(_ s: String, _ range: ClosedRange<Int>, _ what: String) throws(LoadError) -> Int {
+                    guard let n = Int(s), range.contains(n) else {
+                        throw fail(.badOperand, "\(what) must be \(range.lowerBound)...\(range.upperBound)", l.line)
+                    }
+                    return n
+                }
+                let c: AsmLine.Content
+                switch op {
+                case .pushLiteral:
+                    guard let lit = parseLiteral(args[0]) else { throw fail(.badOperand, "bad literal '\(args[0])'", l.line) }
+                    c = .pushLiteral(lit)
+                case .pushTemp, .storeTemp:
+                    let n = try int(args[0], 0...max(0, addressable - 1), "temp index")
+                    if addressable == 0 { throw fail(.badOperand, "no temps to name", l.line) }
+                    c = .op(op, n, 0)
+                case .pushIvar, .storeIvar:
+                    c = .op(op, try int(args[0], 0...(Header.maxSlots - 1), "slot index"), 0)
+                case .pushInt:
+                    c = .op(op, try int(args[0], -128...127, "push_int's operand"), 0)
+                case .send, .sendSuper:
+                    let sel = args[0]
+                    guard isSelector(sel) else { throw fail(.badOperand, "bad selector '\(sel)'", l.line) }
+                    guard let n = Int(args[1]), n == arity(of: sel) else {
+                        throw fail(.badOperand, "\(sel) takes \(arity(of: sel)) argument(s)", l.line)
+                    }
+                    c = .send(op, sel, n)
+                case .pushClosure:
+                    guard let bk = blockIndex[args[0]] else { throw fail(.badOperand, "no block '\(args[0])'", l.line) }
+                    guard let n = Int(args[1]), n == m.blocks[bk].copied else {
+                        throw fail(.badOperand, "block \(args[0]) has \(m.blocks[bk].copied) copied value(s)", l.line)
+                    }
+                    c = .pushClosure(args[0], n)
+                case .pushNewArray:
+                    c = .op(op, try int(args[0], 0...Header.maxSlots, "push_new_array's size"), 0)
+                case .pushTempVectorSlot, .storeTempVectorSlot:
+                    let slot = try int(args[0], 0...(Header.maxSlots - 1), "temp vector slot")
+                    let t = try int(args[1], 0...max(0, addressable - 1), "temp index")
+                    if addressable == 0 { throw fail(.badOperand, "no temps to name", l.line) }
+                    c = .op(op, slot, t)
+                case .jump, .jumpIfTrue, .jumpIfFalse:
+                    c = .jump(op, args[0])
+                default:
+                    c = .op(op, 0, 0)
+                }
+                out.append(AsmLine(c, line: l.line))
+            }
+        }
+        return out
+    }
+    var a = AsmMethod(file: m.file, line: m.line, className: m.className, selector: m.selector, temps: m.temps,
+                      primitive: m.primitive)
+    a.classSide = m.classSide
+    a.unwind = m.unwind
+    a.handler = m.handler
+    a.body = try lowerBody(m.body, addressable: argc + m.temps)
+    for b in m.blocks {
+        a.blocks.append(AsmBlock(name: b.name, line: b.line, args: b.args, copied: b.copied, temps: b.temps,
+                                 body: try lowerBody(b.body, addressable: b.args + b.copied + b.temps)))
+    }
+    for p in m.pragmas {
+        if arity(of: p.selector) != p.arguments.count {
+            throw fail(.badOperand, "pragma \(p.selector) takes \(arity(of: p.selector)) argument(s)", p.line)
+        }
+        var args: [Literal] = []
+        for x in p.arguments {
+            guard let l = parseLiteral(x) else { throw fail(.badOperand, "bad pragma argument '\(x)'", p.line) }
+            args.append(l)
+        }
+        a.pragmas.append((p.selector, args, p.line))
+    }
+    return a
+}
+
+/// Assemble one parsed kasm method and its blocks.
 func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(LoadError) -> AssembledMethod {
+    try assemble(try lower(m, limits: limits), limits: limits)
+}
+
+/// Assemble one method and its blocks: resolve labels, build each literal
+/// frame in first-use order with duplicates merged (block methods and
+/// pragmas are literals too, pragmas after every other literal), encode
+/// with the `ext` prefix where an operand does not fit a byte, and run the
+/// bytecode verifier (`verifyBytecodes`) on every body. Everything the
+/// interpreter trusts about the bytecodes is established there. The kasm
+/// loader and the bootstrap compiler both come through here.
+package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) throws(LoadError) -> AssembledMethod {
     let argc = arity(of: m.selector)
     func fail(_ kind: LoadError.Kind, _ msg: String, _ line: Int) -> LoadError {
         LoadError(kind, "\(m.className)>>\(m.selector): \(msg)", file: m.file, line: line)
@@ -71,30 +253,41 @@ func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(Loa
 
     // Blocks: names, references, reachability, and which need a home.
     var blockIndex: [String: Int] = [:]
-    for (k, b) in m.blocks.enumerated() { blockIndex[b.name] = k }
-    func references(_ body: [KasmLine]) -> [(Int, Int)] {
+    for (k, b) in m.blocks.enumerated() {
+        if blockIndex[b.name] != nil { throw fail(.duplicateLabel, "block '\(b.name)' defined twice", b.line) }
+        blockIndex[b.name] = k
+    }
+    func references(_ body: [AsmLine]) throws(LoadError) -> [(Int, Int)] {
         var out: [(Int, Int)] = []
         for l in body {
-            if case .instruction("push_closure", let args) = l.content, let n = args.first, let k = blockIndex[n] {
+            if case .pushClosure(let n, let c) = l.content {
+                guard let k = blockIndex[n] else { throw fail(.badOperand, "no block '\(n)'", l.line) }
+                if c != m.blocks[k].copied { throw fail(.badOperand, "block \(n) has \(m.blocks[k].copied) copied value(s)", l.line) }
                 out.append((k, l.line))
             }
         }
         return out
     }
     var refCount = [Int](repeating: 0, count: m.blocks.count)
-    for (k, _) in references(m.body) { refCount[k] += 1 }
-    for b in m.blocks { for (k, line) in references(b.body) {
-        if b.name == m.blocks[k].name { throw fail(.badOperand, "block \(b.name) creates itself", line) }
-        refCount[k] += 1
-    } }
+    for (k, _) in try references(m.body) { refCount[k] += 1 }
+    var blockRefs: [[Int]] = []
+    for b in m.blocks {
+        var mine: [Int] = []
+        for (k, line) in try references(b.body) {
+            if b.name == m.blocks[k].name { throw fail(.badOperand, "block \(b.name) creates itself", line) }
+            refCount[k] += 1
+            mine.append(k)
+        }
+        blockRefs.append(mine)
+    }
     for (k, b) in m.blocks.enumerated() where refCount[k] != 1 {
         throw fail(.badOperand, "block \(b.name) is created by \(refCount[k]) push_closure instructions (one wanted)", b.line)
     }
     var reached = Set<Int>()
-    var queue = references(m.body).map(\.0)
+    var queue = try references(m.body).map(\.0)
     while let k = queue.popLast() {
         if !reached.insert(k).inserted { continue }
-        queue += references(m.blocks[k].body).map(\.0)
+        queue += blockRefs[k]
     }
     if let k = (0..<m.blocks.count).first(where: { !reached.contains($0) }) {
         throw fail(.badOperand, "block \(m.blocks[k].name) is not reachable from the method", m.blocks[k].line)
@@ -104,8 +297,8 @@ func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(Loa
     while changed {
         changed = false
         for (k, b) in m.blocks.enumerated() where !needsHome[k] {
-            let direct = b.body.contains { if case .instruction("nonlocal_return", _) = $0.content { return true }; return false }
-            if direct || references(b.body).contains(where: { needsHome[$0.0] }) {
+            let direct = b.body.contains { if case .op(.nonlocalReturn, _, _) = $0.content { return true }; return false }
+            if direct || blockRefs[k].contains(where: { needsHome[$0] }) {
                 needsHome[k] = true
                 changed = true
             }
@@ -118,16 +311,11 @@ func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(Loa
         if arity(of: p.selector) != p.arguments.count {
             throw fail(.badOperand, "pragma \(p.selector) takes \(arity(of: p.selector)) argument(s)", p.line)
         }
-        var args: [Literal] = []
-        for a in p.arguments {
-            guard let l = parseLiteral(a) else { throw fail(.badOperand, "bad pragma argument '\(a)'", p.line) }
-            args.append(l)
-        }
-        pragmas.append(AssembledPragma(selector: p.selector, arguments: args))
+        pragmas.append(AssembledPragma(selector: p.selector, arguments: p.arguments))
     }
 
     struct Body {
-        let lines: [KasmLine]
+        let lines: [AsmLine]
         let argc: Int
         let addressable: Int
         let isBlock: Bool
@@ -139,7 +327,6 @@ func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(Loa
                                                                               maxIvar: Int, minIvar: Int) {
         struct Ins {
             let op: Opcode
-            let args: [String]
             let line: Int
             var a = 0
             var b = 0
@@ -147,18 +334,6 @@ func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(Loa
         }
         var ins: [Ins] = []
         var labels: [String: Int] = [:]
-        for l in b.lines {
-            switch l.content {
-            case .label(let name):
-                if labels[name] != nil { throw fail(.duplicateLabel, "label '\(name)' defined twice", l.line) }
-                labels[name] = ins.count
-            case .instruction(let name, let args):
-                guard let op = Opcode(mnemonic: name), op != .ext else {
-                    throw fail(.unknownOpcode, "unknown instruction '\(name)'", l.line)
-                }
-                ins.append(Ins(op: op, args: args, line: l.line))
-            }
-        }
         var literals: [Literal] = []
         var literalIndex: [Literal: Int] = [:]
         func literal(_ lit: Literal, _ line: Int) throws(LoadError) -> Int {
@@ -169,63 +344,44 @@ func assemble(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(Loa
             return literals.count - 1
         }
         var maxIvar = -1, minIvar = -1
-        for k in ins.indices {
-            let i = ins[k]
-            let expected: Int
-            switch i.op.operands {
-            case .none, .prefix: expected = 0
-            case .index, .int8, .jump: expected = 1
-            case .send, .closure, .vectorSlot: expected = 2
-            }
-            if i.args.count != expected { throw fail(.badOperand, "\(i.op.mnemonic) takes \(expected) operand(s)", i.line) }
-            func int(_ s: String, _ range: ClosedRange<Int>, _ what: String) throws(LoadError) -> Int {
-                guard let n = Int(s), range.contains(n) else {
-                    throw fail(.badOperand, "\(what) must be \(range.lowerBound)...\(range.upperBound)", i.line)
+        for l in b.lines {
+            switch l.content {
+            case .label(let name):
+                if labels[name] != nil { throw fail(.duplicateLabel, "label '\(name)' defined twice", l.line) }
+                labels[name] = ins.count
+            case .op(let op, let a, let x):
+                guard op != .ext, op.operands != .send, op.operands != .jump, op.operands != .closure, op != .pushLiteral else {
+                    throw fail(.badOperand, "\(op.mnemonic) needs its own operands", l.line)
                 }
-                return n
-            }
-            switch i.op {
-            case .pushLiteral:
-                guard let lit = parseLiteral(i.args[0]) else { throw fail(.badOperand, "bad literal '\(i.args[0])'", i.line) }
-                ins[k].a = try literal(lit, i.line)
-            case .pushTemp, .storeTemp:
-                ins[k].a = try int(i.args[0], 0...max(0, b.addressable - 1), "temp index")
-                if b.addressable == 0 { throw fail(.badOperand, "no temps to name", i.line) }
-            case .pushIvar, .storeIvar:
-                let n = try int(i.args[0], 0...(Header.maxSlots - 1), "slot index")
-                maxIvar = max(maxIvar, n)
-                minIvar = minIvar < 0 ? n : min(minIvar, n)
-                ins[k].a = n
-            case .pushInt:
-                ins[k].a = try int(i.args[0], -128...127, "push_int's operand")
-            case .send, .sendSuper:
-                let sel = i.args[0]
-                guard isSelector(sel) else { throw fail(.badOperand, "bad selector '\(sel)'", i.line) }
-                guard let n = Int(i.args[1]), n == arity(of: sel) else {
-                    throw fail(.badOperand, "\(sel) takes \(arity(of: sel)) argument(s)", i.line)
+                if op == .pushIvar || op == .storeIvar {
+                    guard (0..<Header.maxSlots).contains(a) else { throw fail(.badOperand, "slot index \(a)", l.line) }
+                    maxIvar = max(maxIvar, a)
+                    minIvar = minIvar < 0 ? a : min(minIvar, a)
                 }
-                ins[k].a = try literal(.symbol(sel), i.line)
-                ins[k].b = n
-            case .pushClosure:
-                guard let bk = blockIndex[i.args[0]] else { throw fail(.badOperand, "no block '\(i.args[0])'", i.line) }
-                guard let c = Int(i.args[1]), c == m.blocks[bk].copied else {
-                    throw fail(.badOperand, "block \(i.args[0]) has \(m.blocks[bk].copied) copied value(s)", i.line)
+                if op == .pushInt && !(-128...127).contains(a) { throw fail(.badOperand, "push_int's operand must be -128...127", l.line) }
+                if op.operands != .int8 && op.operands != .none && !(0...0xFFFF).contains(a) {
+                    throw fail(.badOperand, "operand \(a) out of range", l.line)
                 }
-                ins[k].a = try literal(.block(bk), i.line)
-                ins[k].b = c
-            case .pushNewArray:
-                ins[k].a = try int(i.args[0], 0...Header.maxSlots, "push_new_array's size")
-            case .pushTempVectorSlot, .storeTempVectorSlot:
-                ins[k].a = try int(i.args[0], 0...(Header.maxSlots - 1), "temp vector slot")
-                ins[k].b = try int(i.args[1], 0...max(0, b.addressable - 1), "temp index")
-                if b.addressable == 0 { throw fail(.badOperand, "no temps to name", i.line) }
-            case .jump, .jumpIfTrue, .jumpIfFalse:
-                guard let t = labels[i.args[0]] else { throw fail(.unknownLabel, "no label '\(i.args[0])'", i.line) }
-                guard t < ins.count else { throw fail(.badStack, "label '\(i.args[0])' is past the last instruction", i.line) }
-                ins[k].label = i.args[0]
-            default:
-                break
+                if op.operands == .vectorSlot && !(0...255).contains(x) { throw fail(.badOperand, "temp index \(x)", l.line) }
+                ins.append(Ins(op: op, line: l.line, a: a, b: x))
+            case .pushLiteral(let lit):
+                ins.append(Ins(op: .pushLiteral, line: l.line, a: try literal(lit, l.line)))
+            case .send(let op, let sel, let n):
+                guard op == .send || op == .sendSuper, isSelector(sel), n == arity(of: sel) else {
+                    throw fail(.badOperand, "\(sel) takes \(arity(of: sel)) argument(s)", l.line)
+                }
+                ins.append(Ins(op: op, line: l.line, a: try literal(.symbol(sel), l.line), b: n))
+            case .pushClosure(let name, let c):
+                ins.append(Ins(op: .pushClosure, line: l.line, a: try literal(.block(blockIndex[name]!), l.line), b: c))
+            case .jump(let op, let label):
+                guard op.isJump else { throw fail(.badOperand, "\(op.mnemonic) is not a jump", l.line) }
+                ins.append(Ins(op: op, line: l.line, label: label))
             }
+        }
+        for i in ins {
+            guard let label = i.label else { continue }
+            guard let t = labels[label] else { throw fail(.unknownLabel, "no label '\(label)'", i.line) }
+            guard t < ins.count else { throw fail(.badStack, "label '\(label)' is past the last instruction", i.line) }
         }
         for l in extraLiterals { _ = try literal(l, b.line) }
         // Lengths (with prefixes), then offsets, then bytes.
