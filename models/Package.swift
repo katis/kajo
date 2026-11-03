@@ -21,5 +21,8 @@ let package = Package(
         .target(name: "YoungCollectionModel", dependencies: ["ModelKit"], swiftSettings: optimized),
         .testTarget(name: "RelocationModelTests", dependencies: ["RelocationModel"]),
         .testTarget(name: "YoungCollectionModelTests", dependencies: ["YoungCollectionModel"]),
+        // Module 8c: the save's hold on the scheduler (docs/models/save-hold.md).
+        .target(name: "SaveHoldModel", dependencies: ["ModelKit"], swiftSettings: optimized),
+        .testTarget(name: "SaveHoldModelTests", dependencies: ["SaveHoldModel"]),
     ]
 )
