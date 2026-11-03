@@ -609,7 +609,15 @@ warnings).
 
 ## Hot-path check
 
-HOTPATH
+`just arc-check` on the final code: 135 functions, zero
+`swift_retain`/`swift_release`; `interpret` 1056 instructions (module 8a:
+1056), one indirect branch, one jump table. 8b put nothing new on the
+interpreter's paths: the new primitives (`kernelPrimitive`, which builds
+an event's JSON in Swift arrays) are out of line behind the primitive
+table's one call and not on the list; `Machine.intern` and
+`stringPrimitive`, which are, gained the weak read barrier's call and stay
+free of ARC. The aligned builds' `interpret` is the same code as the
+starting commit's, instruction for instruction (Measurements).
 
 ## Not done
 
@@ -632,7 +640,34 @@ HOTPATH
 
 ## Gates
 
-GATES
+On the final code commit (`f92dd1b`; the commit after it adds only this
+table), the whole sequence once more, on the Mac mini (M2 Pro) with the
+swift.org 6.4.2 toolchain, every output in a file:
+
+| gate | result |
+|---|---|
+| `swift test` | 300 + 20 passed, 95 + 16 s |
+| under load (12 busy loops) | 300 + 20 passed, 124 + 19 s |
+| ThreadSanitizer | 300 + 20 passed, 0 reports, 377 + 402 s |
+| ThreadSanitizer under load | 300 + 20 passed, 0 reports, 557 + 465 s |
+| `just ios-check` | 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release, `interpret` 1056 instructions, one jump table |
+| `just golden` | 12 of 12 checksums (9 kasm, 3 Smalltalk) |
+| `just test-release` | 300 + 20 passed |
+| `just model-check` | 28 + 15 passed |
+| `just soak` | passed |
+| `just fuzz kasm 600` | libFuzzer, 2.56 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer, 7.72 million runs, no crash |
+| `just fuzz syntax 600` | libFuzzer, 1.90 million runs, no crash |
+| clean build | 0 warnings |
+
+(300 is `KajoVMTests`, 20 `KajoCompilerTests`, whose kernel-image suite
+runs the kernel's 126 SUnit tests.) Two earlier full runs each found
+something the gates exist for: on `2704529`, `ios-check` failed (the
+recipe lacked `-package-name`) and the syntax fuzzer ran out of memory
+(the compiler's reference cycle), both fixed in `62fa9d1`; on `62fa9d1`,
+the snapshot fuzzer crashed after 40 s (the nil-object root, a module 1
+bug as old as the starting commit), fixed in `f92dd1b`.
 
 ## Commands
 
