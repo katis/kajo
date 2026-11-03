@@ -133,7 +133,11 @@ final class FakeMain: @unchecked Sendable {
         let st = rt.vm.runMain(budgetNs: 1_000_000)
         // CPU, not wall time: under load the OS deschedules the thread for
         // tens of ms (AGENTS.md: a wall-clock assertion fails under load).
-        #expect(st.cpuNs &- st.collectorNs < 20_000_000)
+        // Under ThreadSanitizer with the whole suite running alongside, the
+        // 1024 polls between budget checks cost tens of ms of CPU (24 and
+        // 28 ms seen; alone the test passes with the 20 ms bound on every
+        // run), so the sanitizer gets a bound of its own.
+        #expect(st.cpuNs &- st.collectorNs < (underThreadSanitizer ? 100_000_000 : 20_000_000))
         turns += 1
         usleep(2000)
     }

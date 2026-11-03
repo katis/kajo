@@ -266,8 +266,17 @@ extension ObjectMemory {
         var issues = Issues()
         var e: UInt64 = 1
         while e < L.highWater {
-            if !EntryState.isFree(stateWord(e &<< 4)), Header(raw: headerWord(e &<< 4)).isFramePinned {
-                issues.fail("entry \(e) carries a frame pin")
+            if !EntryState.isFree(stateWord(e &<< 4)) {
+                let hd = Header(raw: headerWord(e &<< 4))
+                if hd.isFramePinned { issues.fail("entry \(e) carries a frame pin") }
+                // A snapshot follows a promote-all: no young header, no
+                // deferred entry free. The heap verifier skips a deferred
+                // free's body (it may be reused), so one here would hide a
+                // body offset outside the heap from it and the marker would
+                // read it (the snapshot fuzzer found that with one bit).
+                if hd.isYoung || hd.isDeferredFree {
+                    issues.fail("entry \(e) is young or a deferred free (header 0x\(String(hd.raw, radix: 16)))")
+                }
             }
             e &+= 1
         }

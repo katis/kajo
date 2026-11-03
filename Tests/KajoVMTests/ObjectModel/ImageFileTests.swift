@@ -218,11 +218,14 @@ private func theImageLoaderRejects(_ c: Corruption) throws {
 
 /// Regressions found by `just fuzz snapshot`: each loads cleanly or is
 /// refused, never traps.
-@Test(arguments: ["crash-wellknown-name"])
-func fuzzFoundImagesAreRefused(_ name: String) throws {
-    // A Character where a well-known class's name Symbol was (one bit):
-    // the loader read its bytes as an object's (signal 11 in release).
+@Test(arguments: ["crash-wellknown-name", "crash-marker-offset"])
+func fuzzFoundInputsNeverTrap(_ name: String) throws {
+    // crash-wellknown-name: a Character where a well-known class's name
+    // Symbol was (one bit): the loader read its bytes as an object's
+    // (signal 11 in release). crash-marker-offset: a snapshot whose entry
+    // 52 has bit 48 set in its state word (one bit): the heap verifier
+    // passed it and the marker read the body at that offset (signal 11).
     let url = URL(fileURLWithPath: "\(fixturesDir)/fuzz/snapshot/\(name).img")
     let b = [UInt8](try Data(contentsOf: url))
-    #expect(!FuzzEntry.image(b))
+    #expect(!FuzzEntry.snapshotOrImage(b))
 }
