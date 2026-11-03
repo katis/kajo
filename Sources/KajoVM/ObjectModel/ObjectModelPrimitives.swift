@@ -30,7 +30,7 @@ enum ObjectModelPrimitives {
         (60, "Float +", 1), (61, "Float -", 1), (62, "Float *", 1), (63, "Float /", 1), (64, "Float <", 1),
         (65, "Float >", 1), (66, "Float <=", 1), (67, "Float >=", 1), (68, "Float =", 1), (69, "Float ~=", 1),
         (70, "truncated", 0), (71, "fractionPart", 0), (72, "exponent", 0), (73, "timesTwoPower:", 1), (74, "sqrt", 0),
-        (76, "Character value", 0), (77, "Character value:", 1),
+        (76, "Character value", 0), (77, "Character value: / asCharacter", 1),
         (80, "value", 0), (81, "value:", 1), (82, "value:value:", 2), (83, "value:value:value:", 3),
         (84, "valueWithArguments:", 1), (86, "perform:", 1), (87, "perform:with:", 2), (88, "perform:with:with:", 3),
         (89, "perform:withArguments:", 2),
@@ -88,9 +88,12 @@ func objectModelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         }
     case 76: return c.argc == 0 && c.receiver.isCharacter ? Oop(smallInteger: Int64(c.receiver.characterValue)) : .none
     case 77:
-        guard c.argc == 1, c.arg0.isSmallInteger, c.arg0.smallIntegerValue >= 0,
-              Oop.isScalar(UInt64(c.arg0.smallIntegerValue)) else { return .none }
-        return Oop(character: UInt32(c.arg0.smallIntegerValue))
+        // `Character value: n` (any receiver), or `n asCharacter`
+        let v = c.argc == 1 ? c.arg0 : c.receiver
+        guard c.argc <= 1, v.isSmallInteger, v.smallIntegerValue >= 0, Oop.isScalar(UInt64(v.smallIntegerValue)) else {
+            return .none
+        }
+        return Oop(character: UInt32(v.smallIntegerValue))
     case 90:
         guard c.argc == 1, c.arg0.isObject, m.om.classIndex(of: c.arg0) == WellKnown.symbol else { return .none }
         let found = lookupMethod(m.om, nilObject: m.nilObject, classIndex: m.classIndex(of: c.receiver), selector: c.arg0)

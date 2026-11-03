@@ -173,9 +173,12 @@ func theParserRejects(_ src: String, _ kind: LoadError.Kind) {
 }
 
 @Test func tooManyLiteralsAreRejected() {
-    let body = (0..<257).map { "push_lit \($0 + 1000)\npop" }.joined(separator: "\n") + "\nreturn_self"
+    // Module 8: two-byte literal indices with the ext prefix, up to the
+    // literal Array's block-sized limit.
+    let n = LoaderLimits().maxLiterals
+    let body = (0...n).map { "push_lit \($0 + 1000)\npop" }.joined(separator: "\n") + "\nreturn_self"
     #expect(rejection(method(body)) == .tooManyLiterals)
-    let ok = (0..<256).map { "push_lit \($0 + 1000)\npop" }.joined(separator: "\n") + "\nreturn_self"
+    let ok = (0..<n).map { "push_lit \($0 + 1000)\npop" }.joined(separator: "\n") + "\nreturn_self"
     #expect(rejection(method(ok)) == nil)
 }
 

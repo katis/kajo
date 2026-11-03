@@ -56,8 +56,9 @@ struct LoaderLimits: Sendable {
     var maxMethodsPerClass = 512
     /// A method's bytecodes are one byte object, at most a block.
     var maxMethodBytes = Header.maxBytes
-    /// Literal indices are one byte.
-    var maxLiterals = 256
+    /// Literal indices are one byte, two with the `ext` prefix; the literal
+    /// Array fits a block.
+    var maxLiterals = Header.maxSlots
     /// Arguments plus temps; temp indices are one byte.
     var maxTemps = 256
     /// Operand-stack words one activation may use.

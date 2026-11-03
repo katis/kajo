@@ -13,7 +13,8 @@ final class Runtime {
 
     init(_ src: String, background: Int, heapBlocks: Int = 2048, entries: Int = 1 << 20, sliceMs: Double = 5,
          pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true, pinsForGood: Bool = true,
-         configure: (inout VMConfig) -> Void = { _ in }, before: (Image) -> Void = { _ in }) throws {
+         configure: (inout VMConfig) -> Void = { _ in }, switches: TestSwitches = TestSwitches(),
+         before: (Image) -> Void = { _ in }) throws {
         var vc = VMConfig()
         vc.backgroundWorkers = background
         vc.sliceNs = UInt64(sliceMs * 1e6)
@@ -29,6 +30,7 @@ final class Runtime {
         c.stress = stress
         c.verify = verify
         c.onVerifyFailure = .record
+        c.testSwitches = switches
         image = try Image(memory: ObjectMemory(c), pinsForGood: pinsForGood)
         before(image)
         try image.load(["prelude", "lib", "processes", "nursery"].map { (file: "\($0).kasm", text: kernel($0)) }
