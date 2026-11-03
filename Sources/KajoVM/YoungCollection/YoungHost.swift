@@ -265,6 +265,13 @@ extension VM {
         _ = unsafe host { w in unsafe stopWorld(state, w, retry: true) { stop in unsafe verifyYoungInStop(state, y, stop) } }
     }
 
+    /// Test: stop requesters waiting for every young collection to end.
+    var stopsWanted: Int {
+        unsafe pthread_mutex_lock(state.pointee.safepointLock)
+        defer { unsafe pthread_mutex_unlock(state.pointee.safepointLock) }
+        return unsafe state.pointee.safepoint.pointee.stwWanted
+    }
+
     /// Test: is worker `i` inside the VM?
     func isInside(worker i: Int) -> Bool {
         unsafe pthread_mutex_lock(state.pointee.safepointLock)

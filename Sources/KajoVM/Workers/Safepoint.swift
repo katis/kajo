@@ -161,6 +161,10 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe sp.pointee.stopper = w.pointee.index
     unsafe sp.pointee.lastParker = -1
     unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .relaxed)
+    // Module 7: participants blocked in a wait inside the VM (`waitServicing`:
+    // an opener waiting for `stwWanted`, a collector, an eden wait) must wake
+    // to park, or the stop waits for them forever.
+    unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     while unsafe sp.pointee.parked + 1 < sp.pointee.active {
         unsafe pthread_cond_wait(vm.pointee.safepointCond, vm.pointee.safepointLock)
     }

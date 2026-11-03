@@ -664,3 +664,50 @@ private func youngRootAtSnapshot(scan: Bool) throws -> UInt64 {
     rt.noFailures()
     rt.stop()
 }
+
+// MARK: - a stop and an opener waiting for it
+
+/// Worker 1 (the test thread) collects; during it (hook point 1) a host
+/// thread asks for a stop (it waits for the collection: `stwWanted`) and a
+/// thread acting as worker 2 runs a Process whose `scavenge` opens a
+/// collection, which waits while the stop is wanted. When worker 1's
+/// collection ends the stop is requested: worker 2, blocked inside the VM,
+/// must be woken to park, or the stop waits for it forever. The suite hung
+/// that way once (a random program, the marker's final mark against two
+/// openers): the stop's request now broadcasts. The 50 ms sleep only makes
+/// the interleaving likely; the assertions do not depend on it.
+@Test func aStopWakesAnOpenerThatWaitsForIt() throws {
+    let hooks = YoungHooks()
+    let rt = try youngRuntime(.local, src: youngSrc + """
+    method UndefinedObject scavengeNow temps=0
+      push_nil
+      send scavenge 0
+      pop
+      push_int 7
+      return_top
+    end
+
+    """) { c in
+        hooks.install(&c.young.testSwitches)
+        c.young.verify = false  // no stop of worker 1's own after its collection
+    }
+    let vm = rt.vm
+    let p = rt.spawn("scavengeNow")
+    let stopped = Flag(), ran = Flag()
+    var r: TestThread? = nil, b: TestThread? = nil
+    hooks.set(1) { k in
+        guard k == 1 else { return }
+        r = TestThread { vm.withWorldStopped {}; stopped.set() }
+        #expect(eventually { vm.stopsWanted == 1 })
+        b = TestThread { _ = vm.runOneSlice(worker: 2); ran.set() }
+        usleep(50_000)
+    }
+    vm.collectYoung(worker: 1)
+    hooks.set(1, nil)
+    #expect(eventually(30) { stopped.isSet && ran.isSet })
+    r?.join()
+    b?.join()
+    #expect(rt.result(p) == 7)
+    #expect(rt.verifierFailures == 0)
+    rt.stop()
+}

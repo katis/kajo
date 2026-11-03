@@ -381,6 +381,9 @@ func waitForCollectionsLocked(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
     unsafe sp.pointee.stwWanted += 1
     unsafe waitServicing(vm, w) { unsafe sp.pointee.ycActive > 0 && !sp.pointee.requested }
     unsafe sp.pointee.stwWanted -= 1
+    // Openers wait while a stop is wanted: wake them (they wait again if
+    // another requester still wants one, or park in this stop).
+    unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     if unsafe isRoundParticipant(vm, w) { unsafe y.counters(w.pointee.index).pointee.drainWaitNs &+= nanoseconds() &- t0 }
     return unsafe !sp.pointee.requested
 }
