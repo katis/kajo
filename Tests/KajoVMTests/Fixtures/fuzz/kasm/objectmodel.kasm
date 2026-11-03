@@ -1,0 +1,332 @@
+; Module 8's test kernel: the primitives of ADR 0009 and, in kasm, the few
+; kernel methods the VM's unwinding and signaling protocol needs
+; (ensure:, ifCurtailed:-less unwinding through resume:through:, on:do:,
+; signal, return:, resume:). The real kernel is 8b's, in Smalltalk; this
+; file is what the VM tests run against. Loaded after prelude.kasm.
+
+; --- numbers
+method SmallInteger + temps=0 prim=40
+end
+method SmallInteger - temps=0 prim=41
+end
+method SmallInteger * temps=0 prim=42
+end
+method SmallInteger / temps=0 prim=43
+end
+method SmallInteger quo: temps=0 prim=46
+end
+method SmallInteger bitShift: temps=0 prim=57
+end
+method SmallInteger asFloat temps=0 prim=59
+end
+method LargePositiveInteger + temps=0 prim=40
+end
+method LargePositiveInteger - temps=0 prim=41
+end
+method LargePositiveInteger * temps=0 prim=42
+end
+method LargePositiveInteger // temps=0 prim=44
+end
+method LargePositiveInteger \\ temps=0 prim=45
+end
+method LargePositiveInteger = temps=0 prim=52
+end
+method LargePositiveInteger < temps=0 prim=48
+end
+method LargePositiveInteger bitShift: temps=0 prim=57
+end
+method LargePositiveInteger negated temps=0 prim=58
+end
+method Float + temps=0 prim=60
+end
+method Float - temps=0 prim=61
+end
+method Float * temps=0 prim=62
+end
+method Float / temps=0 prim=63
+end
+method Float < temps=0 prim=64
+end
+method Float = temps=0 prim=68
+end
+method Float truncated temps=0 prim=70
+end
+method Float sqrt temps=0 prim=74
+end
+method Character value temps=0 prim=76
+end
+method Object asCharacter temps=0 prim=77
+end
+
+; --- closures and sends
+method BlockClosure value temps=0 prim=80
+end
+method BlockClosure value: temps=0 prim=81
+end
+method BlockClosure value:value: temps=0 prim=82
+end
+method BlockClosure valueWithArguments: temps=0 prim=84
+end
+method BlockClosure numArgs temps=0 prim=112
+end
+method Object perform: temps=0 prim=86
+end
+method Object perform:with: temps=0 prim=87
+end
+method Object perform:with:with: temps=0 prim=88
+end
+method Object perform:withArguments: temps=0 prim=89
+end
+method Object respondsTo: temps=0 prim=90
+end
+method Object instVarAt: temps=0 prim=91
+end
+method Object instVarAt:put: temps=0 prim=92
+end
+method Object setReadOnly: temps=0 prim=93
+end
+method Object isReadOnly temps=0 prim=94
+end
+method Object basicSize temps=0 prim=95
+end
+method Object shallowCopy temps=0 prim=96
+end
+method Class addSelector:withMethod: temps=0 prim=97
+end
+method Class removeSelector: temps=0 prim=98
+end
+method Object replaceFrom:to:with:startingAt: temps=0 prim=38
+end
+
+; --- Contexts
+method Context sender temps=0 prim=100
+end
+method Context tempAt: temps=0 prim=101
+end
+method Context tempAt:put: temps=0 prim=102
+end
+method Context pc temps=0 prim=103
+end
+method Context method temps=0 prim=104
+end
+method Context receiver temps=0 prim=105
+end
+method Context isDead temps=0 prim=107
+end
+method Context terminateTo: temps=0 prim=108
+end
+method Context findNextUnwindContextUpTo: temps=0 prim=109
+end
+method Context findNextHandlerContextStarting temps=0 prim=110
+end
+method Context size temps=0 prim=111
+end
+
+; --- Strings
+method String compare: temps=0 prim=120
+end
+method String sameBytesAs: temps=0 prim=121
+end
+method String hash temps=0 prim=122
+end
+method String , temps=0 prim=123
+end
+method String scalarAt: temps=0 prim=124
+end
+method String isBoundary: temps=0 prim=125
+end
+method String scalarCount temps=0 prim=126
+end
+method String copyFrom:to: temps=0 prim=127
+end
+method ByteArray encode:at: temps=0 prim=128
+end
+method String asSymbol temps=0 prim=129
+end
+method Object asStringValidating temps=0 prim=130
+end
+method Object asStringRepairing temps=0 prim=131
+end
+method Object byteAt: temps=0 prim=132
+end
+method Object byteSize temps=0 prim=133
+end
+method String indexOfSubstring:startingAt: temps=0 prim=134
+end
+method String scalarSizeAt: temps=0 prim=136
+end
+method Symbol class lookup: temps=0 prim=135
+end
+
+; --- unwinding (Smalltalk-80 / Squeak's protocol over the VM's primitives)
+
+; aBlock ensure: unwindBlock. temp 0 the unwind block (tempAt: 1), temp 1
+; complete (tempAt: 2), temp 2 the result.
+method BlockClosure ensure: temps=2 unwind
+  push_self
+  send value 0
+  store_temp 2
+  push_temp 1
+  is_nil
+  jump_if_false done
+  push_true
+  store_temp 1
+  push_temp 0
+  send value 0
+  pop
+done:
+  push_temp 2
+  return_top
+end
+
+; The VM sends this to the home Context of a non-local return that would
+; cross an unwind mark: return the value to the home's sender, running the
+; unwind blocks on the way.
+method Context aboutToReturn:through: temps=0
+  push_self
+  send sender 0
+  push_temp 0
+  push_temp 1
+  send resume:through: 2
+  return_top
+end
+
+; Unwind thisContext to self, running each pending unwind block from
+; firstUnwind on, and answer value as the result of self's last send.
+; temps: 0 value, 1 firstUnwind, 2 ctxt, 3 unwindBlock
+method Context resume:through: temps=2
+  push_temp 1
+  store_temp 2
+loop:
+  push_temp 2
+  is_nil
+  jump_if_true finish
+  push_temp 2
+  push_int 2
+  send tempAt: 1
+  is_nil
+  jump_if_false next
+  push_temp 2
+  push_int 2
+  push_true
+  send tempAt:put: 2
+  pop
+  push_temp 2
+  push_int 1
+  send tempAt: 1
+  store_temp 3
+  push_this_context
+  push_temp 2
+  send terminateTo: 1
+  pop
+  push_temp 3
+  send value 0
+  pop
+next:
+  push_temp 2
+  push_self
+  send findNextUnwindContextUpTo: 1
+  store_temp 2
+  jump loop
+finish:
+  push_this_context
+  push_self
+  send terminateTo: 1
+  pop
+  push_temp 0
+  return_top
+end
+
+; Return value from self to its sender, unwinding.
+method Context return: temps=0
+  push_self
+  send sender 0
+  push_temp 0
+  push_this_context
+  push_self
+  send findNextUnwindContextUpTo: 1
+  send resume:through: 2
+  return_top
+end
+
+; --- exceptions: 0 signalContext, 1 handlerContext, 2 tag
+class Exc Object 3
+class ExcA Exc 3
+class ExcB Exc 3
+
+; protected on: anExceptionClass do: aHandlerBlock (handler mark).
+; temps: 0 exception class (tempAt: 1), 1 handler block (tempAt: 2)
+method BlockClosure on:do: temps=0 handler
+  push_self
+  send value 0
+  return_top
+end
+
+method Exc tag temps=0
+  push_ivar 2
+  return_top
+end
+
+method Exc tag: temps=0
+  push_temp 0
+  store_ivar 2
+  return_self
+end
+
+; signal: the handler block runs on top of the signaling stack; falling
+; off its end returns its value from on:do:. Unhandled: nil.
+; temps: 0 ctx, 1 handler value
+method Exc signal temps=2
+  push_this_context
+  store_ivar 0
+  push_this_context
+  send sender 0
+  send findNextHandlerContextStarting 0
+  store_temp 0
+loop:
+  push_temp 0
+  is_nil
+  jump_if_true unhandled
+  push_temp 0
+  push_int 1
+  send tempAt: 1
+  push_self
+  class_of
+  identical
+  jump_if_false next
+  push_temp 0
+  store_ivar 1
+  push_temp 0
+  push_int 2
+  send tempAt: 1
+  push_self
+  send value: 1
+  store_temp 1
+  push_self
+  push_temp 1
+  send return: 1
+  return_top
+next:
+  push_temp 0
+  send sender 0
+  send findNextHandlerContextStarting 0
+  store_temp 0
+  jump loop
+unhandled:
+  push_nil
+  return_top
+end
+
+method Exc return: temps=0
+  push_ivar 1
+  push_temp 0
+  send return: 1
+  return_top
+end
+
+method Exc resume: temps=0
+  push_ivar 0
+  push_temp 0
+  send return: 1
+  return_top
+end

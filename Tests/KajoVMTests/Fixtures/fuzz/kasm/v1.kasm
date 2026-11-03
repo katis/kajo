@@ -1,0 +1,104 @@
+; Fuzz seed: bytecode set v1 (blocks, non-local return, temp vectors,
+; thisContext, super, special sends, pragmas, literals, formats).
+class Shape Object 2 fixed meta=1
+class Square Shape 2 meta=1
+class Buf Object 0 words16
+class Weak Object 1 weak
+class Eph Object 2 ephemeron
+method Shape class make temps=0
+  pragma category: 'instance creation'
+  push_self
+  send basicNew 0
+  return_top
+end
+method Shape area temps=0
+  push_ivar 0
+  push_ivar 1
+  mul
+  return_top
+end
+method Square area temps=1
+  push_self
+  send_super area 0
+  store_temp 0
+  push_temp 0
+  push_int 0
+  ne
+  jump_if_false z
+  push_temp 0
+  return_top
+z:
+  push_lit 2.5
+  push_lit $é
+  push_lit 'añ€😀'
+  push_lit 123456789012345678901234567890
+  pop
+  pop
+  pop
+  return_top
+end
+method Shape each: temps=1 unwind
+  push_new_array 2
+  store_temp 1
+  push_int 0
+  store_tv_slot 0 1
+  push_temp 1
+  push_temp 0
+  push_closure outer 2
+  value
+  pop
+  push_tv_slot 0 1
+  return_top
+block outer args=0 copied=2 temps=1
+  push_temp 0
+  push_closure inner 1
+  store_temp 2
+  push_temp 2
+  push_int 3
+  value1
+  push_this_context
+  pop
+  block_return
+block inner args=1 copied=1 temps=0
+  push_tv_slot 0 1
+  push_temp 0
+  add
+  store_tv_slot 0 1
+  push_temp 0
+  push_int 2
+  gt
+  jump_if_false no
+  push_temp 0
+  nonlocal_return
+no:
+  push_nil
+  block_return
+end
+method Shape probe: temps=0 handler
+  push_temp 0
+  is_nil
+  push_temp 0
+  not_nil
+  identical
+  push_temp 0
+  class_of
+  not_identical
+  push_lit @Array
+  push_int 2
+  send new: 1
+  dup
+  size
+  at
+  push_int 7
+  push_int 2
+  int_div
+  push_int 7
+  push_int 2
+  mod
+  div
+  push_int 1
+  value2
+  pop
+  pop
+  return_self
+end
