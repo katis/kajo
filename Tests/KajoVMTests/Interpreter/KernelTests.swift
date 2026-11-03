@@ -6,6 +6,7 @@ import Testing
 /// large `n` is a scaled-down run with the same code paths.
 let scaledWorkers: [String: Int64] = [
     "arith": 8000, "fib": 96, "sends": 40000, "alloc": 320, "ivars": 8000, "walk": 1024,
+    "closures": 6000, "floats": 30000,
 ]
 
 private func kernelHarness(_ name: String, stress: StressFlags = [], heapBlocks: Int = 2048, entries: Int = 1 << 20,

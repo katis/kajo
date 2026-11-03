@@ -31,7 +31,7 @@ func pushClosure(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMuta
     }
     let c = m.allocate(WellKnown.blockClosure, slots: ClosureLayout.size + copied, keeping: home)
     if c == .none { return unsafe restoreLeaving(s) }
-    base = unsafe s.pointee.stackBase
+    unsafe base = s.pointee.stackBase
     let top = unsafe s.pointee.regs.sp
     let f = unsafe s.pointee.regs.fp
     m.store(c, ClosureLayout.method, block, .closureSlot)

@@ -1,0 +1,57 @@
+; floats (module 8): SmallFloat arithmetic on the special sends. TOTAL
+; iterations split between workers; x := x * 0.999 + (i * 0.25) with a
+; comparison per step, mixed SmallInteger and SmallFloat operands, every
+; value a SmallFloat (no boxing). Checksum: x truncated.
+method SmallInteger asFloat temps=0 prim=59
+end
+method SmallFloat truncated temps=0 prim=70
+end
+
+; args: t0 = w, t1 = n. temps: t2 = i, t3 = end, t4 = x, t5 = chunk
+method UndefinedObject run:of: temps=4
+  push_lit 30000000
+  push_temp 1
+  send // 1
+  store_temp 5
+  push_temp 0
+  push_temp 5
+  mul
+  store_temp 2
+  push_temp 2
+  push_temp 5
+  add
+  store_temp 3
+  push_lit 0.0
+  store_temp 4
+loop:
+  push_temp 2
+  push_temp 3
+  lt
+  jump_if_false done
+  push_temp 4
+  push_lit 0.999
+  mul
+  push_temp 2
+  push_lit 0.25
+  mul
+  add
+  dup
+  store_temp 4
+  push_lit 1.0e12
+  lt
+  jump_if_true next
+  push_temp 4
+  push_lit 0.5
+  mul
+  store_temp 4
+next:
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump loop
+done:
+  push_temp 4
+  send truncated 0
+  return_top
+end

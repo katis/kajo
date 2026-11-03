@@ -1,0 +1,114 @@
+; closures (module 8): block-heavy. REPS repetitions split between workers;
+; each runs `1 to: 1000 do: [:i | sum := sum + (i \\ 7)]` through a real
+; (not inlined) from:to:do: loop calling a closure over a temp vector, then
+; a detect that returns non-locally from depth 2 (its home Context is
+; materialized, the frames above it cut). Checksum: the sum over the reps
+; of 2997 (the inner sum) plus (rep \\ 1000) + 1 (the detected value).
+
+; nil from: a to: b do: aBlock. t0 a, t1 b, t2 aBlock, t3 i
+method UndefinedObject from:to:do: temps=1
+  push_temp 0
+  store_temp 3
+loop:
+  push_temp 3
+  push_temp 1
+  le
+  jump_if_false done
+  push_temp 2
+  push_temp 3
+  value1
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump loop
+done:
+  push_self
+  return_top
+end
+
+; nil sumMods: the inner sum over a temp vector. t0 tv
+method UndefinedObject sumMods temps=1
+  push_new_array 1
+  store_temp 0
+  push_int 0
+  store_tv_slot 0 0
+  push_nil
+  push_int 1
+  push_lit 1000
+  push_temp 0
+  push_closure body 1
+  send from:to:do: 3
+  pop
+  push_tv_slot 0 0
+  return_top
+block body args=1 copied=1 temps=0
+  push_tv_slot 0 1
+  push_temp 0
+  push_int 7
+  send \\ 1
+  add
+  store_tv_slot 0 1
+  push_nil
+  block_return
+end
+
+; nil detect: target -> target, by a non-local return from the block
+method UndefinedObject detect: temps=0
+  push_nil
+  push_int 1
+  push_lit 1000
+  push_temp 0
+  push_closure test 1
+  send from:to:do: 3
+  pop
+  push_int 0
+  return_top
+block test args=1 copied=1 temps=0
+  push_temp 0
+  push_temp 1
+  eq
+  jump_if_false no
+  push_temp 0
+  nonlocal_return
+no:
+  push_nil
+  block_return
+end
+
+; args: t0 = w, t1 = n. temps: t2 = reps, t3 = sum
+method UndefinedObject run:of: temps=2
+  push_lit 60000
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_int 0
+  store_temp 3
+loop:
+  push_temp 2
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 3
+  push_nil
+  send sumMods 0
+  add
+  push_nil
+  push_temp 2
+  push_lit 1000
+  send \\ 1
+  push_int 1
+  add
+  send detect: 1
+  add
+  store_temp 3
+  push_temp 2
+  push_int 1
+  sub
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  return_top
+end

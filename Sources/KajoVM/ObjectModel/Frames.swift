@@ -83,11 +83,11 @@ extension Machine {
         var base = unsafe state.pointee.stackBase
         let w = unsafe base[hdr + Frame.context]
         if w & Oop.objectTagMask == 0 && w != nilObject.raw { return Oop(raw: w) }
-        let fp = frameFP(om, base, hdr)
+        let fp = unsafe frameFP(om, base, hdr)
         let n = hdr - fp - 1
         let ctx = allocate(WellKnown.context, slots: ContextLayout.size + n)
         if ctx == .none { return .none }
-        base = unsafe state.pointee.stackBase
+        unsafe base = state.pointee.stackBase
         let method = unsafe base[hdr]
         let isBlock = methodFlags(om, method) & MethodFlags.block != 0
         om.store(ctx, ContextLayout.frame, Oop(smallInteger: Int64(hdr)))
@@ -126,13 +126,13 @@ extension Machine {
         var h = top
         while h > 0 && h != stop {
             let w = unsafe base[h + Frame.context]
-            let fp = frameFP(om, base, h)
+            let fp = unsafe frameFP(om, base, h)
             if w & Oop.objectTagMask == 0 && w != nilObject.raw {
                 detach(Oop(raw: w), fp: fp, hdr: h, pc: framePC(h))
             } else {
                 unsafe base[h + Frame.context] = nilObject.raw
             }
-            guard let c = callerHeader(base, h) else { break }
+            guard let c = unsafe callerHeader(base, h) else { break }
             h = c
         }
     }
@@ -146,7 +146,7 @@ extension Machine {
         // The callee of h: walk down from the current frame.
         var k = r.hdr
         while k > 0 {
-            guard let c = callerHeader(base, k) else { break }
+            guard let c = unsafe callerHeader(base, k) else { break }
             if c == h { return unsafe untagged(base[k + Frame.callerPC]) }
             k = c
         }
@@ -181,7 +181,7 @@ func returnSlow(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutab
         // pause, so the registers stay as they are.
         unsafe save(s, pc, sp, fp, hdr)
         let m = unsafe Machine(state: s)
-        marker = m.detach(Oop(raw: w), fp: fp - base, hdr: hdr - base, pc: unsafe s.pointee.regs.pc &- 1)
+        marker = unsafe m.detach(Oop(raw: w), fp: fp - base, hdr: hdr - base, pc: s.pointee.regs.pc &- 1)
     }
     unsafe hdr[Frame.context] = s.pointee.nilObject.raw
     let r = unsafe plainReturn(s, om, regsAt(s, pc, sp, fp, hdr), v)
@@ -278,7 +278,7 @@ func nonLocalReturn(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeM
     // The first unwind-marked frame between the block's caller and the home.
     var k = unsafe hdr - base
     var unwind = 0
-    while let c = callerHeader(base, k), c != h, !om.config.testSwitches.skipUnwindMarks {
+    while let c = unsafe callerHeader(base, k), c != h, !om.config.testSwitches.skipUnwindMarks {
         if methodFlags(om, unsafe base[c]) & MethodFlags.unwind != 0 {
             unwind = c
             break
@@ -289,8 +289,8 @@ func nonLocalReturn(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeM
         unsafe s.pointee.counters.nonLocalReturns &+= 1
         let hpc = m.framePC(h)
         m.detachFrames(from: unsafe hdr - base, downTo: h)
-        let hfp = frameFP(om, base, h)
-        let code = om.bytesBase(om.load(Oop(raw: unsafe base[h]), MethodLayout.bytecodes))
+        let hfp = unsafe frameFP(om, base, h)
+        let code = unsafe om.bytesBase(om.load(Oop(raw: base[h]), MethodLayout.bytecodes))
         let r = unsafe regsAt(s, code + hpc, base + h + Frame.context, base + hfp, base + h)
         return unsafe doReturn(s, om, r, v)
     }
@@ -370,7 +370,7 @@ func pushThisContext(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
 @inline(never)
 func contextPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     let om = m.om
-    let s = m.state
+    let s = unsafe m.state
     if n >= 112 {
         guard c.receiver.isObject, om.classIndex(of: c.receiver) == WellKnown.blockClosure else { return .none }
         switch n {
@@ -392,13 +392,13 @@ func contextPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     switch n {
     case 100:
         guard c.argc == 0 else { return .none }
-        guard let h = live, let caller = callerHeader(base, h) else { return m.nilObject }
+        guard let h = live, let caller = unsafe callerHeader(base, h) else { return m.nilObject }
         return m.materialize(caller)
     case 101, 102:
         guard c.argc == (n == 102 ? 2 : 1), c.arg0.isSmallInteger else { return .none }
         let i = Int(c.arg0.smallIntegerValue)
         if let h = live {
-            let fp = frameFP(om, base, h)
+            let fp = unsafe frameFP(om, base, h)
             let isBlock = methodFlags(om, unsafe base[h]) & MethodFlags.block != 0
             let count = h - fp - 1 - (isBlock ? 1 : 0)
             guard i >= 1, i <= count else { return .none }
@@ -436,7 +436,7 @@ func contextPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         let stop = c.arg0 == m.nilObject ? 0 : unsafe liveFrame(s, c.arg0)
         guard let stop else { return .none }
         var k = h
-        while let caller = callerHeader(base, k), caller != stop {
+        while let caller = unsafe callerHeader(base, k), caller != stop {
             if methodFlags(om, unsafe base[caller]) & MethodFlags.unwind != 0 { return m.materialize(caller) }
             k = caller
         }
@@ -446,13 +446,13 @@ func contextPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         var k: Int? = h
         while let f = k {
             if methodFlags(om, unsafe base[f]) & MethodFlags.handler != 0 { return m.materialize(f) }
-            k = callerHeader(base, f)
+            k = unsafe callerHeader(base, f)
         }
         return m.nilObject
     case 111:
         guard c.argc == 0 else { return .none }
         if let h = live {
-            let fp = frameFP(om, base, h)
+            let fp = unsafe frameFP(om, base, h)
             return Oop(smallInteger: Int64(h - fp - 1 - (methodFlags(om, unsafe base[h]) & MethodFlags.block != 0 ? 1 : 0)))
         }
         return Oop(smallInteger: Int64(om.count(of: ctx)) - Int64(ContextLayout.size))
@@ -472,17 +472,17 @@ func contextPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
 /// frame's Context and `aContext` a live frame below it.
 private func terminateTo(_ m: Machine, _ ctx: Oop, _ rh: Int, _ target: Oop) -> Oop {
     let om = m.om
-    let s = m.state
+    let s = unsafe m.state
     let base = unsafe s.pointee.stackBase
     let regs = unsafe s.pointee.regs
     guard rh == regs.hdr, let uh = unsafe liveFrame(s, target), uh < rh else { return .none }
     var d = rh
-    while let c = callerHeader(base, d), c != uh { d = c }
-    guard callerHeader(base, d) == uh else { return .none }
+    while let c = unsafe callerHeader(base, d), c != uh { d = c }
+    guard unsafe callerHeader(base, d) == uh else { return .none }
     if d == rh { return ctx }
-    let fpD = frameFP(om, base, d)
+    let fpD = unsafe frameFP(om, base, d)
     let links = unsafe (base[d + Frame.callerPC], base[d + Frame.callerFP], base[d + Frame.callerHdr])
-    if let rc = callerHeader(base, rh) { m.detachFrames(from: rc, downTo: uh) }
+    if let rc = unsafe callerHeader(base, rh) { m.detachFrames(from: rc, downTo: uh) }
     let delta = regs.fp - fpD
     let count = regs.sp - regs.fp + 1
     unsafe (base + fpD).update(from: base + regs.fp, count: count)

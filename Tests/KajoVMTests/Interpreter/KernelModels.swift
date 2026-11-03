@@ -18,8 +18,35 @@ enum KernelModel {
         case "alloc": return alloc(w, n)
         case "ivars": return ivars(w, n)
         case "walk": return walk(w, n)
+        case "closures": return closures(w, n)
+        case "floats": return floats(w, n)
         default: fatalError(name)
         }
+    }
+
+    /// Module 8's block-heavy kernel: per rep the inner sum of i \\ 7 over
+    /// 1...1000 (2997) and the detected (rep \\ 1000) + 1.
+    static func closures(_ w: Int64, _ n: Int64) -> Int64 {
+        var reps = floorDiv(60_000, n), sum: Int64 = 0
+        let inner = (1...1000).reduce(Int64(0)) { $0 + Int64($1 % 7) }
+        while reps > 0 {
+            sum += inner + reps % 1000 + 1
+            reps -= 1
+        }
+        return sum
+    }
+
+    /// Module 8's SmallFloat kernel, in IEEE doubles as the VM computes it.
+    static func floats(_ w: Int64, _ n: Int64) -> Int64 {
+        let chunk = floorDiv(30_000_000, n)
+        var x = 0.0
+        var i = w * chunk
+        while i < w * chunk + chunk {
+            x = x * 0.999 + Double(i) * 0.25
+            if !(x < 1.0e12) { x = x * 0.5 }
+            i += 1
+        }
+        return Int64(x)
     }
 
     static func fibOf(_ k: Int64) -> Int64 { k < 2 ? k : fibOf(k - 1) + fibOf(k - 2) }

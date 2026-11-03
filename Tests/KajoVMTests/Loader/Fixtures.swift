@@ -25,6 +25,9 @@ let goldenKernels: [(name: String, checksum: Int64)] = [
     ("alloc", 41_950_911),
     ("ivars", 36_383_626),
     ("walk", 9_016_009_025_388_544),
+    // module 8: computed by the Swift models (KernelModels.swift)
+    ("closures", 210_210_000),
+    ("floats", 7_499_750_000),
 ]
 
 /// The sources a kernel is loaded with: the prelude, object-representation's
