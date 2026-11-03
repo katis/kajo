@@ -242,3 +242,62 @@ holder is never re-armed. Every store a barrier's load follows is seq_cst
 or fenced. Also: the owner's new-half scan alone covers amendment 7 (the
 snoop is redundant), and the wake from a quiescent wait must store epoch 0
 like `enterVM`.
+
+## Built (module 7, 2026-11-03)
+
+Built in `Sources/KajoVM/YoungCollection/` (docs/modules/young-collection.md)
+on modules 1 to 6, with the model's findings as requirements: the policy is
+the default (the main worker's nursery offloaded to a collector thread at
+user-initiated, background workers local, the stop-the-world scavenge the
+oracle and what module 1's operations run); rounds on module 3's flag word,
+proxies for workers outside the VM and in blocking regions (the shell call
+is one), two rounds before any stack scan, drain rounds until one copies
+nothing; module 6's copy protocol for every young object, so the nursery
+region is now inside the heap's doubly mapped memory; the initial mark's
+young-root scan replaces the global scavenge; deferred entry frees owned by
+their nursery (released at a stop-the-world pause by the same owner);
+seq_cst array-copy stores and remembered-word loads; the quiescent wake's
+epoch 0; the snoop dropped. Every rule has a test that fails without it.
+
+Headless, M2 Max, five interleaved runs, medians; the main thread runs
+120 Hz frames with about a quarter of each frame in Smalltalk (`kajo run
+--main-ms`); every checksum equals the oracle's in every run:
+
+| main worker, ms per 10 s stopped for others | stop-the-world | local | offload |
+|---|--:|--:|--:|
+| storm (alloc, 8 workers) | 708 | 134 | 129 |
+| ring (fragment, 8 workers) | 2 273 | 206 | 185 |
+| share (8 workers) | 139 | 195 | 203 |
+| storm, ring, share with 1 worker | 386, 83, 10.5 | 4.1, 2.5, 2.4 | 4.7, 3.3, 2.2 |
+
+The pieces are acknowledgements of 28 to 44 µs (1 000 to 1 500 per 10 s
+under the eight-worker storm and ring); the rest is the marking cycle's
+pauses. Under heavy main-thread allocation the main worker's own
+collections cost 88 to 91 ms per 10 s locally (1.1 ms each) and 7.6 to 7.7
+ms offloaded (flips of at most 0.021 ms). Rounds: p50 0.04 ms, p99 0.3 ms
+(0.9 on the ring), max 1.4 to 4.0 ms, no single slowest participant.
+Barrier cost with no collection running against module 6, aligned builds:
+`ivars` 1.005 and 0.997, `storeheavy` 1.000 and 0.990 (one and eight
+workers); with the young bits always on (every store out of line) 1.17 and
+1.9. Idle: the collector thread and the marker used 0 ns of CPU and woke 0
+times in a parked second. The young-root scan is 2.3 to 2.7 ms with eight
+busy nurseries. `share` is the one scenario where the main thread does
+worse than under stop-the-world (195 against 139 ms per 10 s: many cheap
+collections, one acknowledgement each), as the experiment found.
+
+**For the owner: should ADRs 0004 to 0008 be accepted?** The headless
+evidence each asked for is in: 0004 (Smalltalk UI on the main thread with
+budgeted preemption) built in module 3, its turn-overrun bound holding with
+young collections (acknowledgements reported apart, every 64th slow poll
+checks the budget); 0005 (generational collection) in module 4, kept as the
+oracle and the fallback; 0006 (concurrent marking) in module 5 and 0007
+(age field, concurrent relocation) in modules 4 and 6, each with its
+measurements; 0008 here, where the main thread's stopped time under the
+storm is 5 times lower than stop-the-world and comes in tens of
+microseconds. What still waits for the shell (module 9) and the device: the
+120 Hz scenarios with AppKit and missed frames rather than a driver loop's
+stopped time, event latency, the mixed QoS policy and the collector thread
+on the phone's efficiency cores, energy, and the share case's
+acknowledgement cost on a real UI thread. Accepting them would make this
+stack the design until the shell's measurements say otherwise; keeping them
+proposed until module 9 has run on the device is the cautious reading.
