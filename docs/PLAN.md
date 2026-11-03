@@ -1,6 +1,6 @@
 # Build plan: from the experiments to `Sources/KajoVM`
 
-Status: started 2026-11-02; modules 1 to 4 built the same day, modules 5 to 7 and 8a the next; the relocation and young-collection
+Status: started 2026-11-02; modules 1 to 4 built the same day, modules 5 to 7, 8a and 8b the next; the relocation and young-collection
 models (`docs/models/`) are checked. A step or two at a time; the order below is the
 current best guess, revised as modules land. `docs/VERIFICATION.md` says how
 each module is verified; this file says what is built and in what order.
@@ -48,7 +48,7 @@ each module is verified; this file says what is built and in what order.
 | 5 | **Concurrent marking and lazy sweep** (built 2026-11-03, `docs/modules/concurrent-marking.md`; ADR 0006), marker at utility on device | concurrent-marking | module 4; schedule perturbation in place |
 | 6 | **Concurrent relocation** through the entry switch (built 2026-11-03, `docs/modules/relocation.md`; ADR 0007) | concurrent-relocation | model check of the entry state machine and post-store check (done: `docs/models/relocation.md`) |
 | 7 | **Young collection without stopping the world** (built 2026-11-03, `docs/modules/young-collection.md`) (ADR 0008), mixed QoS policy | concurrent-young, power | model check of the handshake and epoch freeing (done: `docs/models/young-collection.md`) |
-| 8 | **Kernel, compiler, image build**: Smalltalk sources under `kernel/`, a compiler in Smalltalk bootstrapped from a Swift one or from kasm, the first image | 8a (the VM side) built 2026-11-03: `docs/modules/object-model.md`; 8b (kernel sources, bootstrap compiler, image build, test harness, weak symbol table) building; 8c (Processes saved in the image, decided 2026-11-03) after it; brief `docs/modules/kernel.md` | module 3 at least |
+| 8 | **Kernel, compiler, image build**: Smalltalk sources under `kernel/`, a compiler in Smalltalk bootstrapped from a Swift one or from kasm, the first image | 8a (the VM side) built 2026-11-03: `docs/modules/object-model.md`; 8b (kernel sources, bootstrap compiler, compiler in Smalltalk, image build, test harness, weak symbol table) built 2026-11-03: `docs/modules/kernel-image.md`, with five open questions for the owner; 8c (Processes saved in the image, decided 2026-11-03) building; brief `docs/modules/kernel.md` | module 3 at least |
 | 9 | **Shells and development protocol**: macOS and iOS apps, remote development | ui-thread-scheduling's kajo-ui, device-measurement app | module 8 |
 
 Modules 1 to 3 give a VM that runs kasm programs on many workers with a

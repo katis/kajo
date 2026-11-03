@@ -638,6 +638,29 @@ starting commit's, instruction for instruction (Measurements).
   Temporal-style API later), Random, regular expressions, Bag,
   SortedCollection, LinkedList.
 
+## Open questions for the owner
+
+Each has a provisional answer the build took; the owner's answer is
+recorded here when it comes.
+
+1. Should captured, assigned temps inside inlined loop bodies get a fresh
+   temp vector per iteration (Pharo's rule), at the cost of a per-iteration
+   rule in both compilers? Provisional: one vector per real scope, shared
+   across iterations (the loop counter itself is per iteration).
+2. Are class variables wanted, or are class-side instance variables
+   enough? Provisional: none; `#classVars` is refused.
+3. Should compile warnings become an event kind in the protocol?
+   Provisional: stderr at build time.
+4. Is a primitive that makes a CompiledMethod from the Smalltalk
+   compiler's output and installs it acceptable? It would re-verify the
+   method and pin it, and it is what `Compiler evaluate:` needs.
+   Provisional: not built; the compiler compiles and compares only.
+5. May the image build stay byte-deterministic only before the kernel's
+   initialization? Initialization runs in a VM and worker placement moves
+   a few bytes (4 of about 900 000 in one comparison). Provisional: yes;
+   a test checks the build is deterministic before initialization and the
+   final image by its verifier and a load-save round trip.
+
 ## Gates
 
 On the final code commit (`f92dd1b`; the commit after it adds only this

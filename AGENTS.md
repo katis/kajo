@@ -260,8 +260,10 @@ Safety:
    computed maximum. Frames reserve that word and a guard past the stack end
    catches the next such case.
  - Class, Method and MethodDict are sealed from Smalltalk (no primitive
-   reads, writes, creation or become; no ivar access in their methods) or a
-   verified method's bytecodes could be rewritten at run time.
+   writes, creation or become; no ivar access in their methods) or a
+   verified method's bytecodes could be rewritten at run time. Slot reads
+   through `slotAt:` (primitive 117) are allowed since module 8b: the
+   kernel's reflection needs them and a read rewrites nothing.
  - A stress mode that preempts at every poll livelocks: a Process preempted
    at a send is resumed at that send and preempted again. Every slice must
    execute at least one instruction; the stress flag lets the first poll of
@@ -459,6 +461,34 @@ Safety:
    and mutation without coverage, and the first coverage-guided run found
    the second crash in 3.8 million inputs. Read the "libFuzzer build: ok"
    line before counting a fuzz gate.
+ - A loader checks every structural invariant the collector relies on, not
+   only the ones the snapshot writer could get wrong: the snapshot fuzzer's
+   third crash named a nil object no root held, the collection after
+   loading swept it while the memory still named it, and the same input
+   crashes the commit module 8b started from. The fuzzer finds old bugs
+   with new seeds; each is a loader refusal and a regression fixture.
+ - A fuzz target is also a leak test. The bootstrap compiler's Scope held
+   its Variables and each Variable its Scope, every compilation leaked, and
+   the syntax fuzzer ran out of memory after 4.5 minutes. A tree of scopes
+   has one owning direction (`unowned` back references) and a test that a
+   compilation frees them.
+ - A gate that counts warnings hides errors: `just ios-check` lacked
+   `-package-name`, every file failed to typecheck, and a check that grepped
+   for warnings read it as clean. A gate reads the exit status and the
+   error count first.
+ - An image's size follows the entry table's high-water mark, not the live
+   objects: `Smalltalk at:` rebuilt the list of all classes once per
+   recorded source, the garbage left the table's peak near 1.25 million
+   entries, and the snapshot wrote them all (16 bytes each, after a
+   collection) as a 20 MB image of 2.5 MB of objects. A build step that
+   makes much garbage runs with a nursery or collects first; 8c's image
+   saving inherits the fact.
+ - Placement decides single A/Bs even with the alignment flags: one plain
+   aligned link of module 8b was 12 to 36 percent slower on every kernel
+   with `interpret` identical instruction for instruction, while
+   `-enable-testing` aligned builds of the same commits ran at parity.
+   Before attributing a slowdown to code, diff the disassembly of the hot
+   functions; if it is identical, the number is the linker's.
 
 ## Verification
 
@@ -510,7 +540,16 @@ out of line, the hot kernels are within noise of module 7 and `storeheavy`
 is 1.07 to 1.10 from the read-only check; the owner's answers to 8a's
 questions are in the Built note: inline `class`/`isNil`/`notNil` stay,
 the read-only failure is `modificationForbiddenAt:value:`, the symbol
-table is weak (8b), and images hold Processes (module 8c)). ADRs
+table is weak (8b), and images hold Processes (module 8c); the Smalltalk
+side built in module 8b: a kernel of 123 classes and 1368 methods written
+from scratch in Tonel, a bootstrap compiler in Swift sharing kasm's
+encoder and verifier, a compiler in Smalltalk that agrees with the
+bootstrap on every method of the image, the weak symbol table, the image
+build at 2.5 MB, SUnit with the v1 NDJSON event stream and JUnit XML, and
+the Smalltalk kernels at 0.88 to 1.03 of their kasm twins; 8b left class
+variables, a method-install primitive, saved Processes (8c), Unicode
+tables and the main-thread check undone, and its five open questions in
+`docs/modules/kernel-image.md` await the owner). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -520,7 +559,8 @@ cover.
 ## Project structure
 
  * `Package.swift` is the root SwiftPM package: `KajoVM` library, `kajo`
-   headless CLI, `KajoVMTests` (Swift Testing).
+   headless CLI, `KajoCompiler` library, `KajoVMTests` and
+   `KajoCompilerTests` (Swift Testing).
  * `Sources/KajoVM/` the VM core, one directory per module:
    `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`),
    `Interpreter/` and `Loader/` (module 2, built; `docs/modules/interpreter.md`),
@@ -560,9 +600,17 @@ cover.
    family, method installation in a stop, LargeIntegers and boxed Float,
    the UTF-8 String and interned Symbol primitives, read-only bit 50 in
    every store path, stack growth by copying, pragma literals, the image
-   format and its loader; 8b, the Smalltalk side, is next), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
-   CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
-   targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
+   format and its loader; module 8b added `ObjectModel/Symbols.swift`'s
+   weak table and `ObjectModel/KernelPrimitives.swift`), `Headless.swift`
+   the public entry `kajo run` uses. `Sources/KajoCompiler/` the bootstrap
+   compiler (module 8b, built; `docs/modules/kernel-image.md`: Smalltalk
+   method syntax and Tonel files to the assembler's encoder and the one
+   bytecode verifier, the variable-layout and inlining rules at the top of
+   `Compiler.swift`, the image build, the test harness and its event
+   stream). `Sources/kajo/` the CLI (`kajo run`, `kajo build-image`,
+   `kajo test [image] [--filter] [--tag] [--junit]`); `Sources/fuzz-kasm/`,
+   `Sources/fuzz-snapshot/` and `Sources/fuzz-syntax/` the libFuzzer
+   targets (`just fuzz kasm|snapshot|syntax <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
    `check-hot-path-arc.sh` (`just arc-check`) greps the release disassembly
    of the dispatch loop, send, primitive and allocation paths for retain and
@@ -570,8 +618,12 @@ cover.
    golden`) runs the fixture kernels through `kajo run` against their
    published checksums; `just test-release` runs the suite in a release
    build with the full-size kernels.
- * `kernel/` Smalltalk sources the image is built from. The image is never
-   committed.
+ * `kernel/` Smalltalk sources the image is built from (module 8b: 123
+   Tonel class files, the kernel of `docs/modules/kernel.md` as built in
+   `docs/modules/kernel-image.md`, with its SUnit tests beside the classes;
+   `just build-image`, `just kernel-test`). The image is never committed.
+   Its compiler in Smalltalk compiles every method and is compared with the
+   bootstrap compiler's output by `CompilerTest`; it does not install yet.
  * `apps/` Xcode projects for the macOS and iOS shells, depending on the root
    package. Not created yet.
  * `experiments/` throwaway spikes with a design brief and results each.
@@ -588,4 +640,5 @@ cover.
  * `references/` contains prior art and other references we might benefit from
    in the design. Gitignored; see `references/MANIFEST.md`.
  * `justfile` has the common commands: `just build`, `just test`, `just run`,
-   `just bench`, `just ios-check`.
+   `just bench`, `just ios-check`, `just build-image`, `just kernel-test`,
+   `just fuzz <target> <seconds>`.
