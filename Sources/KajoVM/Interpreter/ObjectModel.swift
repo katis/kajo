@@ -6,9 +6,9 @@
 /// `Metaclass`. `Foo class superclass` is `Foo superclass class`, and
 /// `Object class superclass` is `Class`, so class-side lookups end in
 /// `Class`, `ClassDescription`, `Behavior` and `Object`. The well-known
-/// classes take indices 1 to 26, their metaclasses 27 to 52 (in the same
+/// classes take indices 1 to 27, their metaclasses 28 to 54 (in the same
 /// order), and the loader gives every user class two consecutive indices,
-/// the class's and its metaclass's, from 53.
+/// the class's and its metaclass's, from 55.
 enum WellKnown {
     static let smallInteger: UInt64 = 1
     static let undefinedObject: UInt64 = 2
@@ -43,8 +43,11 @@ enum WellKnown {
     static let behavior: UInt64 = 24
     static let classDescription: UInt64 = 25
     static let pragma: UInt64 = 26
+    /// Module 8b: weak indexed slots; the symbol table's buckets are its
+    /// instances (ADR 0009 section 8's weak set).
+    static let weakArray: UInt64 = 27
 
-    static let count: UInt64 = 26
+    static let count: UInt64 = 27
     static let firstUserClass: UInt64 = 2 * count + 1
 
     /// The metaclass of well-known class `i`.
@@ -99,6 +102,8 @@ enum WellKnown {
         Definition(name: "ClassDescription", index: classDescription, superclass: "Behavior",
                    format: fixed(ClassLayout.size, sealed: true)),
         Definition(name: "Pragma", index: pragma, superclass: "Object", format: fixed(PragmaLayout.size)),
+        Definition(name: "WeakArray", index: weakArray, superclass: "Object",
+                   format: ClassFormat(namedSlots: 0, kind: .variable, weak: true)),
     ]
 
     /// Name and index, in index order (module 2's form).

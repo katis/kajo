@@ -134,7 +134,7 @@ struct CacheEntry {
     var symbolTable = Oop.none
     /// Module 8: a store primitive that refused a read-only object records
     /// the object, index and value here; `primitiveSend` then sends
-    /// `attemptToModify:at:value:` in place of the primitive's answer.
+    /// `modificationForbiddenAt:value:` in place of the primitive's answer.
     var readOnlyFailure = Oop.none
     var readOnlyIndex = Oop.none
     var readOnlyValue = Oop.none
@@ -160,7 +160,7 @@ struct CacheEntry {
 
     /// Record a store refused because `o` is read-only (module 8); the
     /// primitive then fails and `primitiveSend` sends
-    /// `attemptToModify:at:value:`.
+    /// `modificationForbiddenAt:value:`.
     func refuseReadOnly(_ o: Oop, at index: Oop, value: Oop) -> Oop {
         unsafe state.pointee.readOnlyFailure = o
         unsafe state.pointee.readOnlyIndex = index

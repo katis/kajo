@@ -86,7 +86,7 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard rcv.isObject, src.isObject, startO.isSmallInteger, stopO.isSmallInteger, fromO.isSmallInteger else { return .none }
     let rc = m.classIndex(of: rcv), sc = m.classIndex(of: src)
     guard !om.isSealed(rc), !om.isSealed(sc), !om.isBytes(rcv), !om.isBytes(src) else { return .none }
-    // Module 8: a read-only receiver is refused (attemptToModify:at:value:).
+    // Module 8: a read-only receiver is refused (modificationForbiddenAt:value:).
     if om.isReadOnly(rcv) { return m.refuseReadOnly(rcv, at: startO, value: src) }
     let start = startO.smallIntegerValue, stop = stopO.smallIntegerValue, from = fromO.smallIntegerValue
     let n = stop - start + 1

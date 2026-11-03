@@ -265,16 +265,16 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
 
     /// Words a slow path may push above the instruction's starting depth
     /// beyond its declared effect: a store into a read-only object pushes
-    /// the object, itself, the index and the value for
-    /// `attemptToModify:at:value:` in place of the value (3 more); a
+    /// the object, the index and the value for
+    /// `modificationForbiddenAt:value:` in place of the value (2 more); a
     /// non-local return through an unwind mark pushes the home Context and
     /// the unwind Context around the value (2 more). The verifier counts
     /// them in `maxStack`. (A unary send's `doesNotUnderstand:` Message and
-    /// a store primitive's `attemptToModify:at:value:` fit the one word
+    /// a store primitive's `modificationForbiddenAt:value:` fit the one word
     /// every frame reserves.)
     var transientDepth: Int {
         switch self {
-        case .storeIvar, .storeTempVectorSlot: 3
+        case .storeIvar, .storeTempVectorSlot: 2
         case .nonlocalReturn: 2
         default: 0
         }

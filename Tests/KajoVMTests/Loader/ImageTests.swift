@@ -87,7 +87,7 @@ private func loadError(_ img: Image, _ files: [(String, String)]) -> LoadError.K
     let z = try #require(img.lookup(p3, img.symbol("z:")!))
     #expect(om.load(z, MethodLayout.argc) == Oop(smallInteger: 1))
     #expect(om.load(z, MethodLayout.temps) == Oop(smallInteger: 1))
-    #expect(om.load(z, MethodLayout.maxStack) == Oop(smallInteger: 7))  // store_ivar's read-only send: 4 + 3
+    #expect(om.load(z, MethodLayout.maxStack) == Oop(smallInteger: 6))  // store_ivar's read-only send: 4 + 2
     #expect(om.load(z, MethodLayout.primitive) == Oop(smallInteger: 0))
     #expect(om.load(z, MethodLayout.selector) == img.symbol("z:"))
     let lits = om.load(z, MethodLayout.literals)
@@ -155,12 +155,12 @@ func theLoaderRejects(_ files: [(String, String)], _ kind: LoadError.Kind?) thro
 
 @Test func tooManyClassesAndMethodsAreRejected() throws {
     var limits = LoaderLimits()
-    limits.maxClassIndex = 68
+    limits.maxClassIndex = 70
     limits.maxMethodsPerClass = 4
     let img = try makeImage(limits: limits)
     defer { img.destroy() }
     let classes = (0..<8).map { "class C\($0) Object 0\n" }.joined()
-    #expect(loadError(img, [("a", classes)]) == nil)                          // 53 + 2 x 8 = 69 indices: 0...68
+    #expect(loadError(img, [("a", classes)]) == nil)                          // 55 + 2 x 8 = 71 indices: 0...70
     #expect(loadError(img, [("b", "class D Object 0\n")]) == .tooManyClasses)
     let methods = (0..<4).map { "method C0 m\($0) temps=0\n return_self\nend\n" }.joined()
     #expect(loadError(img, [("c", methods)]) == nil)

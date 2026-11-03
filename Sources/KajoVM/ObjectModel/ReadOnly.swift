@@ -6,7 +6,7 @@ import Synchronization
 // a wider mask, not an instruction), the store primitives (`at:put:`,
 // `instVarAt:put:`, `replaceFrom:to:with:startingAt:`, `globalAt:put:`,
 // Context `tempAt:put:`, the UTF-8 encoder's buffer), `become:` and
-// `reshape`. A refused store in a bytecode sends `attemptToModify:at:value:`
+// `reshape`. A refused store in a bytecode sends `modificationForbiddenAt:value:`
 // to the object; a refused primitive store sends it in place of the
 // primitive's answer (`primitiveSend`). The collectors never read it.
 

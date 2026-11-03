@@ -345,8 +345,8 @@ func primitiveSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMu
     if unsafe s.pointee.exit == .suspended { return unsafe leavingWithoutStack(s) }
     if _slowPath(unsafe s.pointee.readOnlyFailure != .none) && result == .none && !m.failed {
         // Module 8: a store primitive refused a read-only object; send
-        // attemptToModify:at:value: in place of its answer.
-        return unsafe attemptToModifyFromPrimitive(s, argc, length)
+        // modificationForbiddenAt:value: in place of its answer.
+        return unsafe modificationForbiddenFromPrimitive(s, argc, length)
     }
     if result != .none {
         let base = unsafe s.pointee.stackBase

@@ -83,7 +83,7 @@ private func primAt(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 private func primAtPut(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard c.argc == 2, indexable(m, c.receiver), let i = slotIndex(m, c.receiver, c.arg0) else { return .none }
     // Module 8: no at:put: on a String or Symbol (UTF-8 stays valid), and
-    // a read-only receiver is refused (attemptToModify:at:value:).
+    // a read-only receiver is refused (modificationForbiddenAt:value:).
     let ci = m.classIndex(of: c.receiver)
     if ci == WellKnown.string || ci == WellKnown.symbol { return .none }
     if m.om.isReadOnly(c.receiver) { return m.refuseReadOnly(c.receiver, at: c.arg0, value: c.arg1) }

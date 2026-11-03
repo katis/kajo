@@ -17,9 +17,9 @@
 //  - the special objects: nil, true, false of their classes; the globals
 //    and the symbol table Arrays of their sizes; the selectors Array holding
 //    the special-send and VM selectors with those bytes;
-//  - the symbol table: every bucket nil or an Array of Symbols filled from
-//    slot 0, each in the bucket its bytes hash to, no two with the same
-//    bytes;
+//  - the symbol table: every bucket nil or a WeakArray of Symbols and
+//    nils (module 8b: the table is weak), each Symbol in the bucket its
+//    bytes hash to, no two with the same bytes;
 //  - the classes: every registered index's class object a behavior naming
 //    that index, its format valid, its metaclass a sealed behaviors format
 //    whose Metaclass instance names the class back; class objects as large
@@ -154,12 +154,13 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
     for j in 0..<SymbolTable.buckets {
         let bucket = om.load(symbols, j)
         if bucket == nilObj { continue }
-        guard isA(bucket, WellKnown.array) else { throw fail("symbol bucket \(j)") }
-        var ended = false
+        // Module 8b: a weak bucket; nil marks a slot never used or a
+        // collected Symbol's tombstone, anywhere in the bucket.
+        guard isA(bucket, WellKnown.weakArray) else { throw fail("symbol bucket \(j)") }
         for i in 0..<Int(om.count(of: bucket)) {
             let s = om.load(bucket, i)
-            if s == nilObj { ended = true; continue }
-            guard !ended, isA(s, WellKnown.symbol), om.isBytes(s) else { throw fail("symbol bucket \(j) slot \(i)") }
+            if s == nilObj { continue }
+            guard isA(s, WellKnown.symbol), om.isBytes(s) else { throw fail("symbol bucket \(j) slot \(i)") }
             let bytes = om.bytes(of: s)
             guard isValidUTF8(bytes), Int(truncatingIfNeeded: utf8Hash(bytes)) & (SymbolTable.buckets - 1) == j,
                   seen.insert(bytes).inserted else { throw fail("symbol bucket \(j): a misplaced or duplicate Symbol") }

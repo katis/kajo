@@ -1,5 +1,5 @@
 // Read-only objects (ADR 0009 section 9): header bit 50, checked in every
-// store path; a refused store sends attemptToModify:at:value: to the
+// store path; a refused store sends modificationForbiddenAt:value: to the
 // object (its answer replaces a primitive's, and is dropped after a store
 // bytecode); method literals are read-only.
 
@@ -19,7 +19,7 @@ method Cell x temps=0
   return_top
 end
 ; the kernel's handler: count the refusals in slot 1 of global 3 (an Array)
-method Object attemptToModify:at:value: temps=0
+method Object modificationForbiddenAt:value: temps=0
   push_nil
   push_int 3
   send globalAt: 1
@@ -29,7 +29,7 @@ method Object attemptToModify:at:value: temps=0
   send globalAt: 1
   push_int 1
   at
-  push_temp 1
+  push_temp 0
   add
   at_put
   pop
@@ -65,9 +65,9 @@ end
 """
 
 /// The rule: `store_ivar` into a read-only object stores nothing and sends
-/// attemptToModify:at:value: (index 1-based), whose answer is dropped;
+/// modificationForbiddenAt:value: (index 1-based), whose answer is dropped;
 /// cleared, the store happens.
-@Test func aStoreIntoAReadOnlyObjectSendsAttemptToModify() throws {
+@Test func aStoreIntoAReadOnlyObjectSendsModificationForbidden() throws {
     let h = try omHarness(readOnlySrc + runOf("""
       push_nil
       send setUp 0

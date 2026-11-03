@@ -40,6 +40,8 @@ package final class Image {
     private var methods: [UInt64: [(selector: Oop, method: Oop)]] = [:]
     private var methodKeys: Set<String> = []
     private var methodNames: [Oop: String] = [:]
+    /// Boot: the special selectors held until the special objects hold them.
+    private var selectorRoots: [RootHandle] = []
     /// Loads so far; an interpreter flushes its lookup cache when it changes.
     private(set) var loads = 0
 
@@ -75,12 +77,15 @@ package final class Image {
         }
         specialSelectors = try specialSelectorsInOrder()
         doesNotUnderstand = try intern("doesNotUnderstand:")
+        selectorRoots.append(om.addRoot(doesNotUnderstand))
         globals = try allocate(WellKnown.array, slots: Image.globalCount)
         om.addRoot(globals)
         specialObjects = try allocate(WellKnown.array, slots: SpecialObjects.size)
         om.addRoot(specialObjects)
         let sel = try allocate(WellKnown.array, slots: specialSelectors.count, roots: [specialObjects])
         for (i, s) in specialSelectors.enumerated() { om.store(sel, i, s) }
+        for h in selectorRoots { om.removeRoot(h) }
+        selectorRoots = []
         for (i, v) in [nilObject, trueObject, falseObject, globals, symbolTable, sel, doesNotUnderstand].enumerated() {
             om.store(specialObjects, i, v)
         }
@@ -120,9 +125,15 @@ package final class Image {
         }
     }
 
+    /// Module 8b: the table is weak, so each Symbol is rooted until the
+    /// special-objects Array holds it.
     private func specialSelectorsInOrder() throws(LoadError) -> [Oop] {
         var r: [Oop] = []
-        for s in specialSelectorNames + VMSelector.names { r.append(try intern(s)) }
+        for s in specialSelectorNames + VMSelector.names {
+            let sym = try intern(s)
+            selectorRoots.append(om.addRoot(sym))
+            r.append(sym)
+        }
         return r
     }
 
@@ -236,7 +247,7 @@ package final class Image {
         let old = om.load(symbolTable, j)
         let n = old == nilObject ? 0 : Int(om.count(of: old))
         guard let size = SymbolTable.grownBucketSize(n) else { throw LoadError(.heapFull, "a symbol table bucket is full") }
-        let nb = try allocate(WellKnown.array, slots: size, roots: [s, old])
+        let nb = try allocate(WellKnown.weakArray, slots: size, roots: [s, old])
         for i in 0..<n { om.store(nb, i, om.load(old, i)) }
         om.store(nb, n, s)
         om.store(symbolTable, j, nb)
@@ -298,6 +309,7 @@ package final class Image {
                 var cls = classesByName[m.className]!
                 if m.classSide { cls = metaclassIndex(of: cls) }
                 let sel = try intern(m.selector)
+                temporaryRoots.append(om.addRoot(sel))  // the table is weak
                 let meth = try makeMethod(m, selector: sel, methodClass: om.classOop(cls))
                 temporaryRoots.append(om.addRoot(meth))
                 methods[cls, default: []].append((sel, meth))
@@ -536,8 +548,8 @@ package final class Image {
 /// The selectors the VM sends itself, after the special-send selectors in
 /// `Image.specialSelectors` (and the interpreter's `specialSelectors`).
 enum VMSelector {
-    static let names = ["attemptToModify:at:value:", "cannotReturn:", "aboutToReturn:through:"]
-    static let attemptToModify = specialSelectorNames.count
+    static let names = ["modificationForbiddenAt:value:", "cannotReturn:", "aboutToReturn:through:"]
+    static let modificationForbidden = specialSelectorNames.count
     static let cannotReturn = specialSelectorNames.count + 1
     static let aboutToReturn = specialSelectorNames.count + 2
 }
@@ -768,6 +780,7 @@ extension Image {
         var touched: [UInt64] = []
         for (cls, m) in planned {
             let sel = try intern(m.selector)
+            temporaryRoots.append(om.addRoot(sel))  // the table is weak
             let meth = try makeMethod(m, selector: sel, methodClass: om.classOop(cls))
             temporaryRoots.append(om.addRoot(meth))
             methods[cls, default: []].append((sel, meth))

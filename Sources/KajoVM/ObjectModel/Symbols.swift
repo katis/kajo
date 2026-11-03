@@ -6,7 +6,12 @@
 /// compare bytes; insertion (and growth) happens on the host before any VM
 /// runs, or with the world stopped (`primIntern`), so a lookup never sees
 /// a half-built table and two workers never intern the same bytes twice.
-/// The table is strong in 8a (a weak set is the kernel's, ADR 0009).
+/// Module 8b: the table is weak (ADR 0009 section 8): its buckets are
+/// WeakArrays, so a Symbol nothing else references is collected and its
+/// slot becomes nil, a tombstone the next insertion into that bucket
+/// reuses. A lookup scans its whole bucket (a hole is no end), and a Symbol
+/// a lookup finds goes through the weak read barrier, so one found while a
+/// marking cycle runs is kept alive (AGENTS.md: weak reads during marking).
 
 /// FNV-1a over the bytes, folded to a non-negative SmallInteger. The hash
 /// of a String and of the Symbol with the same bytes are the same.
@@ -61,20 +66,25 @@ extension ObjectMemory {
     }
 
     /// The Symbol in `table` with this hash for which `matches` holds, or
-    /// `.none`.
+    /// `.none`. Holes (collected Symbols) are skipped.
     func symbolLookup(_ table: Oop, hash: Int64, matches: (Oop) -> Bool) -> Oop {
+        symbolLookupSlot(table, hash: hash, matches: matches).symbol
+    }
+
+    /// The same, with the bucket and slot it was found in (for the weak
+    /// read barrier).
+    func symbolLookupSlot(_ table: Oop, hash: Int64, matches: (Oop) -> Bool) -> (symbol: Oop, bucket: Oop, slot: Int) {
         let bucket = load(table, Int(truncatingIfNeeded: hash) & (SymbolTable.buckets &- 1))
         let nilObj = nilObject
-        if bucket == nilObj { return .none }
+        if bucket == nilObj { return (.none, .none, 0) }
         let n = Int(count(of: bucket))
         var i = 0
         while i < n {
             let k = load(bucket, i)
-            if k == nilObj { return .none }
-            if matches(k) { return k }
+            if k != nilObj && matches(k) { return (k, bucket, i) }
             i &+= 1
         }
-        return .none
+        return (.none, .none, 0)
     }
 
     /// The bucket `symbol` goes into, and the slot in it; nil when the
@@ -100,9 +110,10 @@ extension ObjectMemory {
     }
 }
 
-/// The symbol table's shape: an Array of `buckets` slots, each nil or an
-/// Array of symbols filled from slot 0 (nil after the last). A full bucket
-/// is replaced by one twice its size (the old one's symbols copied over),
+/// The symbol table's shape: an Array of `buckets` slots, each nil or a
+/// WeakArray of Symbols with nil where none is (never used, or collected).
+/// A full bucket is replaced by one twice its size (the old one's symbols
+/// copied over),
 /// so a table holds about `buckets` x 4095 symbols and no object exceeds a
 /// block.
 enum SymbolTable {

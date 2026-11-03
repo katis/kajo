@@ -230,14 +230,14 @@ func interpret(_ s: StatePointer, _ start: Regs) {
 }
 
 /// `store_ivar` or `store_tv_slot` could not store: the object is
-/// read-only (send `attemptToModify:at:value:`), or it has no such slot
+/// read-only (send `modificationForbiddenAt:value:`), or it has no such slot
 /// (the error). One call, out of line.
 @inline(never)
 func storeRefused(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                   _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ o: UInt64, _ n: Int,
                   _ length: Int, _ site: BarrierSite) -> Regs {
     let om = unsafe s.pointee.om
-    if isReadOnlySlot(om, o, n) { return unsafe attemptToModifyFromStore(s, pc, sp, fp, hdr, o, n + 1) }
+    if isReadOnlySlot(om, o, n) { return unsafe modificationForbiddenFromStore(s, pc, sp, fp, hdr, o, n + 1) }
     return unsafe failAt(s, pc, sp, fp, hdr, length, .invalidSlotAccess, 0, o)
 }
 

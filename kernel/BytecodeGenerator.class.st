@@ -85,7 +85,7 @@ BytecodeGenerator class >> pushes: op [
 
 { #category : #accessing }
 BytecodeGenerator class >> transientDepth: op [
-	(#(#storeIvar #storeTempVectorSlot) includes: op) ifTrue: [^ 3].
+	(#(#storeIvar #storeTempVectorSlot) includes: op) ifTrue: [^ 2].
 	op == #nonlocalReturn ifTrue: [^ 2].
 	^ 0
 ]

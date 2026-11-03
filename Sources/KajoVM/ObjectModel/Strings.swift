@@ -111,8 +111,11 @@ extension Machine {
     func intern(_ o: Oop) -> Oop {
         if om.classIndex(of: o) == WellKnown.symbol { return o }
         let h = om.byteObjectHash(o)
-        let found = om.symbolLookup(unsafe state.pointee.symbolTable, hash: h) { om.sameBytes($0, o) }
-        if found != .none { return found }
+        let found = om.symbolLookupSlot(unsafe state.pointee.symbolTable, hash: h) { om.sameBytes($0, o) }
+        if found.symbol != .none {
+            unsafe weakReadBarrier(state, found.bucket, found.slot, found.symbol)
+            return found.symbol
+        }
         return internSlow(o, h)
     }
 
@@ -150,8 +153,9 @@ extension Machine {
             let old = om.load(table, j)
             let k = old == nilObject ? 0 : Int(om.count(of: old))
             guard let size = SymbolTable.grownBucketSize(k),
-                  let nb = om.allocate(ctx, classIndex: WellKnown.array, slots: size, fill: nilObject, extraRoots: roots + [sym])
+                  let nb = om.allocate(ctx, classIndex: WellKnown.weakArray, slots: size, fill: nilObject, extraRoots: roots + [sym])
             else { return .none }
+            // the bucket is full (no hole), so every slot holds a Symbol
             for x in 0..<k { store(nb, x, om.load(old, x), .symbolTable) }
             store(nb, k, sym, .symbolTable)
             store(table, j, nb, .symbolTable)
@@ -305,8 +309,10 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 135:
         guard c.argc == 1, m.isText(c.arg0) else { return .none }
         let t = c.arg0
-        let s = om.symbolLookup(unsafe m.state.pointee.symbolTable, hash: om.byteObjectHash(t)) { om.sameBytes($0, t) }
-        return s == .none ? m.nilObject : s
+        let f = om.symbolLookupSlot(unsafe m.state.pointee.symbolTable, hash: om.byteObjectHash(t)) { om.sameBytes($0, t) }
+        if f.symbol == .none { return m.nilObject }
+        unsafe weakReadBarrier(m.state, f.bucket, f.slot, f.symbol)
+        return f.symbol
     default:
         return .none
     }

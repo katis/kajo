@@ -273,9 +273,9 @@ Object >> beWritable [
 ]
 
 { #category : #'read-only' }
-Object >> attemptToModify: anObject at: index value: aValue [
-	"The VM sends this when a store into a read-only object is refused."
-	^ ModificationForbidden new object: anObject index: index value: aValue; signal
+Object >> modificationForbiddenAt: index value: aValue [
+	"The VM sends this to a read-only object when a store into it is refused (index 1-based)."
+	^ ModificationForbidden new object: self index: index value: aValue; signal
 ]
 
 { #category : #copying }

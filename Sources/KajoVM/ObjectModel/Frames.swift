@@ -24,7 +24,7 @@ import Synchronization
 /// Context: what the caller does with the frame's result.
 enum FrameMarker {
     /// The frame was sent by a store that found its object read-only
-    /// (`attemptToModify:at:value:` from a popping store bytecode): the
+    /// (`modificationForbiddenAt:value:` from a popping store bytecode): the
     /// result is dropped.
     static let discard: Int64 = 1
     /// The frame was sent by a non-local return that could not proceed
@@ -311,11 +311,11 @@ func nonLocalReturn(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeM
 // MARK: - read-only stores in bytecodes
 
 /// `store_ivar` or `store_tv_slot` found its object read-only: [v] becomes
-/// [obj obj index v] and `attemptToModify:at:value:` is sent to the object
+/// [obj index v] and `modificationForbiddenAt:value:` is sent to the object
 /// with the discard marker (the store popped its value; so does the send's
 /// answer). `index` is 1-based. `length` is the instruction's.
 @inline(never)
-func attemptToModifyFromStore(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+func modificationForbiddenFromStore(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                               _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>,
                               _ object: UInt64, _ index: Int) -> Regs {
     unsafe save(s, pc, sp, fp, hdr)
@@ -324,31 +324,29 @@ func attemptToModifyFromStore(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ s
     let top = unsafe s.pointee.regs.sp
     let v = unsafe base[top]
     unsafe base[top] = object
-    unsafe base[top + 1] = object
-    unsafe base[top + 2] = tagged(index)
-    unsafe base[top + 3] = v
-    unsafe s.pointee.regs.sp = top + 3
-    return unsafe markedSend(s, s.pointee.specialSelectors[VMSelector.attemptToModify], 3, FrameMarker.discard)
+    unsafe base[top + 1] = tagged(index)
+    unsafe base[top + 2] = v
+    unsafe s.pointee.regs.sp = top + 2
+    return unsafe markedSend(s, s.pointee.specialSelectors[VMSelector.modificationForbidden], 2, FrameMarker.discard)
 }
 
 /// A store primitive refused a read-only object: the receiver and its
-/// arguments become [obj obj index value] and `attemptToModify:at:value:`
-/// is sent; its answer is the primitive send's. The registers are saved.
-func attemptToModifyFromPrimitive(_ s: StatePointer, _ argc: Int, _ length: Int) -> Regs {
+/// arguments become [obj index value] and `modificationForbiddenAt:value:`
+/// is sent to the object; its answer is the primitive send's. The registers are saved.
+func modificationForbiddenFromPrimitive(_ s: StatePointer, _ argc: Int, _ length: Int) -> Regs {
     unsafe s.pointee.counters.readOnlyRefusals &+= 1
     let base = unsafe s.pointee.stackBase
     let fp0 = unsafe s.pointee.regs.sp - argc
     let o = unsafe s.pointee.readOnlyFailure
     unsafe base[fp0] = o.raw
-    unsafe base[fp0 + 1] = o.raw
-    unsafe base[fp0 + 2] = s.pointee.readOnlyIndex.raw
-    unsafe base[fp0 + 3] = s.pointee.readOnlyValue.raw
-    unsafe s.pointee.regs.sp = fp0 + 3
+    unsafe base[fp0 + 1] = s.pointee.readOnlyIndex.raw
+    unsafe base[fp0 + 2] = s.pointee.readOnlyValue.raw
+    unsafe s.pointee.regs.sp = fp0 + 2
     unsafe s.pointee.readOnlyFailure = .none
     unsafe s.pointee.readOnlyIndex = .none
     unsafe s.pointee.readOnlyValue = .none
     let r = unsafe restore(s)
-    return unsafe send(s, s.pointee.om, r, s.pointee.specialSelectors[VMSelector.attemptToModify], 3, length, poll: false)
+    return unsafe send(s, s.pointee.om, r, s.pointee.specialSelectors[VMSelector.modificationForbidden], 2, length, poll: false)
 }
 
 // MARK: - push_this_context

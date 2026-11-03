@@ -19,7 +19,7 @@
 // Each checks every type, bound and its argument count itself and answers
 // `.none` to fail; the method's bytecodes then run. A store refused for a
 // read-only object records it (`Machine.refuseReadOnly`) and
-// `primitiveSend` sends `attemptToModify:at:value:` instead.
+// `primitiveSend` sends `modificationForbiddenAt:value:` instead.
 
 enum ObjectModelPrimitives {
     static let table: [(number: Int, selector: String, argc: Int)] = [
