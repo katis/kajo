@@ -382,12 +382,36 @@ Safety:
    every N objects or bytes, still only between objects.
  - The marker is a stopper too, and at utility QoS twelve default-QoS busy
    loops starved one final mark to 20 s. A QoS policy for a thread has to
-   cover every role it plays, the stopper role included; open until the
-   young collector's policy (module 7) settles it.
+   cover every role it plays, the stopper role included. Module 7 settled
+   it: a stopper outside the worker table is raised to user-initiated for
+   its stop and restored afterwards, counted as `stopperQoSRaises`.
  - For an A/B of two binaries, build both with
    `-align-all-nofallthru-blocks=5 -align-loops=32`: `storeheavy` was 6
    percent slower in plain builds and 0.3 percent in aligned ones, and a
    build with the check removed was within 0.5 percent of a build with it.
+ - A stop request must wake every participant waiting inside the VM, on
+   whatever condition it waits: an opener waiting for a wanted stop slept
+   through the request and the stop waited for it forever (the suite hung
+   once, the marker's final mark against two openers). Every wait inside
+   the VM is a place a stop must reach; the stop request broadcasts, and
+   a requester leaving `stwWanted` wakes the openers.
+ - Any thread that reads entries between polls is an epoch participant,
+   not only the mutators: the young collector reads other nurseries'
+   holders, so collections and the relocator wait for its epoch word too.
+ - A handshake protocol charges every participant a fee per round, so it
+   wins where stops were long and loses where they were already short:
+   under the storm the main thread stops 5 times less than stop-the-world,
+   under `share` it stops more (195 against 139 ms per 10 s), because many
+   cheap collections cost one 28 to 44 µs acknowledgement each. The
+   acknowledgement on the main thread is the number to watch on device.
+ - Tests that count work under ThreadSanitizer and load assert on what
+   must have started, not on what completed: ten small random programs
+   completed no marking cycle in a loaded sanitizer run and the tally
+   failed; counting cycles started is the honest assertion.
+ - An agent's background `until` loop waiting for a line in an output file
+   outlives the agent when the line never comes, and the session counts
+   the agent as still waiting. Waits in agent sessions are bounded or
+   rely on the harness's own completion notice.
 
 ## Verification
 
@@ -422,7 +446,11 @@ young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
 thread exceeds a frame, acknowledgements and the initial mark remain; model
 checked in `docs/models/young-collection.md`, which found the array-copy
-store ordering hole), 0009 object
+store ordering hole; built in module 7: the main thread's stopped time
+under the allocation storm is 5 times lower than stop-the-world and comes
+in acknowledgements of 28 to 44 µs, the share scenario is the one case
+that is worse, and ADR 0008 raises the acceptance question for 0004 to
+0008 for the owner), 0009 object
 model and bytecode set (proposed, accepted in principle: weak slots and
 ephemerons, immediate SmallFloat and Character, native frames materialized
 into Contexts on demand, compiled closures with temp vectors, frame-walk
@@ -461,7 +489,14 @@ cover.
    primitive, epoch words and pending blocks, selection by live bytes,
    the relocation pass on the marker thread between final mark and sweep,
    the relocation verifier, the model-step table; `kajo run --reloc
-   on|off`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   on|off`), `YoungCollection/` (module 7, built;
+   `docs/modules/young-collection.md`: rounds on the attention word,
+   proxies and blocking regions, local and offloaded collections through
+   module 6's copy protocol, per-nursery remembered sets with carried
+   lists, deferred entry frees owned by their nursery, the epoch rule with
+   the quiescent wake's zero, the young collector thread, the initial
+   mark's young-root scan, the young verifier, the model-step table;
+   `kajo run --young stw|local|offload --main-ms`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
    CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
    targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
