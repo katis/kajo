@@ -95,7 +95,7 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
     switch c {
     case .referenceBeyondHighWater: s.setSlotRaw(s.holder, 1, Oop(entryIndex: hw + 10).raw)
     case .referenceToFreeEntry: s.setSlotRaw(s.holder, 1, s.garbage.raw)
-    case .reservedTagInSlot: s.setSlotRaw(s.holder, 1, 0x102)
+    case .reservedTagInSlot: s.setSlotRaw(s.holder, 1, 0x108)
     case .noneInSlot: s.setSlotRaw(s.holder, 1, 0)
     case .misalignedOffset: om.setStateWord(s.a.raw, om.bodyOffset(s.a) + 4)
     case .offsetInFreeBlock: om.setStateWord(s.a.raw, BlockHeap.start(ofBlock: s.freeBlock))
@@ -108,7 +108,7 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
     case .sizeDisagreesWithHeader:
         om.setHeader(s.a, Header(classIndex: 2, count: 1, isBytes: false))
     case .relocatingState: om.setStateWord(s.a.raw, om.bodyOffset(s.a) | EntryState.relocatingBit)
-    case .reservedHeaderBit: om.setHeaderWord(s.a.raw, om.header(s.a).raw | 1 << 50)
+    case .reservedHeaderBit: om.setHeaderWord(s.a.raw, om.header(s.a).raw | 1 << 51)
     case .unregisteredClass: om.setHeader(s.b, Header(classIndex: 999, count: 1, isBytes: false))
     case .freeEntryWithHeader: om.setHeaderWord(s.garbage.raw, Header(classIndex: 2, count: 0, isBytes: false).raw)
     case .twoEntriesOneBody:
@@ -241,7 +241,7 @@ func theFreeListVerifierCatches(_ c: FreeListCorruption) throws {
 @Test func aRecordedFailureIsCountedAndReported() throws {
     let s = try Scene()
     defer { s.om.destroy() }
-    s.setSlotRaw(s.holder, 1, 0x102)
+    s.setSlotRaw(s.holder, 1, 0x108)
     s.om.collect()
     #expect(s.om.counters.verifierFailures >= 1)
     #expect(s.om.verifierReports.first?.contains("before collection") == true)
@@ -254,7 +254,7 @@ func theFreeListVerifierCatches(_ c: FreeListCorruption) throws {
         let h = w.new(2, 1)
         _ = om.addRoot(h)
         om.retireAllContexts()
-        om.heap.setWord(atOffset: om.bodyOffset(h) + 8, 0x102)
+        om.heap.setWord(atOffset: om.bodyOffset(h) + 8, 0x108)
         om.collect()
     }
 }

@@ -1,8 +1,10 @@
 import Darwin
 import Foundation
 
-/// Snapshot format, version 2 (module 4 added the class formats, the
-/// finalization queue and the nil object; version 1 is refused).
+/// Snapshot format, version 3 (module 4 added the class formats, the
+/// finalization queue and the nil object; module 8 the format word's kind,
+/// sealed and behaviors fields and the immediates SmallFloat and Character
+/// in slots; versions 1 and 2 are refused).
 /// Little-endian 64-bit words, then raw heap and table bytes (the hosts are
 /// little-endian):
 ///
@@ -53,7 +55,7 @@ enum SnapshotError: Error, Equatable, CustomStringConvertible {
 /// touches only the bytes given, with bounds checks: no unsafe code.
 struct SnapshotLayout {
     static let magic: UInt64 = 0x0000_4D4F_4F4A_414B // "KAJOOM\0\0"
-    static let version: UInt64 = 2
+    static let version: UInt64 = 3
     static let headerWords = 9
 
     let blockCount: Int
@@ -234,7 +236,7 @@ extension ObjectMemory {
             unsafe g.pointee.classTable.append(SnapshotLayout.word(b, L.classTableAt + i * 8))
             let f = SnapshotLayout.word(b, L.formatsAt + i * 8)
             let format = ClassFormat(raw: f)
-            guard f & ~ClassFormat.validMask == 0, !(format.isWeak && format.isEphemeron),
+            guard format.isValid,
                   !format.isSpecial || L.nilObject != 0 else { throw .malformed("class \(i) has format 0x\(String(f, radix: 16))") }
             unsafe g.pointee.classFormats.append(f)
         }

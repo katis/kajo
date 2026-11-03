@@ -43,7 +43,7 @@ import Testing
     let h = try Harness(runOf(" push_lit @Array\n push_int -1\n send new: 1\n return_top"), base: ["prelude"])
     defer { h.destroy() }
     let e = try #require(h.error())
-    #expect(e.kind == .primitiveFailed && e.primitive == 3 && e.selector == "new:" && e.receiverClass == "Class")
+    #expect(e.kind == .primitiveFailed && e.primitive == 3 && e.selector == "new:" && e.receiverClass == "Array class")
 }
 
 @Test func deepRecursionIsAStackOverflow() throws {

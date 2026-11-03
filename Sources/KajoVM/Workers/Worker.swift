@@ -101,6 +101,7 @@ extension Worker {
             collectAtEveryAllocation: om.config.stress.contains(.collectAtEveryAllocation),
             stackBase: dummy, stackEnd: dummy + 16)
         unsafe interp.countdown = pollEvery
+        unsafe interp.symbolTable = image.symbolTable
         unsafe w.initialize(to: Worker(interp: interp, index: index, isMain: isMain, vm: vm, dummy: dummy,
                                        pollEvery: pollEvery, rng: seed | 1))
         return unsafe w

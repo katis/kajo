@@ -85,7 +85,7 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     let rcv = c.receiver, src = m.argument(2, of: c), startO = c.arg0, stopO = c.arg1, fromO = m.argument(3, of: c)
     guard rcv.isObject, src.isObject, startO.isSmallInteger, stopO.isSmallInteger, fromO.isSmallInteger else { return .none }
     let rc = m.classIndex(of: rcv), sc = m.classIndex(of: src)
-    guard !Image.isStructural(rc), !Image.isStructural(sc), !om.isBytes(rcv), !om.isBytes(src) else { return .none }
+    guard !om.isSealed(rc), !om.isSealed(sc), !om.isBytes(rcv), !om.isBytes(src) else { return .none }
     let start = startO.smallIntegerValue, stop = stopO.smallIntegerValue, from = fromO.smallIntegerValue
     let n = stop - start + 1
     if n == 0 && start >= 1 && start <= Int64(om.count(of: rcv)) + 1 { return rcv }
@@ -145,7 +145,7 @@ func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UIn
             unsafe copyStoreUnordered(vm, st, om, o, ho, d, i &+ k, v)
         } else {
             om.storeSlot(atState: d, i &+ k, v)
-            if v & 1 == 0 {
+            if v & Oop.objectTagMask == 0 {
                 let hv = om.headerWord(v)
                 if hv & Header.youngBit != 0 && (ho ^ hv) & Header.youngNurseryMask != 0 {
                     unsafe rememberSlow(st, Oop(raw: o), hv, BarrierSite.arrayCopy.rawValue)
@@ -166,7 +166,7 @@ func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UIn
 @inline(never)
 private func copyStoreUnordered(_ vm: VMPointer, _ st: StatePointer, _ om: ObjectMemory, _ o: UInt64, _ ho: UInt64,
                                 _ d: UInt64, _ i: Int, _ v: UInt64) {
-    if v & 1 == 0 {
+    if v & Oop.objectTagMask == 0 {
         let hv = om.headerWord(v)
         if hv & Header.youngBit != 0 && (ho ^ hv) & Header.youngNurseryMask != 0 {
             unsafe rememberSlow(st, Oop(raw: o), hv, BarrierSite.arrayCopy.rawValue)

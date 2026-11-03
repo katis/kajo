@@ -10,7 +10,9 @@
 ///     bit  48      fired ephemeron: queued for finalization once, strong since
 ///     bit  49      deferred free             a dead young entry whose free its
 ///                                            nursery deferred (module 7)
-///     bits 50..51  unused                    reserved
+///     bit  50      read-only (module 8, ADR 0009 section 9): every store
+///                                            path refuses the object
+///     bit  51      unused                    reserved
 ///     bits 52..55  nursery index             young objects only (module 4)
 ///     bit  56      young                     module 4
 ///     bits 57..59  age: scavenges survived   young objects only (module 4)
@@ -46,6 +48,12 @@ struct Header: Hashable, Sendable {
     /// (concurrent-young amendments 10 and 17): used, dead, in no young log,
     /// its slot count 0. Every verifier skips it by this bit.
     static let deferredBit: UInt64 = 1 << 49
+    /// Module 8: the object is read-only (ADR 0009 section 9). Set and
+    /// cleared by a primitive with one atomic or (not a plain store: module
+    /// 7's young collector decides a young header with a compare-and-swap
+    /// concurrently, and retries when this bit changed under it); read by
+    /// every store path, never by the collectors.
+    static let readOnlyBit: UInt64 = 1 << 50
 
     static let nurseryMask: UInt64 = 0xF << nurseryShift
     static let ageMask: UInt64 = 7 << ageShift
@@ -62,8 +70,8 @@ struct Header: Hashable, Sendable {
     static let countMask: UInt64 = ((1 << countBits) - 1) << countShift
     /// Bits this module defines and uses.
     static let usedMask: UInt64 = classMask | countMask | bytesBit | pinnedForGoodBit | framePinBit | firedBit
-        | youngBit | youngOnlyMask | deferredBit
-    /// Bits reserved for later modules (46, 50, 51); zero in every header.
+        | youngBit | youngOnlyMask | deferredBit | readOnlyBit
+    /// Bits reserved for later modules (46, 51); zero in every header.
     static let reservedMask: UInt64 = ~usedMask
 
     static let maxClassIndex: UInt64 = classMask
@@ -92,6 +100,8 @@ struct Header: Hashable, Sendable {
         get { raw & Header.framePinBit != 0 }
         set { raw = newValue ? raw | Header.framePinBit : raw & ~Header.framePinBit }
     }
+
+    var isReadOnly: Bool { raw & Header.readOnlyBit != 0 }
 
     var isPinned: Bool { raw & (Header.pinnedForGoodBit | Header.framePinBit) != 0 }
 

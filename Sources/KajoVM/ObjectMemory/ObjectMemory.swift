@@ -185,7 +185,7 @@ import Synchronization
     @inline(__always)
     func store(_ o: Oop, _ i: Int, _ v: Oop) {
         assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
-        assert(v.isSmallInteger || isUsedReference(v))
+        assert(v.isValidImmediate || isUsedReference(v))
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i &<< 3
         unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v.raw, ordering: .relaxed)
     }
@@ -205,7 +205,7 @@ import Synchronization
     @inline(__always)
     func storeChecked(_ o: Oop, _ i: Int, _ v: Oop) -> Bool {
         assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
-        assert(v.isSmallInteger || isUsedReference(v))
+        assert(v.isValidImmediate || isUsedReference(v))
         #if KAJO_NO_POST_STORE
         store(o, i, v)
         return true

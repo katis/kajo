@@ -18,6 +18,24 @@ struct InterpreterCounters: Sendable, Equatable {
     /// Collections and compactions the interpreter caused: allocation
     /// failures, the collect and compact primitives, safepoints.
     var collectionsTriggered: UInt64 = 0
+    // Module 8.
+    /// Special sends answered by the out-of-line tier without a send.
+    var specialSendTier: UInt64 = 0
+    var superSends: UInt64 = 0
+    var performs: UInt64 = 0
+    var closuresCreated: UInt64 = 0
+    var closureActivations: UInt64 = 0
+    var contextsMaterialized: UInt64 = 0
+    /// Non-local returns that cut straight to the home, that sent
+    /// `aboutToReturn:through:` (an unwind mark between), and that found
+    /// the home dead (`cannotReturn:`).
+    var nonLocalReturns: UInt64 = 0
+    var unwindingReturns: UInt64 = 0
+    var cannotReturns: UInt64 = 0
+    /// Stores refused because the object is read-only.
+    var readOnlyRefusals: UInt64 = 0
+    var largeIntegersMade: UInt64 = 0
+    var floatsBoxed: UInt64 = 0
 }
 
 /// The registers as the collector and the host see them: indices and
@@ -108,6 +126,16 @@ struct CacheEntry {
     /// buffer); nil without one (module 2's standalone interpreter, or a VM
     /// whose nursery is off): every object is then allocated old.
     var young: UnsafeMutablePointer<NurseryAlloc>? = nil
+    /// Module 8: the image's symbol table (interning).
+    var symbolTable = Oop.none
+    /// Module 8: a store primitive that refused a read-only object records
+    /// the object, index and value here; `primitiveSend` then sends
+    /// `attemptToModify:at:value:` in place of the primitive's answer.
+    var readOnlyFailure = Oop.none
+    var readOnlyIndex = Oop.none
+    var readOnlyValue = Oop.none
+    /// Module 8: stack segments grown (stack growth by copying).
+    var stackGrowths: UInt64 = 0
 
     static let cacheEntries = 1024
 }
@@ -124,8 +152,16 @@ struct CacheEntry {
     var globals: Oop { unsafe state.pointee.globals }
 
     @inline(__always)
-    func classIndex(of v: Oop) -> UInt64 {
-        v.isSmallInteger ? WellKnown.smallInteger : om.header(v).classIndex
+    func classIndex(of v: Oop) -> UInt64 { classIndexOf(om, v.raw) }
+
+    /// Record a store refused because `o` is read-only (module 8); the
+    /// primitive then fails and `primitiveSend` sends
+    /// `attemptToModify:at:value:`.
+    func refuseReadOnly(_ o: Oop, at index: Oop, value: Oop) -> Oop {
+        unsafe state.pointee.readOnlyFailure = o
+        unsafe state.pointee.readOnlyIndex = index
+        unsafe state.pointee.readOnlyValue = value
+        return .none
     }
 
     // MARK: allocation
@@ -251,7 +287,8 @@ struct CacheEntry {
     /// classes, whose shape the interpreter trusts.
     @inline(never)
     func become(_ a: Oop, _ b: Oop) -> Bool {
-        guard a.isObject, b.isObject, !Image.isStructural(classIndex(of: a)), !Image.isStructural(classIndex(of: b)) else {
+        guard a.isObject, b.isObject, !om.isSealed(classIndex(of: a)), !om.isSealed(classIndex(of: b)),
+              !om.isReadOnly(a), !om.isReadOnly(b) else {
             return false
         }
         if let vm = unsafe workerOf(state).pointee.vm {
@@ -291,7 +328,8 @@ struct CacheEntry {
         roots.reserveCapacity(r.sp + 4)
         let base = unsafe state.pointee.stackBase
         for i in 0...r.sp { unsafe roots.append(Oop(raw: base[i])) }
-        for v in [r.receiver, r.method, r.result] where v != .none { roots.append(v) }
+        for v in [r.receiver, r.method, r.result, unsafe state.pointee.readOnlyFailure,
+                  unsafe state.pointee.readOnlyIndex, unsafe state.pointee.readOnlyValue] where v != .none { roots.append(v) }
         return roots
     }
 

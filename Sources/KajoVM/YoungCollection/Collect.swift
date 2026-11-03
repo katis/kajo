@@ -340,10 +340,16 @@ struct CollectionTally {
             nh = h0 & ~(Header.youngOnlyMask | Header.youngBit)
         }
         let hp = unsafe om.headerAtomic(o)
-        if unsafe !hp.pointee.compareExchange(expected: h0, desired: nh, ordering: .relaxed).exchanged {
-            // Only this collector writes Y_k's headers: a failure is a bug.
-            unsafe st.claimFailures &+= 1
-            unsafe hp.pointee.store(nh, ordering: .relaxed)
+        var expected = h0, desired = nh
+        while true {
+            let (ok, cur) = unsafe hp.pointee.compareExchange(expected: expected, desired: desired, ordering: .relaxed)
+            if ok { break }
+            // Only this collector writes Y_k's young bits; module 8's
+            // read-only primitive may flip bit 50 meanwhile (an atomic or):
+            // keep it and decide again. Any other change is a bug, counted.
+            if (cur ^ expected) & ~Header.readOnlyBit != 0 { unsafe st.claimFailures &+= 1 }
+            expected = cur
+            desired = desired & ~Header.readOnlyBit | cur & Header.readOnlyBit
         }
         let sw = unsafe om.stateWordAtomic(o)
         var off = unsafe sw.pointee.load(ordering: .relaxed)

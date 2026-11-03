@@ -24,7 +24,7 @@ func storeWithBarriers(_ s: StatePointer, _ o: UInt64, _ i: Int, _ v: UInt64, _ 
     }
     // Module 6: the post-store check (this call is already out of line).
     if _slowPath(!om.storeChecked(Oop(raw: o), i, Oop(raw: v))) { unsafe postStoreSlow(s, o, i, v) }
-    if v & 1 == 0 {
+    if v & Oop.objectTagMask == 0 {
         let hv = om.headerWord(v)
         if hv & Header.youngBit != 0 && (om.headerWord(o) ^ hv) & Header.youngNurseryMask != 0 {
             unsafe rememberSlow(s, Oop(raw: o), hv, site)

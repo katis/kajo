@@ -55,7 +55,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
 
 /// An object primitives may index: not a SmallInteger, not structural.
 private func indexable(_ m: Machine, _ o: Oop) -> Bool {
-    o.isObject && !Image.isStructural(m.classIndex(of: o))
+    o.isObject && !m.om.isSealed(m.classIndex(of: o))
 }
 
 /// A 1-based index into `o`'s slots or bytes, or nil.
@@ -90,22 +90,32 @@ private func primAtPut(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 }
 
 /// `aClass basicNew: n`: an instance with the class's named slots plus `n`
-/// indexed ones (bytes for ByteArray). Refused for SmallInteger and the
-/// structural classes.
+/// indexed ones, or `n` elements of a byte or word class (module 8: the
+/// class format's kind; a fixed class takes no indexed slots). Refused for
+/// the immediate classes and sealed ones.
 private func primBasicNew(_ m: Machine, _ cls: Oop, size: Oop) -> Oop {
-    guard cls.isObject, m.classIndex(of: cls) == WellKnown.classClass, size.isSmallInteger else { return .none }
-    let index = m.om.load(cls, ClassLayout.classIndex), named = m.om.load(cls, ClassLayout.instSize)
-    guard index.isSmallInteger, named.isSmallInteger else { return .none }
+    guard m.om.isBehavior(cls), size.isSmallInteger else { return .none }
+    let index = m.om.load(cls, ClassLayout.classIndex)
+    guard index.isSmallInteger, index.smallIntegerValue > 0, index.smallIntegerValue < Int64(m.om.classCount) else { return .none }
     let ci = UInt64(index.smallIntegerValue)
-    guard ci != WellKnown.smallInteger, !Image.isStructural(ci) else { return .none }
+    guard ci != WellKnown.smallInteger, ci != WellKnown.smallFloat, ci != WellKnown.character, !m.om.isSealed(ci),
+          m.om.classOop(ci) == cls else { return .none }
+    let f = m.om.classFormat(ci)
     let n = size.smallIntegerValue
-    if ci == WellKnown.byteArray {
-        guard n >= 0, n <= Int64(Header.maxBytes) else { return .none }
-        return m.allocateBytes(ci, count: Int(n))
+    guard n >= 0 else { return .none }
+    switch f.kind {
+    case .fixed:
+        guard n == 0 else { return .none }
+        return m.allocate(ci, slots: f.namedSlots)
+    case .variable:
+        let total = Int64(f.namedSlots) + n
+        guard total <= Int64(Header.maxSlots) else { return .none }
+        return m.allocate(ci, slots: Int(total))
+    default:
+        let bytes = n * Int64(f.kind.elementBytes)
+        guard n <= Int64(Header.maxBytes), bytes <= Int64(Header.maxBytes) else { return .none }
+        return m.allocateBytes(ci, count: Int(bytes))
     }
-    let total = named.smallIntegerValue + n
-    guard n >= 0, total <= Int64(Header.maxSlots) else { return .none }
-    return m.allocate(ci, slots: Int(total))
 }
 
 /// `//` and `\\` with floor semantics.

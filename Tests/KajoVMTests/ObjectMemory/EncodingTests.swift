@@ -19,11 +19,18 @@ import Testing
     let o = Oop(entryIndex: 1)
     #expect(o.isObject && !o.isSmallInteger && o.raw == 16 && o.entryIndex == 1)
     #expect(!Oop.none.isObject && !Oop.none.isSmallInteger && Oop.none.raw == 0)
-    // Every other low-nibble pattern is reserved for future immediates.
-    for low: UInt64 in [2, 4, 6, 8, 10, 12, 14] {
+    // Module 8: `..10` is a SmallFloat and `0100` a Character; `1000` and
+    // `1100` stay spare, and so does a Character that is not a scalar.
+    for low: UInt64 in [2, 6, 10, 14] {
+        let r = Oop(raw: 0x100 | low)
+        #expect(!r.isObject && !r.isSmallInteger && r.isSmallFloat && r.isImmediate && !r.isReserved)
+    }
+    #expect(Oop(raw: 0x104).isCharacter && !Oop(raw: 0x104).isReserved)
+    for low: UInt64 in [8, 12] {
         let r = Oop(raw: 0x100 | low)
         #expect(!r.isObject && !r.isSmallInteger && r.isReserved)
     }
+    #expect(Oop(raw: 0xD800 << 4 | 4).isReserved && Oop(raw: 0x110000 << 4 | 4).isReserved)
     #expect(!Oop(raw: 0x100).isReserved && !Oop(smallInteger: 3).isReserved)
 }
 
@@ -57,8 +64,8 @@ import Testing
     // fired ephemeron; module 7 bit 49, a deferred entry free).
     #expect(Header(raw: Header.youngBit | 1).reservedBits == 0)
     #expect(Header(raw: Header.markBit).reservedBits == Header.markBit)
-    #expect(Header(raw: 1 << 50).reservedBits == 1 << 50)
-    #expect(Header.reservedMask == Header.markBit | 3 << 50)
+    #expect(Header(raw: 1 << 51).reservedBits == 1 << 51)
+    #expect(Header.reservedMask == Header.markBit | 1 << 51)
 }
 
 @Test func bodyWordCountsCoverTheBlockLimit() {

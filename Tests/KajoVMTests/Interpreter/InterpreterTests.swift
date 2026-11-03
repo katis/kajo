@@ -137,16 +137,13 @@ func specialSends(_ op: String, _ a: Int64, _ b: Int64, _ expected: Int64) throw
     #expect(h.interpreter.counters.specialSendFallbacks == 0)
 }
 
-/// Overflow and non-SmallInteger operands are real sends of the special
-/// selector, never a trap.
+/// Overflow makes a LargeInteger in the special sends' out-of-line tier
+/// (module 8, ADR 0009 section 7), never a trap; operands that are not
+/// numbers are real sends of the special selector.
 @Test func overflowAndOtherReceiversAreRealSends() throws {
     let h = try Harness("""
     method SmallInteger + temps=0
       push_int 42
-      return_top
-    end
-    method SmallInteger * temps=0
-      push_int 43
       return_top
     end
     method UndefinedObject < temps=0
@@ -157,18 +154,22 @@ func specialSends(_ op: String, _ a: Int64, _ b: Int64, _ expected: Int64) throw
       push_int 44
       return_top
     end
-    """ + runOf("""
+    method UndefinedObject big temps=0
       push_lit 4611686018427387903
       push_int 1
       add
+      return_top
+    end
+    method UndefinedObject product temps=0
       push_lit 4611686018427387903
       push_int 2
       mul
-      add
+      return_top
+    end
+    """ + runOf("""
       push_nil
       push_int 100
       lt
-      add
       push_int 1
       push_nil
       add
@@ -180,26 +181,26 @@ func specialSends(_ op: String, _ a: Int64, _ b: Int64, _ expected: Int64) throw
       return_top
     """))
     defer { h.destroy() }
-    // + overflows: 42; * overflows: 43; 42 + 43 = 85 on the fast path;
-    // nil < 100: 100; 1 + nil: 42 (SmallInteger>>+); nil = nil: 44
-    #expect(try h.value() == 42 + 43 + 100 + 42 + 44)
-    #expect(h.interpreter.counters.specialSendFallbacks == 5)
+    // nil < 100: 100; 1 + nil: 42 (SmallInteger>>+); 100 + 42 on the fast path; nil = nil: 44
+    #expect(try h.value() == 100 + 42 + 44)
+    #expect(h.interpreter.counters.specialSendFallbacks == 3)
+    let big = try h.run("big", []).get()
+    #expect(h.om.classIndex(of: big) == WellKnown.largePositiveInteger && h.om.bytes(of: big) == [0, 0, 0, 0, 0, 0, 0, 0x40])
+    let product = try h.run("product", []).get()
+    #expect(h.interpreter.machine.bigInt(product) == BigInt(4611686018427387903) * BigInt(2))
+    #expect(h.interpreter.counters.specialSendTier == 2 && h.interpreter.counters.largeIntegersMade == 2)
 }
 
 @Test func subtractionOverflowAtTheBottomOfTheRange() throws {
-    let h = try Harness("""
-    method SmallInteger - temps=0
-      push_int 9
-      return_top
-    end
-    """ + runOf("""
+    let h = try Harness(runOf("""
       push_lit -4611686018427387904
       push_int 1
       sub
       return_top
     """))
     defer { h.destroy() }
-    #expect(try h.value() == 9)
+    let v = try h.run().get()
+    #expect(h.om.classIndex(of: v) == WellKnown.largeNegativeInteger && h.om.bytes(of: v) == [1, 0, 0, 0, 0, 0, 0, 0x40])
 }
 
 @Test func sendsCountersAndTheLookupCache() throws {

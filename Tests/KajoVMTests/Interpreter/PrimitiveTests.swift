@@ -156,7 +156,7 @@ import Testing
     ("push_lit @Array\n push_nil\n send new: 1", "size not an integer"),
     ("push_int 3\n send basicNew 0", "basicNew to a non-class"),
     ("push_lit @SmallInteger\n send basicNew 0", "an immediate class"),
-    ("push_lit @Method\n send basicNew 0", "a structural class"),
+    ("push_lit @CompiledMethod\n send basicNew 0", "a structural class"),
     ("push_lit @Object\n send class 0\n push_int 1\n send at: 1", "reading a class object"),
     ("push_lit @Object\n push_int 1\n push_nil\n send at:put: 2", "writing a class object"),
     ("push_int 7\n push_int 0\n send // 1", "division by zero"),

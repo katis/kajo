@@ -42,10 +42,12 @@ extension ObjectMemory {
 
     var verifierReports: [String] { unsafe gc.pointee.failures }
 
-    /// A word that may sit in a slot or a root: a SmallInteger or a
-    /// reference to a used entry below the high water mark.
+    /// A word that may sit in a slot or a root: a valid immediate
+    /// (SmallInteger, SmallFloat, Character holding a scalar; module 8) or a
+    /// reference to a used entry below the high water mark. The spare
+    /// patterns `1000` and `1100` are refused.
     func isValidReferenceOrInteger(_ v: Oop, highWater hw: UInt64) -> Bool {
-        if v.isSmallInteger { return true }
+        if v.isImmediate { return v.isValidImmediate }
         return v.isObject && v.entryIndex < hw && !EntryState.isFree(stateWord(v.raw)) && headerWord(v.raw) != 0
     }
 
@@ -294,7 +296,7 @@ extension ObjectMemory {
         var stack = RawArray<UInt64>()
         defer { reached.free(); stack.free() }
         func visit(_ v: Oop, from: String) {
-            if v.isSmallInteger || v == .none { return }
+            if v.isImmediate && v.isValidImmediate || v == .none { return }
             if !isValidReferenceOrInteger(v, highWater: hw) {
                 out.fail("\(from) holds \(v), not a used entry")
                 return

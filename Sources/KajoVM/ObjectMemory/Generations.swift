@@ -58,24 +58,71 @@ import Darwin
 ///
 ///     bits  0..15  named slots (the indexed part follows them)
 ///     bit  16      weak: the indexed slots are not traced; a slot whose
-///                  referent is reclaimed becomes nil
+///                  referent is reclaimed becomes nil (module 4)
 ///     bit  17      ephemeron: slot 0 is a key traced only if it is
-///                  reachable some other way
+///                  reachable some other way (module 4)
+///     bits 18..20  kind (module 8): 0 pointers fixed, 1 pointers variable,
+///                  2 bytes, 3 16-bit words, 4 32-bit words, 5 64-bit words
+///     bit  21      sealed (module 8): no primitive reads, writes, creates
+///                  or exchanges an instance, no method of the class
+///                  touches an instance variable (module 2's structural
+///                  classes, generalised: every metaclass is sealed)
+///     bit  22      behaviors (module 8): the instances are classes or
+///                  metaclasses (every metaclass, and Metaclass)
 ///
-/// The header keeps only "pointers or bytes" and the count.
+/// The header keeps only "pointers or bytes" and the count (bytes for every
+/// non-pointer kind); the element size is the class's. Weak implies
+/// variable pointers, ephemeron fixed pointers with a key, and the
+/// non-pointer kinds have no named slots.
 struct ClassFormat: Hashable, Sendable {
     var raw: UInt64
 
     init(raw: UInt64) { self.raw = raw }
 
+    enum Kind: UInt64, Sendable, CaseIterable {
+        case fixed = 0
+        case variable = 1
+        case bytes = 2
+        case words16 = 3
+        case words32 = 4
+        case words64 = 5
+
+        var isPointers: Bool { self == .fixed || self == .variable }
+        /// Bytes per indexed element of a non-pointer kind.
+        var elementBytes: Int {
+            switch self {
+            case .fixed, .variable: 8
+            case .bytes: 1
+            case .words16: 2
+            case .words32: 4
+            case .words64: 8
+            }
+        }
+    }
+
     static let namedMask: UInt64 = 0xFFFF
     static let weakBit: UInt64 = 1 << 16
     static let ephemeronBit: UInt64 = 1 << 17
-    static let validMask: UInt64 = namedMask | weakBit | ephemeronBit
+    static let kindShift: UInt64 = 18
+    static let kindMask: UInt64 = 7 << kindShift
+    static let sealedBit: UInt64 = 1 << 21
+    static let behaviorsBit: UInt64 = 1 << 22
+    static let validMask: UInt64 = namedMask | weakBit | ephemeronBit | kindMask | sealedBit | behaviorsBit
 
+    /// Module 4's form: weak classes are variable, ephemerons fixed, and
+    /// any other class variable (kasm's default; v0 let `basicNew:` add
+    /// indexed slots to any class).
     init(namedSlots: Int, weak: Bool = false, ephemeron: Bool = false) {
+        self.init(namedSlots: namedSlots, kind: ephemeron ? .fixed : .variable, weak: weak, ephemeron: ephemeron)
+    }
+
+    init(namedSlots: Int, kind: Kind, weak: Bool = false, ephemeron: Bool = false, sealed: Bool = false,
+         behaviors: Bool = false) {
         precondition(namedSlots >= 0 && UInt64(namedSlots) <= ClassFormat.namedMask && !(weak && ephemeron))
         raw = UInt64(namedSlots) | (weak ? ClassFormat.weakBit : 0) | (ephemeron ? ClassFormat.ephemeronBit : 0)
+            | kind.rawValue &<< ClassFormat.kindShift | (sealed ? ClassFormat.sealedBit : 0)
+            | (behaviors ? ClassFormat.behaviorsBit : 0)
+        precondition(isValid, "invalid class format 0x\(String(raw, radix: 16))")
     }
 
     var namedSlots: Int { Int(truncatingIfNeeded: raw & ClassFormat.namedMask) }
@@ -83,6 +130,38 @@ struct ClassFormat: Hashable, Sendable {
     var isEphemeron: Bool { raw & ClassFormat.ephemeronBit != 0 }
     /// Weak or ephemeron: the collectors treat it specially.
     var isSpecial: Bool { raw & (ClassFormat.weakBit | ClassFormat.ephemeronBit) != 0 }
+    var kind: Kind { Kind(rawValue: (raw & ClassFormat.kindMask) &>> ClassFormat.kindShift) ?? .fixed }
+    var isSealed: Bool { raw & ClassFormat.sealedBit != 0 }
+    var instancesAreBehaviors: Bool { raw & ClassFormat.behaviorsBit != 0 }
+    /// Instances are byte objects (bytes and the 16-, 32-, 64-bit kinds).
+    var isBytes: Bool { !kind.isPointers }
+
+    func with(sealed: Bool) -> ClassFormat {
+        ClassFormat(raw: sealed ? raw | ClassFormat.sealedBit : raw & ~ClassFormat.sealedBit)
+    }
+
+    /// The rules a format word must follow (the snapshot and image loaders
+    /// check them).
+    var isValid: Bool {
+        guard raw & ~ClassFormat.validMask == 0, let k = Kind(rawValue: (raw & ClassFormat.kindMask) &>> ClassFormat.kindShift)
+        else { return false }
+        if isWeak && (isEphemeron || k != .variable) { return false }
+        if isEphemeron && (k != .fixed || namedSlots < 1) { return false }
+        if !k.isPointers && namedSlots != 0 { return false }
+        return true
+    }
+
+    /// Whether an object with this header may be an instance: pointers or
+    /// bytes as the kind says, fixed classes exactly their named slots,
+    /// variable ones at least, word kinds a whole number of elements.
+    func admits(isBytes b: Bool, count: UInt64) -> Bool {
+        let k = kind
+        if k.isPointers {
+            if b { return false }
+            return k == .fixed ? count == UInt64(namedSlots) : count >= UInt64(namedSlots)
+        }
+        return b && count % UInt64(k.elementBytes) == 0
+    }
 }
 
 extension ObjectMemory {

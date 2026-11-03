@@ -10,6 +10,8 @@ enum ReshapeError: Error, Equatable {
     case tooLarge
     /// No room for the new bodies; nothing was changed. Collect and retry.
     case heapFull
+    /// Module 8: an instance is read-only (ADR 0009 section 9).
+    case readOnlyInstance
 }
 
 extension ObjectMemory {
@@ -44,6 +46,7 @@ extension ObjectMemory {
             let h = header(o)
             if h.isBytes { throw .byteObject }
             if h.isPinned { throw .pinnedInstance }
+            if h.isReadOnly { throw .readOnlyInstance }
             if h.count < UInt64(namedSlots) { throw .layoutOutOfRange }
             if UInt64(layout.count) &+ h.count &- UInt64(namedSlots) > UInt64(Header.maxSlots) { throw .tooLarge }
         }
@@ -81,6 +84,12 @@ extension ObjectMemory {
             }
             setHeader(o, Header(raw: h.raw & ~Header.countMask | (j &+ indexed) &<< Header.countShift))
             setStateWord(o.raw, new)
+        }
+        // Module 8: the class format's named-slot count follows (basicNew
+        // reads it).
+        let f = classFormat(classIndex)
+        if f.namedSlots == namedSlots && f.kind.isPointers && layout.count <= Int(ClassFormat.namedMask) {
+            unsafe gc.pointee.classFormats[Int(classIndex)] = f.raw & ~ClassFormat.namedMask | UInt64(layout.count)
         }
         unsafe gc.pointee.counters.reshapedObjects &+= UInt64(objs.count)
         verifyAtPause("after reshape", phase: .idle)

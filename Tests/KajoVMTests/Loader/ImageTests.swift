@@ -31,16 +31,24 @@ private func loadError(_ img: Image, _ files: [(String, String)]) -> LoadError.K
     #expect(om.classIndex(of: img.falseObject) == WellKnown.falseClass)
     #expect(img.classIndex(named: "Object") == WellKnown.object)
     #expect(img.classIndex(named: "Message") == WellKnown.message)
-    for (name, index) in WellKnown.classes {
-        let cls = om.classOop(index)
-        #expect(om.classIndex(of: cls) == WellKnown.classClass)
-        #expect(om.load(cls, ClassLayout.classIndex) == Oop(smallInteger: Int64(index)))
-        #expect(img.symbolName(om.load(cls, ClassLayout.name)) == name)
+    for d in WellKnown.definitions {
+        let cls = om.classOop(d.index)
+        // Module 8: every class is the sole instance of its metaclass.
+        let meta = WellKnown.metaclass(of: d.index)
+        #expect(om.classIndex(of: cls) == meta && om.classIndex(of: om.classOop(meta)) == WellKnown.metaclass)
+        #expect(om.load(om.classOop(meta), MetaclassLayout.thisClass) == cls)
+        #expect(om.load(cls, ClassLayout.classIndex) == Oop(smallInteger: Int64(d.index)))
+        #expect(img.symbolName(om.load(cls, ClassLayout.name)) == d.name)
+        #expect(img.className(meta) == d.name + " class")
         let sup = om.load(cls, ClassLayout.superclass)
-        #expect(sup == (name == "Object" ? img.nilObject : om.classOop(WellKnown.object)))
+        #expect(sup == (d.superclass.map { om.classOop(img.classIndex(named: $0)!) } ?? img.nilObject))
+        // `Foo class superclass` is `Foo superclass class`; Object class's is Class.
+        let metaSup = om.load(om.classOop(meta), ClassLayout.superclass)
+        #expect(metaSup == (sup == img.nilObject ? om.classOop(WellKnown.classClass) : om.classOop(om.classIndex(of: sup))))
+        #expect(om.classFormat(d.index) == d.format && om.classFormat(meta).isSealed && om.classFormat(meta).instancesAreBehaviors)
     }
     #expect(om.load(om.classOop(WellKnown.classClass), ClassLayout.instSize) == Oop(smallInteger: 5))
-    #expect(om.load(om.classOop(WellKnown.method), ClassLayout.instSize) == Oop(smallInteger: 7))
+    #expect(om.load(om.classOop(WellKnown.method), ClassLayout.instSize) == Oop(smallInteger: Int64(MethodLayout.size)))
     // special selectors interned in order, right after boot
     for (i, s) in specialSelectorNames.enumerated() { #expect(img.symbol(s) == img.specialSelectors[i]) }
     #expect(verified(om) == [])
@@ -70,14 +78,14 @@ private func loadError(_ img: Image, _ files: [(String, String)]) -> LoadError.K
     """)])
     let om = img.om
     let p = try #require(img.classIndex(named: "Point")), p3 = try #require(img.classIndex(named: "Point3"))
-    #expect(p == WellKnown.firstUserClass && p3 == p + 1)
+    #expect(p == WellKnown.firstUserClass && p3 == p + 2)  // a class and its metaclass each
     #expect(om.load(om.classOop(p3), ClassLayout.superclass) == om.classOop(p))
     #expect(om.load(om.classOop(p3), ClassLayout.instSize) == Oop(smallInteger: 3))
 
     let z = try #require(img.lookup(p3, img.symbol("z:")!))
     #expect(om.load(z, MethodLayout.argc) == Oop(smallInteger: 1))
     #expect(om.load(z, MethodLayout.temps) == Oop(smallInteger: 1))
-    #expect(om.load(z, MethodLayout.maxStack) == Oop(smallInteger: 4))
+    #expect(om.load(z, MethodLayout.maxStack) == Oop(smallInteger: 7))  // store_ivar's read-only send: 4 + 3
     #expect(om.load(z, MethodLayout.primitive) == Oop(smallInteger: 0))
     #expect(om.load(z, MethodLayout.selector) == img.symbol("z:"))
     let lits = om.load(z, MethodLayout.literals)
@@ -145,12 +153,12 @@ func theLoaderRejects(_ files: [(String, String)], _ kind: LoadError.Kind?) thro
 
 @Test func tooManyClassesAndMethodsAreRejected() throws {
     var limits = LoaderLimits()
-    limits.maxClassIndex = 22
+    limits.maxClassIndex = 68
     limits.maxMethodsPerClass = 4
     let img = try makeImage(limits: limits)
     defer { img.destroy() }
     let classes = (0..<8).map { "class C\($0) Object 0\n" }.joined()
-    #expect(loadError(img, [("a", classes)]) == nil)                          // 15 + 8 = 23 indices: 0...22
+    #expect(loadError(img, [("a", classes)]) == nil)                          // 53 + 2 x 8 = 69 indices: 0...68
     #expect(loadError(img, [("b", "class D Object 0\n")]) == .tooManyClasses)
     let methods = (0..<4).map { "method C0 m\($0) temps=0\n return_self\nend\n" }.joined()
     #expect(loadError(img, [("c", methods)]) == nil)

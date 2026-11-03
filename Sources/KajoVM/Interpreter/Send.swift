@@ -101,7 +101,7 @@ func send(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ sel: UInt64, _ arg
     }
     if count { unsafe s.pointee.counters.sends &+= 1 }
     let rcv = unsafe (r.sp - argc).pointee
-    let cls = rcv & 1 != 0 ? WellKnown.smallInteger : om.headerWord(rcv) & Header.classMask
+    let cls = classIndexOf(om, rcv)
     let e = unsafe s.pointee.cache + (Int(truncatingIfNeeded: (sel &>> 4) ^ cls) & (InterpreterState.cacheEntries &- 1))
     var method: UInt64
     if unsafe e.pointee.classIndex == cls && e.pointee.selector == sel {
@@ -166,10 +166,31 @@ func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64
     return unsafe Regs(pc: code, sp: hdr + (Frame.headerWords &- 1), fp: r.sp - argc, hdr: hdr, code: code, lits: lits)
 }
 
+/// The class index of any word that may sit in a slot: the header's for a
+/// reference, SmallInteger, SmallFloat or Character for an immediate (the
+/// full pattern, module 8; the spare patterns never reach here).
+@_transparent
+func classIndexOf(_ om: ObjectMemory, _ v: UInt64) -> UInt64 {
+    if v & 1 != 0 { return WellKnown.smallInteger }
+    if v & Oop.objectTagMask == 0 { return om.headerWord(v) & Header.classMask }
+    return v & 2 != 0 ? WellKnown.smallFloat : WellKnown.character
+}
+
 /// Return `v` to the caller: it replaces the receiver, sp drops to it, the
-/// caller's bases are re-derived from its method.
+/// caller's bases are re-derived from its method. A frame whose context
+/// word is not nil (a materialized Context to detach, or a return marker)
+/// returns out of line (module 8).
 @_transparent
 func doReturn(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ v: UInt64) -> Regs {
+    if _slowPath(unsafe r.hdr[Frame.context] != s.pointee.nilObject.raw) {
+        return unsafe returnSlow(s, r.pc, r.sp, r.fp, r.hdr, v)
+    }
+    return unsafe plainReturn(s, om, r, v)
+}
+
+/// The return itself, the context word already dealt with.
+@_transparent
+func plainReturn(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ v: UInt64) -> Regs {
     let callerFP = unsafe r.hdr[Frame.callerFP]
     if callerFP == Frame.hostFP { return unsafe bottomReturn(s, r.sp, r.fp, r.hdr, v) }
     let base = unsafe s.pointee.stackBase
@@ -249,23 +270,37 @@ func leavingWithoutStack(_ s: StatePointer) -> Regs {
     return unsafe Regs(pc: leave, sp: d, fp: d, hdr: d, code: leave, lits: UnsafePointer(d))
 }
 
-/// A special arithmetic or comparison bytecode whose fast path did not
-/// apply: a real send of its selector.
+/// A special-send bytecode whose inline fast path did not apply: module
+/// 8's out-of-line tier first (SmallInteger overflow into a LargeInteger,
+/// exact `/`, floor `//` and `\\`, SmallFloat and boxed Float arithmetic
+/// and comparison, mixed with SmallIntegers; `at:put:`, `at:` and `size`
+/// on Arrays and byte objects; closure activation for `value`), else a
+/// real send of its selector, which leaves the stack as a plain send would.
+/// `special` is the selector's index shifted left 8, or'ed with its argc.
 @inline(never)
 func specialSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
-                 _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ index: Int) -> Regs {
+                 _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ special: Int) -> Regs {
+    let index = special &>> 8, argc = special & 0xFF
+    if let r = unsafe specialFastPath(s, pc, sp, fp, hdr, index, argc) { return r }
     unsafe s.pointee.counters.specialSendFallbacks &+= 1
     let om = unsafe s.pointee.om
+    let r = unsafe regsAt(s, pc, sp, fp, hdr)
+    return unsafe send(s, om, r, s.pointee.specialSelectors[index], argc, 1, poll: true)
+}
+
+/// Registers for a frame from the scalars, the bases derived from its
+/// method (or the host's at the bottom).
+@inline(__always)
+func regsAt(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+            _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>) -> Regs {
+    let om = unsafe s.pointee.om
     let base = unsafe s.pointee.stackBase
-    let r: Regs
     if unsafe hdr == base {
-        r = unsafe Regs(pc: pc, sp: sp, fp: fp, hdr: hdr, code: pc, lits: UnsafePointer(base))
-    } else {
-        let method = unsafe Oop(raw: hdr.pointee)
-        r = unsafe Regs(pc: pc, sp: sp, fp: fp, hdr: hdr, code: om.bytesBase(om.load(method, MethodLayout.bytecodes)),
-                        lits: om.slotsBase(om.load(method, MethodLayout.literals)))
+        return unsafe Regs(pc: pc, sp: sp, fp: fp, hdr: hdr, code: pc, lits: UnsafePointer(base))
     }
-    return unsafe send(s, om, r, s.pointee.specialSelectors[index], 1, 1, poll: true)
+    let method = unsafe Oop(raw: hdr.pointee)
+    return unsafe Regs(pc: pc, sp: sp, fp: fp, hdr: hdr, code: om.bytesBase(om.load(method, MethodLayout.bytecodes)),
+                       lits: om.slotsBase(om.load(method, MethodLayout.literals)))
 }
 
 /// Run a primitive. Success: the result replaces receiver and arguments.
@@ -278,6 +313,11 @@ func primitiveSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMu
                    _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>,
                    _ method: UInt64, _ primAndArgc: Int, _ length: Int) -> Regs {
     let prim = primAndArgc &>> 8, argc = primAndArgc & 0xFF
+    if prim >= ActivationPrimitive.first && prim <= ActivationPrimitive.last {
+        // Module 8: closure `value`s and the `perform:` family activate a
+        // frame instead of answering a value.
+        return unsafe activationPrimitive(s, pc, sp, fp, hdr, method, prim, argc, length)
+    }
     unsafe save(s, pc, sp, fp, hdr)
     unsafe s.pointee.counters.primitiveCalls &+= 1
     unsafe s.pointee.sendLength = length
@@ -285,8 +325,14 @@ func primitiveSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMu
     let call = unsafe PrimitiveCall(receiver: Oop(raw: (sp - argc).pointee), argc: argc,
                                     arg0: argc > 0 ? Oop(raw: (sp - argc + 1).pointee) : .none,
                                     arg1: argc > 1 ? Oop(raw: (sp - argc + 2).pointee) : .none)
+    unsafe s.pointee.readOnlyFailure = .none
     let result = primitive(prim, m, call)
     if unsafe s.pointee.exit == .suspended { return unsafe leavingWithoutStack(s) }
+    if _slowPath(unsafe s.pointee.readOnlyFailure != .none) && result == .none && !m.failed {
+        // Module 8: a store primitive refused a read-only object; send
+        // attemptToModify:at:value: in place of its answer.
+        return unsafe attemptToModifyFromPrimitive(s, argc, length)
+    }
     if result != .none {
         let base = unsafe s.pointee.stackBase
         let top = unsafe s.pointee.regs.sp &- argc

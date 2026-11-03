@@ -45,8 +45,10 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             let n = unsafe Int(r.pc.pointee)
             unsafe r.pc += 1
             let rcv = unsafe r.fp.pointee
-            if _slowPath(!hasSlot(om, rcv, n)) {
-                r = unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 2, .invalidSlotAccess, 0, rcv)
+            // The slot check's header load also covers the read-only bit
+            // (module 8): one mask, no extra instruction.
+            if _slowPath(!canStore(om, rcv, n)) {
+                r = unsafe storeRefused(s, r.pc, r.sp, r.fp, r.hdr, rcv, n, 2)
                 continue
             }
             unsafe storeWithBarrier(s, flag, om, Oop(raw: rcv), n, Oop(raw: r.sp.pointee), .storeIvar)
@@ -112,59 +114,154 @@ func interpret(_ s: StatePointer, _ start: Regs) {
                 let (v, o) = Int64(bitPattern: a).addingReportingOverflow(Int64(bitPattern: b) &- 1)
                 if !o { binaryResult(&r, UInt64(bitPattern: v)); continue }
             }
-            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 0)
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 0 &<< 8 | 1)
         case .sub?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 let (v, o) = Int64(bitPattern: a).subtractingReportingOverflow(Int64(bitPattern: b) &- 1)
                 if !o { binaryResult(&r, UInt64(bitPattern: v)); continue }
             }
-            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 1)
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 1 &<< 8 | 1)
         case .mul?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 let (v, o) = (Int64(bitPattern: a) &>> 1).multipliedReportingOverflow(by: Int64(bitPattern: b) &- 1)
                 if !o { binaryResult(&r, UInt64(bitPattern: v) | 1); continue }
             }
-            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 2)
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 2 &<< 8 | 1)
         case .lt?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 binaryResult(&r, Int64(bitPattern: a) < Int64(bitPattern: b) ? trueObject : falseObject)
             } else {
-                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 3)
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 3 &<< 8 | 1)
             }
         case .gt?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 binaryResult(&r, Int64(bitPattern: a) > Int64(bitPattern: b) ? trueObject : falseObject)
             } else {
-                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 4)
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 4 &<< 8 | 1)
             }
         case .le?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 binaryResult(&r, Int64(bitPattern: a) <= Int64(bitPattern: b) ? trueObject : falseObject)
             } else {
-                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 5)
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 5 &<< 8 | 1)
             }
         case .ge?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 binaryResult(&r, Int64(bitPattern: a) >= Int64(bitPattern: b) ? trueObject : falseObject)
             } else {
-                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 6)
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 6 &<< 8 | 1)
             }
         case .eq?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             if a & b & 1 != 0 {
                 binaryResult(&r, a == b ? trueObject : falseObject)
             } else {
-                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 7)
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 7 &<< 8 | 1)
             }
         case .identical?:
             let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
             binaryResult(&r, a == b ? trueObject : falseObject)
+        // Bytecode set v1 (module 8).
+        case .div?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 9 &<< 8 | 1)
+        case .intDiv?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 10 &<< 8 | 1)
+        case .mod?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 11 &<< 8 | 1)
+        case .ne?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                binaryResult(&r, a != b ? trueObject : falseObject)
+            } else {
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 12 &<< 8 | 1)
+            }
+        case .notIdentical?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            binaryResult(&r, a != b ? trueObject : falseObject)
+        case .at?:
+            let i = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & Oop.objectTagMask == 0 && i & 1 != 0 {
+                let h = om.headerWord(a)
+                let k = UInt64(bitPattern: Int64(bitPattern: i) &>> 1) &- 1
+                if h & Header.classMask == WellKnown.array && k < (h & Header.countMask) &>> Header.countShift {
+                    binaryResult(&r, om.load(Oop(raw: a), Int(truncatingIfNeeded: k)).raw)
+                    continue
+                }
+            }
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 14 &<< 8 | 1)
+        case .atPut?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 15 &<< 8 | 2)
+        case .size?:
+            let a = unsafe r.sp.pointee
+            if a & Oop.objectTagMask == 0 {
+                let h = om.headerWord(a)
+                if h & Header.classMask == WellKnown.array {
+                    unsafe r.sp.pointee = tagged(Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift))
+                    continue
+                }
+            }
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 16 &<< 8 | 0)
+        case .classOf?:
+            unsafe r.sp.pointee = om.classOop(classIndexOf(om, r.sp.pointee)).raw
+        case .value?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 18 &<< 8 | 0)
+        case .value1?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 19 &<< 8 | 1)
+        case .value2?:
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 20 &<< 8 | 2)
+        case .isNil?:
+            unsafe r.sp.pointee = r.sp.pointee == nilObject ? trueObject : falseObject
+        case .notNil?:
+            unsafe r.sp.pointee = r.sp.pointee == nilObject ? falseObject : trueObject
+        case .sendSuper?:
+            let lit = unsafe Int(r.pc[0])
+            let argc = unsafe Int(r.pc[1])
+            r = unsafe superSend(s, r.pc + 2, r.sp, r.fp, r.hdr, lit, argc, 3)
+        case .pushClosure?:
+            let lit = unsafe Int(r.pc[0])
+            let copied = unsafe Int(r.pc[1])
+            r = unsafe pushClosure(s, r.pc + 2, r.sp, r.fp, r.hdr, lit, copied)
+        case .pushNewArray?:
+            let n = unsafe Int(r.pc.pointee)
+            r = unsafe pushNewArray(s, r.pc + 1, r.sp, r.fp, r.hdr, n)
+        case .pushTempVectorSlot?:
+            let n = unsafe Int(r.pc[0])
+            let tv = unsafe r.fp[1 &+ Int(r.pc[1])]
+            unsafe r.pc += 2
+            if _slowPath(!hasSlot(om, tv, n)) {
+                r = unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 3, .invalidSlotAccess, 0, tv)
+                continue
+            }
+            push(&r, om.load(Oop(raw: tv), n).raw)
+        case .storeTempVectorSlot?:
+            let n = unsafe Int(r.pc[0])
+            let tv = unsafe r.fp[1 &+ Int(r.pc[1])]
+            unsafe r.pc += 2
+            if _slowPath(!canStore(om, tv, n)) {
+                r = unsafe storeRefused(s, r.pc, r.sp, r.fp, r.hdr, tv, n, 3)
+                continue
+            }
+            unsafe storeWithBarrier(s, flag, om, Oop(raw: tv), n, Oop(raw: r.sp.pointee), .storeTempVector)
+            unsafe r.sp -= 1
+        case .pushThisContext?:
+            let c = unsafe r.hdr[Frame.context]
+            if c & Oop.objectTagMask == 0 && c != nilObject {
+                push(&r, c)
+            } else {
+                r = unsafe pushThisContext(s, r.pc, r.sp, r.fp, r.hdr)
+            }
+        case .blockReturn?:
+            r = unsafe doReturn(s, om, r, r.sp.pointee)
+        case .nonlocalReturn?:
+            r = unsafe nonLocalReturn(s, r.pc, r.sp, r.fp, r.hdr)
+        case .ext?:
+            r = unsafe extendedInstruction(s, r.pc, r.sp, r.fp, r.hdr)
         case nil:
             // The leave code, or a byte outside the set.
             if unsafe s.pointee.exit != .running { return }
@@ -172,6 +269,18 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             r = unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 1, .invalidBytecode, 0, r.fp.pointee)
         }
     }
+}
+
+/// `store_ivar` or `store_tv_slot` could not store: the object is
+/// read-only (send `attemptToModify:at:value:`), or it has no such slot
+/// (the error). One call, out of line.
+@inline(never)
+func storeRefused(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+                  _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ o: UInt64, _ n: Int,
+                  _ length: Int) -> Regs {
+    let om = unsafe s.pointee.om
+    if isReadOnlySlot(om, o, n) { return unsafe attemptToModifyFromStore(s, pc, sp, fp, hdr, o, n + 1) }
+    return unsafe failAt(s, pc, sp, fp, hdr, length, .invalidSlotAccess, 0, o)
 }
 
 /// The poll at a backward jump: count down; due when the budget check is

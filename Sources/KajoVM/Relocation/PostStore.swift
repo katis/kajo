@@ -90,7 +90,7 @@ func noteSpin(_ c: UnsafeMutablePointer<RelocationMutatorCounters>, _ dt: UInt64
 @inline(never)
 func storeConflict(_ s: StatePointer, _ o: UInt64, _ i: Int, _ v: UInt64, _ site: UInt8) {
     unsafe postStoreSlow(s, o, i, v)
-    if v & 1 == 0 {
+    if v & Oop.objectTagMask == 0 {
         let om = unsafe s.pointee.om
         let hv = om.headerWord(v)
         if hv & Header.youngBit != 0 && (om.headerWord(o) ^ hv) & Header.youngNurseryMask != 0 {

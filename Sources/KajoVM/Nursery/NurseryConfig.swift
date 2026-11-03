@@ -153,4 +153,13 @@ enum BarrierSite: UInt8, CaseIterable, Sendable {
     case hostGlobal
     /// Module 6: the array copy primitive's stores (under hazard slots).
     case arrayCopy
+    /// Module 8: `store_tv_slot` (a temp vector may be old).
+    case storeTempVector
+    /// Module 8: `instVarAt:put:`.
+    case instVarAtPut
+    /// Module 8: a Context's slots: materialization (a fresh holder) and
+    /// detachment (the args and temps copied into a Context that may be old).
+    case contextSlot
+    /// Module 8: a new closure's slots (a fresh holder).
+    case closureSlot
 }

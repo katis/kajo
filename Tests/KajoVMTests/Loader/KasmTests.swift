@@ -23,16 +23,20 @@ private func rejection(_ src: String) -> LoadError.Kind? {
 
 // MARK: - opcode table
 
-@Test func theOpcodeTableIsTheExperimentsSet() {
-    // bytecode set v0: experiments/vm-language-bench/SPEC-SHARED.md "Bytecodes"
-    #expect(Opcode.allCases.count == 27)
+@Test func theOpcodeTableIsContiguous() {
+    // bytecode set v1: v0's 27 opcodes unchanged, then ADR 0009's.
+    #expect(Opcode.allCases.count == 50)
     for (i, op) in Opcode.allCases.enumerated() { #expect(Int(op.rawValue) == i && Opcode.decode(UInt8(i)) == op) }
-    for b in 27...255 { #expect(Opcode.decode(UInt8(b)) == nil) }
+    for b in 50...255 { #expect(Opcode.decode(UInt8(b)) == nil) }
     #expect(Opcode.send.rawValue == 0x0C && Opcode.jump.rawValue == 0x0F && Opcode.identical.rawValue == 0x1A)
     #expect(Opcode(mnemonic: "push_temp") == .pushTemp && Opcode(mnemonic: "jump_if_false") == .jumpIfFalse)
     #expect(Opcode.send.length == 3 && Opcode.jump.length == 3 && Opcode.pushInt.length == 2 && Opcode.add.length == 1)
     #expect(Opcode.add.specialSelector == "+" && Opcode.eq.specialSelector == "=" && Opcode.pop.specialSelector == nil)
-    #expect(specialSelectorNames == ["+", "-", "*", "<", ">", "<=", ">=", "=", "=="])
+    #expect(Array(specialSelectorNames.prefix(9)) == ["+", "-", "*", "<", ">", "<=", ">=", "=", "=="])
+    #expect(specialSelectorNames.count == 23)
+    for op in Opcode.allCases where op.specialSelector != nil {
+        #expect(specialSelectorNames[op.specialIndex] == op.specialSelector && arity(of: op.specialSelector!) == op.specialArgc)
+    }
 }
 
 @Test func selectorArity() {
@@ -114,9 +118,9 @@ private func rejection(_ src: String) -> LoadError.Kind? {
     ("push_int -129\nreturn_top", .badOperand),
     ("push_int x\nreturn_top", .badOperand),
     ("push_temp 0\nreturn_top", .badOperand),                       // no temps
-    ("push_ivar 256\nreturn_top", .badOperand),
-    ("push_lit 99999999999999999999\nreturn_top", .badOperand),
-    ("push_lit 4611686018427387904\nreturn_top", .badOperand),     // 2^62: not a SmallInteger
+    ("push_ivar 4095\nreturn_top", .badOperand),
+    ("push_lit 99999x\nreturn_top", .badOperand),
+    ("push_lit 1.5.2\nreturn_top", .badOperand),
     ("push_lit &x\nreturn_top", .badOperand),
     ("push_lit\nreturn_top", .badOperand),
     ("pop 1\nreturn_self", .badOperand),
