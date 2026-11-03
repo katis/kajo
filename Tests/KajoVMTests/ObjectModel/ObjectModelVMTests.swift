@@ -374,9 +374,12 @@ end
 /// collector may compare-and-swap the same word: neither loses its bits.
 @Test(arguments: [YoungMode.local, .offload])
 func readOnlyFlipsRaceNoYoungCollection(_ mode: YoungMode) throws {
-    let rt = try youngRuntime(mode, src: flipSrc, background: 2, start: true)
-    let ps = (0..<2).map { _ in rt.spawn("flips:", [Oop(smallInteger: 150_000)]) }
-    rt.waitAllTerminated()
+    // A small nursery collects often; under ThreadSanitizer a tenth of the
+    // work (and a long wait).
+    let rt = try youngRuntime(mode, src: flipSrc, background: 2, start: true) { $0.nursery.bytes = 256 << 10 }
+    let n: Int64 = underThreadSanitizer ? 15_000 : 150_000
+    let ps = (0..<2).map { _ in rt.spawn("flips:", [Oop(smallInteger: n)]) }
+    rt.waitAllTerminated(underThreadSanitizer ? 600 : 60)
     for p in ps { #expect(rt.result(p) == 0) }
     let ring = rt.global(12)
     #expect(rt.vm.inspect { om in (0..<64).allSatisfy { om.isReadOnly(om.load(ring, $0)) } })
