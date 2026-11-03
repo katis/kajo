@@ -1,271 +1,487 @@
 # Module 8c: Processes saved in the image
 
-Status: brief, 2026-11-03. Decided by the owner the same day ("images hold
-Processes", ADR 0009 Built (8a)); module 8b built the image without them
-and reserved the entry point (special object 7) beside them. Module 9's
-live development needs a running system that can be saved and resumed.
+Status: built 2026-11-04. The owner's decision "images hold Processes"
+(ADR 0009, Built (8a)). New: `Sources/KajoVM/Processes/SavedProcesses.swift`
+(the save, primitive 142, the poll trigger, the resume),
+`Sources/KajoVM/Loader/SavedProcessRules.swift` (the loader's rules), the
+kernel's `Smalltalk snapshot:` and Delay list (`kernel/`), the model
+`models/Sources/SaveHoldModel/` (`docs/models/save-hold.md`). Changes to
+modules 2, 3 and 8 below. Tests in `Tests/KajoVMTests/Processes/`
+(`SavedProcessTests`, `SavedProcessLoaderTests`), the random programs'
+snapshot mode (`Tests/KajoVMTests/Workers/RandomPrograms.swift`),
+`Tests/KajoCompilerTests/SnapshotScenarioTests.swift` with its Smalltalk
+fixture, `kernel/SnapshotTest.class.st`.
 
 ## What it hides
 
-A Kajo image can be saved while Processes are ready, waiting or holding
-locks, and a later `kajo run` of that image continues every one of them
-where it stopped, with the same results as a run that was never saved.
-Everything a Process needs to continue is in the image file, in a form
-that is independent of addresses, worker count and the order the loader
-rebuilds things in, and the loader trusts none of it: a saved frame is
-untrusted input, verified against the methods in the image before any
-Process is made runnable.
+- What an image holds of a running system: which Processes, in what form,
+  and what the scheduler needs to continue them. The form is independent
+  of addresses, worker count and the order the loader rebuilds things in.
+- How a save brings every Process to a point where its registers are
+  exact while the others keep running until they get there.
+- What the loader checks before a saved frame may run: every saved word is
+  untrusted input.
+- What the kernel re-arms on resume (the Delays' timers) and what the VM
+  does (the finalization Semaphore, the records, the queues).
 
-## Starting point (read these as built)
+## The saved form
 
-- `docs/modules/workers.md`: Process and Semaphore layouts (slots 6 to 9
-  are the saved registers, SmallInteger word indices and a bytecode
-  offset, never addresses), the record table, malloc'ed stacks, the ready
-  queues (3 priorities x 2 affinities, head and tail oops, FIFO through
-  `next`), the safepoint protocol and the saved-pc conventions, external
-  signals and the pending-root table, `delay:signal:` as a one-shot GCD
-  timer.
-- `docs/modules/object-model.md`: the frame (`hdr[0..4]`, the block
-  activation's `hdr[-1]`), closures and temp vectors, Contexts (a frame
-  index while live, detached on return), return markers, the unwind and
-  handler marks, frame pins (module 6), stack growth by copying, the image
-  format and `verifyImage`'s rules (it refuses any Process and any live
-  Context today).
-- `docs/modules/kernel-image.md`: the image build, the entry point, the
-  size lesson (an image's size follows the entry table's peak), `kajo run`
-  and `kajo test`, the kernel's Process, Semaphore, Mutex, Monitor,
-  SharedQueue, Delay and Ephemeron classes (`kernel/`).
-- `docs/modules/object-memory.md`, `nursery.md`, `young-collection.md`,
-  `relocation.md`: the snapshot (version 3) follows a promote-all and
-  refuses young, deferred-free and frame-pinned entries; the loader is the
-  trust boundary (AGENTS.md lessons).
-- ADR 0009 section 3 says a Process resumed from a snapshot "rebuilds
-  frames from Contexts". That sentence predates the as-built frame; this
-  module decides the saved form (below) and amends the ADR in its Built
-  (8c) note.
+An image with saved Processes has a **scheduler state** at special object
+8 (`SpecialObjects.scheduler`; nil in an image without, and set back to nil
+once a VM has resumed them). The image format's version is 2 (9 special
+objects); version 1 images (8b's, 8 special objects) still load, and are
+written back as version 1, but cannot save Processes.
 
-## What 8c builds
+| scheduler state slot | |
+|---|---|
+| 0 queues | an Array of 12: the six ready queues' heads, then their tails, nil for empty (`queueIndex` order) |
+| 1 finalization | the Semaphore the VM signals when ephemerons are queued, or nil |
+| 2 processes | an Array of chunks; each chunk an Array of pairs: a Process and its **saved stack** |
+| 3 saver | the Process that sent `snapshot:` (resumes after the send with true), or nil for a save the VM made at a poll (tests) |
+| 4 nextId | the next Process id the saving VM would have given |
 
-### 1. The saved form of a Process
+| a saved Process | |
+|---|---|
+| the Process object | as it is: priority, state (ready or waiting, never running), waitingOn, affinity, next, sp, pc, fp, hdr, result (nil), exitSemaphore, id; `record` written as -1 |
+| its saved stack | an Array of chunks, each an Array of 4095 words but the last, holding the stack words `[0, sp]` verbatim |
 
-Every live Process (state ready or waiting, and the one that asked for
-the save) is saved as heap objects, so module 1's snapshot carries it and
-its verifier covers every oop in it:
+Every word on a stack is already a valid oop or a SmallInteger
+(receivers, arguments, temps, operands, methods, closures, caller pc, fp
+and hdr as indices and offsets, context words), so the words are copied as
+they are: no frame is rebuilt, no Context de-materialized, and a
+materialized Context keeps its frame index. Arrays rather than a sealed
+class: nothing in Smalltalk can reach them (special object 8 is not
+reachable from the image, and is nil again once resumed), and the heap
+verifier and the collectors already cover every word of an Array.
+Terminated Processes are ordinary objects (state 3, record -1, in no
+list) and may be anywhere in an image (provisional, question 3).
 
-- The Process object as it is (priority, state, waitingOn, affinity,
-  next, the four registers, result, exitSemaphore, id); `record` is
-  meaningless in a file and is written as -1 and reassigned on load.
-- The stack words `[0, sp]` as a traced heap object. Every word on a
-  stack is already a valid oop or SmallInteger (receivers, arguments,
-  temps, operands, methods, closures, caller pc/fp/hdr as word indices,
-  context words), so the words can be copied into Arrays verbatim; an
-  object is at most one block (4095 slots), a default stack is 8192 words
-  and grows by doubling, so the saved stack is a chain of chunks (an
-  Array of Arrays, or a dedicated sealed class; decide and document).
-  Materialized Contexts keep their frame indices, which stay valid
-  because indices are what is saved. This is the recommended form: it is
-  what the frame design already is, and it needs no de-materialization.
-  If you choose to rebuild frames from Contexts instead (the ADR's
-  sentence), say why in the doc; either way the ADR is amended to what
-  was built.
-- Nothing by address, worker or time: `runningOn`, `runnableSince`,
-  `hopStart`, the record index and the stuck report are not saved.
+Not saved: the record index, the worker a Process runs on, `runnableSince`,
+`hopStart`, the stuck report, pending external signals (the save drains
+them first, so the image and the running system agree), and outstanding
+`delay:signal:` timers (the kernel re-arms them).
 
-### 2. The scheduler's state
+## The save
 
-What lives outside the heap today and must be in the image: the ready
-queues' heads and tails (6 queues), the finalization Semaphore the VM
-signals (`FinalizationState`), and the list of live Processes (so the
-loader knows which Process objects get a record and a stack; a terminated
-Process is an ordinary object and may appear in an image from now on).
-Put them in the special objects (extend `SpecialObjects`; the image
-format's version becomes 2) or in one sealed scheduler-state object the
-special objects name; the loader rebuilds the queues from the heads
-through `next` and checks the chains (acyclic, each Process in exactly
-one list, its state agreeing with the list it is in: ready in a ready
-queue of its priority and affinity, waiting in `waitingOn`'s waiter list
-and nowhere else). `excessSignals` and waiter lists are already heap
-state and need no change.
+`Smalltalk snapshot: aPathOrNil` (kernel) sends primitive 142
+(`savePrimitive`); `VMConfig.snapshotAtPoll` (tests, `kajo run
+--snapshot-at`) makes the n-th slow poll save the same way. Both call
+`saveImageWithProcesses(vm, w, form)`:
 
-Pending external work is not saved: the save drains the external signal
-stack first (signals land before the stop), and outstanding `delay:signal:`
-timers are dropped. The kernel re-arms them (4).
+1. **Hold the scheduler.** Under the scheduler lock, `saveHold` (refused
+   if another save holds it: the primitive fails); its mirror
+   `vm.saveHold`, a relaxed atomic, and the flag's bit 0, so every poll
+   takes its slow path, as module 4 keeps the bit for a due full
+   collection. While held, `dequeueLocked` answers nothing and idle
+   workers wait (their untimed wait's predicate includes the hold).
+2. **Every other Process leaves its worker at a poll.** `pollSlow`, after
+   its park, reads the mirror: held, the running Process is put back at
+   the end of its ready queue exactly as a preemption puts it (module 3's
+   saved-pc conventions: the send rewound, or the jump's target), and the
+   worker runs nothing more. Its registers in its Process object are then
+   exact.
+3. **Wait.** The saver waits in module 7's `waitServicing` (servicing
+   rounds, parking in other workers' stops) until no other main or
+   background worker is inside the VM; each leaves once its Process is
+   back in a queue and nothing can be dequeued.
+4. **Stop.** Module 8a's method-install stop is the model: `stopWorld`,
+   every other worker parked. The stop first checks that no record but
+   the saver's runs on a worker (if one does, the stop ends and the saver
+   waits again: `snapshotRetries`; the model shows it cannot happen while
+   dequeue refuses, so it is a verifier). Then: drain the external signals;
+   module 1's collection (promote-all first, so nothing young and no
+   garbage goes into the image; the entry table's peak still sets the
+   image's size, the 8b lesson); copy every live Process's stack words
+   into Arrays hung from special object 8 at once (a root, so an
+   allocation that collects keeps them); write the slots the image sees
+   differently (every saved record -1; the saver ready at the back of its
+   queue, its registers the resume point, after the primitive with its
+   receiver and argument replaced by true, or at its poll rewound); take
+   module 1's snapshot and the method table; put back every slot it
+   changed; nil special object 8; release the hold in the stop (so the
+   stop's end clears the flag's bit).
+5. **Release.** Broadcast the idle workers' condition under the scheduler
+   lock, wake the main worker if a main-affine Process is ready. The
+   running system answers false.
 
-### 3. The save
+Is the hold a new cross-thread protocol? Yes: a save is a stop of the
+scheduler, not of the world, and module 8a's install stop alone would
+catch other workers mid-instruction (in an allocation's stop, a young
+collection's wait, a primitive's own stop), where no register set is a
+resume point. `docs/models/save-hold.md` model-checks it: no save sees a
+Process mid-slice, every Process finishes; the stop's check, the poll that
+leaves and the release's broadcast each break a claim when turned off.
 
-A primitive the kernel sends (`Smalltalk snapshot: aString`, or your
-name; document it) run from any Process at a bytecode boundary:
+Frame pins: module 1's snapshot strips frame pins in the bytes it writes
+(unchanged) and its loader refuses them; the running system keeps its own.
+At the save's stop no worker runs a Process, so no frame holds an address.
 
-1. request a stop (module 8a's method-install stop is the model: every
-   worker at a safepoint, every other Process parked with its registers
-   saved; read the saved-pc conventions and make the parked Processes'
-   registers exact);
-2. drain external signals; promote all (the snapshot's precondition) and
-   collect, so the entry table's peak does not bloat the file (the 8b
-   lesson);
-3. write the saving Process so that it resumes **after** the primitive
-   with the answer `true`, and answer `false` in the running system
-   (Smalltalk-80's `snapshot:andQuit:` convention), so one kernel method
-   can do the post-resume work;
-4. copy every live Process's stack into heap chunks, fill the scheduler
-   state, snapshot in module 8a's image format (version 2), then free the
-   chunks (or leave them to the next collection) and continue.
+The image goes to the file the String names (written after the stop, in
+a module 7 blocking region), or for nil to the VM's host
+(`VM.takeSavedImages`, the last eight). The primitive fails when the file
+cannot be written; the save happened all the same.
 
-Frame pins: a snapshot refuses frame-pinned entries today. At the stop no
-frame holds an address, so either clear them as part of the stop (say
-where) or show they cannot be set at that point; the loader's refusal
-stays.
+## The load and the resume
 
-Also `kajo save`? Not needed: the kernel's method is the API; the headless
-CLI gets whatever a test needs (a `--snapshot-at` for the random programs,
-below).
+`Image.load` runs module 1's snapshot loader, `verifyImage` (8a's rules,
+now with Processes, Semaphores and live Contexts collected in its walk
+over every object) and then the saved-Process rules below, all before
+anything runs, all or nothing. A `VM` over an image with saved Processes
+installs them in its initializer, before any worker starts
+(`installSavedProcesses`, on the host worker): per Process a record, a
+malloc'ed stack of `stackWords` doubled until it holds every saved frame's
+deepest operand (`hdr + 5 + maxStack + 8`) and 64 words past sp, the words
+copied back, `record` set; the ready queues from the scheduler state; the
+next id; the finalization Semaphore registered as a pending root and, if
+the finalization queue is not empty, signalled once (its signal was not
+saved); special object 8 set to nil. The record table grows to hold every
+saved Process. The resumed Processes are rooted for the host
+(`VM.resumedProcesses`, `resumedSaver`).
 
-### 4. The load and the resume
+`kajo run image.img` with saved Processes resumes them instead of sending
+the entry point, runs main-affine ones in turns on its thread, and ends
+when nothing can happen without the host (`VM.isQuiescent` twice in a row:
+no Process ready or running, no external signal queued, no Delay
+outstanding): Processes still waiting then are terminated. The checksum is
+the sum of what the resumed Processes that ended answered. `kajo test` on
+such an image refuses (provisional, question 2). Images without saved
+Processes start at the entry point as in 8b.
 
-`Image.load` accepts images of version 2 with saved Processes. For each
-live Process, after `verifyImage` passes and before anything runs: a
-record, a malloc'ed stack of at least the saved words (grown by the usual
-doubling if the saved sp needs it), the words copied back, registers from
-the Process, state as saved, and the ready queues relinked from the saved
-heads. `kajo run image.img` with saved Processes resumes them instead of
-sending the entry point; the entry point stays for images without (8b's
-`kajo test` and the benchmark kernels). `kajo test` on an image with saved
-Processes refuses with a clear message (provisional; question 2 below).
-Main-affine Processes resume on the main worker; `--workers n` applies as
-before.
+The kernel's side: `Smalltalk snapshot:` takes each pending Delay's time
+left (`Delay prepareSnapshot`), sends the primitive, and on true runs
+`Smalltalk resumeAfterSnapshot`: `Delay resumeAfterSnapshot` arms each
+pending Delay's timer again for the time it had left (provisional,
+question 1: the time on disk is not counted), `Ephemeron
+resumeAfterSnapshot` makes sure the finalization Process exists. A Delay
+registers itself with its class while it is waited on (`Delay>>wait`,
+unregistering in an `ensure:`), under a Mutex. The Transcript and the
+event stream need nothing: their primitives reach the new host.
 
-The kernel's side (`kernel/`): the method that called the snapshot
-primitive sees `true` and runs the resume hook: re-arm every pending
-Delay (Delay keeps a class-side list of pending ones with their remaining
-time, computed at save; a Delay's remaining time continues from the
-resume, the time on disk is not counted: provisional, question 1), make
-sure the finalization Process exists (it is saved waiting on its
-Semaphore, so usually it does), and anything else that held host state.
-The Transcript and the event stream reattach to the new host.
+## The loader's rules
 
-### 5. The loader as a trust boundary
+`verifySavedProcesses`, each refused by name and each with a corrupt
+image in `theLoaderRefusesASavedProcess` (33 cases, the message checked):
 
-A saved stack is the most powerful input an image can carry: a forged
-frame could run a verified method on the wrong receiver, address the
-wrong temp, or return into nothing. `verifyImage` gains a saved-Process
-section, every rule refused by name and tested by a corrupt image:
+- the scheduler state an Array of 5; the queues an Array of 12; the
+  finalization slot nil or a Semaphore; the Process list Arrays of pairs,
+  each a Process and an Array, no Process twice; the next id a positive
+  SmallInteger;
+- every Process in the heap saved, or terminated (state 3, record -1, next
+  and waitingOn nil); a saved one ready or waiting, priority and affinity
+  in range, record -1, an id unique and below the next id, result nil, its
+  exit Semaphore nil or a Semaphore, `next` nil or a saved Process, ready
+  with waitingOn nil, waiting on a Semaphore;
+- the ready queues: head and tail both nil or both set; walking `next`
+  from each head, every Process saved, ready, of that queue's priority and
+  affinity, in no other list, the last one the tail; every Semaphore in
+  the heap: excess signals a non-negative SmallInteger, none while it has
+  waiters, its waiter list of saved Processes waiting on it, in no other
+  list, ending at its last waiter; every saved Process in exactly one list;
+- the saver a saved ready Process that has run, whose stack's top word is
+  true after a send;
+- its stack: registers SmallIntegers, sp at least 1, chunks exactly
+  covering `[0, sp]`; a Process that has never run (pc -1): fp and hdr 0,
+  word 0 a method of the method table (not a block) taking sp - 1
+  arguments, word 1 a receiver that fits it; a primitive at the bottom
+  that suspended (hdr 0): pc 0, sp 1, word 0 nil; otherwise
+  `0 < fp < hdr`, `hdr + 4 <= sp`, and the frames, walked from the top
+  through each callee's caller links to the bottom frame (caller fp 0):
+  - the method a CompiledMethod of the method table, traced again by the
+    bytecode verifier; fp equal to `hdr - 1 - argc - temps` of it and at
+    least 1; the header inside its frame's region;
+  - a block activation's `hdr[-1]` a BlockClosure of that block method
+    whose receiver is the frame's receiver; the receiver an instance of a
+    class whose chain reaches the method's class, with its instance
+    variables (pointer slots);
+  - the context word an empty frame's 0, a return marker (discard 1,
+    cascade 2), or a Context whose frame is this header, process this
+    Process, method, receiver and closure this frame's, pc nil, marker 0
+    to 2, named by no other frame;
+  - the top frame's pc an instruction the verifier reached, with the
+    operand depth there `sp - hdr - 4`; a caller's pc (`hdr[1]` of its
+    callee) an instruction the verifier reached with the depth that puts
+    the callee's receiver where the answer goes (`calleeFp - hdr - 4`, one
+    less for the discard marker); for the cascade marker, the instruction
+    ending at that pc a `nonlocal_return` whose depth puts its value where
+    the callee begins;
+  - the caller links SmallIntegers, the caller's header below this
+    frame's fp; the bottom frame's links 0, its fp 1, no marker, word 0 nil;
+- every live Context (frame not nil) named by a saved frame, or of a
+  terminated Process (which can never run again; 8a answers such a Context
+  dead).
 
-- the Process's slots are of the right kinds; state ready or waiting
-  (never running); priority and affinity in range; sp, fp, hdr, pc
-  SmallIntegers with 0 <= fp < hdr < sp <= saved words (pc -1 only for a
-  Process that has never run, whose stack is then the bottom frame's
-  arguments alone, as `fork` lays it out);
-- walking the frames from the top (hdr) through `hdr[3]` to the bottom
-  (caller fp 0): each `hdr[0]` a CompiledMethod of the image's method
-  table; each frame's `fp` equal to `hdr - 1 - argc - temps` of that
-  method; the frames contiguous and non-overlapping, the operand stack of
-  frame k ending where frame k+1's receiver begins; a block activation's
-  `hdr[-1]` a BlockClosure whose block method is `hdr[0]`; a method
-  activation's receiver an instance of a class that inherits from the
-  method's class and has at least its instance variables (the kasm
-  loader's rule, applied to a live receiver);
-- the top frame's pc and every caller pc (`hdr[1]` of the callee) a
-  bytecode boundary of its method that the bytecode verifier reached, and
-  the operand depth there equal to the verifier's traced depth at that pc
-  (the verifier already computes depths per path; expose the per-pc depth,
-  which must be unique per reachable pc for this check to be sound, and
-  make that uniqueness a verifier rule if it is not one yet). A caller's
-  pc is the one after its send, so its traced depth already accounts for
-  the popped arguments and the pushed answer;
-- each context word nil, a return marker allowed at that frame (discard
-  and cascade frames are VM-sent; check what the sender convention
-  allows), or a Context whose `frame` is this header's index and whose
-  `process` is this Process; no live Context anywhere else; a detached
-  Context has frame nil as today;
-- `waitingOn` a Semaphore whose waiter list contains the Process exactly
-  once; a ready Process in exactly one ready queue; `next` chains acyclic
-  and consistent; the saving Process's frame shaped so that resuming
-  pushes `true` where the primitive's answer goes;
-- the special objects' scheduler state well formed; the finalization
-  Semaphore a Semaphore.
+The bytecode verifier already gave every reachable instruction one depth
+(paths meeting with two depths are refused); it now hands the per
+instruction depths out (`VerifiedCode.depths`, `verifyHeapMethod(traced:)`).
+The rules also guard every slot read by the holder's class and size first.
 
-All or nothing, as today: any failure destroys the memory and throws.
+## Measurements
 
-### 6. Fuzzing and random programs
+Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS 27,
+swift.org Swift 6.4.2, 2026-11-04 00:34 to 00:47 (load average 2.2 to 2.9
+1-minute, the agent session the busiest other process).
 
-- `fuzz-snapshot` reaches images with saved Processes: add seeds (an image
-  with one Process at each state and priority, one with a grown stack,
-  one with live Contexts and a pending non-local return, one mid-`ensure:`)
-  and make sure the fuzz entry exercises the resume path up to, but not
-  including, running Smalltalk (loading and verifying; running a fuzzed
-  image is the random programs' job).
-- The seeded random programs (`Workers/RandomPrograms.swift`, `just soak`)
-  gain a mode: snapshot at the n-th poll, load the bytes into a fresh VM,
-  resume, and compare the result with the uninterrupted run and the model.
-  This is the main oracle for the whole module; it must run in `just
-  soak` and as a test with the stress flags (every poll, every
-  allocation) over a seed range.
-- `theImageLoaderRejects` gains one corrupt image per rule in section 5.
+### The kernels against the starting commit
 
-### 7. Tests (Swift and Smalltalk)
+The starting commit's `kajo` (5ddd8f4, from a worktree) against this
+module's, both built `-c release -Xswiftc -enable-testing` with
+`-align-all-nofallthru-blocks=5 -align-loops=32`; five runs interleaved,
+`--slice-ms 0`; median (min to max) ms. The Smalltalk kernels run from
+images each binary built itself (the starting commit cannot read a
+version 2 image). Every checksum is the published one on both sides.
 
-A round trip, each resumed run finishing with the same result as an
-uninterrupted one:
+| kernel | workers | 5ddd8f4 ms | 8c ms | 8c / start | checksums |
+|---|--:|--:|--:|--:|---|
+| fib | 1 | 1689.9 (1688 to 1696) | 1720.0 (1718 to 1722) | **1.018** | 24682992 |
+| fib | 8 | 221.1 (218 to 228) | 238.0 (227 to 245) | **1.076** | 24682992 |
+| arith | 1 | 2532.5 (2531 to 2544) | 2550.0 (2548 to 2564) | **1.007** | 372800000 |
+| arith | 8 | 336.5 (336 to 338) | 350.9 (338 to 356) | **1.043** | 372800000 |
+| sends | 1 | 2565.2 (2557 to 2580) | 2588.2 (2572 to 2594) | **1.009** | 1066666666666668 |
+| sends | 8 | 332.3 (331 to 343) | 349.7 (348 to 360) | **1.052** | 133333335000001 |
+| ivars | 1 | 1970.1 (1966 to 1971) | 1978.6 (1973 to 1983) | **1.004** | 36383626 |
+| ivars | 8 | 253.0 (253 to 261) | 265.0 (253 to 267) | **1.047** | 71714128 |
+| storeheavy | 1 | 2409.1 (2406 to 2415) | 2401.0 (2395 to 2403) | **0.997** | 512000 |
+| storeheavy | 8 | 324.2 (322 to 334) | 308.9 (308 to 318) | **0.953** | 512000 |
+| alloc | 1 | 2958.3 (2951 to 2972) | 2958.4 (2953 to 2977) | **1.000** | 41950911 |
+| alloc | 8 | 492.4 (460 to 514) | 472.7 (437 to 488) | **0.960** | 42008248 |
+| Smalltalk sends | 1 | 2286.2 (2267 to 2304) | 2267.3 (2258 to 2274) | **0.992** | 1066666666666668 |
+| Smalltalk sends | 8 | 303.3 (292 to 311) | 307.7 (303 to 315) | **1.015** | 133333335000001 |
+| Smalltalk ivars | 1 | 1974.0 (1962 to 1977) | 1975.1 (1969 to 1976) | **1.001** | 36383626 |
+| Smalltalk ivars | 8 | 252.5 (252 to 257) | 270.4 (259 to 279) | **1.071** | 71714128 |
+| Smalltalk closures | 1 | 3822.0 (3815 to 3841) | 3822.7 (3817 to 3831) | **1.000** | 210210000 |
+| Smalltalk closures | 8 | 502.1 (494 to 508) | 513.4 (500 to 514) | **1.023** | 209214000 |
 
-- Processes ready at every priority and affinity, FIFO order kept;
-- waiting on a Semaphore with and without excess signals; a Mutex held
-  by one Process with others queued; a Monitor; a SharedQueue with
-  producers and consumers mid-stream;
-- a Delay pending at save, which fires after resume;
-- live Contexts (`thisContext` held in a variable), a pending non-local
-  return through two frames, an `ensure:` block pending, an active
-  `on:do:` handler whose exception is signalled after resume, a frame
-  carrying a return marker;
-- a stack grown past 8192 words; a Process that has never run;
-- the finalization Process with an Ephemeron whose key dies after resume;
-- the saving Process answers `false` then `true`; saving twice; a saved
-  image loaded on a VM with a different worker count;
-- images without Processes still start at the entry point; `kajo test` on
-  an image with Processes refuses;
-- every loader rule refused; mutation of saved-Process images loads clean
-  or is refused (300 copies, as today).
+- One worker: 0.99 to 1.02 (fib 1.018 the largest).
+- Eight workers: 0.95 to 1.08, both ways (storeheavy and alloc faster,
+  fib, sends and ivars slower). `interpret` is the same code in both
+  aligned binaries: its disassembly (1321 lines) differs only in the page
+  offset of the jump table's `adrp` (four lines). What 8c adds to a
+  running worker is in `pollSlow`, reached every 1024 polls: one relaxed
+  load of the hold's mirror inside the branch a stop takes, and one load
+  of `snapshotAtPoll` (the trigger is out of line); `dequeueLocked` gained
+  one load under the scheduler lock. A second interleaved A/B of the three
+  slowest eight-worker kernels, seven runs each, 00:47 the same session:
+  fib 221.8 (217 to 246) against 225.4 (223 to 242), **1.016**; ivars
+  260.2 (252 to 281) against 261.5 (253 to 274), **1.005**; sends 339.1
+  (331 to 354) against 335.5 (332 to 354), **0.989**. The first run's
+  eight-worker gaps are the session's, not the code's.
 
-Kernel tests (SUnit) for the kernel's side: the Delay list, the resume
-hook, `Smalltalk snapshot:` answering `false` in the saver.
+### The save, the image, the load
 
-## Rules
+Release build with `-enable-testing` (`measureTheSave`), the kernel image
+with the scenario class, 4 workers, five saves each; the saving Process
+forks n Processes that wait on one Semaphore, then sends `Smalltalk
+snapshot: nil`:
 
-AGENTS.md binds, in particular: every verifier on in checked builds, the
-stop-the-world collector as oracle, zero ARC and one jump table on the hot
-paths (the save and load are not hot paths, but nothing they add may touch
-the dispatch loop; if a check is added to a poll, measure it), tests
-assert on CPU or on work, `.strictMemorySafety()` with every unsafe
-construct marked and counted. No new cross-thread protocol without a model
-in `models/`; if the save reuses the method-install stop, say so and add
-no model.
+| | 0 other Processes | 300 Processes waiting |
+|---|--:|--:|
+| the save's stop (p50 of 5; first 0.96 ms both) | 0.45 ms | 0.56 ms |
+| image | 2 567 576 bytes | 2 663 576 bytes |
+| `Image.load` (verify all, p50) | 12.7 ms | 14.9 ms |
+| `VM` init with the install | 0.07 ms | 0.16 ms |
 
-Measure: the kasm and Smalltalk kernels within noise of the starting
-commit (five interleaved runs, aligned `-enable-testing` builds, 1 and 8
-workers); the save's stop time for the kernel image with a few hundred
-Processes; the image's size with and without saved Processes; load time.
+The stop is the whole save's work: the drain, the full collection with
+promote-all, the copies, module 1's snapshot and the method table; it does
+not include the hold's wait (each Process's next poll). The kernel image
+without saved Processes is 2 566 968 bytes and loads in 12.4 ms; 300
+saved Processes add 96 000 bytes (320 per Process: its object, its two
+chunk Arrays and its pair) and 2.2 ms of loading (the frame rules
+retrace each distinct frame method once). The fib image saved by `kajo run
+--snapshot-at 3` is 158 704 bytes and resumes to the published checksum.
 
-## Open questions for the owner (build to the provisional answers)
+## Changes to earlier modules
 
-1. A Delay's remaining time continues from the resume (time on disk is
-   not counted). Alternative: fire at once every Delay whose deadline
-   passed in wall-clock time.
-2. `kajo test` refuses an image with saved Processes. Alternative: a
-   `--fresh` flag that discards them (terminating each as a terminate
-   would, without running unwind blocks).
-3. Terminated Processes may appear in an image as ordinary objects (their
-   `record` -1, no stack). Alternative: the save fails on one.
-4. The saved stack as Array chunks (position-independent by
-   construction) rather than Contexts. The ADR is amended to the built
-   form.
+- Module 2 (`Loader/`): `ImageFile.swift` version 2 (version 1 still read),
+  `encodedImage(snapshot:)` split out of `saveImage`, `verifyImage` collects
+  Processes, Semaphores and live Contexts and calls the saved-Process rules
+  (8a's "no Process, no live Context" rule replaced by them);
+  `BytecodeVerifier.swift` `VerifiedCode.depths`; `Image.swift`
+  `SpecialObjects.scheduler` (8) and `size` 9, `savedScheduler`,
+  `hasSavedProcesses`; `FuzzEntry.image` installs an image's saved
+  Processes in a VM it does not start, then destroys it (the fuzzer's leak
+  test covers the stacks). `Primitives.swift`: 142.
+- Module 3 (`Workers/`, `Processes/`): `VMState.saveHold`, `slowPolls`,
+  `savedImages`; `SchedulerState.saveHold`; `dequeueLocked` refuses while
+  held; the background workers' idle wait waits while held; `stopWorld`'s
+  end keeps the flag's bit while held; `pollSlow` puts a held Process back
+  and calls the poll trigger (out of line); `VMConfig.snapshotAtPoll`; the
+  VM installs saved Processes in its initializer (`resumedProcesses`,
+  `resumedSaver`, `takeSavedImages`, `isQuiescent`); counters
+  `snapshots`, `snapshotsRefused`, `snapshotRetries`, `snapshotNs`,
+  `holdPreemptions`, `processesResumed`.
+- Module 8a (`ObjectModel/ObjectModelPrimitives.swift`):
+  `verifyHeapMethod(traced:)`.
+- Module 8b: `Headless` resumes images with saved Processes, `kajo test`
+  refuses them, `--snapshot-at N --snapshot-to path`; kernel: `Smalltalk
+  snapshot:`, `primSnapshot:`, `resumeAfterSnapshot`; Delay's pending list,
+  `prepareSnapshot`, `resumeAfterSnapshot`, `isPending:`, `pendingFor:`;
+  `Ephemeron resumeAfterSnapshot`, `finalizationProcess`; SnapshotTest.
+- Tests changed on purpose: `theImageLoaderRejects`' bad version is 3 (2 is
+  valid now).
 
-## Deliverables
+## Deviations from the brief
 
-Code under `Sources/KajoVM/` (where it belongs: `Loader/ImageFile.swift`,
-`Processes/`, a new `Processes/SavedProcesses.swift` or similar) and
-`kernel/`; the as-built doc replaces this brief's sections below the
-title in the style of `docs/modules/kernel-image.md` (what it hides, each
-part as built, the saved form with a table, the loader's rules, measurements,
-changes to earlier modules, deviations with reasons, tests, broken variants
-run by hand, unsafe surface, hot-path check, not done, gates, commands);
-ADR 0009's Built (8c) note; terms in `docs/CONTEXT.md`; `kernel.md`'s
-status line. AGENTS.md and PLAN.md are the main session's.
+- **The save holds the scheduler before its stop** (a new protocol, with a
+  model), where the brief named module 8a's install stop as the model: in
+  a stop other workers may be parked mid-instruction (an allocation's stop,
+  a young collection's wait, a primitive's own stop), and no register set
+  of such a Process is a resume point. The hold brings each to a poll,
+  where module 3's preemption already makes its registers exact; the stop
+  itself is the install stop.
+- **The saver's answer is in the image's copy of its stack** (true where
+  the primitive's receiver was) rather than pushed on resume: the frame
+  then is an ordinary suspended-after-a-primitive frame, and the loader's
+  depth rule covers it like any other; the extra rule is that its top word
+  is true after a send.
+- **A save the VM triggers at a poll** (`snapshotAtPoll`) exists beside the
+  primitive: the random programs need saves at arbitrary points, not only
+  where a program asks; there the Process at the poll is saved as
+  preempted and no saver is named.
+- **Version 1 images still load** (no saved Processes, 8 special objects),
+  so the snapshot fuzzer's v1 regression fixtures keep exercising the
+  rules they were found by.
+- **A primitive at the bottom of a Process that suspended** (a
+  host-spawned `wait`, hdr 0) is a saved form of its own: module 3 already
+  resumes it to the leave code.
+- **kajo run of a resumed image ends when quiescent**, not when every
+  Process ended: a kernel image always has a finalization Process waiting.
+- **The finalization Semaphore is signalled once on resume** when the
+  finalization queue is not empty: the signal that a collection sent went
+  through the external queue, which is not saved.
+- **`SnapshotTest>>testSnapshotAnswersFalseInTheSaver` saves to the host
+  (nil)**, so `kajo test` leaves no file behind.
+- **The fuzz seeds are kasm images** (`saved-states.img`: waiting, ready,
+  never run, a live Context below a block frame, the saver;
+  `saved-shapes.img`: discard and cascade frames, a grown stack): a kernel
+  image does not fit the fuzz entry's 2 MiB heap. A pending non-local
+  return and an `ensure:` mid-unwind are covered by the Smalltalk round
+  trips, not by seeds.
+
+## Tests
+
+SWIFT_TESTS
+
+**Round trips** (each run to its end where it saved and again from the
+image in a fresh VM, with another worker count): `oneReadyProcessRoundTrips`,
+`theBaseImageLoadsAndResumes` (two waiters, a live Context in a method
+frame below a waiting block frame, a Process that never ran, the saver),
+`markedFramesAndAGrownStackRoundTrip` (a discard frame from a read-only
+store, a cascade frame from `cannotReturn:`, a stack of 3000 frames grown
+past 8192 words), `readyQueuesKeepPriorityAffinityAndFIFO` (seven
+Processes over every priority and both affinities: the same run order
+before and after), `excessSignalsSurviveTheSave`; in Smalltalk
+(`aScenarioResumesWithTheSameAnswer`): a Mutex held with three queued, a
+Monitor with two waiting, a SharedQueue with three producers and two
+consumers mid-stream, a Delay pending at the save (the resumed run would
+never end without its re-arm), `ensure:` pending, a non-local return
+through two frames, an `on:do:` whose exception is signalled after the
+resume, the finalization Process mourning an ephemeron whose key dies
+after the resume; `savingTwiceAndSavingAResumedImage` (1, 10, 101, 110);
+`kajoTestRefusesAnImageWithSavedProcessesAndRunResumesIt`;
+`anImageWithoutProcessesStartsAtTheEntryPoint`.
+
+**The loader**: `theLoaderRefusesASavedProcess` (33 corruptions, each
+refused with its rule's message), `theBaseImageReencodedLoads`,
+`mutatedSavedProcessImagesLoadCleanOrAreRejected` (300 mutated copies
+through the fuzz entry, which installs what loads),
+`savedProcessFuzzSeedsLoadThroughTheFuzzEntry`.
+
+**The random programs** (`randomProgramsResumeFromASnapshot`, six modes:
+one worker, eight, `stopEveryPoll`, collect at every allocation,
+`preemptEveryPoll`, perturbation): each seed's program saved at a slow
+poll chosen from the seed, run to its end, and resumed from the image on
+another worker count; both answers must be the model's. 100 seeds per mode
+in the suite (10, and 2 for the two costliest, under ThreadSanitizer),
+1000 in `just soak`.
+
+**Kernel** (SUnit, `SnapshotTest`): `snapshot: nil` answers false in the
+saver; a Delay is pending only while waited on; `prepareSnapshot` takes
+the time left; the resume hook re-arms a pending Delay.
+
+**Model** (`cd models && swift test --filter SaveHold`): 5 tests,
+`docs/models/save-hold.md`.
+
+## Broken variants run by hand
+
+Debug builds, 2026-11-04, each restored afterwards.
+
+| rule | broken variant | test | result |
+|---|---|---|---|
+| the loader checks the traced depth at every saved pc | both depth guards always pass | `theLoaderRefusesASavedProcess` | 3 of 33 corruptions load: pcInsideAnInstruction, depthDisagrees, callerPcDisagrees |
+| a save waits until no other Process runs | no wait, no check in the stop (module 8a's install stop alone) | `randomProgramsResumeFromASnapshot`, 20 seeds | five of six modes save images the loader refuses: "Process @1549 is saved with state 1 (ready or waiting only)" (a Process caught running mid-slice); one worker saves cleanly (no other worker) |
+
+The hold's other two rules (the poll that puts a held Process back, the
+release's broadcast) are broken in the model (`docs/models/save-hold.md`),
+where a test fails without each.
+
+## Unsafe surface
+
+Lines with `unsafe` (comments excluded): `SavedProcesses.swift` 87 new (the
+VM, worker and record pointers, the stacks' malloc and copy), 0 in
+`SavedProcessRules.swift` (safe code over module 1's checked loads);
+`VM.swift` 166 to 178 (installation, `isQuiescent`), `Poll.swift` 42 to 48
+(the hold's preemption, the trigger), `Scheduling.swift` 187 to 188,
+`Headless.swift` 22 to 26 (the resume run's hooks). The whole
+`Sources/KajoVM` has 4377 such lines (4267 at the start). Counted on the
+final commit's clean build (0 warnings).
+
+## Hot-path check
+
+`just arc-check` on the final code: zero `swift_retain`/`swift_release` on
+every checked path; `interpret` 1056 instructions, one indirect branch, one
+jump table (unchanged). Its first run on this module found `pollSlow` with
+ARC 3: the poll trigger, inlined, brought the save's Swift arrays into it;
+`snapshotAtPoll` is `@inline(never)` now. `dequeueLocked`, `pollSlow`,
+`requeueCurrent` and `runSlice` are on the list and free of ARC. The save,
+the loader's rules and the install are not on the hot path.
+
+## Not done
+
+- A save from the host (with Processes): the host worker runs no Process;
+  the poll trigger is the tests' way in.
+- Delays of a poll-triggered save are not re-armed (no kernel code runs);
+  the random programs use none.
+- `Process>>terminate` still runs no unwind blocks; a terminated Process's
+  Contexts with frame indices stay in images as dead Contexts.
+- A save that does not fit the heap fails the primitive
+  (`snapshotsRefused`); there is no reserve for it.
+- Device runs.
+
+## Open questions for the owner
+
+The brief's four, built to their provisional answers:
+
+1. A Delay's remaining time continues from the resume (time on disk not
+   counted).
+2. `kajo test` refuses an image with saved Processes.
+3. Terminated Processes may appear in an image as ordinary objects.
+4. The saved stack as Array chunks; ADR 0009 amended.
+
+New from the build:
+
+5. The hold is a scheduler-level stop: while a save waits for every
+   Process to reach a poll, a Process in a long blocking region (a shell
+   call) delays the save. Acceptable, or should a save time out and fail?
+6. `kajo run` of a resumed image ends when nothing can happen without the
+   host, terminating Processes still waiting then. Is that the CLI's
+   contract, or should it wait (a server image)?
+
+## Gates
+
+GATES
+
+## Commands
+
+```zsh
+just build-image                                   # kernel image without Processes
+swift run kajo run k.kasm... --snapshot-at 3 --snapshot-to out.img
+swift run kajo run out.img --workers 4             # resume
+cd models && swift test --filter SaveHold
+KAJO_MEASURE_SNAPSHOT=1 swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests --filter measureTheSave
+S=<scratch>; git worktree add $S/start 5ddd8f4
+A2=(-Xswiftc -enable-testing -Xswiftc -Xllvm -Xswiftc -align-all-nofallthru-blocks=5 -Xswiftc -Xllvm -Xswiftc -align-loops=32)
+(cd $S/start && swift build -c release --product kajo --scratch-path .build/bench-a2 $A2)
+swift build -c release --product kajo --scratch-path .build/bench-a2 $A2
+zsh bench.sh $S/start/.build/bench-a2/release/kajo .build/bench-a2/release/kajo bench.txt 5; python3 agg.py bench.txt
+zsh gates.sh    # every gate, outputs and the commit each ran on in files
+```
