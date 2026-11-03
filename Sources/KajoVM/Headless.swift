@@ -1,4 +1,5 @@
 import Darwin
+import Foundation
 
 /// The VM's public surface for headless runs (`kajo run`): load kasm files
 /// into a fresh image and send `run:of:` to nil, as the experiments' bench
@@ -64,6 +65,10 @@ public enum Headless {
         /// Module 8b: where the kernel's events go (NDJSON objects, on the
         /// emitting VM thread); nil drops them.
         public var events: (@Sendable ([UInt8]) -> Void)? = nil
+        /// Module 8c: save the image with every Process in it at this slow
+        /// poll of the run (0: never), to `snapshotTo`.
+        public var snapshotAt = 0
+        public var snapshotTo: String? = nil
 
         public init() {}
     }
@@ -153,6 +158,11 @@ public enum Headless {
         do { image = try Image.load(image: bytes, config: config) } catch { return .failure(.load("\(error)")) }
         defer { image.destroy() }
         guard image.entryPoint != image.nilObject else { return .failure(.unsupported("the image names no entry point")) }
+        // Module 8c (provisional, the owner's question 2): a test run starts
+        // from the entry point alone.
+        guard !image.hasSavedProcesses else {
+            return .failure(.unsupported("the image holds saved Processes; kajo test needs an image without (kajo run resumes them)"))
+        }
         let sink = EventSink(events)
         let vm = VM(image: image, config: vc)
         var hooks = unsafe vm.hooks
@@ -240,6 +250,9 @@ public enum Headless {
 
     private static func run(_ image: Image, _ vc: VMConfig, _ options: Options) -> Outcome {
         func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: [], report: []) }
+        var vc = vc
+        vc.snapshotAtPoll = options.snapshotAt
+        if image.hasSavedProcesses { return resume(image, vc, options) }
         let vm = VM(image: image, config: vc)
         let sink = options.events.map { EventSink($0) }
         if let sink {
@@ -288,6 +301,10 @@ public enum Headless {
         vm.waitUntilAllTerminated()
         let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
         vm.shutdown()
+        if let path = options.snapshotTo {
+            guard let b = vm.takeSavedImages().first else { return failed(.unsupported("--snapshot-at \(options.snapshotAt): the run ended first")) }
+            guard FileManager.default.createFile(atPath: path, contents: Data(b)) else { return failed(.unsupported("cannot write \(path)")) }
+        }
         var sum: Int64 = 0
         var checksum: Result<Int64, Failure> = .success(0)
         for p in processes {
@@ -329,6 +346,52 @@ public enum Headless {
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
                               "stopperQoSRaises"].contains($0.name) },
         report: report)
+    }
+}
+
+extension Headless {
+    /// Module 8c: `kajo run` of an image with saved Processes resumes them
+    /// instead of sending the entry point, and runs until nothing can happen
+    /// without the host (every Process ended, or waiting with no timer or
+    /// signal outstanding; main-affine ones get turns on this thread). The
+    /// checksum is the sum of what the resumed Processes that ended answered.
+    static func resume(_ image: Image, _ vc: VMConfig, _ options: Options) -> Outcome {
+        let vm = VM(image: image, config: vc)
+        let sink = options.events.map { EventSink($0) }
+        if let sink {
+            var hooks = unsafe vm.hooks
+            unsafe hooks.context = Unmanaged.passUnretained(sink).toOpaque()
+            unsafe hooks.event = eventHook
+            unsafe vm.hooks = hooks
+        }
+        defer { withExtendedLifetime(sink) {} }
+        defer { vm.destroy() }
+        let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        vm.start()
+        var calm = 0
+        while calm < 2 {
+            if vm.liveProcessCount == 0 { break }
+            if vm.runMain(budgetNs: 2_000_000).slices == 0 { usleep(10_000) }
+            calm = vm.isQuiescent ? calm + 1 : 0
+        }
+        let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
+        let waiting = vm.liveProcessCount
+        vm.terminateAll()
+        vm.waitUntilAllTerminated()
+        vm.shutdown()
+        var sum: Int64 = 0, ended = 0
+        var checksum: Result<Int64, Failure> = .success(0)
+        for p in vm.resumedProcesses {
+            if let e = vm.error(of: p) { checksum = .failure(.vm(e)); break }
+            let v = vm.result(of: p)
+            if v.isSmallInteger { sum = sum &+ v.smallIntegerValue; ended += 1 }
+            checksum = .success(sum)
+        }
+        if case .success = checksum, ended == 0 { checksum = .success(0) }
+        let v = vm.counters
+        return Outcome(checksum: checksum, milliseconds: ms, counters: v.named.filter {
+            ["processesResumed", "slices", "preemptions", "stops", "snapshots"].contains($0.name)
+        }, report: [("resumed", "\(vm.resumedProcesses.count)"), ("answered", "\(ended)"), ("leftWaiting", "\(waiting)")])
     }
 }
 

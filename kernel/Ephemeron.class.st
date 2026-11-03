@@ -38,7 +38,7 @@ Ephemeron class >> registry [
 
 { #category : #accessing }
 Ephemeron class >> ensureFinalizationProcess [
-	"The one Process that mourns queued ephemerons (images hold no Process: it starts in each run)."
+	"The one Process that mourns queued ephemerons: it starts with the first registered ephemeron of a run, and a saved image keeps it (module 8c)."
 	(finalizationProcess notNil and: [finalizationProcess isTerminated not]) ifTrue: [^ self].
 	finalizationSemaphore := Semaphore new.
 	self finalizationSemaphore: finalizationSemaphore.
@@ -65,8 +65,19 @@ Ephemeron class >> nextMourner [
 
 { #category : #accessing }
 Ephemeron class >> forgetProcess [
-	"Before saving an image: no Process may be in it."
+	"Before the image build saves the kernel: the build's VM terminates every Process, and a run starts its own."
 	finalizationProcess := nil
+]
+
+{ #category : #accessing }
+Ephemeron class >> resumeAfterSnapshot [
+	"A saved image resumed: the finalization Process was saved waiting on its Semaphore, which the VM signals again (module 8c). Start one if there were ephemerons but no Process."
+	(registry notNil and: [registry notEmpty]) ifTrue: [self ensureFinalizationProcess]
+]
+
+{ #category : #accessing }
+Ephemeron class >> finalizationProcess [
+	^ finalizationProcess
 ]
 
 { #category : #accessing }

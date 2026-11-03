@@ -164,6 +164,30 @@ Smalltalk class >> microsecondClock [
 	^ 0
 ]
 
+{ #category : #snapshots }
+Smalltalk class >> snapshot: aPathOrNil [
+	"Save the image with every Process in it: to the file aPathOrNil names, or, given nil, to the VM's host. Answers false here; the saved image resumes this Process with true, after the hook that re-arms what the VM does not save (module 8c)."
+	| resumed |
+	Delay prepareSnapshot.
+	resumed := self primSnapshot: aPathOrNil.
+	resumed ifTrue: [self resumeAfterSnapshot].
+	^ resumed
+]
+
+{ #category : #snapshots }
+Smalltalk class >> primSnapshot: aPathOrNil [
+	"Fails outside a VM, while another save is in progress, when the saved stacks do not fit the heap, or when the file cannot be written."
+	<primitive: 142>
+	^ self error: 'the image could not be saved'
+]
+
+{ #category : #snapshots }
+Smalltalk class >> resumeAfterSnapshot [
+	"The image resumed in a new VM: arm again what lived in the old one's host (the Delays' timers) and make sure the finalization Process exists. The Transcript and the event stream go to the new host by themselves."
+	Delay resumeAfterSnapshot.
+	Ephemeron resumeAfterSnapshot
+]
+
 { #category : #'entry points' }
 Smalltalk class >> garbageCollect [
 	<primitive: 11>

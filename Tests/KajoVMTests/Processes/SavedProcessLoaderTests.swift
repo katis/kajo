@@ -321,3 +321,18 @@ func theLoaderRefusesASavedProcess(_ c: SavedCorruption) throws {
     }
     #expect(rejected > 0 && loaded + rejected == 300)
 }
+
+/// The snapshot fuzzer's seeds with saved Processes
+/// (`Fixtures/fuzz/snapshot/saved-*.img`): Processes waiting, never run,
+/// with a live Context and a block frame, the saver; marked frames and a
+/// grown stack. Each loads through the fuzz entry, which installs them in
+/// a VM. `KAJO_WRITE_FUZZ_SEEDS=1` writes them.
+@Test func savedProcessFuzzSeedsLoadThroughTheFuzzEntry() throws {
+    let seeds: [(String, [UInt8])] = [("saved-states", loaderBase.bytes), ("saved-shapes", try shapesImage().bytes)]
+    for (name, b) in seeds {
+        #expect(FuzzEntry.image(b), "\(name)")
+        let url = URL(fileURLWithPath: "\(fixturesDir)/fuzz/snapshot/\(name).img")
+        if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil { try Data(b).write(to: url) }
+        if let d = try? Data(contentsOf: url) { #expect(FuzzEntry.image([UInt8](d)), "\(name) fixture") }
+    }
+}

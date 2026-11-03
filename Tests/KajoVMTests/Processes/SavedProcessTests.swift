@@ -136,3 +136,232 @@ end
     #expect(r.vm.counters[.processesResumed] == 2)
     r.stop()
 }
+
+/// Saved stacks with return markers (a read-only store's discard frame, a
+/// non-local return's cascade frame) and a stack grown past 8192 words,
+/// each waiting on global 1's Semaphore at the save.
+private let shapesSrc = snapshotSrc + """
+class Cell Object 1
+method Cell x: temps=0
+  push_temp 0
+  store_ivar 0
+  push_int 1
+  return_top
+end
+method Object setReadOnly: temps=0 prim=93
+end
+method Object modificationForbiddenAt:value: temps=0
+  push_nil
+  push_int 1
+  send globalAt: 1
+  send wait 0
+  pop
+  push_int -5
+  return_top
+end
+method UndefinedObject discarding temps=1
+  push_lit @Cell
+  send basicNew 0
+  store_temp 0
+  push_temp 0
+  push_true
+  send setReadOnly: 1
+  pop
+  push_temp 0
+  push_int 8
+  send x: 1
+  push_int 10
+  add
+  return_top
+end
+class K Object 0
+method K make temps=0
+  push_closure ret 0
+  return_top
+block ret args=0 copied=0 temps=0
+  push_int 5
+  nonlocal_return
+end
+method BlockClosure cannotReturn: temps=0
+  push_nil
+  push_int 1
+  send globalAt: 1
+  send wait 0
+  pop
+  push_temp 0
+  push_int 90
+  add
+  return_top
+end
+method UndefinedObject cascading temps=0
+  push_lit @K
+  send basicNew 0
+  send make 0
+  value
+  push_lit 1000
+  add
+  return_top
+end
+method UndefinedObject deep: temps=0
+  push_temp 0
+  push_int 0
+  eq
+  jump_if_false more
+  push_nil
+  push_int 1
+  send globalAt: 1
+  send wait 0
+  pop
+  push_int 0
+  return_top
+more:
+  push_nil
+  push_temp 0
+  push_int 1
+  sub
+  send deep: 1
+  push_temp 0
+  add
+  return_top
+end
+method UndefinedObject setup temps=0
+  push_nil
+  push_int 1
+  push_nil
+  send newSemaphore 0
+  send globalAt:put: 2
+  return_top
+end
+method UndefinedObject twoWaits temps=0
+  push_nil
+  push_int 1
+  send globalAt: 1
+  send wait 0
+  pop
+  push_nil
+  push_int 1
+  send globalAt: 1
+  send wait 0
+  pop
+  push_int 9
+  return_top
+end
+method UndefinedObject saver temps=0
+  push_nil
+  push_nil
+  send snapshot: 1
+  jump_if_false here
+  push_int 100
+  return_top
+here:
+  push_int 1
+  return_top
+end
+"""
+
+/// A discard frame, a cascade frame and a grown stack, waiting at the
+/// save, then released: the same answers where it saved and where it
+/// resumed (on another worker count).
+/// The image of `shapesSrc` with the discard, cascade and grown-stack
+/// Processes waiting, and their ids (the fuzz seeds use it too).
+func shapesImage() throws -> (bytes: [UInt8], ids: [Int64]) {
+    let rt = try Runtime(shapesSrc, background: 1, start: false)
+    func run(_ sel: String, _ args: [Oop] = [], priority: Int = Priority.normal) -> Oop {
+        let p = rt.spawn(sel, args, priority: priority)
+        while rt.vm.runOneSlice(worker: 1) {}
+        return p
+    }
+    _ = run("setup")
+    let d = run("discarding"), c = run("cascading"), g = run("deep:", [int(3000)])
+    #expect(rt.vm.counters.stackGrowths > 0)
+    let s = run("saver", priority: Priority.ui)
+    #expect(rt.vm.result(of: s) == Oop(smallInteger: 1))
+    let ids = [d, c, g].map { processId(rt, $0) }
+    let sem = rt.global(1)
+    for _ in 0..<3 { rt.vm.signal(sem) }
+    while rt.vm.runOneSlice(worker: 1) {}
+    #expect([d, c, g].map { rt.result($0) } == [11, 1095, 4501500])
+    let images = rt.vm.takeSavedImages()
+    rt.stop()
+    return (try #require(images.first), ids)
+}
+
+/// A discard frame, a cascade frame and a grown stack, waiting at the
+/// save, then released: the same answers where it saved and where it
+/// resumed (on another worker count).
+@Test func markedFramesAndAGrownStackRoundTrip() throws {
+    let (bytes, ids) = try shapesImage()
+    let r = try Resumed(bytes, background: 3)
+    let rsem = r.vm.global(1)
+    for _ in 0..<3 { r.vm.signal(rsem) }
+    r.waitAllTerminated()
+    #expect(ids.map { r.process(id: $0).flatMap(r.result) } == [11, 1095, 4501500])
+    r.stop()
+}
+
+/// Ready at every priority and affinity: the order they run in after the
+/// resume is the order they would have run in.
+@Test func readyQueuesKeepPriorityAffinityAndFIFO() throws {
+    let src = logSrc + snapshotSrc + """
+    method UndefinedObject tag: temps=0
+      push_nil
+      push_temp 0
+      send log: 1
+      return_top
+    end
+    method UndefinedObject saver temps=0
+      push_nil
+      push_nil
+      send snapshot: 1
+      pop
+      push_int 1
+      return_top
+    end
+    """
+    let rt = try Runtime(src, background: 1, start: false)
+    _ = rt.spawn("makeLog:", [int(16)])
+    while rt.vm.runOneSlice(worker: 1) {}
+    _ = rt.spawn("saver", priority: Priority.ui)
+    let tags: [(Int, Int, Bool)] = [(1, 1, false), (2, 0, false), (3, 2, false), (4, 1, false), (5, 1, true), (6, 2, true),
+                                    (7, 0, true)]
+    for (t, prio, main) in tags { _ = rt.spawn("tag:", [int(Int64(t))], priority: prio, main: main) }
+    func drain(_ vm: VM) {
+        while vm.runOneSlice(worker: 1) {}
+        while vm.runMain(budgetNs: 50_000_000).slices > 0 {}
+    }
+    drain(rt.vm)
+    let order = logValues(rt)
+    #expect(order == [3, 1, 4, 2, 6, 5, 7])
+    let images = rt.vm.takeSavedImages()
+    rt.stop()
+    guard let bytes = images.first else { Issue.record("no image"); return }
+    let r = try Resumed(bytes, background: 1, start: false)
+    #expect(r.vm.resumedProcesses.count == 8)
+    drain(r.vm)
+    let resumedOrder = r.vm.inspect { om -> [Int64] in
+        let arr = om.load(r.image.globals, 2)
+        let n = Int(om.load(r.image.globals, 3).smallIntegerValue)
+        return (0..<n).map { om.load(arr, $0).smallIntegerValue }
+    }
+    #expect(resumedOrder == order)
+    r.stop()
+}
+
+/// A Semaphore's excess signals are heap state: two saved, two waits pass.
+@Test func excessSignalsSurviveTheSave() throws {
+    let rt = try Runtime(shapesSrc, background: 1, start: false)
+    _ = rt.spawn("setup")
+    while rt.vm.runOneSlice(worker: 1) {}
+    rt.vm.signal(rt.global(1))
+    rt.vm.signal(rt.global(1))
+    _ = rt.spawn("saver")
+    while rt.vm.runOneSlice(worker: 1) {}
+    let images = rt.vm.takeSavedImages()
+    rt.stop()
+    let r = try Resumed(try #require(images.first), background: 1)
+    #expect(r.vm.excessSignals(r.vm.global(1)) == 2)
+    let p = try #require(r.vm.spawn(receiver: r.image.nilObject, selector: "twoWaits"))
+    r.waitAllTerminated()
+    #expect(r.result(p) == 9)
+    r.stop()
+}

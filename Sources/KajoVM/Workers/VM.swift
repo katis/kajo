@@ -284,6 +284,27 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     }
 
     var idleWorkerCount: Int { schedRead { $0.idleWorkers } }
+
+    /// Module 8c: nothing can happen without the host: no Process ready or
+    /// running, no external signal queued, no Delay outstanding (no pending
+    /// root but the finalization Semaphore's). A snapshot of a moving state:
+    /// the host asks twice, apart, before believing it (`kajo run` of a
+    /// resumed image ends there).
+    var isQuiescent: Bool {
+        if unsafe externalPending(state) { return false }
+        unsafe pthread_mutex_lock(state.pointee.pendingLock)
+        let pending = unsafe state.pointee.pending.pointee.count
+        let fin = unsafe state.pointee.finalization.pointee.handle >= 0 ? 1 : 0
+        unsafe pthread_mutex_unlock(state.pointee.pendingLock)
+        if pending > fin { return false }
+        return schedRead { s in
+            if s.saveHold { return false }
+            for q in 0..<(Priority.count * Affinity.count) where unsafe state.pointee.queues[q] != 0 { return false }
+            for i in 0..<s.recordHighWater where unsafe state.pointee.records[i].process != .none
+                && state.pointee.records[i].runningOn >= 0 { return false }
+            return true
+        }
+    }
     var hopLatencies: [UInt64] { schedRead { $0.hopLatencies } }
 
     private func schedRead<T>(_ body: (SchedulerState) -> T) -> T {

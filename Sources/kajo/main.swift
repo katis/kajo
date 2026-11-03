@@ -11,6 +11,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress everyblock,everycycle] [--reloc-threshold 0.5]
                 [--reloc-cap 0.5] [--sample-ms N] [--young stw|local|offload]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
+                [--snapshot-at N --snapshot-to out.img]
        kajo run <image.img> [the options above]
        kajo build-image [-o kernel.img] [--no-init] [<dir or file.st>...]   (default: kernel/)
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB]
@@ -20,6 +21,10 @@ run: loads the kasm files in order into a fresh image (or loads an image),
 runs one Process per worker sending run: i of: workers to nil (to the
 image's entry point), and prints one key=value line: the sum of their
 answers, the run time, the counters, per-worker QoS and the stops.
+--snapshot-at N saves the image with every Process in it at the run's N-th
+slow poll to --snapshot-to. An image with saved Processes is resumed
+instead: its Processes run until nothing can happen without the host, and
+the checksum is the sum of what those that ended answered.
 
 build-image: compiles Tonel class files (a directory's *.st) with the
 bootstrap compiler into a verified image.
@@ -80,6 +85,8 @@ case "run":
         case "--main-ms": options.mainMs = Int(value()) ?? 0
         case "--main-alloc": options.mainAlloc = Int(value()) ?? 0
         case "--main-work": options.mainWork = Int(value()) ?? 0
+        case "--snapshot-at": options.snapshotAt = Int(value()) ?? 0
+        case "--snapshot-to": options.snapshotTo = value()
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }
