@@ -203,14 +203,20 @@ func kernelsOnEightWorkersMatchTheirModels(_ name: String) throws {
     for c in cpu.dropFirst() { #expect(c < 1_000_000) }  // worker 0 is the main worker: no thread of its own
     #expect(wakes <= 5)
     // The probe reads real CPU time (microsecond grained: a worker can
-    // reach its wait in less): a Process that spins 50 ms shows up in it.
+    // reach its wait in less): a spinning Process shows up in it. The spin
+    // runs until the probe has seen 30 ms of CPU, a budget rather than a
+    // wall-clock window: in a 50 ms window under ThreadSanitizer and twelve
+    // busy loops the spinner got 23 ms. A broken probe reads 0 forever and
+    // the deadline fails the test.
     let before = rt.vm.workerCPUNanoseconds().reduce(0, +)
     let p = rt.spawn("spinUntil:", [int(0)])
-    usleep(50_000)
+    var spun: UInt64 = 0
+    #expect(eventually(30) {
+        spun = rt.vm.workerCPUNanoseconds().reduce(0, +) &- before
+        return spun >= 30_000_000
+    }, "\(spun) ns of CPU seen by the probe")
     rt.vm.setGlobal(9, int(1))
     #expect(eventually { rt.state(p) == .terminated })
-    let spun = rt.vm.workerCPUNanoseconds().reduce(0, +) &- before
-    #expect(spun > 30_000_000, "\(spun) ns")
     rt.stop()
 }
 
