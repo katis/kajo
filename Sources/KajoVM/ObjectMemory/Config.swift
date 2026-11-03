@@ -92,4 +92,17 @@ enum ObjectMemoryError: Error, Equatable {
 struct TestSwitches: Sendable {
     /// Compaction moves pinned bodies.
     var ignorePins = false
+    // Module 8: each turns one object-model rule off, out of line only,
+    // so the suite shows the rule's test failing without it.
+    /// A non-local return cuts straight to its home, past unwind marks.
+    var skipUnwindMarks = false
+    /// `send_super` looks up from the receiver's class's superclass, not
+    /// the method class's.
+    var superFromReceiverClass = false
+    /// LargeInteger results are not normalized to SmallIntegers.
+    var noNormalization = false
+    /// The UTF-8 boundary check accepts any offset in range.
+    var noBoundaryCheck = false
+    /// The frame-pin walk skips the frame's Context word.
+    var pinWalkSkipsContext = false
 }

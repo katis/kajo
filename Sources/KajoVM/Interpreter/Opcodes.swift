@@ -153,7 +153,7 @@ enum Opcode: UInt8, CaseIterable, Sendable {
         case .at: "at"
         case .atPut: "at_put"
         case .size: "size"
-        case .classOf: "class"
+        case .classOf: "class_of"
         case .value: "value"
         case .value1: "value1"
         case .value2: "value2"

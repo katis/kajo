@@ -110,10 +110,11 @@ extension Machine {
         for i in 0..<max(0, n) {
             store(ctx, ContextLayout.size + i, Oop(raw: unsafe base[fp + 1 + i]), .contextSlot)
         }
-        om.store(ctx, ContextLayout.frame, nilObject)
-        om.store(ctx, ContextLayout.pc, Oop(smallInteger: Int64(pc)))
+        // The Context may be old (and relocating): checked stores.
+        unsafe checkedStore(state, ctx, ContextLayout.frame, nilObject)
+        unsafe checkedStore(state, ctx, ContextLayout.pc, Oop(smallInteger: Int64(pc)))
         let mk = om.load(ctx, ContextLayout.marker)
-        om.store(ctx, ContextLayout.marker, Oop(smallInteger: 0))
+        unsafe checkedStore(state, ctx, ContextLayout.marker, Oop(smallInteger: 0))
         unsafe base[hdr + Frame.context] = nilObject.raw
         return mk.isSmallInteger ? mk.smallIntegerValue : 0
     }
@@ -277,7 +278,7 @@ func nonLocalReturn(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeM
     // The first unwind-marked frame between the block's caller and the home.
     var k = unsafe hdr - base
     var unwind = 0
-    while let c = callerHeader(base, k), c != h {
+    while let c = callerHeader(base, k), c != h, !om.config.testSwitches.skipUnwindMarks {
         if methodFlags(om, unsafe base[c]) & MethodFlags.unwind != 0 {
             unwind = c
             break
@@ -362,4 +363,143 @@ func pushThisContext(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
     unsafe s.pointee.stackBase[top] = ctx.raw
     unsafe s.pointee.regs.sp = top
     return unsafe restore(s)
+}
+
+// MARK: - Context and BlockClosure primitives (100 to 116)
+
+@inline(never)
+func contextPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
+    let om = m.om
+    let s = m.state
+    if n >= 112 {
+        guard c.receiver.isObject, om.classIndex(of: c.receiver) == WellKnown.blockClosure else { return .none }
+        switch n {
+        case 112: return c.argc == 0 ? om.load(om.load(c.receiver, ClosureLayout.method), MethodLayout.argc) : .none
+        case 113: return c.argc == 0 ? om.load(c.receiver, ClosureLayout.receiver) : .none
+        case 114: return c.argc == 0 ? om.load(c.receiver, ClosureLayout.method) : .none
+        case 115: return c.argc == 0 ? om.load(c.receiver, ClosureLayout.home) : .none
+        default:
+            guard c.argc == 1, c.arg0.isSmallInteger else { return .none }
+            let i = c.arg0.smallIntegerValue
+            guard i >= 1, i <= Int64(om.count(of: c.receiver)) - Int64(ClosureLayout.size) else { return .none }
+            return om.load(c.receiver, ClosureLayout.size + Int(i - 1))
+        }
+    }
+    guard c.receiver.isObject, om.classIndex(of: c.receiver) == WellKnown.context else { return .none }
+    let ctx = c.receiver
+    let live = unsafe liveFrame(s, ctx)
+    let base = unsafe s.pointee.stackBase
+    switch n {
+    case 100:
+        guard c.argc == 0 else { return .none }
+        guard let h = live, let caller = callerHeader(base, h) else { return m.nilObject }
+        return m.materialize(caller)
+    case 101, 102:
+        guard c.argc == (n == 102 ? 2 : 1), c.arg0.isSmallInteger else { return .none }
+        let i = Int(c.arg0.smallIntegerValue)
+        if let h = live {
+            let fp = frameFP(om, base, h)
+            let isBlock = methodFlags(om, unsafe base[h]) & MethodFlags.block != 0
+            let count = h - fp - 1 - (isBlock ? 1 : 0)
+            guard i >= 1, i <= count else { return .none }
+            if n == 101 { return Oop(raw: unsafe base[fp + i]) }
+            unsafe base[fp + i] = c.arg1.raw  // the stack is a root: no barrier
+            return c.arg1
+        }
+        guard om.load(ctx, ContextLayout.frame) == m.nilObject else { return .none }  // another Process's frame
+        let count = Int(om.count(of: ctx)) - ContextLayout.size
+        guard i >= 1, i <= count else { return .none }
+        if n == 101 { return om.load(ctx, ContextLayout.size + i - 1) }
+        if om.isReadOnly(ctx) { return m.refuseReadOnly(ctx, at: c.arg0, value: c.arg1) }
+        m.store(ctx, ContextLayout.size + i - 1, c.arg1, .contextSlot)
+        return c.arg1
+    case 103:
+        guard c.argc == 0 else { return .none }
+        if let h = live { return Oop(smallInteger: Int64(m.framePC(h))) }
+        return om.load(ctx, ContextLayout.pc)
+    case 104: return c.argc == 0 ? om.load(ctx, ContextLayout.method) : .none
+    case 105: return c.argc == 0 ? om.load(ctx, ContextLayout.receiver) : .none
+    case 106: return c.argc == 0 ? om.load(ctx, ContextLayout.closure) : .none
+    case 107:
+        // Dead: detached, or its Process has ended (a Process ended from
+        // outside never ran its frames' detachment).
+        guard c.argc == 0 else { return .none }
+        let p = om.load(ctx, ContextLayout.process)
+        let ended = p.isObject && om.classIndex(of: p) == WellKnown.process
+            && om.load(p, ProcessLayout.state) == Oop(smallInteger: Int64(ProcessState.terminated.rawValue))
+        return m.boolean(om.load(ctx, ContextLayout.frame) == m.nilObject || ended)
+    case 108:
+        guard c.argc == 1, let h = live else { return .none }
+        return terminateTo(m, ctx, h, c.arg0)
+    case 109:
+        guard c.argc == 1, let h = live else { return .none }
+        let stop = c.arg0 == m.nilObject ? 0 : unsafe liveFrame(s, c.arg0)
+        guard let stop else { return .none }
+        var k = h
+        while let caller = callerHeader(base, k), caller != stop {
+            if methodFlags(om, unsafe base[caller]) & MethodFlags.unwind != 0 { return m.materialize(caller) }
+            k = caller
+        }
+        return m.nilObject
+    case 110:
+        guard c.argc == 0, let h = live else { return .none }
+        var k: Int? = h
+        while let f = k {
+            if methodFlags(om, unsafe base[f]) & MethodFlags.handler != 0 { return m.materialize(f) }
+            k = callerHeader(base, f)
+        }
+        return m.nilObject
+    case 111:
+        guard c.argc == 0 else { return .none }
+        if let h = live {
+            let fp = frameFP(om, base, h)
+            return Oop(smallInteger: Int64(h - fp - 1 - (methodFlags(om, unsafe base[h]) & MethodFlags.block != 0 ? 1 : 0)))
+        }
+        return Oop(smallInteger: Int64(om.count(of: ctx)) - Int64(ContextLayout.size))
+    default:
+        return .none
+    }
+}
+
+/// `thisContext terminateTo: aContext` (Smalltalk-80's, as Squeak's
+/// `resume:through:` uses it): every frame between the running frame R
+/// (the receiver's) and `aContext`'s frame U is cut, their Contexts
+/// detached, and R moves down to where U's callee D began, with D's links,
+/// so U is R's caller and R's return answers U's send. Frame links are
+/// indices, so the move is one `memmove` and the moved frame's own links;
+/// R's Context (if any) gets its new index, and R's return marker is
+/// dropped (its caller changed). Fails unless the receiver is the running
+/// frame's Context and `aContext` a live frame below it.
+private func terminateTo(_ m: Machine, _ ctx: Oop, _ rh: Int, _ target: Oop) -> Oop {
+    let om = m.om
+    let s = m.state
+    let base = unsafe s.pointee.stackBase
+    let regs = unsafe s.pointee.regs
+    guard rh == regs.hdr, let uh = unsafe liveFrame(s, target), uh < rh else { return .none }
+    var d = rh
+    while let c = callerHeader(base, d), c != uh { d = c }
+    guard callerHeader(base, d) == uh else { return .none }
+    if d == rh { return ctx }
+    let fpD = frameFP(om, base, d)
+    let links = unsafe (base[d + Frame.callerPC], base[d + Frame.callerFP], base[d + Frame.callerHdr])
+    if let rc = callerHeader(base, rh) { m.detachFrames(from: rc, downTo: uh) }
+    let delta = regs.fp - fpD
+    let count = regs.sp - regs.fp + 1
+    unsafe (base + fpD).update(from: base + regs.fp, count: count)
+    let nh = rh - delta
+    unsafe base[nh + Frame.callerPC] = links.0
+    unsafe base[nh + Frame.callerFP] = links.1
+    unsafe base[nh + Frame.callerHdr] = links.2
+    let w = unsafe base[nh + Frame.context]
+    if w & 1 != 0 {
+        unsafe base[nh + Frame.context] = m.nilObject.raw
+    } else if w == ctx.raw {
+        unsafe checkedStore(s, ctx, ContextLayout.frame, Oop(smallInteger: Int64(nh)))
+        unsafe checkedStore(s, ctx, ContextLayout.marker, Oop(smallInteger: 0))
+    }
+    unsafe s.pointee.regs.sp = regs.sp - delta
+    unsafe s.pointee.regs.fp = fpD
+    unsafe s.pointee.regs.hdr = nh
+    unsafe s.pointee.counters.terminations &+= 1
+    return ctx
 }

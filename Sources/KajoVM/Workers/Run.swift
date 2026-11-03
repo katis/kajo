@@ -45,7 +45,12 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     unsafe interpret(s, start)
     switch unsafe s.pointee.exit {
     case .suspended:
-        if unsafe w.pointee.leave == .terminated { unsafe terminateCurrent(vm, w, result: vm.pointee.nilObject) }
+        if unsafe w.pointee.leave == .terminated {
+            // Module 8: the frames go away with the stack; their Contexts
+            // are detached first (the registers were saved by the poll).
+            unsafe detachAllContexts(s)
+            unsafe terminateCurrent(vm, w, result: vm.pointee.nilObject)
+        }
     case .returned:
         let result = unsafe s.pointee.regs.result
         // The result register is live only until the termination takes it
@@ -58,6 +63,7 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
         unsafe terminateCurrent(vm, w, result: Oop(raw: base[1]))
     case .error:
         unsafe recordError(vm, w)
+        unsafe detachAllContexts(s)
         unsafe terminateCurrent(vm, w, result: vm.pointee.nilObject)
     }
 }

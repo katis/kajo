@@ -245,7 +245,7 @@ extension Machine {
     /// A normalized integer: a SmallInteger when it fits, else a new
     /// LargeInteger. `.none` when the heap is full (the error recorded).
     func integer(_ b: BigInt) -> Oop {
-        if let v = b.int64, Oop.fitsSmallInteger(v) { return Oop(smallInteger: v) }
+        if let v = b.int64, Oop.fitsSmallInteger(v), !om.config.testSwitches.noNormalization { return Oop(smallInteger: v) }
         let bytes = b.bytes
         guard bytes.count <= Header.maxBytes else { return .none }
         let o = allocateBytes(b.negative ? WellKnown.largeNegativeInteger : WellKnown.largePositiveInteger, count: bytes.count)

@@ -360,15 +360,35 @@ func primitiveSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMu
     return unsafe activate(s, om, r, method, argc, length)
 }
 
-/// No room for the next frame.
+/// No room for the next frame: grow the Process's stack (module 8) and
+/// activate again, or the error. A closure's activation grows through
+/// `closureStackOverflow`.
 @inline(never)
 func stackOverflow(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                    _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>,
                    _ method: UInt64, _ length: Int) -> Regs {
     let om = unsafe s.pointee.om
+    if let r = unsafe grown(s, pc, sp, fp, hdr, method) {
+        let argc = untagged(om.load(Oop(raw: method), MethodLayout.argc).raw)
+        if methodFlags(om, method) & MethodFlags.block != 0, let c = unsafe activateClosure(s, om, r, argc, length) { return c }
+        return unsafe activate(s, om, r, method, argc, length)
+    }
     let argc = untagged(om.load(Oop(raw: method), MethodLayout.argc).raw)
     return unsafe failAt(s, pc, sp, fp, hdr, length, .stackOverflow, om.load(Oop(raw: method), MethodLayout.selector).raw,
                          (sp - argc).pointee)
+}
+
+/// The registers on a stack grown to fit `method`'s frame, or nil.
+@inline(__always)
+func grown(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+           _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ method: UInt64) -> Regs? {
+    let om = unsafe s.pointee.om
+    let mb = om.stateWord(method)
+    let need = untagged(om.loadAtomic(bodyOffset: mb, MethodLayout.temps)) &+ Frame.headerWords
+        &+ untagged(om.loadAtomic(bodyOffset: mb, MethodLayout.maxStack)) &+ 2
+    unsafe save(s, pc, sp, fp, hdr)
+    guard unsafe growStack(s, needed: need) else { return nil }
+    return unsafe restore(s)
 }
 
 /// Nothing understands `sel`: send `doesNotUnderstand:` with a Message if

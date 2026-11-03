@@ -36,6 +36,10 @@ struct InterpreterCounters: Sendable, Equatable {
     var readOnlyRefusals: UInt64 = 0
     var largeIntegersMade: UInt64 = 0
     var floatsBoxed: UInt64 = 0
+    var methodsInstalled: UInt64 = 0
+    var symbolsInterned: UInt64 = 0
+    /// `terminateTo:` moves.
+    var terminations: UInt64 = 0
 }
 
 /// The registers as the collector and the host see them: indices and

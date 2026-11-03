@@ -162,4 +162,8 @@ enum BarrierSite: UInt8, CaseIterable, Sendable {
     case contextSlot
     /// Module 8: a new closure's slots (a fresh holder).
     case closureSlot
+    /// Module 8: a class's new method dictionary (installation, in a stop).
+    case installMethod
+    /// Module 8: a new Symbol and grown buckets in the symbol table (in a stop).
+    case symbolTable
 }

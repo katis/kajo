@@ -49,6 +49,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 35...37: return nurseryPrimitive(n, m, c)  // module 4, Nursery/Finalization.swift
     case 38: return primReplace(m, c)  // module 6, Relocation/Hazard.swift
     case 39: return primSlowPeek(m, c)  // module 7, YoungCollection/Mutator.swift (tests)
+    case 40...79, 90...136: return objectModelPrimitive(n, m, c)  // module 8, ObjectModel/
     default: return .none
     }
 }
@@ -80,6 +81,11 @@ private func primAt(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 
 private func primAtPut(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard c.argc == 2, indexable(m, c.receiver), let i = slotIndex(m, c.receiver, c.arg0) else { return .none }
+    // Module 8: no at:put: on a String or Symbol (UTF-8 stays valid), and
+    // a read-only receiver is refused (attemptToModify:at:value:).
+    let ci = m.classIndex(of: c.receiver)
+    if ci == WellKnown.string || ci == WellKnown.symbol { return .none }
+    if m.om.isReadOnly(c.receiver) { return m.refuseReadOnly(c.receiver, at: c.arg0, value: c.arg1) }
     if m.om.isBytes(c.receiver) {
         guard c.arg1.isSmallInteger, c.arg1.smallIntegerValue >= 0, c.arg1.smallIntegerValue <= 255 else { return .none }
         unsafe checkedStoreByte(m.state, c.receiver, i, UInt8(c.arg1.smallIntegerValue))
@@ -134,6 +140,7 @@ private func primGlobal(_ m: Machine, _ c: PrimitiveCall, put: Bool) -> Oop {
     let i = c.arg0.smallIntegerValue
     guard i >= 1, i <= Int64(Image.globalCount) else { return .none }
     if put {
+        if m.om.isReadOnly(m.globals) { return m.refuseReadOnly(m.globals, at: c.arg0, value: c.arg1) }
         m.store(m.globals, Int(i - 1), c.arg1, .globalAtPut)
         return c.arg1
     }

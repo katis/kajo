@@ -227,7 +227,10 @@ func superSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutabl
     unsafe s.pointee.counters.sends &+= 1
     unsafe s.pointee.counters.superSends &+= 1
     let sel = unsafe r.lits[lit]
-    let mc = om.load(Oop(raw: unsafe r.hdr[Frame.method]), MethodLayout.methodClass)
+    var mc = om.load(Oop(raw: unsafe r.hdr[Frame.method]), MethodLayout.methodClass)
+    if _slowPath(om.config.testSwitches.superFromReceiverClass) {
+        mc = om.classOop(classIndexOf(om, unsafe (r.sp - argc).pointee))
+    }
     let sup = om.load(mc, ClassLayout.superclass)
     let rcv = unsafe (r.sp - argc).pointee
     if unsafe sup == s.pointee.nilObject {

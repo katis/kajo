@@ -109,16 +109,19 @@ func relocationAtFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64)
 
 /// Every word of each running Process's current frame (receiver to the
 /// flushed sp, the method among them), for each worker that runs one. The
-/// one walk the frame pins go through: module 8's Context materialization
-/// changes what a frame is here, and nowhere else. World stopped.
+/// one walk the frame pins go through. Module 8: a frame's words include
+/// its context word (`hdr[4]`), so a materialized frame's Context is
+/// pinned with the frame, and a block frame's closure word (`hdr[-1]`);
+/// the walk names both explicitly. World stopped.
 func forEachRunningFrameWord(_ vm: VMPointer, _ body: (UInt64) -> Void) {
+    let skipContext = unsafe vm.pointee.om.config.testSwitches.pinWalkSkipsContext
     for k in unsafe 0..<vm.pointee.workerCount {
         let w = unsafe vm.worker(k)
         if unsafe w.pointee.current == .none { continue }
         let regs = unsafe w.pointee.interp.regs
         let base = unsafe w.pointee.interp.stackBase
         if regs.sp < regs.fp { continue }
-        for i in regs.fp...regs.sp { unsafe body(base[i]) }
+        for i in regs.fp...regs.sp where !(skipContext && i == regs.hdr + Frame.context) { unsafe body(base[i]) }
     }
 }
 

@@ -5,8 +5,12 @@ struct VMConfig: Sendable {
     /// Background workers (OS threads at user-initiated QoS). The main
     /// worker (index 0) belongs to the shell and runs only in `runMain`.
     var backgroundWorkers = 1
-    /// Words per Process stack segment (64 KiB).
+    /// Words per Process stack segment (64 KiB) when the Process is made.
     var stackWords = 8192
+    /// Module 8: a stack that runs out is copied into a segment twice its
+    /// size, up to this many words (8 MiB); past it a frame that does not
+    /// fit is a stack overflow (the Process ends with the VMError).
+    var maxStackWords = 1 << 20
     /// Polls between two budget checks (clock reads, external queue,
     /// terminate requests). ADR 0004: 1024.
     var pollEvery = 1024

@@ -216,6 +216,8 @@ enum Counter: Int, CaseIterable {
     /// Module 7: stops whose stopper (outside the worker table) was raised
     /// to user-initiated for the stop.
     case stopperQoSRaises
+    /// Module 8: Process stacks copied into a segment twice the size.
+    case stackGrowths
 }
 
 /// A snapshot of the counters.
@@ -235,6 +237,7 @@ struct VMCounters: Sendable {
     var externalSignals: UInt64 { self[.externalSignals] }
     var staleExternalSignals: UInt64 { self[.staleExternalSignals] }
     var stackOverflows: UInt64 { self[.stackOverflows] }
+    var stackGrowths: UInt64 { self[.stackGrowths] }
     var processErrors: UInt64 { self[.processErrors] }
     var stops: UInt64 { self[.stops] }
     var idleWakeups: UInt64 { self[.idleWakeups] }
