@@ -8,7 +8,7 @@ swift build -c release --product kajo >/dev/null || exit 2
 kajo=$(swift build -c release --product kajo --show-bin-path)/kajo
 k=Tests/KajoVMTests/Fixtures/kernels
 fail=0
-for pair in arith:372800000 fib:24682992 sends:1066666666666668 alloc:41950911 ivars:36383626 walk:9016009025388544; do
+for pair in arith:372800000 fib:24682992 sends:1066666666666668 alloc:41950911 ivars:36383626 walk:9016009025388544 storeheavy:512000; do
   name=${pair%%:*} want=${pair#*:}
   line=$($kajo run $k/prelude.kasm $k/lib.kasm $k/$name.kasm --workers 1)
   got=$(print -- "$line" | tr ' ' '\n' | sed -n 's/^checksum=//p')

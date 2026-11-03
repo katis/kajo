@@ -1,0 +1,129 @@
+; Fixture copied from experiments/concurrent-relocation/kernels/storeheavy.kasm (2026-11-03).
+; storeheavy: SmallInteger stores into the instance variables of a few hot
+; objects, nothing else that a barrier could see (SPEC.md "Kernels"). The
+; post-store check is the only barrier work that fires: no pointer is
+; stored, so the generational barrier exits at its SmallInteger test and the
+; SATB flag is never set (no allocation, so no scavenge and no cycle).
+; 64 000 calls of spin: 1000 in total, split between workers (64 million
+; iterations, 512 million store_ivar). Checksum: every object's ivar sum
+; after each call.
+class Hot Object 8
+
+; t0 = n: store n into all eight ivars, counting n down to 1
+method Hot spin: temps=0
+loop:
+  push_temp 0
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 0
+  store_ivar 0
+  push_temp 0
+  store_ivar 1
+  push_temp 0
+  store_ivar 2
+  push_temp 0
+  store_ivar 3
+  push_temp 0
+  store_ivar 4
+  push_temp 0
+  store_ivar 5
+  push_temp 0
+  store_ivar 6
+  push_temp 0
+  store_ivar 7
+  push_temp 0
+  push_int 1
+  sub
+  store_temp 0
+  jump loop
+done:
+  return_self
+end
+
+method Hot sum temps=0
+  push_ivar 0
+  push_ivar 1
+  add
+  push_ivar 2
+  add
+  push_ivar 3
+  add
+  push_ivar 4
+  add
+  push_ivar 5
+  add
+  push_ivar 6
+  add
+  push_ivar 7
+  add
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = hots (Array of 4), t3 = reps, t4 = k, t5 = sum
+method UndefinedObject run:of: temps=4
+  push_lit @Array
+  push_int 4
+  send new: 1
+  store_temp 2
+  push_int 1
+  store_temp 4
+init:
+  push_temp 4
+  push_int 4
+  le
+  jump_if_false go
+  push_temp 2
+  push_temp 4
+  push_lit @Hot
+  send basicNew 0
+  send at:put: 2
+  pop
+  push_temp 4
+  push_int 1
+  add
+  store_temp 4
+  jump init
+go:
+  push_lit 64000
+  push_temp 1
+  send // 1
+  store_temp 3
+  push_int 1
+  store_temp 4
+  push_int 0
+  store_temp 5
+loop:
+  push_temp 3
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 5
+  push_temp 2
+  push_temp 4
+  send at: 1
+  push_lit 1000
+  send spin: 1
+  send sum 0
+  add
+  store_temp 5
+  push_temp 4
+  push_int 1
+  add
+  dup
+  store_temp 4
+  push_int 4
+  gt
+  jump_if_false next
+  push_int 1
+  store_temp 4
+next:
+  push_temp 3
+  push_int 1
+  sub
+  store_temp 3
+  jump loop
+done:
+  push_temp 5
+  return_top
+end

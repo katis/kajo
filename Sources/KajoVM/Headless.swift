@@ -37,6 +37,16 @@ public enum Headless {
         /// The marker is raised to user-initiated below this headroom (0:
         /// always utility, above 1: always user-initiated).
         public var escalateBelow = 0.25
+        /// Module 6: concurrent relocation (`on`, `off`), its stress flags
+        /// (`everyblock`, `everycycle`), the sparse-block threshold and the
+        /// to-space cap (fractions).
+        public var relocation = "on"
+        public var relocationStress = ""
+        public var relocationThreshold = 0.5
+        public var relocationCap = 0.5
+        /// Sample old space in use every this many ms (0: never); the
+        /// samples are in the report (`oldSamples`).
+        public var sampleMs = 0
 
         public init() {}
     }
@@ -87,6 +97,11 @@ public enum Headless {
         vc.marking.floor = options.floor
         vc.marking.safetyFactor = options.safetyFactor
         vc.marking.escalateBelow = options.escalateBelow
+        guard options.relocation == "on" || options.relocation == "off" else { return failed(.unsupported("--reloc: on or off")) }
+        vc.relocation.enabled = options.relocation == "on"
+        vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
+        vc.relocation.threshold = options.relocationThreshold
+        vc.relocation.cap = options.relocationCap
 
         if let problem = vc.nursery.validate(workers: options.workers + 2) { return failed(.unsupported("nursery: \(problem)")) }
         var config = ObjectMemoryConfig()
@@ -126,6 +141,14 @@ public enum Headless {
             }
             processes.append(p)
         }
+        var samples: [(ms: Double, mb: Double)] = []
+        if options.sampleMs > 0 {
+            while vm.liveProcessCount > 0 {
+                usleep(UInt32(options.sampleMs * 1000))
+                let t = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
+                samples.append((t, Double(vm.inspect { $0.blocksInUse } * BlockHeap.blockBytes) / 1e6))
+            }
+        }
         vm.waitUntilAllTerminated()
         let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
         vm.shutdown()
@@ -153,6 +176,10 @@ public enum Headless {
         ]
         report += nurseryReport(vm, stops: stops, ms: ms)
         report += markingReport(vm, stops: stops)
+        report += relocationReport(vm)
+        if !samples.isEmpty {
+            report.append(("oldSamples", samples.map { unsafe String(format: "%.0f:%.1f", $0.ms, $0.mb) }.joined(separator: ",")))
+        }
         return Outcome(checksum: checksum, milliseconds: ms, counters: [
             ("sends", c.sends), ("cacheMisses", c.cacheMisses), ("cacheFlushes", c.cacheFlushes),
             ("primitiveCalls", c.primitiveCalls), ("primitiveFailures", c.primitiveFailures),
@@ -251,5 +278,45 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("markerQoS", qosList.isEmpty ? "-" : qosList), ("qosEscalations", "\(c.qosEscalations)"), ("qosLowerings", "\(c.qosLowerings)"),
         ("promotionMBs", f(c.lastPromotionBytesPerSecond / 1e6)), ("predictedFillMs", ms(c.lastPredictedFillNs)),
         ("markVerifies", "\(c.verifierRuns)"), ("missed", "\(c.missed)"),
+    ]
+}
+
+/// Module 6's line: cycles that planned and selected a relocation, what
+/// was selected (candidates, blocks, capped, bytes to move, expected
+/// reclaim) and moved (objects, bytes, evacuated blocks), objects skipped
+/// (pinned, hazarded), stores redone and spins (all workers and the main
+/// worker), hazard slots taken, frame pins, pending blocks and the delay
+/// from switch to free, blocks freed by epoch and at pauses, the
+/// relocator's CPU and wall time, the verifier, and old space at the end
+/// and its peak at a pause.
+func relocationReport(_ vm: VM) -> [(String, String)] {
+    let blockBytes = UInt64(BlockHeap.blockBytes)
+    let endMB = Double(UInt64(vm.inspect { $0.blocksInUse }) &* blockBytes) / 1e6
+    guard vm.hasRelocation else { return [("reloc", "off"), ("oldEndMB", unsafe String(format: "%.1f", endMB))] }
+    let c = vm.relocationCounters
+    let log = vm.relocationLog
+    func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
+    func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
+    let freed = c.freedByEpoch &+ c.freedAtPause
+    let selected = log.filter { $0.blocksSelected > 0 }
+    return [
+        ("reloc", "on"), ("relocPlanned", "\(c.cyclesPlanned)"), ("relocCycles", "\(c.cyclesSelected)"),
+        ("relocCandidates", "\(c.candidates)"), ("relocSelected", "\(c.blocksSelected)"), ("relocCapped", "\(c.capped)"),
+        ("relocToMoveMB", f(Double(c.bytesToMove) / 1e6)), ("relocExpectedMB", f(Double(c.expectedReclaimBytes) / 1e6)),
+        ("relocMovedObjects", "\(c.objectsMoved)"), ("relocMovedMB", f(Double(c.bytesMoved) / 1e6)),
+        ("relocEvacuated", "\(c.blocksEvacuated)"), ("relocActualMB", f(Double(freed &* blockBytes) / 1e6)),
+        ("relocSkipPinned", "\(c.skippedPinned)"), ("relocSkipHazard", "\(c.skippedHazard)"), ("relocNoSpace", "\(c.noSpace)"),
+        ("relocAborted", "\(c.passesAborted)"), ("storesRedone", "\(c.storesRedone)"), ("spinEpisodes", "\(c.spinEpisodes)"),
+        ("spinMs", ms(c.spinNs)), ("spinMaxMs", ms(c.spinMaxNs)), ("mainSpinEpisodes", "\(c.mainSpinEpisodes)"),
+        ("mainSpinMaxMs", ms(c.mainSpinMaxNs)), ("hazardsTaken", "\(c.hazardsTaken)"), ("hazardWaits", "\(c.hazardWaits)"),
+        ("framePins", "\(c.framePins)"), ("framePinsPerCycle", selected.isEmpty ? "-" : f(Double(c.framePins) / Double(selected.count))),
+        ("pendingMax", "\(c.pendingMax)"), ("freedByEpoch", "\(c.freedByEpoch)"), ("freedAtPause", "\(c.freedAtPause)"),
+        ("freeDelayMeanMs", freed == 0 ? "-" : ms(c.freeDelayNs / freed)), ("freeDelayMaxMs", ms(c.freeDelayMaxNs)),
+        ("relocCpuMs", ms(c.passCpuNs)), ("relocWallMs", ms(c.passWallNs)),
+        ("relocMovedMBPerCycle", selected.isEmpty ? "-" : f(Double(c.bytesMoved) / 1e6 / Double(selected.count))),
+        ("relocVerifies", "\(c.verifierRuns)"), ("relocVerifyFailures", "\(c.verifierFailures)"),
+        ("parksWhileRelocating", "\(c.parksWhileRelocating)"),
+        ("oldEndMB", unsafe String(format: "%.1f", endMB)),
+        ("oldPeakMB", unsafe String(format: "%.1f", Double(c.peakBlocksInUse &* blockBytes) / 1e6)),
     ]
 }
