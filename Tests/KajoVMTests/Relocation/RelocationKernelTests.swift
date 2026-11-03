@@ -74,7 +74,10 @@ private func underRelocation(_ src: String, heapBlocks: Int, _ name: String) thr
     let r = rt.relocation
     let m = rt.marking
     #expect(m.missed == 0 && r.verifierFailures == 0 && r.parksWhileRelocating == 0)
-    #expect(r.objectsMoved > 1000 && r.verifierRuns > 10, "\(r)")
+    // The relocation verifier runs at every pause from a final mark that
+    // selected blocks to the first pause after the cycle: at least once
+    // per selecting cycle.
+    #expect(r.objectsMoved > 1000 && r.cyclesSelected >= 2 && r.verifierRuns >= r.cyclesSelected, "\(r)")
     if name == "fragment" { #expect(r.hazardsTaken > 0) }
     print("\(name) under relocation: \(m.cyclesCompleted) cycles, moved \(r.objectsMoved) objects (\(r.bytesMoved) bytes), \(r.blocksEvacuated) blocks evacuated, skipped pinned \(r.skippedPinned) hazard \(r.skippedHazard), stores redone \(r.storesRedone), spins \(r.spinEpisodes) (max \(r.spinMaxNs) ns), hazards taken \(r.hazardsTaken), freed by epoch \(r.freedByEpoch) at pauses \(r.freedAtPause), frame pins \(r.framePins)")
     rt.noFailures()
