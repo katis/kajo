@@ -2,6 +2,10 @@
 Class {
 	#name : #Smalltalk,
 	#superclass : #Object,
+	#classInstVars : [
+		'sources',
+		'classNames'
+	],
 	#category : #'Kernel-System'
 }
 
@@ -47,11 +51,59 @@ Smalltalk class >> includesKey: aSymbol [
 ]
 
 { #category : #classes }
+Smalltalk class >> classNamed: aString [
+	"The class named aString, or nil (a table by name, rebuilt when a class is missing from it)."
+	| sym |
+	sym := Symbol lookup: aString.
+	sym isNil ifTrue: [^ nil].
+	classNames isNil ifTrue: [self rebuildClassNames].
+	^ classNames at: sym ifAbsent: [
+		self rebuildClassNames.
+		classNames at: sym ifAbsent: [nil]]
+]
+
+{ #category : #classes }
+Smalltalk class >> rebuildClassNames [
+	classNames := IdentityDictionary new.
+	self allClasses do: [:c | classNames at: c name put: c]
+]
+
+{ #category : #sources }
+Smalltalk class >> recordSources: anArray [
+	"The image build hands every method's source over: 'Class[ class]', the selector and the source, a line each."
+	| table |
+	sources isNil ifTrue: [sources := IdentityDictionary new].
+	table := sources.
+	anArray do: [:s | | i j spec sel cls m |
+		i := s indexOf: Character lf.
+		j := s indexOfSubstring: (String with: Character lf) startingAt: i + 1.
+		spec := s copyFrom: 1 to: i - 1.
+		sel := (s copyFrom: i + 1 to: j - 1) asSymbol.
+		cls := (spec endsWith: ' class')
+			ifTrue: [(self at: (spec copyFrom: 1 to: spec byteSize - 6) asSymbol) class]
+			ifFalse: [self at: spec asSymbol].
+		m := cls compiledMethodAt: sel.
+		table at: m put: (s copyFrom: j + 1 to: s byteSize)]
+]
+
+{ #category : #sources }
+Smalltalk class >> sourceOf: aCompiledMethod [
+	sources isNil ifTrue: [^ nil].
+	^ sources at: aCompiledMethod ifAbsent: [nil]
+]
+
+{ #category : #sources }
+Smalltalk class >> noteSource: aString of: aCompiledMethod [
+	sources isNil ifTrue: [sources := IdentityDictionary new].
+	sources at: aCompiledMethod put: aString
+]
+
+{ #category : #sources }
 Smalltalk class >> definitionOf: aClass [
 	^ self kernelDefinitions detect: [:d | d first == aClass name] ifNone: [nil]
 ]
 
-{ #category : #classes }
+{ #category : #sources }
 Smalltalk class >> instanceVariableNamesOf: aClass [
 	"Every instance variable name of aClass, inherited first; class-side ones for a metaclass."
 	| own d |
@@ -65,7 +117,7 @@ Smalltalk class >> instanceVariableNamesOf: aClass [
 	^ (self instanceVariableNamesOf: aClass superclass) , own
 ]
 
-{ #category : #classes }
+{ #category : #sources }
 Smalltalk class >> categoryOf: aClass [
 	^ (self definitionOf: aClass) ifNil: [''] ifNotNil: [:d | d at: 5]
 ]

@@ -2,12 +2,13 @@
 // build (the kernel's class initialization), before the image is saved.
 
 extension Image {
-    /// `ClassName selector` (class side) in a Process on a one-worker VM
+    /// `ClassName selector` (class side; with `strings`, `ClassName selector:
+    /// anArrayOfStrings`) in a Process on a one-worker VM
     /// with no nursery and stop-the-world collection, to completion. nil
     /// when it answered; else what went wrong. The VM is gone afterwards, so
     /// the image can be saved (it holds no Process: the terminated one is
     /// released and unreachable).
-    package func runToCompletion(className: String, selector: String) -> String? {
+    package func runToCompletion(className: String, selector: String, strings: [String]? = nil) -> String? {
         guard let ci = classIndex(named: className) else { return "no class \(className)" }
         var vc = VMConfig()
         vc.backgroundWorkers = 1
@@ -17,7 +18,8 @@ extension Image {
         vc.young.mode = .stw
         let vm = VM(image: self, config: vc)
         vm.start()
-        guard let p = vm.spawn(receiver: om.classOop(ci), selector: selector) else {
+        let args = strings.map { [vm.newStringArray($0)] } ?? []
+        guard let p = vm.spawn(receiver: om.classOop(ci), selector: selector, arguments: args) else {
             vm.shutdown()
             vm.destroy()
             return "\(className) class does not understand \(selector)"

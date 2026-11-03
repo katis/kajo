@@ -55,6 +55,17 @@ public struct KernelBuild: Sendable {
             if let problem = image.runToCompletion(className: "Smalltalk", selector: "initializeKernel") {
                 throw CompileError("Smalltalk initializeKernel: \(problem)")
             }
+            // Every method's source, kept in the image (Smalltalk sourceOf:),
+            // in Arrays of at most 2000 Strings: "Class[ class]\nselector\nsource".
+            let sources = plan.sources
+            var start = 0
+            while start < sources.count {
+                let chunk = Array(sources[start..<min(sources.count, start + 2000)])
+                if let problem = image.runToCompletion(className: "Smalltalk", selector: "recordSources:", strings: chunk) {
+                    throw CompileError("Smalltalk recordSources: \(problem)")
+                }
+                start += chunk.count
+            }
         }
         return Result(image: image.imageBytes(), classes: plan.classes.count, methods: plan.compiled.count, warnings: plan.warnings)
     }
@@ -65,6 +76,8 @@ struct Plan {
     var classes: [TonelClass] = []
     var definitions: [KernelClassDefinition] = []
     var compiled: [AssembledMethod] = []
+    /// "Class[ class]\nselector\nsource" per compiled method.
+    var sources: [String] = []
     var warnings: [String] = []
     /// Instance variable names (inherited first) and class-side ones.
     var instanceVariables: [String: [String]] = [:]
@@ -156,6 +169,7 @@ struct Plan {
                                    firstSlot: m.classSide ? Image.classLayoutSize : 0, isClassName: classNames)
             let (am, pragmas) = try compileMethod(m.source, file: file, line: m.line, in: ctx)
             compiled.append(am)
+            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n" + String(decoding: m.source, as: UTF8.self))
             for p in pragmas {
                 if p.selector == "consumesPragmas:", m.classSide, case .array(let xs) = p.arguments[0] {
                     for case .symbol(let s) in xs { consumed.insert(s) }
