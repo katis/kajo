@@ -189,16 +189,24 @@ import Synchronization
     /// the copy and stores again. Both halves are seq_cst, each on its own
     /// (the model shows either weakened loses the store). On arm64: `ldr`,
     /// `stlr`, `ldar`, `cmp`, `b.ne`, `tbnz`.
+    ///
+    /// Built with `-DKAJO_NO_POST_STORE` (benchmarks only, never shipped):
+    /// the raw store, answering true, to measure the check's own cost.
     @inline(__always)
     func storeChecked(_ o: Oop, _ i: Int, _ v: Oop) -> Bool {
         assert(isUsedReference(o) && !header(o).isBytes && UInt64(i) < header(o).count)
         assert(v.isSmallInteger || isUsedReference(v))
+        #if KAJO_NO_POST_STORE
+        store(o, i, v)
+        return true
+        #else
         let sw = unsafe stateWordAtomic(o.raw)
         let e1 = unsafe sw.pointee.load(ordering: .relaxed)
         let off = Int(truncatingIfNeeded: e1) &+ 8 &+ i &<< 3
         unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt64>.self).pointee.store(v.raw, ordering: .sequentiallyConsistent)
         let e2 = unsafe sw.pointee.load(ordering: .sequentiallyConsistent)
         return e2 == e1 && e1 & EntryState.relocatingBit == 0
+        #endif
     }
 
     /// The same for one byte of a byte object (`at:put:` on a ByteArray).

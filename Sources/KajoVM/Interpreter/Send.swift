@@ -117,20 +117,30 @@ func send(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ sel: UInt64, _ arg
 /// primitive out of line, else an inline activation.
 @_transparent
 func invoke(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64, _ argc: Int, _ length: Int) -> Regs {
-    let prim = om.load(Oop(raw: method), MethodLayout.primitive).raw
+    // The method's state word once for all its fields (module 6: state
+    // words are atomic loads the compiler does not merge; a method is
+    // pinned for good, and one instruction may read one body anyway).
+    let mb = om.stateWord(method)
+    let prim = om.loadAtomic(bodyOffset: mb, MethodLayout.primitive)
     if prim != tagged(0) {
         return unsafe primitiveSend(s, r.pc, r.sp, r.fp, r.hdr, method, untagged(prim) &<< 8 | argc, length)
     }
-    return unsafe activate(s, om, r, method, argc, length)
+    return unsafe activate(s, om, r, method, mb, argc, length)
 }
 
 /// Push a frame for `method` over the receiver and arguments on top of the
 /// stack (SPEC-SHARED "Frames"; Frame in Stack.swift).
 @_transparent
 func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64, _ argc: Int, _ length: Int) -> Regs {
-    let mo = Oop(raw: method)
-    let temps = untagged(om.load(mo, MethodLayout.temps).raw)
-    let maxStack = untagged(om.load(mo, MethodLayout.maxStack).raw)
+    unsafe activate(s, om, r, method, om.stateWord(method), argc, length)
+}
+
+/// The same with the method's state word `mb` already loaded.
+@_transparent
+func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64, _ mb: UInt64, _ argc: Int,
+              _ length: Int) -> Regs {
+    let temps = untagged(om.loadAtomic(bodyOffset: mb, MethodLayout.temps))
+    let maxStack = untagged(om.loadAtomic(bodyOffset: mb, MethodLayout.maxStack))
     var sp = unsafe r.sp
     // One word more than the frame uses: a unary send that ends in
     // doesNotUnderstand: pushes its Message above the deepest operand.
@@ -151,8 +161,8 @@ func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64
     unsafe hdr[Frame.callerFP] = tagged(r.fp - base)
     unsafe hdr[Frame.callerHdr] = tagged(r.hdr - base)
     unsafe hdr[Frame.context] = nilObject
-    let code = unsafe om.bytesBase(om.load(mo, MethodLayout.bytecodes))
-    let lits = unsafe om.slotsBase(om.load(mo, MethodLayout.literals))
+    let code = unsafe om.bytesBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.bytecodes)))
+    let lits = unsafe om.slotsBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.literals)))
     return unsafe Regs(pc: code, sp: hdr + (Frame.headerWords &- 1), fp: r.sp - argc, hdr: hdr, code: code, lits: lits)
 }
 
@@ -166,9 +176,9 @@ func doReturn(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ v: UInt64) -> 
     let fp = unsafe base + untagged(callerFP)
     let hdr = unsafe base + untagged(r.hdr[Frame.callerHdr])
     unsafe r.fp.pointee = v
-    let method = unsafe Oop(raw: hdr[Frame.method])
-    let code = unsafe om.bytesBase(om.load(method, MethodLayout.bytecodes))
-    let lits = unsafe om.slotsBase(om.load(method, MethodLayout.literals))
+    let mb = unsafe om.stateWord(hdr[Frame.method])
+    let code = unsafe om.bytesBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.bytecodes)))
+    let lits = unsafe om.slotsBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.literals)))
     return unsafe Regs(pc: code + untagged(r.hdr[Frame.callerPC]), sp: r.fp, fp: fp, hdr: hdr, code: code, lits: lits)
 }
 
