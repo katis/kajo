@@ -36,12 +36,15 @@ method UndefinedObject oldheapReplaceEvery temps=0
 end
 """
 
-private let fragmentSource = kernel("fragment") + """
-method UndefinedObject fragmentIters temps=0
-  push_lit \(fragmentIterations)
-  return_top
-end
-"""
+private func fragmentKernel(_ iterations: Int) -> String {
+    kernel("fragment") + """
+    method UndefinedObject fragmentIters temps=0
+      push_lit \(iterations)
+      return_top
+    end
+    """
+}
+private let fragmentSource = fragmentKernel(fragmentIterations)
 
 /// `run: i of: 4` on four workers; the summed checksum and the runtime
 /// (stopped by the caller).
@@ -99,9 +102,18 @@ private func underRelocation(_ src: String, heapBlocks: Int, _ name: String) thr
 /// between a CAS and its switch or revert (`park` counts it; checked
 /// builds that trap stop there), and the perturbation did reach the copies.
 @Test func theRelocatorNeverParksWhileRelocating() throws {
-    let (_, rt) = try runKernel(fragmentSource, heapBlocks: 128 * 32, relocate: true, perturb: true)
+    // A release build runs 400 000 iterations in a fraction of a second,
+    // too few cycles when the whole suite runs beside it; more iterations
+    // need a larger heap: with perturbation slowing the relocator, a 128
+    // MiB heap ran out (module 4's promotion reserve) at 1.6 million.
+    #if DEBUG
+    let (src, heap) = (fragmentSource, 128 * 32)
+    #else
+    let (src, heap) = (fragmentKernel(800_000), 512 * 32)
+    #endif
+    let (_, rt) = try runKernel(src, heapBlocks: heap, relocate: true, perturb: true)
     let r = rt.relocation
-    #expect(r.objectsMoved > 1000 && r.perturbedCopies >= 2 * r.objectsMoved)
+    #expect(r.objectsMoved > 1000 && r.perturbedCopies >= 2 * r.objectsMoved, "\(r) \(rt.marking)")
     #expect(r.parksWhileRelocating == 0)
     #expect(rt.vm.counters.stops > 10)
     rt.noFailures()
