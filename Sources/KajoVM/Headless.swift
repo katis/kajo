@@ -61,6 +61,9 @@ public enum Headless {
         public var mainAlloc = 0
         public var mainWork = 0
         public var frameMs = 1000.0 / 120.0
+        /// Module 8b: where the kernel's events go (NDJSON objects, on the
+        /// emitting VM thread); nil drops them.
+        public var events: (@Sendable ([UInt8]) -> Void)? = nil
 
         public init() {}
     }
@@ -95,41 +98,11 @@ public enum Headless {
     /// Load `files` (path, text) in order and run `nil run: 0 of: workers`.
     public static func run(_ files: [(path: String, text: String)], options: Options = Options()) -> Outcome {
         func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: [], report: []) }
-        if options.workers < 1 || options.workers > 255 { return failed(.unsupported("--workers: 1 to 255")) }
-        var vc = VMConfig()
-        vc.backgroundWorkers = options.workers
-        vc.stackWords = options.stackWords
-        vc.stress = VMStress(parsing: options.vmStress)
-        vc.sliceNs = UInt64(options.sliceMs * 1e6)
-        vc.nursery.bytes = options.nurseryKB << 10
-        vc.nursery.survivorBytes = options.survivorKB << 10
-        vc.nursery.age = options.age
-        vc.nursery.stress = NurseryStress(parsing: options.nurseryStress)
-        guard options.gc == "cm" || options.gc == "stw" else { return failed(.unsupported("--gc: cm or stw")) }
-        vc.marking.enabled = options.gc == "cm"
-        vc.marking.stress = MarkingStress(parsing: options.markingStress)
-        vc.marking.floor = options.floor
-        vc.marking.safetyFactor = options.safetyFactor
-        vc.marking.escalateBelow = options.escalateBelow
-        guard options.relocation == "on" || options.relocation == "off" else { return failed(.unsupported("--reloc: on or off")) }
-        vc.relocation.enabled = options.relocation == "on"
-        vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
-        vc.relocation.threshold = options.relocationThreshold
-        vc.relocation.cap = options.relocationCap
-        guard let mode = YoungMode(name: options.young) else { return failed(.unsupported("--young: stw, local or offload")) }
-        vc.young.mode = mode
-        vc.young.stress = YoungStress(parsing: options.youngStress)
-        vc.young.verify = options.verify
-
-        if let problem = vc.nursery.validate(workers: options.workers + 2) { return failed(.unsupported("nursery: \(problem)")) }
-        var config = ObjectMemoryConfig()
-        config.heapBytes = options.heapMiB << 20
-        config.reserveBytes = vc.nursery.reserveBytes(workers: options.workers + 2)
-        config.nurseryRegionBytes = vc.nursery.regionBytes(workers: options.workers + 2)
-        config.entryCapacity = options.entries
-        config.stress = StressFlags(parsing: options.stress)
-        config.verify = options.verify
-        config.onVerifyFailure = .trap
+        let vc: VMConfig, config: ObjectMemoryConfig
+        switch configs(options) {
+        case .success(let c): (vc, config) = c
+        case .failure(let f): return failed(f)
+        }
         let image: Image
         do {
             image = try Image(memory: ObjectMemory(config))
@@ -144,7 +117,138 @@ public enum Headless {
         } catch {
             return failed(.load("\(error)"))
         }
+        return run(image, vc, options)
+    }
+
+    /// Module 8b: load an image and run its entry point the same way: the
+    /// object the image names (special object 7, `Smalltalk` in the kernel)
+    /// is sent `setup: workers`, then `run: i of: workers` on each worker.
+    public static func run(image bytes: [UInt8], options: Options = Options()) -> Outcome {
+        func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: [], report: []) }
+        let vc: VMConfig, config: ObjectMemoryConfig
+        switch configs(options) {
+        case .success(let c): (vc, config) = c
+        case .failure(let f): return failed(f)
+        }
+        let image: Image
+        do { image = try Image.load(image: bytes, config: config) } catch { return failed(.load("\(error)")) }
+        defer { image.destroy() }
+        return run(image, vc, options)
+    }
+
+    /// Module 8b: `kajo test`. Load an image, send its entry point `test:`
+    /// with the arguments (Strings), and hand every event the kernel emits
+    /// (NDJSON objects, primitive 140) to `events` as it happens, on the
+    /// emitting VM thread; then one `gc` event per collection pause, stamped
+    /// with when it began, and a `gc` summary. Answers what `test:`
+    /// answered (the number of failed and errored tests).
+    public static func test(image bytes: [UInt8], arguments: [String], options: Options = Options(),
+                            events: @escaping @Sendable ([UInt8]) -> Void) -> Result<Int64, Failure> {
+        let vc: VMConfig, config: ObjectMemoryConfig
+        switch configs(options) {
+        case .success(let c): (vc, config) = c
+        case .failure(let f): return .failure(f)
+        }
+        let image: Image
+        do { image = try Image.load(image: bytes, config: config) } catch { return .failure(.load("\(error)")) }
+        defer { image.destroy() }
+        guard image.entryPoint != image.nilObject else { return .failure(.unsupported("the image names no entry point")) }
+        let sink = EventSink(events)
         let vm = VM(image: image, config: vc)
+        var hooks = unsafe vm.hooks
+        unsafe hooks.context = Unmanaged.passUnretained(sink).toOpaque()
+        unsafe hooks.event = eventHook
+        unsafe vm.hooks = hooks
+        defer {
+            vm.shutdown()
+            vm.destroy()
+            withExtendedLifetime(sink) {}
+        }
+        vm.start()
+        let args = vm.newStringArray(arguments)
+        guard let p = vm.spawn(receiver: image.entryPoint, selector: "test:", arguments: [args]) else {
+            return .failure(.unsupported("the entry point does not understand test:"))
+        }
+        vm.waitUntilTerminated(p)
+        let error = vm.error(of: p)
+        let answer = vm.result(of: p)
+        vm.terminateAll()
+        vm.waitUntilAllTerminated()
+        // gc events: the pauses, stamped with their start on the wall clock.
+        let offsetNs = Int64(clock_gettime_nsec_np(CLOCK_REALTIME)) - Int64(nanoseconds())
+        var scavenges = 0, full = 0, other = 0
+        for st in vm.stops where st.kind != .other {
+            switch st.kind {
+            case .scavenge: scavenges += 1
+            case .full: full += 1
+            default: other += 1
+            }
+            let ts = (Int64(st.atNs) + offsetNs) / 1000
+            events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"\(st.kind)\",\"pauseUs\":\(st.pauseNs / 1000),\"ttspUs\":\(st.timeToSafepointNs / 1000),\"slowestWorker\":\(st.slowest)}".utf8))
+        }
+        let c = image.om.counters
+        let ts = clock_gettime_nsec_np(CLOCK_REALTIME) / 1000
+        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations)}".utf8))
+        if let error { return .failure(.vm(error)) }
+        guard answer.isSmallInteger else { return .failure(.notAnInteger("\(answer)")) }
+        return .success(answer.smallIntegerValue)
+    }
+
+    /// Whether these bytes start like an image file.
+    public static func isImage(_ bytes: [UInt8]) -> Bool {
+        bytes.count >= 8 && (0..<8).reduce(UInt64(0)) { $0 | UInt64(bytes[$1]) << (8 * UInt64($1)) } == ImageFile.magic
+    }
+
+    static func configs(_ options: Options) -> Result<(VMConfig, ObjectMemoryConfig), Failure> {
+        if options.workers < 1 || options.workers > 255 { return .failure(.unsupported("--workers: 1 to 255")) }
+        var vc = VMConfig()
+        vc.backgroundWorkers = options.workers
+        vc.stackWords = options.stackWords
+        vc.stress = VMStress(parsing: options.vmStress)
+        vc.sliceNs = UInt64(options.sliceMs * 1e6)
+        vc.nursery.bytes = options.nurseryKB << 10
+        vc.nursery.survivorBytes = options.survivorKB << 10
+        vc.nursery.age = options.age
+        vc.nursery.stress = NurseryStress(parsing: options.nurseryStress)
+        guard options.gc == "cm" || options.gc == "stw" else { return .failure(.unsupported("--gc: cm or stw")) }
+        vc.marking.enabled = options.gc == "cm"
+        vc.marking.stress = MarkingStress(parsing: options.markingStress)
+        vc.marking.floor = options.floor
+        vc.marking.safetyFactor = options.safetyFactor
+        vc.marking.escalateBelow = options.escalateBelow
+        guard options.relocation == "on" || options.relocation == "off" else { return .failure(.unsupported("--reloc: on or off")) }
+        vc.relocation.enabled = options.relocation == "on"
+        vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
+        vc.relocation.threshold = options.relocationThreshold
+        vc.relocation.cap = options.relocationCap
+        guard let mode = YoungMode(name: options.young) else { return .failure(.unsupported("--young: stw, local or offload")) }
+        vc.young.mode = mode
+        vc.young.stress = YoungStress(parsing: options.youngStress)
+        vc.young.verify = options.verify
+
+        if let problem = vc.nursery.validate(workers: options.workers + 2) { return .failure(.unsupported("nursery: \(problem)")) }
+        var config = ObjectMemoryConfig()
+        config.heapBytes = options.heapMiB << 20
+        config.reserveBytes = vc.nursery.reserveBytes(workers: options.workers + 2)
+        config.nurseryRegionBytes = vc.nursery.regionBytes(workers: options.workers + 2)
+        config.entryCapacity = options.entries
+        config.stress = StressFlags(parsing: options.stress)
+        config.verify = options.verify
+        config.onVerifyFailure = .trap
+        return .success((vc, config))
+    }
+
+    private static func run(_ image: Image, _ vc: VMConfig, _ options: Options) -> Outcome {
+        func failed(_ f: Failure) -> Outcome { Outcome(checksum: .failure(f), milliseconds: 0, counters: [], report: []) }
+        let vm = VM(image: image, config: vc)
+        let sink = options.events.map { EventSink($0) }
+        if let sink {
+            var hooks = unsafe vm.hooks
+            unsafe hooks.context = Unmanaged.passUnretained(sink).toOpaque()
+            unsafe hooks.event = eventHook
+            unsafe vm.hooks = hooks
+        }
+        defer { withExtendedLifetime(sink) {} }
         defer {
             vm.shutdown()
             vm.destroy()
@@ -152,14 +256,17 @@ public enum Headless {
         vm.start()
         let n = options.workers
         // A kernel's shared state (`nil setup: workers`, when it has one).
-        if let s = vm.spawn(receiver: image.nilObject, selector: "setup:", arguments: [Oop(smallInteger: Int64(n))]) {
+        // An image built from the kernel names its entry point; kasm runs
+        // start at nil.
+        let entry = image.entryPoint == image.nilObject ? image.nilObject : image.entryPoint
+        if let s = vm.spawn(receiver: entry, selector: "setup:", arguments: [Oop(smallInteger: Int64(n))]) {
             vm.waitUntilAllTerminated()
             vm.release(s)
         }
         let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         var processes: [Oop] = []
         for i in 0..<n {
-            guard let p = vm.spawn(receiver: image.nilObject, selector: "run:of:",
+            guard let p = vm.spawn(receiver: entry, selector: "run:of:",
                                    arguments: [Oop(smallInteger: Int64(i)), Oop(smallInteger: Int64(n))]) else {
                 return failed(.unsupported("no method UndefinedObject>>run:of:"))
             }
@@ -512,4 +619,19 @@ func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
         ("collectorWakeups", "\(c.collectorWakeups)"),
         ("ycVerifies", "\(c.verifierRuns)"),
     ]
+}
+
+// MARK: - module 8b: the event sink
+
+/// Where primitive 140's events go: the host's closure, reached from the C
+/// hook through the hooks' context pointer.
+final class EventSink: @unchecked Sendable {
+    let emit: @Sendable ([UInt8]) -> Void
+    init(_ emit: @escaping @Sendable ([UInt8]) -> Void) { self.emit = emit }
+}
+
+private let eventHook: @convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>, Int) -> Void = { ctx, bytes, count in
+    guard let ctx = unsafe ctx else { return }
+    let sink = unsafe Unmanaged<EventSink>.fromOpaque(ctx).takeUnretainedValue()
+    sink.emit(unsafe Array(UnsafeBufferPointer(start: bytes, count: count)))
 }

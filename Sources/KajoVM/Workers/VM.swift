@@ -286,6 +286,45 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe pthread_mutex_unlock(state.pointee.schedLock)
     }
 
+    /// Block until Process `p` has terminated (an untimed wait on the
+    /// condition its termination broadcasts). One watcher at a time.
+    func waitUntilTerminated(_ p: Oop) {
+        let id = unsafe host { _ in image.om.load(p, ProcessLayout.id).smallIntegerValue }
+        unsafe pthread_mutex_lock(state.pointee.schedLock)
+        unsafe state.pointee.sched.pointee.watchedId = id
+        unsafe state.pointee.sched.pointee.watchedDone = false
+        unsafe pthread_mutex_unlock(state.pointee.schedLock)
+        if self.state(of: p) != .terminated {
+            unsafe pthread_mutex_lock(state.pointee.schedLock)
+            while unsafe !state.pointee.sched.pointee.watchedDone {
+                unsafe pthread_cond_wait(state.pointee.doneCond, state.pointee.schedLock)
+            }
+            unsafe pthread_mutex_unlock(state.pointee.schedLock)
+        }
+        unsafe pthread_mutex_lock(state.pointee.schedLock)
+        unsafe state.pointee.sched.pointee.watchedId = -1
+        unsafe pthread_mutex_unlock(state.pointee.schedLock)
+    }
+
+    /// An Array of new Strings, rooted for the host (arguments for an entry
+    /// point).
+    func newStringArray(_ strings: [String]) -> Oop {
+        unsafe host { w in
+            let m = unsafe machine(w)
+            let a = m.allocate(WellKnown.array, slots: strings.count)
+            precondition(a != .none, "heap full")
+            let h = image.om.addRoot(a)
+            for (i, s) in strings.enumerated() {
+                let o = m.newString(Array(s.utf8))
+                precondition(o != .none, "heap full")
+                m.store(a, i, o, .instVarAtPut)
+            }
+            image.om.removeRoot(h)
+            keep(a)
+            return a
+        }
+    }
+
     /// A new Semaphore with no signals, rooted for the host.
     func newSemaphore() -> Oop {
         unsafe host { w in

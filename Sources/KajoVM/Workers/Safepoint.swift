@@ -201,7 +201,8 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     let t2 = nanoseconds()
     let i = unsafe sp.pointee.stopCount
     unsafe sp.pointee.stops[i & (SafepointState.stopLog - 1)] = StopRecord(
-        timeToSafepointNs: t1 &- t0, pauseNs: t2 &- t0, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind)
+        timeToSafepointNs: t1 &- t0, pauseNs: t2 &- t0, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind,
+        atNs: t0)
     unsafe sp.pointee.kind = .other
     unsafe sp.pointee.stopCount = i &+ 1
     let epoch = unsafe sp.pointee.epoch

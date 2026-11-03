@@ -156,6 +156,8 @@ struct StopRecord: Sendable {
     var slowest: Int
     var requester: Int
     var kind = StopKind.other
+    /// Module 8b: when the stop was requested (uptime ns), for the `gc` events.
+    var atNs: UInt64 = 0
 }
 
 /// Guarded by the scheduler lock.
@@ -167,6 +169,10 @@ struct SchedulerState {
     var recordFree = -1
     var recordHighWater = 0
     var hopLatencies: [UInt64] = []
+    /// Module 8b: the id of the Process the host waits for, and whether it
+    /// has terminated.
+    var watchedId: Int64 = -1
+    var watchedDone = false
 }
 
 /// A Process's native record (fixed table, free list under the scheduler
@@ -218,6 +224,8 @@ enum Counter: Int, CaseIterable {
     case stopperQoSRaises
     /// Module 8: Process stacks copied into a segment twice the size.
     case stackGrowths
+    /// Module 8b: events emitted by primitive 140.
+    case events
 }
 
 /// A snapshot of the counters.

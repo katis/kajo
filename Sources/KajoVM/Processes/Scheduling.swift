@@ -190,7 +190,11 @@ private func finishLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, _ resul
     unsafe records(vm, ri).pointee = ProcessRecord(nextFree: vm.pointee.sched.pointee.recordFree)
     unsafe vm.pointee.sched.pointee.recordFree = ri
     unsafe vm.pointee.sched.pointee.liveProcesses -= 1
-    if unsafe vm.pointee.sched.pointee.liveProcesses == 0 { unsafe pthread_cond_broadcast(vm.pointee.doneCond) }
+    // Module 8b: the host may wait for this one Process (`waitUntilTerminated`).
+    let watched = unsafe vm.pointee.sched.pointee.watchedId >= 0
+        && om.load(p, ProcessLayout.id) == Oop(smallInteger: vm.pointee.sched.pointee.watchedId)
+    if watched { unsafe vm.pointee.sched.pointee.watchedDone = true }
+    if unsafe vm.pointee.sched.pointee.liveProcesses == 0 || watched { unsafe pthread_cond_broadcast(vm.pointee.doneCond) }
     let sem = om.load(p, ProcessLayout.exitSemaphore)
     let needMain = unsafe sem != nilObject ? signalLocked(vm, w, sem) : false
     return unsafe (base, needMain)

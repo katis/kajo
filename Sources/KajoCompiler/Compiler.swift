@@ -11,9 +11,8 @@ import KajoVM
 //
 // - Variables. A variable is *captured* when a real block (one not
 //   inlined) other than the scope that declares it reads or writes it. A
-//   captured variable that is ever assigned (an inlined loop's counter and
-//   an inlined `ifNotNil:` argument count as assigned) lives in its scope's
-//   temp vector; every other captured variable is copied into the closure.
+//   captured variable that is ever assigned lives in its scope's temp
+//   vector; every other captured variable is copied into the closure.
 //   Arguments are never assigned, so never in a vector.
 // - Every declaration takes a sequence number in source order; a real
 //   scope takes one when it is entered, before its arguments. A real
@@ -54,7 +53,9 @@ enum Binding {
 
 /// A temporary or argument, of a method, a real block or an inlined block.
 final class Variable {
-    enum Kind { case argument, temporary, hidden }
+    /// `inlinedArgument`: an inlined block's argument, a local of the real
+    /// scope that only the inlined code writes.
+    enum Kind { case argument, temporary, hidden, inlinedArgument }
     let name: String
     let kind: Kind
     let scope: Scope
@@ -280,7 +281,9 @@ struct Compiler {
             try resolve(a.variable, scope)
             switch a.variable.binding {
             case .local(let v):
-                if v.kind == .argument { throw fail("cannot assign to the argument '\(v.name)'", a.line) }
+                if v.kind == .argument || v.kind == .inlinedArgument {
+                    throw fail("cannot assign to the argument '\(v.name)'", a.line)
+                }
                 v.written = true
             case .instanceVariable:
                 break
@@ -319,10 +322,7 @@ struct Compiler {
         let b = n as! BlockNode
         let s = Scope(parent: scope, isReal: false, seq: 0)
         b.scope = s
-        for (name, line) in b.arguments {
-            let v = try declare(name, .temporary, in: s, line: line)
-            v.written = true
-        }
+        for (name, line) in b.arguments { _ = try declare(name, .inlinedArgument, in: s, line: line) }
         for (name, line) in b.temporaries { _ = try declare(name, .temporary, in: s, line: line) }
         try analyzeStatements(b.statements, s)
     }

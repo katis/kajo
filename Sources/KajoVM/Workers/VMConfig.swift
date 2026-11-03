@@ -113,6 +113,9 @@ struct VMTestSwitches: Sendable {
     var stuck: (@convention(c) (UnsafeMutableRawPointer?, Int64, UnsafePointer<CChar>, Double) -> Void)? = nil
     /// A shell call (primitive 29) on the main worker: kind, value, answer.
     var shell: (@convention(c) (UnsafeMutableRawPointer?, Int64, Int64) -> Int64)? = nil
+    /// Module 8b: an NDJSON event from primitive 140 (one JSON object, no
+    /// newline). Any VM thread, inside the VM; must not block for long.
+    var event: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>, Int) -> Void)? = nil
 
     init(context: UnsafeMutableRawPointer? = nil,
          wakeMain: (@convention(c) (UnsafeMutableRawPointer?) -> Void)? = nil,

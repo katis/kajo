@@ -1,4 +1,5 @@
 import Foundation
+import KajoCompiler
 import KajoVM
 
 let usage = """
@@ -10,11 +11,22 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress everyblock,everycycle] [--reloc-threshold 0.5]
                 [--reloc-cap 0.5] [--sample-ms N] [--young stw|local|offload]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
+       kajo run <image.img> [the options above]
+       kajo build-image [-o kernel.img] [--no-init] [<dir or file.st>...]   (default: kernel/)
+       kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB]
        kajo version
 
-Loads the files in order into a fresh image, runs one Process per worker
-sending run: i of: workers to nil, and prints one key=value line: the sum
-of their answers, the run time, the counters, per-worker QoS and the stops.
+run: loads the kasm files in order into a fresh image (or loads an image),
+runs one Process per worker sending run: i of: workers to nil (to the
+image's entry point), and prints one key=value line: the sum of their
+answers, the run time, the counters, per-worker QoS and the stops.
+
+build-image: compiles Tonel class files (a directory's *.st) with the
+bootstrap compiler into a verified image.
+
+test: runs the image's TestCases (built from kernel/ when no image is given)
+and writes the NDJSON event stream on stdout, a summary on stderr, and JUnit
+XML with --junit. Exit status 0 when every test passed, 1 otherwise.
 """
 
 func fail(_ message: String, _ code: Int32 = 2) -> Never {
@@ -75,11 +87,24 @@ case "run":
     }
     if paths.isEmpty { fail(usage) }
     var files: [(path: String, text: String)] = []
+    var imageBytes: [UInt8]? = nil
     for p in paths {
-        guard let text = try? String(contentsOfFile: p, encoding: .utf8) else { fail("cannot read \(p)") }
+        guard let data = FileManager.default.contents(atPath: p) else { fail("cannot read \(p)") }
+        if Headless.isImage([UInt8](data)) {
+            guard paths.count == 1 else { fail("an image runs alone") }
+            imageBytes = [UInt8](data)
+            break
+        }
+        guard let text = String(data: data, encoding: .utf8) else { fail("cannot read \(p)") }
         files.append((p, text))
     }
-    let outcome = Headless.run(files, options: options)
+    // The Transcript on stderr, a line per event.
+    options.events = { line in
+        if let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], o["kind"] as? String == "transcript" {
+            FileHandle.standardError.write(((o["text"] as? String ?? "") + "\n").data(using: .utf8)!)
+        }
+    }
+    let outcome = imageBytes.map { Headless.run(image: $0, options: options) } ?? Headless.run(files, options: options)
     switch outcome.checksum {
     case .success(let checksum):
         let counters = outcome.counters.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
@@ -88,6 +113,39 @@ case "run":
     case .failure(let f):
         fail("kajo: \(f)", 1)
     }
+case "build-image":
+    var out = "kernel.img"
+    var dirs: [String] = []
+    var options = KernelBuild.Options()
+    var i = 0
+    while i < args.count {
+        switch args[i] {
+        case "-o":
+            i += 1
+            guard i < args.count else { fail(usage) }
+            out = args[i]
+        case "--no-init": options.initialize = false
+        case "--heap":
+            i += 1
+            guard i < args.count, let n = Int(args[i]) else { fail(usage) }
+            options.heapMiB = n
+        case let a where a.hasPrefix("-"): fail("unknown option \(a)\n\(usage)")
+        default: dirs.append(args[i])
+        }
+        i += 1
+    }
+    if dirs.isEmpty { dirs = ["kernel"] }
+    do {
+        let t0 = Date()
+        let r = try KernelBuild.build(KernelBuild.sources(in: dirs), options: options)
+        for w in r.warnings { FileHandle.standardError.write((w + "\n").data(using: .utf8)!) }
+        guard FileManager.default.createFile(atPath: out, contents: Data(r.image)) else { fail("cannot write \(out)") }
+        print("\(out): \(r.classes) classes, \(r.methods) methods, \(r.image.count) bytes, \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms")
+    } catch {
+        fail("kajo build-image: \(error)", 1)
+    }
+case "test":
+    runTests(args)
 default:
     fail(usage)
 }
