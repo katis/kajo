@@ -59,7 +59,7 @@ wanted=(
   Rounds 'serviceRounds(_:_:)|runRound(_:_:_:_:_:)|waitServicing(_:_:_:)|youngEnterLocked(_:_:)|youngLeaveLocked(_:_:)|blockingBegin(_:_:)'
   Collect 'Collector.evacuate(_:_:)|copyBody(_:from:to:bytes:)|Collector.drainGrey()|Collector.scanHolder(_:)|Collector.processHanded()|Collector.sweep(_:_:)|Collector.freeDeferred(_:_:)|waitEpoch(_:_:_:_:)'
   Mutator 'youngResumeCheck(_:_:_:_:)|primSlowPeek(_:_:)'
-  Special 'superSend(_:_:_:_:_:_:_:_:)|extendedInstruction(_:_:_:_:_:)|activationPrimitive(_:_:_:_:_:_:_:_:_:)|primitiveFailure(_:_:_:_:_:_:_:_:_:)|spreadArray(_:_:extra:)|isSelectorOf(_:_:arity:receiver:)'
+  Special 'v1Instruction(_:_:_:_:_:)|superSend(_:_:_:_:_:_:_:_:)|extendedInstruction(_:_:_:_:_:)|activationPrimitive(_:_:_:_:_:_:_:_:_:)|primitiveFailure(_:_:_:_:_:_:_:_:_:)|spreadArray(_:_:extra:)|isSelectorOf(_:_:arity:receiver:)'
   Frames 'returnSlow(_:_:_:_:_:_:)|nonLocalReturn(_:_:_:_:_:)|attemptToModifyFromStore(_:_:_:_:_:_:_:)|attemptToModifyFromPrimitive(_:_:_:)|pushThisContext(_:_:_:_:_:)|markedSend(_:_:_:_:)|Machine.materialize(_:)|Machine.detach(_:fp:hdr:pc:)|Machine.detachFrames(from:downTo:)|Machine.framePC(_:)|liveFrame(_:_:)|contextPrimitive(_:_:_:)|detachAllContexts(_:)'
   Closures 'pushClosure(_:_:_:_:_:_:_:)|pushNewArray(_:_:_:_:_:_:)'
   Numbers 'Machine.integerArith(_:_:_:)|Machine.floatArith(_:_:_:)|Machine.boxFloat(_:)'

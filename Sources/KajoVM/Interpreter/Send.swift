@@ -3,12 +3,27 @@
 /// running method's bytecodes and literal frame. Both are re-derived from
 /// the method oop after any call that can pause (`restore`).
 @safe struct Regs {
+    // Stored in this order (not the initializer's): fp and hdr are not
+    // neighbours, so the loop does not load them as one vector pair and
+    // unpack it at every dispatch (module 8 measured that order costing the
+    // v0 kernels 3 to 10 percent with the larger v1 switch).
     var pc: UnsafePointer<UInt8>
-    var sp: UnsafeMutablePointer<UInt64>
     var fp: UnsafeMutablePointer<UInt64>
-    var hdr: UnsafeMutablePointer<UInt64>
+    var sp: UnsafeMutablePointer<UInt64>
     var code: UnsafePointer<UInt8>
+    var hdr: UnsafeMutablePointer<UInt64>
     var lits: UnsafePointer<UInt64>
+
+    @inline(__always)
+    init(pc: UnsafePointer<UInt8>, sp: UnsafeMutablePointer<UInt64>, fp: UnsafeMutablePointer<UInt64>,
+         hdr: UnsafeMutablePointer<UInt64>, code: UnsafePointer<UInt8>, lits: UnsafePointer<UInt64>) {
+        unsafe self.pc = pc
+        unsafe self.fp = fp
+        unsafe self.sp = sp
+        unsafe self.code = code
+        unsafe self.hdr = hdr
+        unsafe self.lits = lits
+    }
 }
 
 typealias StatePointer = UnsafeMutablePointer<InterpreterState>
@@ -160,7 +175,7 @@ func activate(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ method: UInt64
     unsafe hdr[Frame.callerPC] = tagged(r.pc - r.code)
     unsafe hdr[Frame.callerFP] = tagged(r.fp - base)
     unsafe hdr[Frame.callerHdr] = tagged(r.hdr - base)
-    unsafe hdr[Frame.context] = nilObject
+    unsafe hdr[Frame.context] = Frame.emptyContext
     let code = unsafe om.bytesBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.bytecodes)))
     let lits = unsafe om.slotsBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.literals)))
     return unsafe Regs(pc: code, sp: hdr + (Frame.headerWords &- 1), fp: r.sp - argc, hdr: hdr, code: code, lits: lits)
@@ -182,7 +197,7 @@ func classIndexOf(_ om: ObjectMemory, _ v: UInt64) -> UInt64 {
 /// returns out of line (module 8).
 @_transparent
 func doReturn(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ v: UInt64) -> Regs {
-    if _slowPath(unsafe r.hdr[Frame.context] != s.pointee.nilObject.raw) {
+    if _slowPath(unsafe r.hdr[Frame.context] != Frame.emptyContext) {
         return unsafe returnSlow(s, r.pc, r.sp, r.fp, r.hdr, v)
     }
     return unsafe plainReturn(s, om, r, v)

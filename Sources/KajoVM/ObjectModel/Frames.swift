@@ -3,9 +3,10 @@ import Synchronization
 // Frames, Contexts, returns and unwinding (ADR 0009 sections 3 to 5).
 //
 // A frame's context word (`hdr[Frame.context]`, module 3's reserved slot)
-// is nil, a materialized Context, or a SmallInteger return marker
-// (`FrameMarker`). Returns test it against nil (one load and compare, in
-// `doReturn`); anything else returns out of line here: a Context is
+// is SmallInteger 0 (`Frame.emptyContext`), a materialized Context, or a
+// SmallInteger return marker (`FrameMarker`). Returns test it against the
+// empty word (one load and a compare with an immediate, in `doReturn`);
+// anything else returns out of line here: a Context is
 // detached (its frame gone: `frame` nil, the args and temps copied into its
 // indexed slots, the last pc kept), and a marker changes what the caller
 // does with the value. Every way a frame disappears detaches its Context:
@@ -82,7 +83,7 @@ extension Machine {
     func materialize(_ hdr: Int) -> Oop {
         var base = unsafe state.pointee.stackBase
         let w = unsafe base[hdr + Frame.context]
-        if w & Oop.objectTagMask == 0 && w != nilObject.raw { return Oop(raw: w) }
+        if w & Oop.objectTagMask == 0 { return Oop(raw: w) }
         let fp = unsafe frameFP(om, base, hdr)
         let n = hdr - fp - 1
         let ctx = allocate(WellKnown.context, slots: ContextLayout.size + n)
@@ -115,7 +116,7 @@ extension Machine {
         unsafe checkedStore(state, ctx, ContextLayout.pc, Oop(smallInteger: Int64(pc)))
         let mk = om.load(ctx, ContextLayout.marker)
         unsafe checkedStore(state, ctx, ContextLayout.marker, Oop(smallInteger: 0))
-        unsafe base[hdr + Frame.context] = nilObject.raw
+        unsafe base[hdr + Frame.context] = Frame.emptyContext
         return mk.isSmallInteger ? mk.smallIntegerValue : 0
     }
 
@@ -127,10 +128,10 @@ extension Machine {
         while h > 0 && h != stop {
             let w = unsafe base[h + Frame.context]
             let fp = unsafe frameFP(om, base, h)
-            if w & Oop.objectTagMask == 0 && w != nilObject.raw {
+            if w & Oop.objectTagMask == 0 {
                 detach(Oop(raw: w), fp: fp, hdr: h, pc: framePC(h))
             } else {
-                unsafe base[h + Frame.context] = nilObject.raw
+                unsafe base[h + Frame.context] = Frame.emptyContext
             }
             guard let c = unsafe callerHeader(base, h) else { break }
             h = c
@@ -176,14 +177,14 @@ func returnSlow(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutab
     var marker: Int64 = 0
     if w & 1 != 0 {
         marker = Int64(untagged(w))
-    } else if w & Oop.objectTagMask == 0 {
+    } else {
         // The detach stores into the Context (barriers, no allocation): no
         // pause, so the registers stay as they are.
         unsafe save(s, pc, sp, fp, hdr)
         let m = unsafe Machine(state: s)
         marker = unsafe m.detach(Oop(raw: w), fp: fp - base, hdr: hdr - base, pc: s.pointee.regs.pc &- 1)
     }
-    unsafe hdr[Frame.context] = s.pointee.nilObject.raw
+    unsafe hdr[Frame.context] = Frame.emptyContext
     let r = unsafe plainReturn(s, om, regsAt(s, pc, sp, fp, hdr), v)
     if unsafe marker == 0 || s.pointee.exit != .running { return r }
     if marker == FrameMarker.discard {
@@ -492,7 +493,7 @@ private func terminateTo(_ m: Machine, _ ctx: Oop, _ rh: Int, _ target: Oop) -> 
     unsafe base[nh + Frame.callerHdr] = links.2
     let w = unsafe base[nh + Frame.context]
     if w & 1 != 0 {
-        unsafe base[nh + Frame.context] = m.nilObject.raw
+        unsafe base[nh + Frame.context] = Frame.emptyContext
     } else if w == ctx.raw {
         unsafe checkedStore(s, ctx, ContextLayout.frame, Oop(smallInteger: Int64(nh)))
         unsafe checkedStore(s, ctx, ContextLayout.marker, Oop(smallInteger: 0))

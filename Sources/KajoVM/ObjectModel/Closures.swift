@@ -101,7 +101,7 @@ func activateClosure(_ s: StatePointer, _ om: ObjectMemory, _ r: Regs, _ argc: I
     unsafe hdr[Frame.callerPC] = tagged(r.pc - r.code)
     unsafe hdr[Frame.callerFP] = tagged(r.fp - base)
     unsafe hdr[Frame.callerHdr] = tagged(r.hdr - base)
-    unsafe hdr[Frame.context] = nilObject
+    unsafe hdr[Frame.context] = Frame.emptyContext
     let code = unsafe om.bytesBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.bytecodes)))
     let lits = unsafe om.slotsBase(Oop(raw: om.loadAtomic(bodyOffset: mb, MethodLayout.literals)))
     unsafe s.pointee.counters.closureActivations &+= 1

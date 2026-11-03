@@ -120,6 +120,36 @@ method UndefinedObject child temps=0
   push_int 1
   return_top
 end
+; module 8: (global 9) instVarAt: 2 put: a fresh Pair
+method UndefinedObject viaInstVarAtPut temps=0
+  push_nil
+  push_int 9
+  send g: 1
+  push_int 2
+  push_nil
+  push_int 5
+  send pair: 1
+  send instVarAt:put: 2
+  pop
+  push_int 0
+  return_top
+end
+method Object instVarAt:put: temps=0 prim=92
+end
+; module 8: (global 8), an old Array, as a temp vector: slot 3 gets a
+; fresh Pair through store_tv_slot
+method UndefinedObject viaTempVector temps=1
+  push_nil
+  push_int 8
+  send g: 1
+  store_temp 0
+  push_nil
+  push_int 5
+  send pair: 1
+  store_tv_slot 2 0
+  push_int 0
+  return_top
+end
 method UndefinedObject viaFork temps=0
   push_nil
   push_lit #child
@@ -141,6 +171,11 @@ end
 let barrierSitesCaught: Set<BarrierSite> = [
     .storeIvar, .atPut, .globalAtPut, .hostGlobal, .readyQueueLink, .unlinkLink, .processResult, .waitingOn,
     .waiterLink, .lastWaiterOnWait, .arrayCopy,
+    // Module 8. Not caught: contextSlot and closureSlot store into fresh
+    // holders (a Context's detachment into an old Context is the one
+    // exception, not built as a scenario); installMethod and symbolTable
+    // store old values (methods, dictionaries, symbols) in a stop.
+    .storeTempVector, .instVarAtPut,
 ]
 
 /// Run the scenarios with `skip` switched off; answers whether a verifier
@@ -155,7 +190,8 @@ private func siteScenario(_ skip: BarrierSite?) throws -> Bool {
         rt.spawn("makeHolders")
         rt.runOn(1)
         try rt.checkedScavenge()
-        for sel in ["viaIvar", "viaAtPut", "viaGlobal", "viaMessage", "viaFork", "viaArrayCopy"] {
+        for sel in ["viaIvar", "viaAtPut", "viaGlobal", "viaMessage", "viaFork", "viaArrayCopy", "viaInstVarAtPut",
+                    "viaTempVector"] {
             rt.spawn(sel)
             rt.runOn(1)
             try rt.checkedScavenge()

@@ -9,7 +9,6 @@ import Synchronization
 func interpret(_ s: StatePointer, _ start: Regs) {
     var r = start
     let om = unsafe s.pointee.om
-    let nilObject = unsafe s.pointee.nilObject.raw
     let trueObject = unsafe s.pointee.trueObject.raw
     let falseObject = unsafe s.pointee.falseObject.raw
     let flag = unsafe s.pointee.safepointFlag
@@ -48,7 +47,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             // The slot check's header load also covers the read-only bit
             // (module 8): one mask, no extra instruction.
             if _slowPath(!canStore(om, rcv, n)) {
-                r = unsafe storeRefused(s, r.pc, r.sp, r.fp, r.hdr, rcv, n, 2)
+                r = unsafe storeRefused(s, r.pc, r.sp, r.fp, r.hdr, rcv, n, 2, .storeIvar)
                 continue
             }
             unsafe storeWithBarrier(s, flag, om, Oop(raw: rcv), n, Oop(raw: r.sp.pointee), .storeIvar)
@@ -58,7 +57,9 @@ func interpret(_ s: StatePointer, _ start: Regs) {
         case .dup?:
             unsafe push(&r, r.sp.pointee)
         case .pushNil?:
-            push(&r, nilObject)
+            // Loaded where used: a register for nil cost the store path
+            // its heap and table bases (module 8).
+            push(&r, unsafe s.pointee.nilObject.raw)
         case .pushTrue?:
             push(&r, trueObject)
         case .pushFalse?:
@@ -175,40 +176,17 @@ func interpret(_ s: StatePointer, _ start: Regs) {
         case .mod?:
             r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 11 &<< 8 | 1)
         case .ne?:
-            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
-            if a & b & 1 != 0 {
-                binaryResult(&r, a != b ? trueObject : falseObject)
-            } else {
-                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 12 &<< 8 | 1)
-            }
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .notIdentical?:
-            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
-            binaryResult(&r, a != b ? trueObject : falseObject)
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .at?:
-            let i = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
-            if a & Oop.objectTagMask == 0 && i & 1 != 0 {
-                let h = om.headerWord(a)
-                let k = UInt64(bitPattern: Int64(bitPattern: i) &>> 1) &- 1
-                if h & Header.classMask == WellKnown.array && k < (h & Header.countMask) &>> Header.countShift {
-                    binaryResult(&r, om.load(Oop(raw: a), Int(truncatingIfNeeded: k)).raw)
-                    continue
-                }
-            }
-            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 14 &<< 8 | 1)
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .atPut?:
             r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 15 &<< 8 | 2)
         case .size?:
-            let a = unsafe r.sp.pointee
-            if a & Oop.objectTagMask == 0 {
-                let h = om.headerWord(a)
-                if h & Header.classMask == WellKnown.array {
-                    unsafe r.sp.pointee = tagged(Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift))
-                    continue
-                }
-            }
-            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 16 &<< 8 | 0)
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .classOf?:
-            unsafe r.sp.pointee = om.classOop(classIndexOf(om, r.sp.pointee)).raw
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .value?:
             r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 18 &<< 8 | 0)
         case .value1?:
@@ -216,9 +194,9 @@ func interpret(_ s: StatePointer, _ start: Regs) {
         case .value2?:
             r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 20 &<< 8 | 2)
         case .isNil?:
-            unsafe r.sp.pointee = r.sp.pointee == nilObject ? trueObject : falseObject
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .notNil?:
-            unsafe r.sp.pointee = r.sp.pointee == nilObject ? falseObject : trueObject
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .sendSuper?:
             let lit = unsafe Int(r.pc[0])
             let argc = unsafe Int(r.pc[1])
@@ -231,31 +209,11 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             let n = unsafe Int(r.pc.pointee)
             r = unsafe pushNewArray(s, r.pc + 1, r.sp, r.fp, r.hdr, n)
         case .pushTempVectorSlot?:
-            let n = unsafe Int(r.pc[0])
-            let tv = unsafe r.fp[1 &+ Int(r.pc[1])]
-            unsafe r.pc += 2
-            if _slowPath(!hasSlot(om, tv, n)) {
-                r = unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 3, .invalidSlotAccess, 0, tv)
-                continue
-            }
-            push(&r, om.load(Oop(raw: tv), n).raw)
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .storeTempVectorSlot?:
-            let n = unsafe Int(r.pc[0])
-            let tv = unsafe r.fp[1 &+ Int(r.pc[1])]
-            unsafe r.pc += 2
-            if _slowPath(!canStore(om, tv, n)) {
-                r = unsafe storeRefused(s, r.pc, r.sp, r.fp, r.hdr, tv, n, 3)
-                continue
-            }
-            unsafe storeWithBarrier(s, flag, om, Oop(raw: tv), n, Oop(raw: r.sp.pointee), .storeTempVector)
-            unsafe r.sp -= 1
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .pushThisContext?:
-            let c = unsafe r.hdr[Frame.context]
-            if c & Oop.objectTagMask == 0 && c != nilObject {
-                push(&r, c)
-            } else {
-                r = unsafe pushThisContext(s, r.pc, r.sp, r.fp, r.hdr)
-            }
+            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .blockReturn?:
             r = unsafe doReturn(s, om, r, r.sp.pointee)
         case .nonlocalReturn?:
@@ -277,7 +235,7 @@ func interpret(_ s: StatePointer, _ start: Regs) {
 @inline(never)
 func storeRefused(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                   _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ o: UInt64, _ n: Int,
-                  _ length: Int) -> Regs {
+                  _ length: Int, _ site: BarrierSite) -> Regs {
     let om = unsafe s.pointee.om
     if isReadOnlySlot(om, o, n) { return unsafe attemptToModifyFromStore(s, pc, sp, fp, hdr, o, n + 1) }
     return unsafe failAt(s, pc, sp, fp, hdr, length, .invalidSlotAccess, 0, o)

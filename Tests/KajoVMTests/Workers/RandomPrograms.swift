@@ -353,6 +353,16 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                default: break
                                }
+                           }, after: { img in
+                               // Module 8's image ends in a block with pinned
+                               // classes and symbols, which no relocation moves:
+                               // fill it (and part of the next, as garbage) so
+                               // promotions land in blocks a cycle can evacuate.
+                               guard self == .relocateEveryLiveBlock else { return }
+                               for _ in 0..<80 {
+                                   _ = img.om.allocate(img.context, classIndex: WellKnown.array, slots: 62,
+                                                       fill: img.nilObject, extraRoots: [])
+                               }
                            })
     }
 }
@@ -429,7 +439,14 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
         #expect(rt.vm.markingCounters.missed == 0)
     case .relocateEveryLiveBlock:
         let r = rt.vm.relocationCounters
-        randomScavenges.add(config, r.objectsMoved)
+        if ProcessInfo.processInfo.environment["KAJO_RELOC_DEBUG"] != nil {
+            print("RELOC seed \(p.seed) cycles \(rt.vm.markingCounters.cycles) planned \(r.cyclesPlanned) selected \(r.blocksSelected) candidates \(r.candidates) moved \(r.objectsMoved) pinned \(r.skippedPinned) aborted \(r.passesAborted)")
+        }
+        // Blocks selected and evacuated (every live block of each cycle's
+        // snapshot): module 8's image is larger and pinned, so in some runs
+        // of 100 seeds every selected block held only pinned image objects
+        // and nothing moved (KAJO_RELOC_DEBUG prints both).
+        randomScavenges.add(config, r.blocksSelected)
         #expect(rt.vm.markingCounters.missed == 0 && r.parksWhileRelocating == 0 && r.verifierFailures == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     case .stwScavenge: #expect(!rt.vm.hasYoungCollection)

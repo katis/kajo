@@ -55,10 +55,14 @@ enum Frame {
     static let callerPC = 1
     static let callerFP = 2
     static let callerHdr = 3
-    /// The frame's Context once materialized (ADR 0009); nil until then.
-    /// Written at activation, read by nothing yet.
+    /// The frame's context word (ADR 0009, module 8): `emptyContext` until
+    /// a Context is materialized into it, or a return marker
+    /// (ObjectModel/Frames.swift).
     static let context = 4
     static let headerWords = 5
+    /// The context word of a plain frame: SmallInteger 0, so the return's
+    /// test is a compare with an immediate and keeps no register for nil.
+    static let emptyContext: UInt64 = 1
 
     /// The caller fp of a frame the host entered.
     static let hostFP = Oop(smallInteger: 0).raw

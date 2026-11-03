@@ -297,10 +297,7 @@ func extendedInstruction(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
         push(&r, om.load(Oop(raw: rcv), a).raw)
     case .storeIvar:
         let rcv = unsafe r.fp.pointee
-        if !canStore(om, rcv, a) {
-            if isReadOnlySlot(om, rcv, a) { return unsafe attemptToModifyFromStore(s, next, sp, fp, hdr, rcv, a + 1) }
-            return unsafe failAt(s, next, sp, fp, hdr, length, .invalidSlotAccess, 0, rcv)
-        }
+        if !canStore(om, rcv, a) { return unsafe storeRefused(s, next, sp, fp, hdr, rcv, a, length, .storeIvar) }
         unsafe storeWithBarrier(s, om, Oop(raw: rcv), a, Oop(raw: r.sp.pointee), .storeIvar)
         unsafe r.sp -= 1
     case .send:
@@ -317,10 +314,7 @@ func extendedInstruction(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
         push(&r, om.load(Oop(raw: tv), a).raw)
     case .storeTempVectorSlot:
         let tv = unsafe r.fp[1 &+ b]
-        if !canStore(om, tv, a) {
-            if isReadOnlySlot(om, tv, a) { return unsafe attemptToModifyFromStore(s, next, sp, fp, hdr, tv, a + 1) }
-            return unsafe failAt(s, next, sp, fp, hdr, length, .invalidSlotAccess, 0, tv)
-        }
+        if !canStore(om, tv, a) { return unsafe storeRefused(s, next, sp, fp, hdr, tv, a, length, .storeTempVector) }
         unsafe storeWithBarrier(s, om, Oop(raw: tv), a, Oop(raw: r.sp.pointee), .storeTempVector)
         unsafe r.sp -= 1
     default:
@@ -329,12 +323,14 @@ func extendedInstruction(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
     return r
 }
 
-/// The receiver has pointer slot `n` and is not read-only.
+/// The receiver has pointer slot `n` and is not read-only: two single-bit
+/// tests (bits 47 and 50 together are not a logical immediate, and a mask
+/// built in a register cost a register in the dispatch loop).
 @_transparent
 func canStore(_ om: ObjectMemory, _ rcv: UInt64, _ n: Int) -> Bool {
     if rcv & Oop.objectTagMask != 0 { return false }
     let h = om.headerWord(rcv)
-    return h & (Header.bytesBit | Header.readOnlyBit) == 0
+    return h & Header.bytesBit == 0 && h & Header.readOnlyBit == 0
         && UInt64(truncatingIfNeeded: n) < (h & Header.countMask) &>> Header.countShift
 }
 
@@ -344,4 +340,80 @@ func isReadOnlySlot(_ om: ObjectMemory, _ rcv: UInt64, _ n: Int) -> Bool {
     let h = om.headerWord(rcv)
     return h & Header.readOnlyBit != 0 && h & Header.bytesBit == 0
         && UInt64(truncatingIfNeeded: n) < (h & Header.countMask) &>> Header.countShift
+}
+
+// MARK: - the v1 instructions run out of line
+
+/// The v1 instructions whose fast paths run out of line, one call each from
+/// their own case: `ne`, `not_identical`, `at`, `size`, `class_of`,
+/// `is_nil`, `not_nil`, `push_tv_slot`, `store_tv_slot`,
+/// `push_this_context`. Inline in the loop they cost the v0 kernels 4 to
+/// 16 percent through register pressure (docs/modules/object-model.md,
+/// "Measurements"). `pc` is past the opcode.
+@inline(never)
+func v1Instruction(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+                   _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>) -> Regs {
+    let om = unsafe s.pointee.om
+    let nilObject = unsafe s.pointee.nilObject.raw
+    let trueObject = unsafe s.pointee.trueObject.raw, falseObject = unsafe s.pointee.falseObject.raw
+    var r = unsafe regsAt(s, pc, sp, fp, hdr)
+    switch unsafe Opcode.decode((pc - 1).pointee) {
+    case .ne?:
+        let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+        if a & b & 1 != 0 {
+            binaryResult(&r, a != b ? trueObject : falseObject)
+            return r
+        }
+        return unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 12 &<< 8 | 1)
+    case .notIdentical?:
+        let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+        binaryResult(&r, a != b ? trueObject : falseObject)
+        return r
+    case .at?:
+        let i = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+        if a & Oop.objectTagMask == 0 && i & 1 != 0 {
+            let h = om.headerWord(a)
+            let k = UInt64(bitPattern: Int64(bitPattern: i) &>> 1) &- 1
+            if h & Header.classMask == WellKnown.array && k < (h & Header.countMask) &>> Header.countShift {
+                binaryResult(&r, om.load(Oop(raw: a), Int(truncatingIfNeeded: k)).raw)
+                return r
+            }
+        }
+        return unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 14 &<< 8 | 1)
+    case .size?:
+        return unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 16 &<< 8 | 0)
+    case .classOf?:
+        unsafe r.sp.pointee = om.classOop(classIndexOf(om, r.sp.pointee)).raw
+        return r
+    case .isNil?:
+        unsafe r.sp.pointee = r.sp.pointee == nilObject ? trueObject : falseObject
+        return r
+    case .notNil?:
+        unsafe r.sp.pointee = r.sp.pointee == nilObject ? falseObject : trueObject
+        return r
+    case .pushTempVectorSlot?:
+        let n = unsafe Int(r.pc[0])
+        let tv = unsafe r.fp[1 &+ Int(r.pc[1])]
+        unsafe r.pc += 2
+        if !hasSlot(om, tv, n) { return unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 3, .invalidSlotAccess, 0, tv) }
+        push(&r, om.load(Oop(raw: tv), n).raw)
+        return r
+    case .storeTempVectorSlot?:
+        let n = unsafe Int(r.pc[0])
+        let tv = unsafe r.fp[1 &+ Int(r.pc[1])]
+        unsafe r.pc += 2
+        if !canStore(om, tv, n) { return unsafe storeRefused(s, r.pc, r.sp, r.fp, r.hdr, tv, n, 3, .storeTempVector) }
+        unsafe storeWithBarrier(s, om, Oop(raw: tv), n, Oop(raw: r.sp.pointee), .storeTempVector)
+        unsafe r.sp -= 1
+        return r
+    case .pushThisContext?:
+        let c = unsafe r.hdr[Frame.context]
+        if c & Oop.objectTagMask == 0 {
+            push(&r, c)
+            return r
+        }
+        return unsafe pushThisContext(s, r.pc, r.sp, r.fp, r.hdr)
+    default:
+        return unsafe failAt(s, r.pc, r.sp, r.fp, r.hdr, 1, .invalidBytecode, 0, r.fp.pointee)
+    }
 }

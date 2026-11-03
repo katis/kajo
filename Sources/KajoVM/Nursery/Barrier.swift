@@ -33,7 +33,9 @@ func storeWithBarrier(_ s: StatePointer, _ flag: UnsafeMutablePointer<Atomic<UIn
         unsafe storeConflict(s, o.raw, i, v.raw, site.rawValue)
         return
     }
-    if v.raw & Oop.objectTagMask == 0 {
+    // SmallIntegers first (one tbnz), then the rest of the immediate
+    // pattern (module 8): only a reference has a header to load.
+    if v.raw & 1 == 0 && v.raw & Oop.objectTagMask == 0 {
         let hv = om.headerWord(v.raw)
         if hv & Header.youngBit != 0 {
             if (om.headerWord(o.raw) ^ hv) & Header.youngNurseryMask != 0 {
