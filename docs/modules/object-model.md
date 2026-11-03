@@ -454,8 +454,10 @@ already loads the header; the read-only bit widens its mask: no extra
 instruction), `at:put:` (and the special send's tier), `instVarAt:put:`,
 `replaceFrom:to:with:startingAt:`, `globalAt:put:`, a detached Context's
 `tempAt:put:`, `encode:at:`, `become:` (either side) and `reshape` (any
-instance). A refused bytecode store sends `attemptToModify: object at:
-index value: value` to the object (1-based index) with the discard marker;
+instance). A refused bytecode store sends `modificationForbiddenAt: index
+value: value` to the object (1-based index; 8a sent `attemptToModify:
+object at: index value: value`, changed in 8b by the owner's answer) with
+the discard marker;
 a refused primitive records the store and `primitiveSend` sends the same
 message in place of its answer (the frame's one reserved word covers the
 extra argument). Immediates answer `isReadOnly` true. Method literals,
@@ -684,8 +686,8 @@ Module 2 (`Interpreter/`, `Loader/`):
 - `Send.swift`: `classIndexOf` (the class of any word), the return's
   context-word test and `returnSlow`, `specialSend` takes the selector
   index and argc and tries the tier first, `primitiveSend` hands the
-  activation primitives over and sends `attemptToModify:at:value:` after a
-  refused store, `stackOverflow` grows the stack; `Regs` stores fp and hdr
+  activation primitives over and sends `modificationForbiddenAt:value:`
+  (8a: `attemptToModify:at:value:`) after a refused store, `stackOverflow` grows the stack; `Regs` stores fp and hdr
   apart.
 - `Dispatch.swift`: the v1 cases; `store_ivar` checks the read-only bit
   and calls `storeRefused`; `nil`, true and false as before.
@@ -776,8 +778,10 @@ From the brief (kernel.md) and ADR 0009, each with its reason:
   a method is ambiguous with the directive.
 - **kasm classes default to `variable`** (v0 behaviour), not Smalltalk's
   fixed; `fixed` is explicit.
-- **`attemptToModify:at:value:` is sent to the object with the object as
-  its first argument**, the selector read literally; open question.
+- **`attemptToModify:at:value:` was sent to the object with the object as
+  its first argument**, the selector read literally; the owner chose
+  `modificationForbiddenAt:value:` and 8b changed it
+  (`docs/modules/kernel-image.md`).
 - **Read-only is set with an atomic or/and**, not "one relaxed store":
   module 7's young collector compare-and-swaps young headers concurrently.
   AGENTS.md's "mutators must not set bits in a live header" was written
@@ -808,7 +812,7 @@ From the brief (kernel.md) and ADR 0009, each with its reason:
 | SendTests | **super through the method class (broken variant: from the receiver's class)**, perform: and its arities, respondsTo:, perform with the wrong arity, class-side methods and class instance variables, the special sends' fast paths and fallbacks, the ext prefix past 255 literals, method installation (another class's method refused, removal) |
 | NumberTests | SmallFloat against Double (200 000 values), Characters, float arithmetic on the special sends (boxing and back), **LargeIntegers against Int128**, **normalization (broken variant)**, LargeInteger literals |
 | StringTests | scalars at boundaries only, **a position inside a scalar fails (broken variant `noBoundaryCheck`)**, copy, concatenate, count, search, equality, hashing and interning, encoding into a buffer and validation, invalid bytes refused unless repaired, no at:put: on a String |
-| ReadOnlyTests | **a store bytecode into a read-only object sends attemptToModify:at:value: and drops its answer**, the store primitives refuse (at:put:, the special at:put:, instVarAt:put:, replaceFrom:to:with:startingAt:), literals read-only, become: and reshape refuse |
+| ReadOnlyTests | **a store bytecode into a read-only object sends modificationForbiddenAt:value: (8a: attemptToModify:at:value:) and drops its answer**, the store primitives refuse (at:put:, the special at:put:, instVarAt:put:, replaceFrom:to:with:startingAt:), literals read-only, become: and reshape refuse |
 | ObjectModelVMTests | **immediates through every collector (stw, local, offload)**, **the Context frame pin (broken variant `pinWalkSkipsContext`)**, **stack growth preserving frame links** and the overflow past the maximum, **read-only flips during young collections**, **a removed method gone from another worker's cache** |
 | LoaderV1Tests | **41 rejections of malformed v1 constructs**, the shapes the loader builds (blocks, pragmas, formats, metaclasses) |
 | ImageFileTests | an image round trip that runs and loads more kasm, **21 rejected corruptions**, 300 mutated images, **the two inputs the snapshot fuzzer crashed on, refused** |
@@ -869,7 +873,8 @@ safe loads and stores.
 `v1Instruction`, `superSend`, `extendedInstruction`,
 `activationPrimitive`, `primitiveFailure`, `spreadArray`, `isSelectorOf`,
 `returnSlow`, `nonLocalReturn`, `attemptToModifyFromStore`,
-`attemptToModifyFromPrimitive`, `pushThisContext`, `markedSend`,
+`attemptToModifyFromPrimitive` (renamed `modificationForbiddenFrom...` in
+8b), `pushThisContext`, `markedSend`,
 `Machine.materialize`, `detach`, `detachFrames`, `framePC`, `liveFrame`,
 `contextPrimitive`, `detachAllContexts`, `pushClosure`, `pushNewArray`,
 `Machine.integerArith`, `floatArith`, `boxFloat`, `stringPrimitive`,

@@ -1,8 +1,11 @@
 # Module 8: object model v1 in the VM, the kernel, the compiler, the image
 
 Status: 8a (the VM side) built 2026-11-03, described in
-`docs/modules/object-model.md`; 8b (the Smalltalk side) is next and not
-started. The six questions of the proposal were answered by the owner the
+`docs/modules/object-model.md`; 8b (the Smalltalk side) built 2026-11-03,
+described in `docs/modules/kernel-image.md` (the bootstrap compiler, the
+kernel, the image build, SUnit and the event stream, the compiler in
+Smalltalk, the weak symbol table and `modificationForbiddenAt:value:`);
+saved Processes in images are 8c, next. The six questions of the proposal were answered by the owner the
 same day and the answers are folded in below. 8a's deviations from this
 brief are listed in object-model.md; the String section below holds as
 written for the VM side.
@@ -43,7 +46,8 @@ format that verifies every method before any of it runs.
   hashing, concatenation, scalar decoding at a byte offset, boundary
   checks, scalar encoding into a stream buffer, interning.
 - Read-only bit 50 and its checks in every store path; the failure sends
-  `attemptToModify:at:value:`. Method literals are read-only in the image.
+  `modificationForbiddenAt:value:` (8a sent `attemptToModify:at:value:`;
+  changed in 8b). Method literals are read-only in the image.
 - `perform:` family, `respondsTo:`, `super` through the method's defining
   class, cache flush ordering on method install.
 - Stack growth by copying (question 4): a Process's stack is one segment;

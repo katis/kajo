@@ -3,7 +3,8 @@
 Date: 2026-11-02
 Status: proposed (accepted in principle by the project owner; each section
 is revised as the module that implements it is built). Sections 2 to 11
-built in module 8a; see "Built (8a)".
+built in module 8a; see "Built (8a)". The kernel's parts and section 12
+built in module 8b; see "Built (8b)".
 
 ## Context
 
@@ -350,6 +351,34 @@ Open questions for the owner, answered 2026-11-03:
   saved Process stacks, their waits and the ready queues are part of the
   image format. Not in 8a or 8b; module 8c builds it before module 9's
   live development needs it.
+
+## Built (8b, 2026-11-03)
+
+Module 8b (`docs/modules/kernel-image.md`) built the kernel the sections
+above ask of it, the owner's two answers that were 8b's, and section 12:
+
+- **1**: WeakArray (well-known class 27) and Ephemeron in the kernel; the
+  finalization Process mourns, starting with the first registered
+  ephemeron in each run.
+- **4, 5**: the compilers allocate temp vectors by one rule (captured and
+  assigned; an inlined loop's counter is copied per iteration); ANSI
+  exceptions in Smalltalk over the frame walks: resume, return, retry (a
+  loop in `on:do:`), pass, outer, `ensure:`, `ifCurtailed:`.
+- **7**: Fraction completes the tower; Integer `/` answers one when not
+  exact.
+- **8**: the String protocol as kernel.md decided, written index-free;
+  the symbol table is **weak**: buckets are WeakArrays, collected Symbols
+  leave tombstones that interning reuses, lookups take the weak read
+  barrier.
+- **9**: a refused store sends `modificationForbiddenAt:value:`; Object
+  signals ModificationForbidden (resumable).
+- **10**: the bootstrap compiler and the compiler in Smalltalk inline the
+  selectors listed above and the `ifNil:` family, and agree on every method
+  of the kernel.
+- **12**: kernel collections are unsynchronized; Semaphore, a reentrant
+  Mutex, Monitor and SharedQueue in Smalltalk over the VM's Semaphore; the
+  kernel's process tests share state only through them. Main-thread
+  affinity is a pragma the kernel declares; nothing checks it yet.
 
 ## Consequences
 

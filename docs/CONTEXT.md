@@ -190,9 +190,12 @@ as they are understood.
   of its metaclass; a metaclass is an instance of Metaclass.
   `Foo class superclass` is `Foo superclass class`.
 - **Read-only**: header bit 50: every store path refuses the object and
-  sends it `attemptToModify:at:value:`. Method literals are read-only.
+  sends it `modificationForbiddenAt:value:` (index, value). Method literals
+  are read-only.
 - **Symbol table**: the Array of buckets of interned Symbols; a lookup
-  compares bytes, a new Symbol is inserted with the world stopped.
+  compares bytes, a new Symbol is inserted with the world stopped. Weak
+  (8b): the buckets are WeakArrays, a Symbol nothing else references is
+  collected and its slot is a **tombstone** the next insertion reuses.
 - **Image file**: module 1's snapshot with a method table and the special
   objects, loaded only after every object-model rule and every method has
   been verified.
@@ -203,6 +206,40 @@ as they are understood.
 - **Finalization queue**: the fired ephemerons, a root, taken one at a
   time by a Process that a Semaphore wakes; finalizers never run on a
   collector thread.
+
+## Kernel and compiler (module 8b)
+
+- **Tonel**: the kernel's source format, one file per class: a class
+  definition in STON, then the methods, each with its protocol.
+- **Bootstrap compiler**: `KajoCompiler`, the Swift compiler from Smalltalk
+  method syntax to bytecode set v1. It builds the image and stays the
+  oracle the compiler in Smalltalk is compared with.
+- **Compiler in Smalltalk**: the kernel's Scanner, Parser, Compiler and
+  BytecodeGenerator; it must produce exactly what the bootstrap compiler
+  produced for every method (CompilerTest).
+- **Captured variable**: a temp or argument a real block other than its
+  own scope uses. Captured and assigned, it lives in a **temp vector**;
+  otherwise it is **copied** into the closure.
+- **Inlined block**: a literal block of `ifTrue:`, `whileTrue:`, `to:do:`
+  and the other inlined selectors, compiled as jumps in the enclosing
+  method or block; its temps are that scope's.
+- **Image build**: Tonel files to an image: define, compile, install,
+  initialize in a VM, save (`kajo build-image`).
+- **Entry point**: special object 7 of an image, the object `kajo run` and
+  `kajo test` start a fresh Process at (`run:of:`, `setup:`, `test:`): the
+  class Smalltalk in the kernel.
+- **Well-known class**: one of the 27 classes the VM knows by index
+  (SmallInteger to WeakArray); the kernel's file for it must agree with the
+  VM's format and may give it a superclass.
+- **Event**: one JSON object of the core event protocol, versioned `"v":1`
+  and stamped with the time it happened; the CLI writes them as NDJSON.
+  Kinds in v1: `run.started`, `test.started`, `test.passed`, `test.failed`,
+  `test.errored`, `transcript`, `gc`, `run.finished`.
+- **Pragma index**: pragma selector to the Pragmas of every installed
+  method, kept by installation, saved with the image; `Pragma allNamed:`.
+- **Consumer** (of a pragma): a class that declares the pragma selectors
+  it reads with a class-side `<consumesPragmas: #(...)>`; any other pragma
+  is a compile warning.
 
 ## Concurrent marking (module 5)
 

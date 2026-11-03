@@ -42,7 +42,7 @@ Smalltalk class >> at: aSymbol [
 
 { #category : #classes }
 Smalltalk class >> at: aSymbol ifAbsent: aBlock [
-	^ self allClasses detect: [:c | c name == aSymbol] ifNone: aBlock
+	^ (self classNamed: aSymbol) ifNil: [aBlock value]
 ]
 
 { #category : #classes }
