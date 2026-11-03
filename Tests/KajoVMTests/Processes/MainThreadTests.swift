@@ -168,7 +168,9 @@ final class FakeMain: @unchecked Sendable {
         // Module 4: a parked main worker copies in a scavenge's parallel
         // phase (until ADR 0008 takes it off the pause): CPU, but the
         // stop's, not the turn's.
-        cpuOverruns.append(Double(Int64(bitPattern: st.cpuNs &- st.collectorNs &- budget)) / 1e6)
+        // Module 7: likewise the young collection work the turn did (round
+        // acknowledgements, its own collections), reported apart.
+        cpuOverruns.append(Double(Int64(bitPattern: st.cpuNs &- st.collectorNs &- st.youngNs &- budget)) / 1e6)
         usleep(500)
     }
     overruns.sort()

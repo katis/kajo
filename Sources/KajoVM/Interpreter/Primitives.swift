@@ -48,6 +48,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 20...34: return processPrimitive(n, m, c)  // module 3, Processes/ProcessPrimitives.swift
     case 35...37: return nurseryPrimitive(n, m, c)  // module 4, Nursery/Finalization.swift
     case 38: return primReplace(m, c)  // module 6, Relocation/Hazard.swift
+    case 39: return primSlowPeek(m, c)  // module 7, YoungCollection/Mutator.swift (tests)
     default: return .none
     }
 }

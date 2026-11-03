@@ -48,7 +48,10 @@ func afterScavenge(_ vm: VMPointer, roots: [Oop], literalBefore: RawArray<UInt64
     unsafe initialMark(vm, mk, roots: roots, trigger: trigger, literal: false)
 }
 
-/// Keep the old-entry estimate (world stopped).
+/// Keep the old-entry estimate (world stopped). Module 7's initial-mark
+/// pause calls it too.
+func countOldEntriesAtPause(_ vm: VMPointer, _ mk: MarkingPointer) { unsafe countOldEntries(vm, mk) }
+
 private func countOldEntries(_ vm: VMPointer, _ mk: MarkingPointer) {
     let om = unsafe mk.pointee.om
     let log = unsafe mk.pointee.log
@@ -80,12 +83,18 @@ func promotionRate(_ mk: MarkingPointer) -> Double {
 /// Decide at the end of a scavenge. Records the rate and the prediction
 /// either way.
 func decideTrigger(_ mk: MarkingPointer) -> CycleTrigger? {
+    unsafe decideTrigger(mk, rate: promotionRate(mk), oldEntries: nil, record: true)
+}
+
+/// The decision on a given promotion rate (module 7 samples between
+/// stops). `record`: world stopped, the rate and the prediction are kept
+/// in the log; module 7 decides outside stops and only reads the log.
+func decideTrigger(_ mk: MarkingPointer, rate: Double, oldEntries: UInt64?, record: Bool) -> CycleTrigger? {
     let c = unsafe mk.pointee.config
     let om = unsafe mk.pointee.om
     let log = unsafe mk.pointee.log
     let inUse = Double(om.blocksInUse * BlockHeap.blockBytes)
     let soft = Double(om.softLimitBlocks * BlockHeap.blockBytes)
-    let rate = unsafe promotionRate(mk)
     var fillNs: UInt64 = 0
     var predicted = false
     if c.safetyFactor > 0 && rate > 0 && inUse >= MarkingConfig.predictorFrom * soft {
@@ -95,11 +104,13 @@ func decideTrigger(_ mk: MarkingPointer) -> CycleTrigger? {
         let cycleNs = last > 0 ? Double(last) : inUse / MarkingConfig.assumedMarkBytesPerSecond * 1e9
         predicted = fill < c.safetyFactor * cycleNs
     }
-    unsafe log.pointee.counters.lastPromotionBytesPerSecond = rate
-    unsafe log.pointee.counters.lastPredictedFillNs = fillNs
+    if record {
+        unsafe log.pointee.counters.lastPromotionBytesPerSecond = rate
+        unsafe log.pointee.counters.lastPredictedFillNs = fillNs
+    }
     if c.stress.contains(.cycleAtEveryScavenge) { return .forced }
     if inUse >= c.floor * soft { return .floor }
-    if unsafe Double(log.pointee.oldEntries) >= c.floor * Double(om.entryCapacity) { return .entries }
+    if unsafe Double(oldEntries ?? log.pointee.oldEntries) >= c.floor * Double(om.entryCapacity) { return .entries }
     return predicted ? .predictor : nil
 }
 
@@ -160,7 +171,19 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     unsafe greyRoots(mk, roots)
     om.forEachRoot(extraRoots: []) { unsafe greyIfCandidate(mk, om, m, $0.raw) }
     let t2 = nanoseconds()
-    if unsafe !literal && !mk.pointee.config.testSwitches.noSurvivorRoots, let n = unsafe vm.pointee.nursery {
+    if let y = unsafe vm.pointee.young {
+        // Module 7: no scavenge before this snapshot. Every nursery's young
+        // bodies are roots (the young-root scan, concurrent-young Part 3);
+        // the snapshot is the old map, which never holds a young entry or a
+        // deferred entry free (amendment 17), except under the test switch
+        // that brings the experiment's bug back.
+        if unsafe !literal && y.pointee.config.testSwitches.youngRoots {
+            let ts = nanoseconds()
+            let words = unsafe youngRootScan(vm, mk)
+            unsafe noteYoungRootScan(y, nanoseconds() &- ts, words)
+        }
+        unsafe snapshotDeferred(vm, y, mk)
+    } else if unsafe !literal && !mk.pointee.config.testSwitches.noSurvivorRoots, let n = unsafe vm.pointee.nursery {
         // Survivors are roots (ADR 0007): every slot, weak and ephemeron
         // slots included (their referents survive this cycle).
         for k in unsafe 0..<n.pointee.count {

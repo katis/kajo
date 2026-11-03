@@ -25,6 +25,9 @@ struct VMConfig: Sendable {
     var marking = MarkingConfig()
     /// Module 6: concurrent relocation of old space (needs marking).
     var relocation = RelocationConfig()
+    /// Module 7: young collection without stopping the world (needs a
+    /// nursery in a doubly mapped region; `stw`: module 4's scavenge only).
+    var young = YoungConfig()
     /// Injected yields and sleeps, seeded (docs/VERIFICATION.md layer 5).
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).

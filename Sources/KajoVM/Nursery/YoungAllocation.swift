@@ -89,6 +89,13 @@ extension Machine {
                 fail(.outOfMemory)
                 return .none
             }
+            // Module 7: a full eden is collected without stopping the world
+            // (locally, or flipped to the young collector thread).
+            if !tableFull && !force, let y = unsafe vm.pointee.young {
+                unsafe collectOwnNursery(vm, y, w, held: extra)
+                unsafe state.pointee.counters.collectionsTriggered &+= 1
+                continue
+            }
             let full = tableFull || (force && fullStress)
             let before = pauseCount()
             let stopped = unsafe stopWorld(vm, w, retry: false, keeping: keep) { stop in
@@ -173,7 +180,15 @@ extension NurseryShared {
         guard config.enabled else { return }
         let om = unsafe vm.pointee.om
         let count = unsafe vm.pointee.workerCount
-        let n = unsafe NurseryShared.make(config, om: om, workers: count)
+        // Module 7: young collection without stopping the world needs the
+        // nursery region mapped twice (a RELOCATING young body is read
+        // through the alias); otherwise the stop-the-world scavenge only.
+        let young = unsafe vm.pointee.config.young
+        let concurrent = young.mode != .stw && om.heap.extraBytes >= config.stride * count
+        let half = young.stress.contains(.collectAtEveryHalf) ? 64 << 10 : 0
+        let n = unsafe NurseryShared.make(config, om: om, workers: count, offloaded: concurrent && young.mode == .offload,
+                                          youngHolders: concurrent && young.testSwitches.crossNurseryBarrier,
+                                          concurrent: concurrent, halfBytes: half)
         unsafe vm.pointee.nursery = n
         for i in 0..<count { unsafe vm.worker(i).pointee.interp.young = n.alloc(i) }
         let needed = config.reserveBytes(workers: count) / BlockHeap.blockBytes
@@ -208,5 +223,7 @@ private func promoteAllForOldSpace(_ vm: VMPointer, _ extra: [Oop]?) {
     // Module 5: a marking cycle is abandoned, a sweep finished and applied.
     unsafe markingBeforeOldSpaceOperation(vm)
     let roots = unsafe extra ?? gatherRoots(vm, [])
-    unsafe scavenge(vm, vm.worker(stopper), roots: roots, promoteAll: true)
+    // The stopper may be outside the worker table (module 7's young
+    // collector, module 5's marker): it promotes everything it copies.
+    unsafe scavenge(vm, participantWorker(vm, stopper), roots: roots, promoteAll: true)
 }

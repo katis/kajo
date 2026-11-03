@@ -44,7 +44,8 @@ import Synchronization
     let hostLock: UnsafeMutablePointer<pthread_mutex_t>
     /// Per-worker words other threads read: terminate requests (the
     /// record index + 1 to terminate), the QoS a thread got, its Mach
-    /// thread port. One 128-byte line per worker.
+    /// thread port. One 128-byte line per worker, then one for module 5's
+    /// marker worker and one for module 7's young collector.
     let workerShared: UnsafeMutableRawPointer
     /// Errors that terminated Processes, by Process id (own mutex).
     let errors: UnsafeMutablePointer<ErrorLog>
@@ -61,6 +62,19 @@ import Synchronization
     var marking: MarkingPointer? = nil
     /// Module 6: concurrent relocation, nil when it is off (or no marking).
     var relocation: RelocationPointer? = nil
+    /// Modules 6 and 7: the global epoch E (incremented with seq_cst when
+    /// memory waits for every participant to pass a safepoint), the count
+    /// of hazard slots held in every worker, and the tests' enter-window
+    /// hook. Each in its own line.
+    let epoch: UnsafeMutablePointer<Atomic<UInt64>>
+    let hazardsHeld: UnsafeMutablePointer<Atomic<Int>>
+    let enterWindow: UnsafeMutablePointer<EnterWindowHook>
+    /// Epoch words are kept (relocation or young collection without
+    /// stopping the world is installed). Set before any thread starts.
+    var epochsOn = false
+    /// Module 7: young collection without stopping the world, nil in the
+    /// stop-the-world configuration.
+    var young: YoungPointer? = nil
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -109,6 +123,15 @@ struct WorkerShared: ~Copyable {
     var stopper = -1
     /// What the current stop does (`StopKind`), for its record.
     var kind = StopKind.other
+    /// Module 7: per participant (the workers, then the marker's and the
+    /// young collector's slots): inside the VM, and inside a blocking
+    /// region (acknowledged by proxy, its stack scanned by the opener).
+    var inside: UnsafeMutablePointer<Bool>
+    var blocking: UnsafeMutablePointer<Bool>
+    /// Module 7: stop requesters waiting for every young collection to end
+    /// (no collection opens while nonzero), and the collections open.
+    var stwWanted = 0
+    var ycActive = 0
 }
 
 /// What a stop did, in its record.
@@ -119,6 +142,9 @@ enum StopKind: UInt8, Sendable {
     /// Module 5: a final mark, and a sweep's apply in a stop of its own.
     case finalMark
     case apply
+    /// Module 7: an initial mark without a scavenge, the young verifier.
+    case initialMark
+    case verify
 }
 
 struct StopRecord: Sendable {
@@ -187,6 +213,9 @@ enum Counter: Int, CaseIterable {
     case schedLocks, schedContended, schedWaitNs, pendingContended, safepointContended
     case idleWaits, idleWakeups, idleNs, slices, stuckReports, terminateRequests
     case stopVerifierFailures, scheduleVerifierFailures, perturbations
+    /// Module 7: stops whose stopper (outside the worker table) was raised
+    /// to user-initiated for the stop.
+    case stopperQoSRaises
 }
 
 /// A snapshot of the counters.

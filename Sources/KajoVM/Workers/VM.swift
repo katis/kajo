@@ -1,6 +1,13 @@
 import Darwin
 import Synchronization
 
+/// False flags for `n` participants.
+private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
+    let p = UnsafeMutablePointer<Bool>.allocate(capacity: n)
+    unsafe p.initialize(repeating: false, count: n)
+    return unsafe p
+}
+
 /// A VM over a loaded image: the main worker, the background workers and
 /// the host worker, the scheduler, safepoints and external signals. The
 /// host surface (tests, `kajo run`, later the shells). Every method may be
@@ -23,8 +30,8 @@ import Synchronization
         let flag = unsafe makeFlagLine()
         let workers = UnsafeMutablePointer<WorkerPointer>.allocate(capacity: workerCount)
         precondition(MemoryLayout<WorkerShared>.size <= 128, "a worker's shared words fit one line")
-        let shared = UnsafeMutableRawPointer.allocate(byteCount: 128 * workerCount, alignment: 128)
-        for i in 0..<workerCount {
+        let shared = UnsafeMutableRawPointer.allocate(byteCount: 128 * (workerCount + 2), alignment: 128)
+        for i in 0..<(workerCount + 2) {
             unsafe (shared + 128 * i).bindMemory(to: WorkerShared.self, capacity: 1).initialize(to: WorkerShared())
         }
         let counters = UnsafeMutablePointer<Atomic<UInt64>>.allocate(capacity: Counter.allCases.count)
@@ -42,12 +49,15 @@ import Synchronization
         unsafe state = raw.bindMemory(to: VMState.self, capacity: 1)
         unsafe state.initialize(to: VMState(
             om: om, image: image, config: config, nilObject: image.nilObject, workers: workers, workerCount: workerCount,
-            flag: flag, safepoint: boxed(SafepointState(stops: stops, parts: .allocate(capacity: workerCount))), safepointLock: makeMutex(), safepointCond: makeCond(),
+            flag: flag, safepoint: boxed(SafepointState(stops: stops, parts: .allocate(capacity: workerCount + 2),
+                                                        inside: flags(workerCount + 2), blocking: flags(workerCount + 2))),
+            safepointLock: makeMutex(), safepointCond: makeCond(),
             sched: boxed(SchedulerState()), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
             doneCond: makeCond(), externalHead: boxed(Atomic<UInt>(0)), pending: boxed(PendingState()),
             pendingSlots: pendingSlots, pendingNext: pendingNext, pendingLock: makeMutex(), hostLock: makeMutex(),
             workerShared: shared, errors: boxed(ErrorLog()), errorsLock: makeMutex(), counters: counters,
-            finalization: boxed(FinalizationState())))
+            finalization: boxed(FinalizationState()), epoch: boxed(Atomic<UInt64>(1)), hazardsHeld: boxed(Atomic<Int>(0)),
+            enterWindow: boxed(EnterWindowHook())))
         let seed = config.perturb?.seed ?? 0x9E37_79B9_7F4A_7C15
         for i in 0..<workerCount {
             unsafe workers[i] = Worker.make(image: image, vm: state, index: i, isMain: i == 0, flag: flag,
@@ -56,6 +66,8 @@ import Synchronization
         unsafe NurseryShared.install(state)
         unsafe MarkingShared.install(state)
         unsafe RelocationShared.install(state)
+        unsafe YoungShared.install(state)
+        unsafe state.pointee.epochsOn = state.pointee.relocation != nil || state.pointee.young != nil
     }
 
     var config: VMConfig { unsafe state.pointee.config }
@@ -71,7 +83,8 @@ import Synchronization
         }
     }
 
-    /// Start the background workers' threads at user-initiated QoS.
+    /// Start the background workers' threads at user-initiated QoS, the
+    /// marker thread and module 7's young collector thread.
     func start() {
         precondition(!started)
         started = true
@@ -91,6 +104,7 @@ import Synchronization
             unsafe pthread_attr_destroy(&attr)
         }
         unsafe startMarkerThread(state)
+        unsafe startYoungCollector(state)
     }
 
     /// Stop and join the background workers (each finishes its slice).
@@ -106,6 +120,7 @@ import Synchronization
                 unsafe state.worker(i).pointee.thread = nil
             }
         }
+        unsafe stopYoungCollector(state)
         unsafe stopMarkerThread(state)
     }
 
@@ -122,18 +137,24 @@ import Synchronization
             node = unsafe n.pointee.next
             unsafe n.deallocate()
         }
+        unsafe YoungShared.uninstall(state)
         unsafe RelocationShared.uninstall(state)
         unsafe MarkingShared.uninstall(state)
         unsafe NurseryShared.uninstall(state)
         for i in unsafe 0..<s.workerCount { unsafe Worker.destroy(s.workers[i]) }
         unsafe s.workers.deallocate()
-        for i in unsafe 0..<s.workerCount {
+        for i in unsafe 0..<(s.workerCount + 2) {
             unsafe (s.workerShared + 128 * i).assumingMemoryBound(to: WorkerShared.self).deinitialize(count: 1)
         }
         unsafe s.workerShared.deallocate()
         unsafe freeFlagLine(s.flag)
         unsafe s.safepoint.pointee.stops.deallocate()
         unsafe s.safepoint.pointee.parts.deallocate()
+        unsafe s.safepoint.pointee.inside.deallocate()
+        unsafe s.safepoint.pointee.blocking.deallocate()
+        unsafe unbox(s.epoch)
+        unsafe unbox(s.hazardsHeld)
+        unsafe unbox(s.enterWindow)
         unsafe unbox(s.safepoint)
         unsafe unbox(s.sched)
         unsafe unbox(s.externalHead)

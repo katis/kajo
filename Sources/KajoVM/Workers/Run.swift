@@ -12,6 +12,11 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
                  "runSlice: Process \(p) state \(intSlot(om, p, ProcessLayout.state)) record \(ri)")
     let r = unsafe records(vm, ri)
     let base = unsafe r.pointee.base.unsafelyUnwrapped
+    // Module 7: a parked stack is scanned for every young collection past
+    // its H1 start that has not scanned it yet (SPEC "Processes").
+    if let y = unsafe vm.pointee.young, unsafe barrierWord(vm.pointee.flag).pointee.load(ordering: .relaxed) > 1 {
+        unsafe youngResumeCheck(vm, y, w, ri)
+    }
     unsafe w.pointee.current = p
     unsafe w.pointee.record = ri
     unsafe s.pointee.stackBase = base
@@ -139,6 +144,11 @@ struct TurnStats: Sendable {
     /// Module 4: of `parkNs`, the time this worker spent copying and
     /// sweeping in a scavenge's parallel phase (CPU work, not waiting).
     var collectorNs: UInt64 = 0
+    /// Module 7: young collection on this worker in the turn: round
+    /// acknowledgements, flips or its own collections, waits for the
+    /// collector, for a pending stop or for collections before a stop.
+    var youngNs: UInt64 = 0
+    var acks: UInt64 = 0
     var slices = 0
     var preempted = false
 
@@ -154,6 +164,7 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
     var st = TurnStats()
     let t0 = nanoseconds(), cpu0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     let park0 = unsafe w.pointee.parkNs, stop0 = unsafe w.pointee.stopNs, gc0 = unsafe w.pointee.collectorNs
+    let young0 = unsafe youngTurnNs(vm, 0)
     st.enterWaitNs = unsafe enterVM(vm, w)
     // The main worker runs at whatever QoS the shell's thread has: logged
     // per turn, as the background workers log theirs at start.
@@ -182,6 +193,9 @@ func runMainTurn(_ vm: VMPointer, budgetNs: UInt64, minPriority: Int) -> TurnSta
     st.parkNs = unsafe w.pointee.parkNs &- park0
     st.collectorNs = unsafe w.pointee.collectorNs &- gc0
     st.stopNs = unsafe w.pointee.stopNs &- stop0
+    let young1 = unsafe youngTurnNs(vm, 0)
+    st.youngNs = young1.ns &- young0.ns
+    st.acks = young1.acks &- young0.acks
     st.leaveWaitNs = unsafe leaveVM(vm, w)
     st.ns = nanoseconds() &- t0
     st.cpuNs = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) &- cpu0

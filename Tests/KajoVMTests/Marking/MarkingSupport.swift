@@ -223,11 +223,12 @@ end
 /// the interleaving. Promotion on first survival (the experiment's), with
 /// every verifier on.
 func markingRuntime(_ src: String = markingSrc, background: Int = 1, age: Int = 1, nurseryKB: Int = 1024,
-                    heapBlocks: Int = 2048, start: Bool = false,
+                    heapBlocks: Int = 2048, start: Bool = false, young: YoungMode = YoungConfig().mode,
                     _ change: (inout MarkingConfig) -> Void = { _ in }) throws -> Runtime {
     try Runtime(src, background: background, heapBlocks: heapBlocks, start: start, configure: { c in
         c.nursery.bytes = nurseryKB * 1024
         c.nursery.age = age
+        c.young.mode = young
         c.marking.enabled = true
         c.marking.markerThread = false
         change(&c.marking)

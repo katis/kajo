@@ -40,23 +40,33 @@ private func checkRemembered(_ n: NurseryPointer, _ out: inout Issues) {
     let om = unsafe n.pointee.om
     let hw = om.highWater
     let count = unsafe n.pointee.count
-    let strict = unsafe !n.alloc(0).pointee.rememberYoungHolders
+    let strict = unsafe !n.pointee.concurrent
     var inList = RawArray<UInt32>(repeating: 0, count: Int(hw))
     defer { inList.free() }
     func visit(_ list: RawArray<UInt64>, _ k: Int, _ name: String) {
         let bit = remBit(k)
         for i in 0..<list.count {
             let o = Oop(raw: list[i])
-            guard o.isObject && o.entryIndex < hw && om.isUsedReference(o) else {
+            guard o.isObject && o.entryIndex < hw else {
+                out.fail("\(name) holds \(o), not an entry")
+                continue
+            }
+            if strict && inList[Int(o.entryIndex)] & bit != 0 { out.fail("entry \(o.entryIndex) is twice in nursery \(k)'s lists") }
+            inList[Int(o.entryIndex)] |= bit
+            // Young collection without stopping the world: a list may name
+            // a holder freed (or freed and reused) since it was listed: its
+            // nursery's sweep found its remembered word cleared by another
+            // collection's scan of it. Every scan of a list tests the bit
+            // first (SPEC step 3), so such a name is skipped; what must hold
+            // is that every holder of a young object has its bit, and that
+            // every bit is listed.
+            if !strict { continue }
+            if !om.isUsedReference(o) {
                 out.fail("\(name) holds \(o), not a used entry")
                 continue
             }
             let h = om.header(o)
-            if h.isDeferredFree { continue }
-            if strict && inList[Int(o.entryIndex)] & bit != 0 { out.fail("entry \(o.entryIndex) is twice in nursery \(k)'s lists") }
-            inList[Int(o.entryIndex)] |= bit
-            if strict && h.isYoung { out.fail("young entry \(o.entryIndex) is in \(name)") }
-            if h.isYoung && h.nurseryIndex == k { out.fail("entry \(o.entryIndex), young in nursery \(k), is in \(name)") }
+            if h.isYoung { out.fail("young entry \(o.entryIndex) is in \(name)") }
             if unsafe n.remMarker(o.raw).pointee.load(ordering: .relaxed) & bit == 0 {
                 out.fail("entry \(o.entryIndex) is in \(name) with its bit clear")
             }
@@ -255,6 +265,14 @@ func verifyAfterScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>, expected 
 func verifyNurseryAfterScavenge(_ n: NurseryPointer) -> [String] {
     var out = Issues()
     unsafe checkYoungBodies(n, &out, after: true)
+    unsafe checkRemembered(n, &out)
+    return out.list
+}
+
+/// The remembered-set check on its own, at a pause (module 7's young
+/// verifier after a collection).
+func verifyRememberedAtPause(_ n: NurseryPointer) -> [String] {
+    var out = Issues()
     unsafe checkRemembered(n, &out)
     return out.list
 }

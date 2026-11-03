@@ -148,7 +148,10 @@ private func youngAtSnapshot(literal: Bool) throws -> (UInt64, Int64?) {
 /// a freed entry. Broken (`noRememberedFilter`): the scavenge after the
 /// sweep reads the freed holder and its verifier reports it.
 private func deadRememberedHolder(filter: Bool) throws -> Runtime {
-    let rt = try markingRuntime { $0.testSwitches.noRememberedFilter = !filter }
+    // The stop-the-world configuration: its remembered-set verifier is
+    // strict (module 7's collections tolerate stale names of freed holders
+    // in the lists, which every scan skips by the remembered bit).
+    let rt = try markingRuntime(young: .stw) { $0.testSwitches.noRememberedFilter = !filter }
     rt.run("mkHolder")
     rt.scavenge()
     let holder = rt.global(9)
@@ -217,7 +220,9 @@ private func deadRememberedHolder(filter: Bool) throws -> Runtime {
 /// scavenge. Scanning survivors at the initial mark keeps O; without the
 /// scan (`noSurvivorRoots`) the verifier reports it missed.
 private func survivorAtSnapshot(scan: Bool) throws -> UInt64 {
-    let rt = try markingRuntime(age: 2) { $0.testSwitches.noSurvivorRoots = !scan }
+    // Module 4's scavenge and ADR 0007's survivor scan (module 7's young-root
+    // scan has its own test in YoungCollection/).
+    let rt = try markingRuntime(age: 2, young: .stw) { $0.testSwitches.noSurvivorRoots = !scan }
     rt.run("mkEmptyH")
     rt.run("mkO")
     rt.scavenge()

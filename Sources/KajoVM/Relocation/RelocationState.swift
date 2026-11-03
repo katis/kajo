@@ -136,13 +136,15 @@ struct RelocationCounters: Sendable {
     let om: ObjectMemory
     let workerCount: Int
     /// The global epoch E: incremented (seq_cst) when a block is evacuated.
+    /// The VM's (module 7's young collections share it).
     let epoch: UnsafeMutablePointer<Atomic<UInt64>>
     /// Hazard slots held in every worker (amendment 16): the relocator
-    /// scans the slots only when one is held.
+    /// scans the slots only when one is held. The VM's.
     let hazardsHeld: UnsafeMutablePointer<Atomic<Int>>
     let state: UnsafeMutablePointer<RelocatorState>
     /// Test hook: called by `enterVM` between its load of the epoch and its
     /// store of it (where a worker's own loads may overtake that store).
+    /// The VM's.
     let enterWindow: UnsafeMutablePointer<EnterWindowHook>
 }
 
@@ -181,8 +183,8 @@ extension RelocationShared {
         unsafe live.initialize(repeating: 0, count: blocks)
         let st = unsafe linedValue(RelocatorState(blockLive: live, blockCount: blocks, context: om.makeContext()))
         let r = unsafe linedValue(RelocationShared(
-            config: config, om: om, workerCount: vm.pointee.workerCount, epoch: boxed(Atomic<UInt64>(1)),
-            hazardsHeld: boxed(Atomic<Int>(0)), state: st, enterWindow: linedValue(EnterWindowHook())))
+            config: config, om: om, workerCount: vm.pointee.workerCount, epoch: vm.pointee.epoch,
+            hazardsHeld: vm.pointee.hazardsHeld, state: st, enterWindow: vm.pointee.enterWindow))
         unsafe vm.pointee.relocation = r
     }
 
@@ -198,9 +200,6 @@ extension RelocationShared {
         unsafe st.pointee.framePins.free()
         unsafe s.om.destroyContext(st.pointee.context)
         unsafe unlinedValue(st)
-        unsafe unbox(s.epoch)
-        unsafe unbox(s.hazardsHeld)
-        unsafe unlinedValue(s.enterWindow)
         unsafe unlinedValue(r)
         unsafe vm.pointee.relocation = nil
     }

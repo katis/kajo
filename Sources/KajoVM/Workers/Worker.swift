@@ -57,6 +57,10 @@ enum LeaveReason: UInt8, Sendable {
     /// its switch or revert; a park there would deadlock (checked builds
     /// trap, every build counts it).
     var inRelocation = false
+    /// Module 7: the oop the young allocation slow path keeps across a
+    /// collection (`keeping:`); a root of this worker's round
+    /// acknowledgements. 0 otherwise.
+    var youngHeld: UInt64 = 0
     /// Perturbation generator state (xorshift).
     var rng: UInt64
     var thread: pthread_t? = nil

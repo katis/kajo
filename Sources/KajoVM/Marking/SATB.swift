@@ -9,14 +9,18 @@ import Synchronization
 // 20 percent through register pressure).
 
 /// The store with every barrier the flag word asks for: the SATB record of
-/// the old value while marking, the store, then module 4's insertion
-/// barrier. Scalars only; the VM is reached through the worker.
+/// the old value while marking (bit 0), module 7's young deletion record
+/// while a young collection runs (bits 1..), the store with the post-store
+/// check, then module 4's insertion barrier. Scalars only; the VM is
+/// reached through the worker.
 @inline(never)
 func storeWithBarriers(_ s: StatePointer, _ o: UInt64, _ i: Int, _ v: UInt64, _ site: UInt8) {
     let om = unsafe s.pointee.om
     let w = unsafe workerOf(s)
-    if let vm = unsafe w.pointee.vm, let mk = unsafe vm.pointee.marking {
-        unsafe satbRecord(mk, om, w, o, i)
+    if let vm = unsafe w.pointee.vm {
+        if let mk = unsafe vm.pointee.marking { unsafe satbRecord(mk, om, w, o, i) }
+        // Module 7: the young deletion barrier while a collection runs.
+        unsafe youngDeletionBarrier(vm, w, o, i)
     }
     // Module 6: the post-store check (this call is already out of line).
     if _slowPath(!om.storeChecked(Oop(raw: o), i, Oop(raw: v))) { unsafe postStoreSlow(s, o, i, v) }

@@ -86,7 +86,7 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
     // another participant may promote one while it is scanned; they are
     // traced if reachable and the copy remembers them again.
     unsafe ph.pointee.holders.removeAll()
-    unsafe ph.pointee.rememberYoung = n.alloc(0).pointee.rememberYoungHolders
+    unsafe ph.pointee.rememberYoung = n.pointee.concurrent
     var dropped: UInt64 = 0
     func takeHolders(_ list: UnsafeMutablePointer<RawArray<UInt64>>) {
         for i in unsafe 0..<list.pointee.count {

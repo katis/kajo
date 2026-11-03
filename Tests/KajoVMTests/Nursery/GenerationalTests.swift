@@ -231,7 +231,14 @@ import Testing
     rt.stop()
 }
 
-@Test func sharedYoungObjectsAreClaimedOnceByParallelScavengers() throws {
+/// Module 7: in every mode (the stop-the-world scavenge, local collection,
+/// the offload policy); the suite also runs under load and under
+/// ThreadSanitizer. Without stopping the world each worker collects its own
+/// nursery while the others take its objects (cross-nursery holders, the
+/// deletion barrier, rounds), and the young verifier runs after every
+/// fourth collection.
+@Test(arguments: YoungMode.allCases)
+func sharedYoungObjectsAreClaimedOnceByParallelScavengers(_ mode: YoungMode) throws {
     // 8 Processes on 8 workers each publish a young Array of 32 Pairs in an
     // old Array (global 9) and link the neighbour's young Array into their
     // own young list, while 256 KiB nurseries force scavenges with up to 8
@@ -379,7 +386,11 @@ import Testing
       return_top
     end
     """
-    let rt = try nurseryRuntime(src, background: 8, nurseryKB: 256, start: true)
+    let rt = try nurseryRuntime(src, background: 8, nurseryKB: 256, start: true, configure: {
+        $0.young.mode = mode
+        $0.young.verify = true
+        $0.young.verifyEvery = 4
+    })
     let mutex = rt.semaphore(global: 11)
     rt.vm.signal(mutex)
     rt.spawn("makeShared")
@@ -389,15 +400,22 @@ import Testing
     rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
     for p in ps { #expect(rt.result(p) == 3000 * 32) }
     let log = rt.vm.scavengeLog
-    #expect(log.count >= 10)
-    #expect(log.contains { $0.participants >= 4 })
-    #expect(rt.vm.nurseryCounters.verifierRuns == UInt64(log.count))
+    if mode == .stw {
+        #expect(log.count >= 10)
+        #expect(log.contains { $0.participants >= 4 })
+        #expect(rt.vm.nurseryCounters.verifierRuns == UInt64(log.count))
+    } else {
+        let yc = rt.vm.youngCounters
+        #expect(yc.collectionsLocal + yc.collectionsOffloaded >= 10, "\(yc)")
+        #expect(yc.verifierRuns >= 2)
+    }
     rt.noFailures()
     rt.stop()
 }
 
 @Test func deadYoungEntriesAreFreedAndReused() throws {
-    let rt = try nurseryRuntime(pairSrc, nurseryKB: 256)
+    // Module 4's scavenge sweep (module 7's collections sweep the same way).
+    let rt = try nurseryRuntime(pairSrc, nurseryKB: 256, configure: { $0.young.mode = .stw })
     rt.spawn("churn:", [int(300_000)])
     rt.runOn(1)
     let c = rt.vm.nurseryCounters
@@ -437,7 +455,9 @@ import Testing
     rt.spawn("churn:", [int(40_000)])
     rt.runOn(2) // churns in nursery 2: scavenges while the keeper is parked
     rt.scavenge()
-    #expect(rt.vm.nurseryCounters.scavenges >= 3)
+    // Module 7: or young collections without stopping the world.
+    let yc = rt.vm.youngCounters
+    #expect(rt.vm.nurseryCounters.scavenges + yc.collectionsLocal + yc.collectionsOffloaded >= 3)
     rt.vm.signal(sem)
     rt.runOn(1)
     #expect(rt.result(k) == 300 * 301 / 2)
@@ -531,7 +551,7 @@ import Testing
     rt.spawn("fill")
     rt.runOn(1)
     rt.scavenge()
-    #expect(rt.vm.nurseryCounters.promotedObjects >= 20 * 4000)
+    #expect(rt.vm.nurseryCounters.promotedObjects + rt.vm.youngCounters.promotedObjects >= 20 * 4000)
     let before = rt.vm.inspect { $0.blocksInUse }
     rt.spawn("dropMost")
     rt.runOn(1)

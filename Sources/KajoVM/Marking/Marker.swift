@@ -128,7 +128,8 @@ enum MarkOutcome {
 @inline(never)
 func markerPoll(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64, phase: MarkingPhase) -> Bool {
     let mw = unsafe mk.pointee.markerWorker
-    if unsafe vm.pointee.flag.pointee.load(ordering: .relaxed) != 0 { unsafe park(vm, mw) }
+    // Bit 0 only: module 7's rounds (bits 1..) are not the marker's.
+    if unsafe vm.pointee.flag.pointee.load(ordering: .relaxed) & 1 != 0 { unsafe park(vm, mw) }
     unsafe applyWantedQoS(mk)
     return unsafe mk.cycleNow == cycle && mk.phaseNow == phase && !mk.pointee.stopping.pointee.load(ordering: .relaxed)
 }

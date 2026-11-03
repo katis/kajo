@@ -676,7 +676,11 @@ end
     #expect(eventually { keepers.allSatisfy { rt.state($0) == .waiting } })
     // Module 4: with a nursery the churn scavenges (each a stop scanning
     // the parked stacks); without one it collects.
-    func pauses() -> UInt64 { rt.image.om.counters.collections + rt.vm.nurseryCounters.scavenges }
+    // Module 7: young collections scan the parked stacks at T1.
+    func pauses() -> UInt64 {
+        let yc = rt.vm.youngCounters
+        return rt.image.om.counters.collections + rt.vm.nurseryCounters.scavenges + yc.collectionsLocal + yc.collectionsOffloaded
+    }
     let collections = pauses()
     rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
     rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])

@@ -297,7 +297,7 @@ func relocateOne(_ vm: VMPointer, _ r: RelocationPointer, _ mw: WorkerPointer, _
                  _ bytes: UInt64) -> RelocateOutcome {
     guard let dst = unsafe toSpace(r, bytes) else { return .noSpace }
     guard unsafe relocBegin(vm, r, mw, o, off) else { return .casFailed }
-    if unsafe r.pointee.config.testSwitches.hazardRule && isHazarded(vm, r, o) {
+    if unsafe r.pointee.config.testSwitches.hazardRule && isHazarded(vm, o) {
         unsafe relocRevert(r, mw, o, off)
         return .hazard
     }

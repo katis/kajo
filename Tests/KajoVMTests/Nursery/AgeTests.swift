@@ -192,7 +192,10 @@ func anOldHolderOfASurvivorStaysRemembered(_ broken: Bool) throws {
 /// off, the verifier finds it.
 @Test(arguments: [false, true])
 func aPromotedHolderOfASurvivorIsRemembered(_ broken: Bool) throws {
-    let rt = try ageRuntime(3, configure: { $0.nursery.testSwitches.forgetPromotedHolders = broken })
+    let rt = try ageRuntime(3, configure: {
+        $0.nursery.testSwitches.forgetPromotedHolders = broken
+        $0.young.mode = .stw  // module 4's rule: young holders are never remembered
+    })
     spawnRun(rt, "mkPair")
     rt.scavenge()
     rt.scavenge()  // P and Q age 2

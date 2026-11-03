@@ -161,6 +161,7 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
         return .none
     }
     unsafe records(vm, ri).pointee = ProcessRecord(process: p, base: base, end: base + words)
+    unsafe youngNewRecordLocked(vm, ri)
     unsafe setIntSlot(w, p, ProcessLayout.record, ri)
     let id = unsafe vm.pointee.sched.pointee.nextId
     unsafe vm.pointee.sched.pointee.nextId += 1

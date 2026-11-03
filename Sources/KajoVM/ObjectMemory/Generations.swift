@@ -290,6 +290,14 @@ extension ObjectMemory {
         return s
     }
 
+    /// The queue as roots, under the pool lock (module 7's collectors, the
+    /// world running).
+    func forEachFinalizedLocked(_ body: (Oop) -> Void) {
+        lockPools()
+        defer { unlockPools() }
+        forEachFinalized(body)
+    }
+
     /// World stopped: the queue as roots.
     func forEachFinalized(_ body: (Oop) -> Void) {
         let q = unsafe shared.pointee.finalization

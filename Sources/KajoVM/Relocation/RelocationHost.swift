@@ -143,7 +143,7 @@ extension VM {
             unsafe leaveVM(state, mw)
             return nil
         }
-        if unsafe r.pointee.config.testSwitches.hazardRule && isHazarded(state, r, o.raw) {
+        if unsafe r.pointee.config.testSwitches.hazardRule && isHazarded(state, o.raw) {
             unsafe relocRevert(r, mw, o.raw, off)
             unsafe leaveVM(state, mw)
             return nil
@@ -173,8 +173,7 @@ extension VM {
     /// Test: `hook(context, worker)` runs in `enterVM` between the load of
     /// the epoch and the store of it. Set before any worker runs.
     func setEnterWindow(_ hook: (@convention(c) (UnsafeMutableRawPointer?, Int) -> Void)?, context: UnsafeMutableRawPointer?) {
-        guard let r = unsafe state.pointee.relocation else { return }
-        unsafe r.pointee.enterWindow.pointee = EnterWindowHook(hook: hook, context: context)
+        unsafe state.pointee.enterWindow.pointee = EnterWindowHook(hook: hook, context: context)
     }
 
     /// Test: publish `o` in hazard slot `k` of worker `i` (which must be

@@ -11,11 +11,22 @@ import Synchronization
 // freed when every worker's word is past s. Every pause frees every
 // pending block: the world stopped is every worker at such a point.
 
-/// Worker `w`'s epoch word, nil for a worker outside the table (the marker,
-/// which is the one freeing) or without relocation.
+/// A thread that keeps an epoch word: a worker of the table, or module 7's
+/// young collector thread (it reads young and old bodies between its
+/// polls). Module 5's marker worker is not one: it is the relocator, the
+/// one freeing, and reads no young body.
+@inline(__always)
+func isEpochParticipant(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
+    let i = unsafe w.pointee.index
+    let n = unsafe vm.pointee.workerCount
+    return i < n || i == n &+ 1
+}
+
+/// Worker `w`'s epoch word, nil for a thread that keeps none, or when no
+/// epoch is kept (neither relocation nor young collection is installed).
 @inline(__always)
 private func epochWord(_ vm: VMPointer, _ w: WorkerPointer) -> UnsafeMutablePointer<WorkerShared>? {
-    guard unsafe vm.pointee.relocation != nil, unsafe w.pointee.index < vm.pointee.workerCount else { return nil }
+    guard unsafe vm.pointee.epochsOn, unsafe isEpochParticipant(vm, w) else { return nil }
     return unsafe vm.shared(w.pointee.index)
 }
 
@@ -24,12 +35,13 @@ private func epochWord(_ vm: VMPointer, _ w: WorkerPointer) -> UnsafeMutablePoin
 /// E (acquire), then the word (release).
 @inline(__always)
 func epochAdvance(_ vm: VMPointer, _ w: WorkerPointer) {
-    guard let line = unsafe epochWord(vm, w), let r = unsafe vm.pointee.relocation else { return }
-    let e = unsafe r.pointee.epoch.pointee.load(ordering: .acquiring)
+    guard let line = unsafe epochWord(vm, w) else { return }
+    let e = unsafe vm.pointee.epoch.pointee.load(ordering: .acquiring)
     unsafe line.pointee.epoch.store(e, ordering: .releasing)
 }
 
-/// `leaveVM`, before the worker leaves: quiescent (release).
+/// `leaveVM`, and module 7's waits, before the worker blocks: quiescent
+/// (release).
 @inline(__always)
 func epochQuiesce(_ vm: VMPointer, _ w: WorkerPointer) {
     guard let line = unsafe epochWord(vm, w) else { return }
@@ -43,14 +55,43 @@ func epochQuiesce(_ vm: VMPointer, _ w: WorkerPointer) {
 /// became visible (docs/models/relocation.md, finding 1); the seq_cst scan
 /// in `tryFreePending` makes the argument hold under C++ rules (finding 2).
 func epochEnter(_ vm: VMPointer, _ w: WorkerPointer) {
-    guard let line = unsafe epochWord(vm, w), let r = unsafe vm.pointee.relocation else { return }
-    if unsafe r.pointee.config.testSwitches.enterZero {
+    guard let line = unsafe epochWord(vm, w) else { return }
+    if unsafe vm.pointee.relocation?.pointee.config.testSwitches.enterZero ?? true {
         unsafe line.pointee.epoch.store(0, ordering: .sequentiallyConsistent)
     }
-    let e = unsafe r.pointee.epoch.pointee.load(ordering: .sequentiallyConsistent)
-    let hook = unsafe r.pointee.enterWindow.pointee
+    let e = unsafe vm.pointee.epoch.pointee.load(ordering: .sequentiallyConsistent)
+    let hook = unsafe vm.pointee.enterWindow.pointee
     if let h = unsafe hook.hook { unsafe h(hook.context, w.pointee.index) }
     unsafe line.pointee.epoch.store(e, ordering: .releasing)
+}
+
+/// Module 7: the wake from a quiescent wait (`waitServicing`), the same
+/// three steps as `enterVM` (docs/models/young-collection.md, finding 3: an
+/// unlock is only a release, so a later relaxed offset load could be
+/// satisfied before a plain epoch store is visible while a collector's
+/// scan still reads quiescent). `zero` off is the test switch's broken
+/// variant: E, then the word.
+func epochWake(_ vm: VMPointer, _ w: WorkerPointer, zero: Bool) {
+    guard let line = unsafe epochWord(vm, w) else { return }
+    if zero { unsafe line.pointee.epoch.store(0, ordering: .sequentiallyConsistent) }
+    let e = unsafe vm.pointee.epoch.pointee.load(ordering: .sequentiallyConsistent)
+    let hook = unsafe vm.pointee.enterWindow.pointee
+    if let h = unsafe hook.hook { unsafe h(hook.context, w.pointee.index) }
+    unsafe line.pointee.epoch.store(e, ordering: .releasing)
+}
+
+/// The smallest epoch word of every participant (seq_cst loads: the
+/// relocation model's finding 2): the workers, and module 7's young
+/// collector when there is one.
+func minParticipantEpoch(_ vm: VMPointer) -> UInt64 {
+    var m = quiescentEpoch
+    for i in unsafe 0..<vm.pointee.workerCount {
+        m = unsafe Swift.min(m, vm.shared(i).pointee.epoch.load(ordering: .sequentiallyConsistent))
+    }
+    if unsafe vm.pointee.young != nil {
+        m = unsafe Swift.min(m, vm.shared(vm.pointee.workerCount &+ 1).pointee.epoch.load(ordering: .sequentiallyConsistent))
+    }
+    return m
 }
 
 /// The relocator: block `b` is evacuated, every switch of its objects
@@ -76,11 +117,7 @@ func tryFreePending(_ vm: VMPointer, _ r: RelocationPointer, atPause: Bool) -> I
     if n == 0 { return 0 }
     let rule = unsafe r.pointee.config.testSwitches.epochRule
     var minEpoch = quiescentEpoch
-    if !atPause && rule {
-        for i in unsafe 0..<vm.pointee.workerCount {
-            minEpoch = unsafe Swift.min(minEpoch, vm.shared(i).pointee.epoch.load(ordering: .sequentiallyConsistent))
-        }
-    }
+    if !atPause && rule { minEpoch = unsafe minParticipantEpoch(vm) }
     let om = unsafe r.pointee.om
     let now = nanoseconds()
     var kept = 0, freed = 0

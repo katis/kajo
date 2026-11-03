@@ -22,6 +22,8 @@ func enterVM(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> UInt64 
         waited = nanoseconds() &- t0
     }
     unsafe sp.pointee.active += 1
+    // Module 7: inside, owing no round already open.
+    unsafe youngEnterLocked(vm, w)
     let epoch = unsafe sp.pointee.epoch
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     // Module 6: 0, then the relocation epoch, before any heap access.
@@ -41,6 +43,8 @@ func leaveVM(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> UInt64 
     // Module 6: no body pointer from here on.
     unsafe epochQuiesce(vm, w)
     unsafe lockCounted(vm.pointee.safepointLock, vm, contended: .safepointContended)
+    // Module 7: the rounds it owes are done by proxy, then it is outside.
+    unsafe youngLeaveLocked(vm, w)
     unsafe vm.pointee.safepoint.pointee.active -= 1
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
@@ -63,7 +67,7 @@ func park(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) {
 }
 
 /// Mutex held: wait out the current stop, if any.
-private func parkLocked(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) {
+func parkLocked(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) {
     let sp = unsafe vm.pointee.safepoint
     guard unsafe sp.pointee.requested else { return }
     let t0 = nanoseconds()
@@ -135,18 +139,28 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
                _ work: (StopContext) -> Void) -> Bool {
     let sp = unsafe vm.pointee.safepoint
     let t0 = nanoseconds()
+    // Module 7 settles module 6's open item: a stopper outside the worker
+    // table (module 5's marker at utility, the young collector) runs the
+    // stop at user-initiated at least, so the world never waits for a
+    // starved stopper; its own QoS comes back after the release.
+    let raised = unsafe raiseStopperQoS(vm, w)
+    defer { if let q = raised { pthread_set_qos_class_self_np(q, 0) } }
     unsafe lockCounted(vm.pointee.safepointLock, vm, contended: .safepointContended)
-    while unsafe sp.pointee.requested {
-        unsafe parkLocked(vm, w)
-        if !retry {
-            unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
-            return false
+    while true {
+        while unsafe sp.pointee.requested {
+            unsafe parkLocked(vm, w)
+            if !retry {
+                unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+                return false
+            }
         }
+        // Module 7: stops and young collections never interleave.
+        if unsafe waitForCollectionsLocked(vm, w) { break }
     }
     unsafe sp.pointee.requested = true
     unsafe sp.pointee.stopper = w.pointee.index
     unsafe sp.pointee.lastParker = -1
-    unsafe vm.pointee.flag.pointee.store(1, ordering: .relaxed)
+    unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .relaxed)
     while unsafe sp.pointee.parked + 1 < sp.pointee.active {
         unsafe pthread_cond_wait(vm.pointee.safepointCond, vm.pointee.safepointLock)
     }
@@ -171,7 +185,11 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     }
     // Module 4: a full collection a scavenge requested keeps every poll on
     // its slow path until a worker runs it in a stop of its own.
-    unsafe vm.pointee.flag.pointee.store(fullCollectionDue(vm) ? 1 : 0, ordering: .relaxed)
+    if unsafe fullCollectionDue(vm) {
+        unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .relaxed)
+    } else {
+        unsafe vm.pointee.flag.pointee.bitwiseAnd(~1, ordering: .relaxed)
+    }
     unsafe sp.pointee.requested = false
     unsafe sp.pointee.stopper = -1
     unsafe sp.pointee.epoch &+= 1
@@ -312,4 +330,15 @@ func verifierFailed(_ vm: UnsafeMutablePointer<VMState>, _ c: Counter, _ report:
 
 extension Int64 {
     var asInt: Int { Int(truncatingIfNeeded: self) }
+}
+
+/// A stopper outside the worker table below user-initiated is raised to it
+/// for its stop (counted). Answers the QoS to restore, or nil.
+private func raiseStopperQoS(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -> qos_class_t? {
+    guard unsafe w.pointee.index >= vm.pointee.workerCount else { return nil }
+    let cur = qos_class_self()
+    guard cur.rawValue < QOS_CLASS_USER_INITIATED.rawValue else { return nil }
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INITIATED, 0)
+    unsafe vm.count(.stopperQoSRaises)
+    return cur
 }

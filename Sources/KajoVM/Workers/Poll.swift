@@ -10,7 +10,8 @@ import Darwin
 @inline(never)
 func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
     let w = unsafe workerOf(s)
-    let flagged = unsafe s.pointee.safepointFlag.pointee.load(ordering: .relaxed) != 0
+    let attention = unsafe s.pointee.safepointFlag.pointee.load(ordering: .relaxed)
+    let flagged = attention != 0
     guard let vm = unsafe w.pointee.vm else {
         // Module 2's standalone interpreter: the flag is a test switch
         // that collects at every poll.
@@ -23,13 +24,19 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
     }
     // Module 6: a poll slow path holds no body pointer.
     unsafe epochAdvance(vm, w)
-    if flagged {
+    // The attention word (module 7): bit 0 a stop, bits 1.. open rounds.
+    if attention & 1 != 0 {
         unsafe s.pointee.counters.safepointPolls &+= 1
         unsafe park(vm, w)
         // Module 4: a scavenge left old space past its soft limit.
         if unsafe fullCollectionDue(vm) { unsafe runDueFullCollection(vm, w) }
     }
-    if unsafe s.pointee.countdown != 0 { return false }
+    if attention > 1 { unsafe serviceRounds(vm, w) }
+    // While rounds are open every poll reaches this slow path (the word
+    // stays nonzero until the slowest participant acknowledges), so polls
+    // cost more: the budget is checked at each of them too, or a turn
+    // would overrun by the time of 1024 slow polls (module 7).
+    if unsafe s.pointee.countdown != 0 && attention <= 1 { return false }
     unsafe s.pointee.countdown = w.pointee.pollEvery
     unsafe perturb(vm, w)
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }

@@ -18,11 +18,11 @@ import Synchronization
 @inline(never)
 func hazardAcquire(_ vm: VMPointer, _ w: WorkerPointer, _ k: Int, _ o: Oop) -> UInt64 {
     let om = unsafe vm.pointee.om
-    guard let r = unsafe vm.pointee.relocation else { return om.stateWord(o.raw) }
+    guard unsafe vm.pointee.epochsOn else { return om.stateWord(o.raw) }
     let line = unsafe vm.shared(w.pointee.index)
     if k == 0 { unsafe line.pointee.hazard0.store(o.raw, ordering: .sequentiallyConsistent) }
     else { unsafe line.pointee.hazard1.store(o.raw, ordering: .sequentiallyConsistent) }
-    unsafe r.pointee.hazardsHeld.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
+    unsafe vm.pointee.hazardsHeld.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent)
     let sw = unsafe om.stateWordAtomic(o.raw)
     var e = unsafe sw.pointee.load(ordering: .sequentiallyConsistent)
     unsafe w.pointee.relocation.hazardsTaken &+= 1
@@ -44,18 +44,18 @@ func hazardAcquire(_ vm: VMPointer, _ w: WorkerPointer, _ k: Int, _ o: Oop) -> U
 /// body happen before the relocator can see the slot free.
 @inline(__always)
 func hazardRelease(_ vm: VMPointer, _ w: WorkerPointer, _ k: Int) {
-    guard let r = unsafe vm.pointee.relocation else { return }
+    guard unsafe vm.pointee.epochsOn else { return }
     let line = unsafe vm.shared(w.pointee.index)
     if k == 0 { unsafe line.pointee.hazard0.store(0, ordering: .releasing) }
     else { unsafe line.pointee.hazard1.store(0, ordering: .releasing) }
-    unsafe r.pointee.hazardsHeld.pointee.wrappingSubtract(1, ordering: .releasing)
+    unsafe vm.pointee.hazardsHeld.pointee.wrappingSubtract(1, ordering: .releasing)
 }
 
 /// The relocator, after its CAS and fence: does any worker's hazard slot
 /// name `o`? The count first, then the slots (all seq_cst).
 @inline(__always)
-func isHazarded(_ vm: VMPointer, _ r: RelocationPointer, _ o: UInt64) -> Bool {
-    if unsafe r.pointee.hazardsHeld.pointee.load(ordering: .sequentiallyConsistent) == 0 { return false }
+func isHazarded(_ vm: VMPointer, _ o: UInt64) -> Bool {
+    if unsafe vm.pointee.hazardsHeld.pointee.load(ordering: .sequentiallyConsistent) == 0 { return false }
     for i in unsafe 0..<vm.pointee.workerCount {
         let line = unsafe vm.shared(i)
         if unsafe line.pointee.hazard0.load(ordering: .sequentiallyConsistent) == o
@@ -114,13 +114,15 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UInt64, _ d: UInt64, _ i: Int,
                _ s: UInt64, _ j: Int, _ n: Int) {
     let st = unsafe w.pointer(to: \Worker.interp)!
-    let marking = unsafe barrierWord(vm.pointee.flag).pointee.load(ordering: .relaxed) != 0
+    let flags = unsafe barrierWord(vm.pointee.flag).pointee.load(ordering: .relaxed)
     let mk = unsafe vm.pointee.marking
+    let young = unsafe flags > 1 ? vm.pointee.young : nil
+    let ordered = unsafe young?.pointee.config.testSwitches.arrayCopyOrdering ?? true
     let ho = om.headerWord(o)
     var k = 0
     while k < n {
         let v = om.loadAtomic(bodyOffset: s, j &+ k)
-        if marking, let mk = unsafe mk {
+        if flags & 1 != 0, let mk = unsafe mk {
             // The SATB record of the overwritten value (as `satbRecord`,
             // through the body this primitive holds).
             let b = unsafe mk.buffer(w.pointee.index)
@@ -130,13 +132,45 @@ func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UIn
                 unsafe satbPushIfCandidate(mk, om, w, om.loadAtomic(bodyOffset: d, i &+ k))
             }
         }
-        om.storeSlot(atState: d, i &+ k, v)
-        if v & 1 == 0 {
-            let hv = om.headerWord(v)
-            if hv & Header.youngBit != 0 && (ho ^ hv) & Header.youngNurseryMask != 0 {
-                unsafe rememberSlow(st, Oop(raw: o), hv, BarrierSite.arrayCopy.rawValue)
+        // Module 7: the young deletion record of the overwritten value.
+        if let y = unsafe young, unsafe y.pointee.config.testSwitches.youngDeletionBarrier {
+            unsafe youngDeletionRecord(vm, y, w, om.loadAtomic(bodyOffset: d, i &+ k))
+        }
+        if _slowPath(!ordered) {
+            // Test switch `arrayCopyOrdering` off: a relaxed store, and the
+            // barrier's seq_cst load of the remembered word overtakes it
+            // (C++ and ARMv8 allow `str` then `ldar` to reorder): the load
+            // runs first, the hook stands for the store buffer, then the
+            // store (docs/models/young-collection.md, finding 1).
+            unsafe copyStoreUnordered(vm, st, om, o, ho, d, i &+ k, v)
+        } else {
+            om.storeSlot(atState: d, i &+ k, v)
+            if v & 1 == 0 {
+                let hv = om.headerWord(v)
+                if hv & Header.youngBit != 0 && (ho ^ hv) & Header.youngNurseryMask != 0 {
+                    unsafe rememberSlow(st, Oop(raw: o), hv, BarrierSite.arrayCopy.rawValue)
+                }
             }
         }
         k &+= 1
     }
+}
+
+/// The broken variant of the array copy's store (test switch): the
+/// insertion barrier's load first, the copy window hook, then a relaxed
+/// store.
+@inline(never)
+private func copyStoreUnordered(_ vm: VMPointer, _ st: StatePointer, _ om: ObjectMemory, _ o: UInt64, _ ho: UInt64,
+                                _ d: UInt64, _ i: Int, _ v: UInt64) {
+    if v & 1 == 0 {
+        let hv = om.headerWord(v)
+        if hv & Header.youngBit != 0 && (ho ^ hv) & Header.youngNurseryMask != 0 {
+            unsafe rememberSlow(st, Oop(raw: o), hv, BarrierSite.arrayCopy.rawValue)
+        }
+    }
+    if let y = unsafe vm.pointee.young {
+        let hook = unsafe y.pointee.copyWindow.pointee
+        if let h = unsafe hook.hook { unsafe h(hook.context, workerOf(st).pointee.index) }
+    }
+    om.setWordAtomic(atOffset: d &+ 8 &+ UInt64(i) &<< 3, v)
 }

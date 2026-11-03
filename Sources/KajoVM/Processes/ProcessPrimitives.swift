@@ -59,7 +59,11 @@ func processPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         if unsafe w.pointee.isMain {
             let v = c.arg0.isSmallInteger ? c.arg0.smallIntegerValue : 0
             guard let h = unsafe vm.pointee.hooks.shell else { return c.arg0.isSmallInteger ? c.arg0 : Oop(smallInteger: 0) }
+            // Module 7: the shell call may block for long without touching
+            // the heap: a blocking region (acknowledged by proxy).
+            unsafe blockingBegin(vm, w)
             let r = unsafe h(vm.pointee.hooks.context, 0, v)
+            unsafe blockingEnd(vm, w)
             return Oop.fitsSmallInteger(r) ? Oop(smallInteger: r) : .none
         }
         // Off main: retry the send on the main worker. At the bottom of a

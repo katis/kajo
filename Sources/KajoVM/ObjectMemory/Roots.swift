@@ -37,6 +37,14 @@ extension ObjectMemory {
 
     var rootCount: Int { unsafe gc.pointee.roots.count }
 
+    /// Every registered root (module 7's host worker scans them at its
+    /// round acknowledgements: only host calls change the registry, one at
+    /// a time, inside the VM).
+    func forEachRegisteredRoot(_ body: (Oop) -> Void) {
+        let rs = unsafe gc.pointee.roots
+        for i in 0..<rs.count where rs[i] != 0 { body(Oop(raw: rs[i])) }
+    }
+
     // MARK: - class table
 
     /// Register a class oop (or `.none`, set later) and answer its index.
