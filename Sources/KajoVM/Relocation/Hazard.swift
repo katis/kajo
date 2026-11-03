@@ -151,6 +151,10 @@ func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UIn
                     unsafe rememberSlow(st, Oop(raw: o), hv, BarrierSite.arrayCopy.rawValue)
                 }
             }
+            // The same test window after the store and the load.
+            if let y = unsafe young, let h = unsafe y.pointee.copyWindow.pointee.hook {
+                unsafe h(y.pointee.copyWindow.pointee.context, w.pointee.index)
+            }
         }
         k &+= 1
     }

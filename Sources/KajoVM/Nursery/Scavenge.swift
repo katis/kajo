@@ -670,6 +670,7 @@ private func processWeakSlots(_ n: NurseryPointer, parts: [Int]) -> UInt64 {
 /// next collection). The entries go back to their nursery's stash.
 func releaseDeferred(_ n: NurseryPointer) {
     let om = unsafe n.pointee.om
+    let own = unsafe n.pointee.deferredOwnership
     var released: UInt64 = 0
     for k in unsafe 0..<n.pointee.count {
         let v = unsafe n.survivors(k)
@@ -679,10 +680,12 @@ func releaseDeferred(_ n: NurseryPointer) {
             unsafe n.remMarker(raw).pointee.store(0, ordering: .relaxed)
             om.setStateWord(raw, EntryState.free(next: 0))
             om.setHeaderWord(raw, 0)
-            unsafe a.pointee.stash.append(UInt32(truncatingIfNeeded: raw &>> 4))
+            unsafe a.pointee.stash.pushNext(UInt32(truncatingIfNeeded: raw &>> 4))
             released &+= 1
         }
-        unsafe v.pointee.deferred.removeAll()
+        // Module 7's test switch `deferredOwnership` off: the pause frees
+        // them and the nursery keeps them too (the experiment's double free).
+        if own { unsafe v.pointee.deferred.removeAll() }
     }
     unsafe n.pointee.state.pointee.counters.deferredReleased &+= released
 }

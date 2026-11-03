@@ -47,6 +47,8 @@ func verifyRelocation(_ vm: VMPointer, _ r: RelocationPointer) -> [String] {
         }
         if om.isPendingDead(e) { continue }
         let hd = Header(raw: om.headerWord(raw))
+        // Module 7: a deferred entry free's body may have been reused.
+        if hd.isDeferredFree { continue }
         if nursery.contains(s) {
             if BackRef.entryIndex(h.word(atOffset: s)) != e { out.fail("entry \(e): its young body's back reference names another entry") }
             continue

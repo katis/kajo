@@ -188,7 +188,8 @@ extension NurseryShared {
         let half = young.stress.contains(.collectAtEveryHalf) ? 64 << 10 : 0
         let n = unsafe NurseryShared.make(config, om: om, workers: count, offloaded: concurrent && young.mode == .offload,
                                           youngHolders: concurrent && young.testSwitches.crossNurseryBarrier,
-                                          concurrent: concurrent, halfBytes: half)
+                                          concurrent: concurrent, deferredOwnership: young.testSwitches.deferredOwnership,
+                                          halfBytes: half)
         unsafe vm.pointee.nursery = n
         for i in 0..<count { unsafe vm.worker(i).pointee.interp.young = n.alloc(i) }
         let needed = config.reserveBytes(workers: count) / BlockHeap.blockBytes

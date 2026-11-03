@@ -15,8 +15,10 @@ func signalFinalization(_ vm: VMPointer) {
     if sem != .none { unsafe VMRef(vm: vm).signalFromOutside(sem, handle: nil) }
 }
 
-/// Module 4's primitives: 35 `scavenge`, 36 `finalizationSemaphore:`, 37
-/// `nextMourner`. Outside a VM each fails.
+/// Module 4's primitives: 35 `scavenge` (module 7: the caller's nursery
+/// only, without stopping the world, unless the configuration is
+/// stop-the-world), 36 `finalizationSemaphore:`, 37 `nextMourner`. Outside a
+/// VM each fails.
 enum NurseryPrimitives {
     static let table: [(number: Int, selector: String, argc: Int)] = [
         (35, "scavenge", 0), (36, "finalizationSemaphore:", 1), (37, "nextMourner", 0),
@@ -30,7 +32,13 @@ func nurseryPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     switch n {
     case 35:
         guard c.argc == 0 else { return .none }
-        unsafe scavengeNow(vm, w)
+        // Module 7: without stopping the world, the caller's own nursery is
+        // collected (locally, or flipped to the young collector thread).
+        if let y = unsafe vm.pointee.young, unsafe w.pointee.interp.young != nil {
+            unsafe collectOwnNursery(vm, y, w, held: .none)
+        } else {
+            unsafe scavengeNow(vm, w)
+        }
         unsafe m.state.pointee.counters.collectionsTriggered &+= 1
         return c.receiver
     case 36:

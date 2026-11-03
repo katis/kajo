@@ -99,7 +99,7 @@ private func roundWork(_ vm: VMPointer, _ y: YoungPointer, _ i: Int, _ k: Int, _
         // Records from an earlier collection of k may name freed entries.
         unsafe n.delBuffer(i, k).pointee.removeAll()
     case .h1:
-        if scan { unsafe scanOwnStack(vm, y, vm.worker(i), k, &roots) }
+        if scan { unsafe scanOwnStack(vm, y, participantWorker(vm, i), k, &roots) }
         unsafe publish(n, i, k, &pubs)
         // Offload: the owner's new half allocated before this
         // acknowledgement is scanned at T1 (amendment 7a).

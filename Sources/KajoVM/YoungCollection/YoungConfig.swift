@@ -74,8 +74,8 @@ struct YoungStress: OptionSet, Sendable {
 }
 
 /// A test hook: called by a collector with (context, nursery, point).
-/// Points: 0 before H0, 1 after H1 (before T1), 2 after the entry sweep
-/// (before the epoch rule).
+/// Points: 0 before H0, 1 after H1 (before T1), 3 after T1's work (before
+/// the drain rounds), 2 after the entry sweep (before the epoch rule).
 typealias YoungHook = @convention(c) (UnsafeMutableRawPointer?, Int, Int) -> Void
 
 /// Switches that turn a rule off so a test can show the rule matters

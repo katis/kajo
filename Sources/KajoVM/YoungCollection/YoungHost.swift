@@ -333,3 +333,49 @@ func youngTurnNs(_ vm: VMPointer, _ i: Int) -> (ns: UInt64, acks: UInt64) {
                 &+ c.drainWaitNs,
             c.acksOwn &+ c.acksOther)
 }
+
+extension VM {
+    /// Test: start only the young collector thread (a VM whose workers the
+    /// test drives, `start` not called).
+    func startYoungCollectorOnly() { unsafe startYoungCollector(state) }
+
+    /// Test: `fetch_or` bits into `o`'s remembered word now, with no stop
+    /// (from a collector's hook, as another collection's fold would).
+    func orRememberedWordNow(_ o: Oop, _ bits: UInt32) {
+        guard let n = unsafe state.pointee.nursery else { return }
+        unsafe n.remMarker(o.raw).pointee.bitwiseOr(bits, ordering: .sequentiallyConsistent)
+    }
+
+    /// Test: store a SmallInteger or nil into global `i` with no stop (a
+    /// flag a spinning Process polls; never young, so no barrier).
+    func setGlobalNow(_ i: Int, _ v: Oop) {
+        precondition(!v.isObject || v == image.nilObject)
+        image.om.store(image.globals, i - 1, v)
+    }
+
+    /// Test: global `i` read with no stop.
+    func globalNow(_ i: Int) -> Oop { image.om.load(image.globals, i - 1) }
+
+    /// Start a marking cycle with module 7's initial-mark pause (no
+    /// scavenge, the young-root scan). No-op while a cycle runs.
+    func startYoungCycle() {
+        guard let mk = unsafe state.pointee.marking, let y = unsafe state.pointee.young else { return }
+        _ = unsafe host { w in
+            unsafe stopWorld(state, w, retry: true) { stop in unsafe initialMarkPause(state, y, mk, stop, trigger: .forced) }
+        }
+    }
+
+    /// Test: worker `i`'s epoch word now, and what a collector's epoch
+    /// check would see (the smallest participant word).
+    var minimumEpoch: UInt64 { unsafe minParticipantEpoch(state) }
+    var globalEpoch: UInt64 { unsafe state.pointee.epoch.pointee.load(ordering: .sequentiallyConsistent) }
+
+    /// Test: worker `i` (inside the VM on this thread) waits as
+    /// `waitServicing` does: quiescent, then the wake (with the enter
+    /// window hook between its load of the epoch and its store).
+    func quiesceAndWake(worker i: Int) {
+        let w = unsafe state.worker(i)
+        unsafe epochQuiesce(state, w)
+        unsafe epochWake(state, w, zero: state.pointee.young?.pointee.config.testSwitches.quiescentWakeZero ?? true)
+    }
+}

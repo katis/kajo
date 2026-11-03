@@ -123,6 +123,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     carried.free()
     unsafe col.processHanded()
     unsafe col.drainGrey()
+    if let hk = sw.hook { unsafe hk(sw.hookContext, k, 3) }
     let t3 = nanoseconds()
     st.t1Ns = t3 &- t2
     st.rounds = 2
@@ -682,7 +683,7 @@ struct CollectionTally {
             }
             unsafe om.stateWordAtomic(raw).pointee.store(EntryState.free(next: 0), ordering: .relaxed)
             unsafe om.headerAtomic(raw).pointee.store(0, ordering: .relaxed)
-            unsafe stash.pointee.append(UInt32(truncatingIfNeeded: raw &>> 4))
+            unsafe stash.pointee.pushNext(UInt32(truncatingIfNeeded: raw &>> 4))
             freed &+= 1
         }
         rec.deferredKept = UInt64(kept)

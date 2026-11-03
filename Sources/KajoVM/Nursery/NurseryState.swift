@@ -257,6 +257,9 @@ struct ScavengeRecord: Sendable {
     /// stop-the-world scavenge remembers the survivors it copies for the
     /// other nurseries they name.
     let concurrent: Bool
+    /// Module 7's test switch (on outside tests): a pause that releases
+    /// deferred entry frees takes them from their nursery's list.
+    let deferredOwnership: Bool
     /// The remembered word: 32 bits per entry beside the table. Bit n: the
     /// holder is in nursery n's remembered set (some owner's buffer n, or
     /// nursery n's carried list) because it names a young object of
@@ -358,7 +361,8 @@ extension NurseryShared {
     /// `offloaded`: nursery 0's eden is two halves (module 7); `youngHolders`:
     /// the barrier remembers young holders of other nurseries too.
     static func make(_ requested: NurseryConfig, om: ObjectMemory, workers: Int, offloaded: Bool = false,
-                     youngHolders: Bool = false, concurrent: Bool = false, halfBytes: Int = 0) -> NurseryPointer {
+                     youngHolders: Bool = false, concurrent: Bool = false, deferredOwnership: Bool = true,
+                     halfBytes: Int = 0) -> NurseryPointer {
         let config = requested.effective
         if let problem = config.validate(workers: workers) { preconditionFailure("nursery: \(problem)") }
         let stride = UInt64(config.stride)
@@ -410,7 +414,7 @@ extension NurseryShared {
         let s = unsafe lined(NurseryShared(
             config: config, om: om, count: workers, regionStart: start, stride: stride, edenBytes: eden,
             survivorBytes: surv, largeLimit: large, alloc: alloc, scav: scav, surv: survs, buffers: buffers,
-            bufferOwners: owners, concurrent: concurrent, rem: rem, remBytes: remBytes,
+            bufferOwners: owners, concurrent: concurrent, deferredOwnership: deferredOwnership, rem: rem, remBytes: remBytes,
             phase: lined(ScavengePhase()), taskNext: atomicLine(0), sweepNext: atomicLine(0), inCopy: atomicLine(0),
             idle: atomicLine(0), copyEnd: atomicLine(UInt64(0)), packets: lined(pool), packetLock: makeMutex(),
             poolCount: atomicLine(0), state: lined(NurseryLog()), fullRequested: atomicLine(false)))

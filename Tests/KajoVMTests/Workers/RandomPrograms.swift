@@ -253,6 +253,13 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     case noNursery, tinyNurseries, promoteAll, scavengeEveryAllocation
     case cycleEveryScavenge, markingAlwaysOn
     case relocateEveryLiveBlock
+    /// Module 7: the stop-the-world scavenge (the oracle; every other
+    /// configuration runs the default offload policy), every nursery
+    /// collected locally, the offload policy with even tasks on the main
+    /// worker (driven by the test thread's turns), and a round at every
+    /// poll; tiny nurseries, perturbation, the young verifier after every
+    /// collection.
+    case stwScavenge, localCollection, offloadCollection, roundEveryPoll
 
     var testDescription: String { rawValue }
 
@@ -260,17 +267,20 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         switch self {
         case .oneWorker, .tinyNurseries: 1
         case .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock: 4
+        case .localCollection, .offloadCollection, .roundEveryPoll: 4
         default: 8
         }
     }
 
     func runtime(_ p: RandomProgram) throws -> Runtime {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
-                      .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock].contains(self)
+                      .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
+                      .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll].contains(self)
+        let source = self == .offloadCollection ? mainTasks(p.source) : p.source
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
-        return try Runtime(p.source, background: workers, heapBlocks: 256, stress: stress, verify: verify,
+        return try Runtime(source, background: workers, heapBlocks: 256, stress: stress, verify: verify,
                            configure: { c in
                                // Programs allocate tens of KiB: 512 KiB
                                // nurseries keep the promotion reserve (and
@@ -300,10 +310,34 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                        c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                    }
                                case .scavengeEveryAllocation: c.nursery.stress = .scavengeAtEveryAllocation
+                               case .stwScavenge: c.young.mode = .stw
+                               case .localCollection, .offloadCollection, .roundEveryPoll:
+                                   c.nursery.bytes = 24 << 10
+                                   c.nursery.survivorBytes = 2 << 10
+                                   c.young.mode = self == .offloadCollection ? .offload : .local
+                                   c.young.verify = true
+                                   if self == .roundEveryPoll { c.young.stress = .roundAtEveryPoll }
+                                   c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                default: break
                                }
                            })
     }
+}
+
+/// Even tasks forked with main affinity (`offloadCollection`): the main
+/// worker's nursery is the offloaded one.
+func mainTasks(_ source: String) -> String {
+    var lines = source.components(separatedBy: "\n")
+    var i = 0
+    while i + 4 < lines.count {
+        let t = lines[i].trimmingCharacters(in: .whitespaces)
+        if t.hasPrefix("push_lit #task"), let n = Int(t.dropFirst("push_lit #task".count).dropLast()), n % 2 == 0,
+           lines[i + 3].trimmingCharacters(in: .whitespaces) == "push_false" {
+            lines[i + 3] = lines[i + 3].replacingOccurrences(of: "push_false", with: "push_true")
+        }
+        i += 1
+    }
+    return lines.joined(separator: "\n")
 }
 
 /// Scavenges seen by the current tiny-nursery configuration's seeds.
@@ -321,6 +355,13 @@ let randomScavenges = ScavengeTally()
 func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     let rt = try config.runtime(p)
     let root = rt.spawn("root")
+    if config == .offloadCollection {
+        // The shell's part: main turns until everything has terminated.
+        let end = now() + UInt64((underThreadSanitizer ? 600.0 : 120.0) * 1e9)
+        while rt.vm.liveProcessCount > 0 && now() < end {
+            if rt.vm.runMain(budgetNs: 2_000_000).slices == 0 { usleep(200) }
+        }
+    }
     guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
         Issue.record("seed \(p.seed) \(config): did not finish (stops \(rt.vm.counters.stops), scavenges \(rt.vm.nurseryCounters.scavenges), collections \(rt.image.om.counters.collections))")
         rt.vm.terminateAll()
@@ -341,7 +382,11 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     case .preemptEveryPoll: #expect(c.preemptions > 10)
     case .collectEveryAllocation: #expect(rt.image.om.counters.stressCollections > 10)
     case .noNursery: #expect(!rt.vm.hasNursery)
-    case .tinyNurseries, .promoteAll: randomScavenges.add(config, rt.vm.nurseryCounters.scavenges)
+    case .tinyNurseries, .promoteAll:
+        // Module 7: the `scavenge` primitive collects the caller's nursery
+        // without stopping the world.
+        let yc = rt.vm.youngCounters
+        randomScavenges.add(config, rt.vm.nurseryCounters.scavenges + yc.collectionsLocal + yc.collectionsOffloaded)
     case .cycleEveryScavenge, .markingAlwaysOn:
         randomScavenges.add(config, rt.vm.markingCounters.cyclesCompleted)
         #expect(rt.vm.markingCounters.missed == 0)
@@ -350,6 +395,14 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
         randomScavenges.add(config, r.objectsMoved)
         #expect(rt.vm.markingCounters.missed == 0 && r.parksWhileRelocating == 0 && r.verifierFailures == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
+    case .stwScavenge: #expect(!rt.vm.hasYoungCollection)
+    case .localCollection, .offloadCollection, .roundEveryPoll:
+        let yc = rt.vm.youngCounters
+        randomScavenges.add(config, yc.collectionsLocal + yc.collectionsOffloaded)
+        if ProcessInfo.processInfo.environment["KAJO_RANDOM_DEBUG"] != nil {
+            print("seed \(p.seed) \(config): \(yc) scavenges \(rt.vm.nurseryCounters.scavenges) young \(rt.vm.nurseryCounters.youngAllocations)")
+        }
+        if config == .offloadCollection { #expect(yc.offloadedInline == 0) }
     default: break
     }
     rt.stop()
@@ -380,7 +433,8 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
         }
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
-    if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock].contains(config) {
+    if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
+        .localCollection, .offloadCollection, .roundEveryPoll].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
         // cycle, or moves an object), the configuration must.
         #expect(randomScavenges.take(config) > 0)

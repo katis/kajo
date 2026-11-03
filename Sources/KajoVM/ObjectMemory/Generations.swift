@@ -34,6 +34,17 @@ import Darwin
         unsafe count &+= 1
     }
 
+    /// Add a free entry as the next one handed out (module 7's released
+    /// deferred frees: reused first, so a double free shows at once).
+    mutating func pushNext(_ index: UInt32) {
+        unsafe append(index)
+        let b = unsafe base.unsafelyUnwrapped
+        let last = unsafe count &- 1
+        let t = unsafe b[next]
+        unsafe b[next] = b[last]
+        unsafe b[last] = t
+    }
+
     mutating func free() {
         unsafe Darwin.free(UnsafeMutableRawPointer(base))
         unsafe base = nil
