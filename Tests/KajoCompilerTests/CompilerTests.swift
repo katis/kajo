@@ -2,6 +2,7 @@
 // the code each construct compiles to, then methods compiled from Tonel
 // files and run on a VM.
 
+import Foundation
 import Testing
 @testable import KajoCompiler
 @testable import KajoVM
@@ -148,6 +149,18 @@ import Testing
         if FuzzSyntax.run(b) { compiled += 1 }
     }
     #expect(compiled > 0)
+}
+
+/// The syntax fuzzer's crash in module 8c's gate run: a keyword send of
+/// more than 255 arguments trapped in the assembler (the argument count is
+/// one byte); it is a CompileError now.
+@Test func aSendOfMoreThan255ArgumentsIsRefused() throws {
+    var url = URL(fileURLWithPath: #filePath)
+    for _ in 0..<2 { url.deleteLastPathComponent() }
+    let b = [UInt8](try Data(contentsOf: url.appendingPathComponent("KajoVMTests/Fixtures/fuzz/syntax/crash-many-keywords.st")))
+    #expect(!FuzzSyntax.run(b))
+    let many = "f " + (1...300).map { "k\($0): 1" }.joined(separator: " ")
+    #expect(throws: CompileError.self) { _ = try compileMethod(Array(("m ^ nil " + many).utf8), file: "t", in: FuzzSyntax.context) }
 }
 
 /// A compilation leaves nothing behind: the scopes and variables are freed

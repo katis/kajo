@@ -23,7 +23,11 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
     let rt = try Runtime(churnSrc, background: 7, heapBlocks: 512, configure: {
         $0.testSwitches.countReleasedAsParked = broken
     })
-    for _ in 0..<7 { rt.spawn("churn:", [int(checkedBuild ? 40_000 : 150_000)]) }
+    // Module 8c: long enough that the host's stops land while the workers
+    // run even when the suite loads the machine (a release run in the full
+    // suite finished 150 000 iterations in fewer than 20 stops); the
+    // Processes are terminated once the stops are done.
+    for _ in 0..<7 { rt.spawn("churn:", [int(checkedBuild ? 40_000 : 3_000_000)]) }
     var stops = 0
     while rt.vm.liveProcessCount > 0 && stops < 400 {
         if broken {
@@ -44,6 +48,7 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
     } else {
         #expect(stops >= 20)
         #expect(rt.vm.counters.stopVerifierFailures == 0)
+        rt.vm.terminateAll()
     }
     rt.waitAllTerminated()
     rt.stop(verifyHeap: !broken)

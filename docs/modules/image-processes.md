@@ -218,7 +218,7 @@ The rules also guard every slot read by the holder's class and size first.
 ## Measurements
 
 Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS 27,
-swift.org Swift 6.4.2, 2026-11-04 00:34 to 00:47 (load average 2.2 to 2.9
+swift.org Swift 6.4.2, 2026-11-04 00:30 to 00:41 (load average 2.2 to 2.9
 1-minute, the agent session the busiest other process).
 
 ### The kernels against the starting commit
@@ -260,7 +260,7 @@ version 2 image). Every checksum is the published one on both sides.
   load of the hold's mirror inside the branch a stop takes, and one load
   of `snapshotAtPoll` (the trigger is out of line); `dequeueLocked` gained
   one load under the scheduler lock. A second interleaved A/B of the three
-  slowest eight-worker kernels, seven runs each, 00:47 the same session:
+  slowest eight-worker kernels, seven runs each, right after it:
   fib 221.8 (217 to 246) against 225.4 (223 to 242), **1.016**; ivars
   260.2 (252 to 281) against 261.5 (253 to 274), **1.005**; sends 339.1
   (331 to 354) against 335.5 (332 to 354), **0.989**. The first run's
@@ -316,8 +316,21 @@ retrace each distinct frame method once). The fib image saved by `kajo run
   snapshot:`, `primSnapshot:`, `resumeAfterSnapshot`; Delay's pending list,
   `prepareSnapshot`, `resumeAfterSnapshot`, `isPending:`, `pendingFor:`;
   `Ephemeron resumeAfterSnapshot`, `finalizationProcess`; SnapshotTest.
+- Module 8b (`Loader/Assembler.swift`): the second operand of a send, a
+  closure or a temp-vector instruction is checked to fit its byte (a
+  `CompileError`, `badOperand`). The syntax fuzzer's gate run on ab180a6
+  found a keyword send of more than 255 arguments trapping there ("Not
+  enough bits to represent the passed value", `assembleBody`); it is as old
+  as 8b. The input is a seed and a regression test
+  (`Fixtures/fuzz/syntax/crash-many-keywords.st`,
+  `aSendOfMoreThan255ArgumentsIsRefused`).
 - Tests changed on purpose: `theImageLoaderRejects`' bad version is 3 (2 is
-  valid now).
+  valid now). `backToBackStopsDoNotLetReleasedWorkersRun` churns long enough
+  in release builds that the host's 20 stops land while workers run, and
+  terminates the Processes after them: in the same gate run's `just
+  test-release` the full suite (with this module's random programs beside
+  it) let the seven Processes of 150 000 iterations finish before 20 stops
+  ("stops >= 20" failed); alone it passed six runs of six.
 
 ## Deviations from the brief
 
@@ -359,7 +372,11 @@ retrace each distinct frame method once). The fib image saved by `kajo run
 
 ## Tests
 
-SWIFT_TESTS
+310 `KajoVMTests` (8b: 300; 10 new: 4 in `SavedProcessTests`, 5 in
+`SavedProcessLoaderTests`, `randomProgramsResumeFromASnapshot`) and 26
+`KajoCompilerTests` (8b: 20; `SnapshotScenarioTests`' 4, the gated
+`measureTheSave`, and the syntax fuzzer's regression); 4 new kernel SUnit tests (`SnapshotTest`); 5 model
+tests.
 
 **Round trips** (each run to its end where it saved and again from the
 image in a fresh VM, with another worker count): `oneReadyProcessRoundTrips`,

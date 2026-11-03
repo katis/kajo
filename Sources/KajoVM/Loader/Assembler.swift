@@ -404,6 +404,12 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
                 a &= 0xFF
             }
             bytes.append(i.op.rawValue)
+            // The second operand (argc, copied count, temp) is one byte, never
+            // extended: the syntax fuzzer's crash in module 8c's gate run was a
+            // keyword send of more than 255 arguments, which trapped here.
+            if i.op.operands == .send || i.op.operands == .closure || i.op.operands == .vectorSlot, i.b < 0 || i.b > 255 {
+                throw fail(.badOperand, "operand \(i.b) exceeds 255", i.line)
+            }
             switch i.op.operands {
             case .none, .prefix: break
             case .index: bytes.append(UInt8(a))
