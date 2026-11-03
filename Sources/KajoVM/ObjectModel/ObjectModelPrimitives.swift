@@ -55,9 +55,7 @@ func objectModelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     switch n {
     case 40...57:
         guard c.argc == 1, c.receiver.isSmallInteger || m.bigInt(c.receiver) != nil else { return .none }
-        let ops: [ArithOp] = [.add, .sub, .mul, .div, .intDiv, .mod, .quo, .rem, .lt, .gt, .le, .ge, .eq, .ne, .bitAnd,
-                              .bitOr, .bitXor, .bitShift]
-        return m.integerArith(ops[n - 40], c.receiver, c.arg0)
+        return m.integerArith(integerOp(n), c.receiver, c.arg0)
     case 58:
         guard c.argc == 0, let b = m.bigInt(c.receiver) else { return .none }
         return m.integer(-b)
@@ -66,8 +64,7 @@ func objectModelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         return m.float(b.double)
     case 60...69:
         guard c.argc == 1, m.double(c.receiver) != nil else { return .none }
-        let ops: [ArithOp] = [.add, .sub, .mul, .div, .lt, .gt, .le, .ge, .eq, .ne]
-        return m.floatArith(ops[n - 60], c.receiver, c.arg0)
+        return m.floatArith(floatOp(n), c.receiver, c.arg0)
     case 70...74:
         guard let d = m.double(c.receiver) else { return .none }
         switch n {
@@ -116,6 +113,46 @@ func objectModelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 100...116: return contextPrimitive(n, m, c)
     case 120...136: return stringPrimitive(n, m, c)
     default: return .none
+    }
+}
+
+@inline(__always)
+private func integerOp(_ n: Int) -> ArithOp {
+    switch n {
+    case 40: .add
+    case 41: .sub
+    case 42: .mul
+    case 43: .div
+    case 44: .intDiv
+    case 45: .mod
+    case 46: .quo
+    case 47: .rem
+    case 48: .lt
+    case 49: .gt
+    case 50: .le
+    case 51: .ge
+    case 52: .eq
+    case 53: .ne
+    case 54: .bitAnd
+    case 55: .bitOr
+    case 56: .bitXor
+    default: .bitShift
+    }
+}
+
+@inline(__always)
+private func floatOp(_ n: Int) -> ArithOp {
+    switch n {
+    case 60: .add
+    case 61: .sub
+    case 62: .mul
+    case 63: .div
+    case 64: .lt
+    case 65: .gt
+    case 66: .le
+    case 67: .ge
+    case 68: .eq
+    default: .ne
     }
 }
 

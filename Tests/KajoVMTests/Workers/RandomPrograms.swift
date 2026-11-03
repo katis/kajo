@@ -49,6 +49,9 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
     var signalsTo = Array(repeating: 0, count: k)
     var halves: [(first: [String], second: [String])] = []
     var currents: [Int?] = Array(repeating: nil, count: k)
+    // Module 8: the block methods each task's closures run, appended to its
+    // method.
+    var blocks: [[String]] = Array(repeating: [], count: k)
 
     func ops(_ i: Int, _ n: Int, signals: Bool, waits: Int, acc: inout Int64) -> [String] {
         var out: [String] = []
@@ -60,7 +63,7 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                 waitsLeft -= 1
                 continue
             }
-            switch rng.below(12) {
+            switch rng.below(14) {
             case 0, 1:  // allocate
                 objects.append(Array(repeating: .none, count: 8))
                 current = objects.count - 1
@@ -109,6 +112,16 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                 guard let c = current else { continue }
                 published[i] = c
                 out += ["push_nil", "push_int 10", "send globalAt: 1", "push_int \(i + 1)", "push_temp 2", "send at:put: 2", "pop"]
+            case 12:  // module 8: acc += [:x | x + v] value: w (a copied value)
+                let v = Int64(rng.below(201) - 100), w = Int64(rng.below(201) - 100)
+                acc &+= v &+ w
+                let b = "b\(blocks[i].count)"
+                blocks[i].append("block \(b) args=1 copied=1 temps=0\n  push_temp 0\n  push_temp 1\n  add\n  block_return")
+                out += ["push_temp 1", "push_int \(v)", "push_closure \(b) 1", "push_int \(w)", "value1", "add", "store_temp 1"]
+            case 13:  // module 8: acc += nil nlr: v (a non-local return from a block two frames up)
+                let v = Int64(rng.below(201) - 100)
+                acc &+= v
+                out += ["push_temp 1", "push_nil", "push_int \(v)", "send nlr: 1", "add", "store_temp 1"]
             default:
                 guard signals else { continue }
                 signalsTo[(i + 1) % k] += 1
@@ -155,7 +168,9 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
         let scavenge = ["push_nil", "send scavenge 0", "pop"]
         src += (halves[i].first + scavenge + halves[i].second).map { $0.hasSuffix(":") ? $0 : "  \($0)" }.joined(separator: "\n")
         src += "\n  push_nil\n  push_int 12\n  send globalAt: 1\n  push_int \(i + 1)\n  push_temp 1\n  send at:put: 2\n  pop\n"
-        src += "  push_temp 1\n  return_top\nend\n"
+        src += "  push_temp 1\n  return_top\n"
+        src += blocks[i].map { $0 + "\n" }.joined()
+        src += "end\n"
     }
     // The root: shared Arrays (10 published, 11 Semaphores, 12 answers,
     // 13 exit Semaphores), fork every task, join, sum.
@@ -190,8 +205,26 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
 }
 
 /// `nil sum: x`: x itself for a SmallInteger, 0 for nil, the sum over the
-/// 8 slots of an Array.
+/// 8 slots of an Array. Module 8: `nil nlr: v` answers v by a non-local
+/// return from a block evaluated by `apply:`.
 private let sumSource = """
+method UndefinedObject nlr: temps=0
+  push_nil
+  push_temp 0
+  push_closure ret 1
+  send apply: 1
+  pop
+  push_int -99
+  return_top
+block ret args=0 copied=1 temps=0
+  push_temp 0
+  nonlocal_return
+end
+method UndefinedObject apply: temps=0
+  push_temp 0
+  value
+  return_top
+end
 method UndefinedObject sum: temps=2
   push_temp 0
   push_nil

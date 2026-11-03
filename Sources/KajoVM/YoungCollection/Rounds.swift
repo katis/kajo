@@ -304,7 +304,7 @@ func runRound(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: Int, 
         unsafe waitServicing(vm, c) { unsafe h.pointee.need > 0 }
     }
     let dt = nanoseconds() &- t0
-    unsafe y.pointee.log.pointee.rounds.append(RoundRecord(nursery: k, kind: kind, latencyNs: dt, slowest: h.pointee.lastAcker))
+    unsafe logRound(y, RoundRecord(nursery: k, kind: kind, latencyNs: dt, slowest: h.pointee.lastAcker))
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     roots.free()
     unsafe pubs.free()
@@ -386,4 +386,12 @@ func waitForCollectionsLocked(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     if unsafe isRoundParticipant(vm, w) { unsafe y.counters(w.pointee.index).pointee.drainWaitNs &+= nanoseconds() &- t0 }
     return unsafe !sp.pointee.requested
+}
+
+/// The round log's Swift array append (ARC), out of line so the round
+/// itself has none (module 8: `just arc-check` found it inlined into
+/// `runRound` with the swift.org 6.4.2 toolchain). Mutex held.
+@inline(never)
+func logRound(_ y: YoungPointer, _ r: RoundRecord) {
+    unsafe y.pointee.log.pointee.rounds.append(r)
 }

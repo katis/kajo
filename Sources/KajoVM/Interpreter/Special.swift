@@ -122,7 +122,7 @@ func activationPrimitive(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
         let n = prim - ActivationPrimitive.perform
         if argc == n + 1 {
             let sel = unsafe (sp - n).pointee
-            if isSelectorOf(om, sel, arity: n) {
+            if unsafe isSelectorOf(s, sel, arity: n, receiver: (sp - n - 1).pointee) {
                 var i = 0
                 while i < n {
                     unsafe (sp - n + i).pointee = (sp - n + i + 1).pointee
@@ -138,7 +138,7 @@ func activationPrimitive(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
         let sel = unsafe (sp - 1).pointee
         if argc == 2, let arr = Optional(unsafe sp.pointee), isArray(om, arr) {
             let n = Int(om.count(of: Oop(raw: arr)))
-            if isSelectorOf(om, sel, arity: n), let k = unsafe spreadArray(s, sp, extra: 0) {
+            if unsafe isSelectorOf(s, sel, arity: n, receiver: (sp - 2).pointee), let k = unsafe spreadArray(s, sp, extra: 0) {
                 // Shift the spread arguments down over the selector.
                 var i = 0
                 while i < k {
@@ -161,11 +161,25 @@ func isArray(_ om: ObjectMemory, _ v: UInt64) -> Bool {
     v & Oop.objectTagMask == 0 && om.headerWord(v) & Header.classMask == WellKnown.array
 }
 
-/// `sel` is a Symbol of `arity` arguments.
-func isSelectorOf(_ om: ObjectMemory, _ sel: UInt64, arity n: Int) -> Bool {
+/// `sel` is a Symbol and the method a receiver of class `cls` finds for it
+/// takes `n` arguments (or there is none: `doesNotUnderstand:` builds its
+/// Message from `n`). The arity is the method's, so a Symbol that is not a
+/// selector, or one whose method takes another count, fails.
+func isSelectorOf(_ s: StatePointer, _ sel: UInt64, arity n: Int, receiver rcv: UInt64) -> Bool {
+    let om = unsafe s.pointee.om
     guard sel & Oop.objectTagMask == 0, sel != 0, om.headerWord(sel) & Header.classMask == WellKnown.symbol else { return false }
-    guard let name = String(validating: om.bytes(of: Oop(raw: sel)), as: UTF8.self) else { return false }
-    return isSelector(name) && arity(of: name) == n
+    let method = unsafe lookupMiss(s, classIndexOf(om, rcv), sel)
+    if method != 0 { return untagged(om.load(Oop(raw: method), MethodLayout.argc).raw) == n }
+    // No method: the arity as the bytes spell it (binary 1, else colons).
+    let o = Oop(raw: sel)
+    let count = Int(om.count(of: o))
+    if count == 0 { return false }
+    let first = om.loadByte(o, 0)
+    let word = first >= 0x80 || first == 95 || (first | 0x20) >= 97 && (first | 0x20) <= 122
+    if !word { return n == 1 }
+    var colons = 0
+    for i in 0..<count where om.loadByte(o, i) == 58 { colons &+= 1 }
+    return colons == n
 }
 
 /// Replace the Array on top of the stack by its elements. nil when it is

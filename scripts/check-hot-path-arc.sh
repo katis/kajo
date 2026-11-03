@@ -36,7 +36,7 @@ typeset -A wanted
 wanted=(
   Allocation 'ObjectMemory.tryAllocate(_:classIndex:slots:fill:)|ObjectMemory.tryAllocateBytes(_:classIndex:count:)|ObjectMemory.allocate(_:header:bytes:fill:)|ObjectMemory.place(_:header:bytes:fill:)|ObjectMemory.allocateSlow(_:header:bytes:fill:)|ObjectMemory.refillBlock(_:bytes:reserve:)|ObjectMemory.refillEntries(_:)|ObjectMemory.allocateBody(_:bytes:reserve:)|ObjectMemory.retire(_:)'
   ObjectMemory 'ObjectMemory.store(_:_:_:)|ObjectMemory.load(_:_:)|ObjectMemory.storeByte(_:_:_:)|ObjectMemory.loadByte(_:_:)|ObjectMemory.lockPools()|ObjectMemory.unlockPools()|ObjectMemory.bytesBase(_:)|ObjectMemory.slotsBase(_:)'
-  Dispatch 'interpret(_:_:)'
+  Dispatch 'interpret(_:_:)|storeRefused(_:_:_:_:_:_:_:_:)'
   Send 'lookupMiss(_:_:_:)|pollAndSend(_:_:_:_:_:_:_:_:)|pollAtJump(_:_:_:_:_:)|specialSend(_:_:_:_:_:_:)|primitiveSend(_:_:_:_:_:_:_:_:)|bottomReturn(_:_:_:_:_:)|stackOverflow(_:_:_:_:_:_:_:)|failAt(_:_:_:_:_:_:_:_:_:)|doesNotUnderstand(_:_:_:_:_:_:_:_:)'
   Primitives 'primitive(_:_:_:)|primAt(_:_:)|primAtPut(_:_:)|primBasicNew(_:_:size:)|primDivide(_:modulo:)'
   InterpreterState 'Machine.allocate(_:slots:keeping:)|Machine.allocateBytes(_:count:)|Machine.fail(_:selector:receiverClass:primitive:)'
@@ -59,6 +59,12 @@ wanted=(
   Rounds 'serviceRounds(_:_:)|runRound(_:_:_:_:_:)|waitServicing(_:_:_:)|youngEnterLocked(_:_:)|youngLeaveLocked(_:_:)|blockingBegin(_:_:)'
   Collect 'Collector.evacuate(_:_:)|copyBody(_:from:to:bytes:)|Collector.drainGrey()|Collector.scanHolder(_:)|Collector.processHanded()|Collector.sweep(_:_:)|Collector.freeDeferred(_:_:)|waitEpoch(_:_:_:_:)'
   Mutator 'youngResumeCheck(_:_:_:_:)|primSlowPeek(_:_:)'
+  Special 'superSend(_:_:_:_:_:_:_:_:)|extendedInstruction(_:_:_:_:_:)|activationPrimitive(_:_:_:_:_:_:_:_:_:)|primitiveFailure(_:_:_:_:_:_:_:_:_:)|spreadArray(_:_:extra:)|isSelectorOf(_:_:arity:receiver:)'
+  Frames 'returnSlow(_:_:_:_:_:_:)|nonLocalReturn(_:_:_:_:_:)|attemptToModifyFromStore(_:_:_:_:_:_:_:)|attemptToModifyFromPrimitive(_:_:_:)|pushThisContext(_:_:_:_:_:)|markedSend(_:_:_:_:)|Machine.materialize(_:)|Machine.detach(_:fp:hdr:pc:)|Machine.detachFrames(from:downTo:)|Machine.framePC(_:)|liveFrame(_:_:)|contextPrimitive(_:_:_:)|detachAllContexts(_:)'
+  Closures 'pushClosure(_:_:_:_:_:_:_:)|pushNewArray(_:_:_:_:_:_:)'
+  Numbers 'Machine.integerArith(_:_:_:)|Machine.floatArith(_:_:_:)|Machine.boxFloat(_:)'
+  Strings 'stringPrimitive(_:_:_:)|Machine.intern(_:)'
+  StackGrowth 'growStack(_:needed:)'
 )
 fail=0
 found=0
@@ -81,6 +87,13 @@ for obj in ${(k)wanted}; do
     if [[ ${names[$i]} == 'interpret(_:_:)' ]]; then
       branches=$(print -- "$body" | grep -cE '	br	x[0-9]+')
       tables=$(print -- "$body" | grep -oE 'lJTI[0-9_]+' | sort -u | wc -l | tr -d ' ')
+      # Module 8: with 50 opcodes the compiler hoists the table's address
+      # into a register before the loop and the relocation names a section
+      # label (ltmpN), not lJTI: count the table loads (a halfword or byte
+      # load indexed by the opcode) instead.
+      if (( tables == 0 )); then
+        tables=$(print -- "$body" | grep -cE '	ldr[hb]	w[0-9]+, \[x[0-9]+, x[0-9]+(, lsl #1)?\]')
+      fi
       printf '%-46s indirect branches %d, jump tables %d\n' "  dispatch" "$branches" "$tables"
       (( branches == 1 && tables == 1 )) || { echo "FAIL: the dispatch loop is not one jump table"; fail=1; }
       check=$(print -- "$body" | grep -A6 -B3 -E '	stlr	' | grep -E '^ +[0-9a-f]+:' | sed 's/^ *[0-9a-f]*: *//' | tr '\t' ' ' | tr '\n' ';')

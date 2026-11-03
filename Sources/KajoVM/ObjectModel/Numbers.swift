@@ -255,6 +255,10 @@ extension Machine {
         return o
     }
 
+    /// An Int64 outside the SmallInteger range as a LargeInteger.
+    @inline(never)
+    func largeInteger(_ v: Int64) -> Oop { integer(BigInt(v)) }
+
     /// The double an oop holds: a SmallFloat or a boxed Float.
     func double(_ v: Oop) -> Double? {
         if v.isSmallFloat { return v.smallFloatValue }
@@ -324,12 +328,12 @@ extension Machine {
         if a.isSmallInteger && b.isSmallInteger {
             let x = a.smallIntegerValue, y = b.smallIntegerValue
             switch op {
-            case .add: return Oop.fitsSmallInteger(x + y) ? Oop(smallInteger: x + y) : integer(BigInt(x + y))
-            case .sub: return Oop.fitsSmallInteger(x - y) ? Oop(smallInteger: x - y) : integer(BigInt(x - y))
+            case .add: return Oop.fitsSmallInteger(x + y) ? Oop(smallInteger: x + y) : largeInteger(x + y)
+            case .sub: return Oop.fitsSmallInteger(x - y) ? Oop(smallInteger: x - y) : largeInteger(x - y)
             case .mul:
                 let (p, o) = x.multipliedReportingOverflow(by: y)
                 if !o && Oop.fitsSmallInteger(p) { return Oop(smallInteger: p) }
-                return integer(BigInt(x) * BigInt(y))
+                return largeArith(.mul, a, b)
             case .lt: return boolean(x < y)
             case .gt: return boolean(x > y)
             case .le: return boolean(x <= y)
@@ -338,18 +342,18 @@ extension Machine {
             case .ne: return boolean(x != y)
             case .div:
                 guard y != 0, x % y == 0 else { return .none }
-                return Oop.fitsSmallInteger(x / y) ? Oop(smallInteger: x / y) : integer(BigInt(x / y))
+                return Oop.fitsSmallInteger(x / y) ? Oop(smallInteger: x / y) : largeInteger(x / y)
             case .intDiv, .mod:
                 guard y != 0 else { return .none }
                 var q = x / y
                 if x % y != 0 && (x < 0) != (y < 0) { q -= 1 }
                 let r = x - q * y
                 let v = op == .intDiv ? q : r
-                return Oop.fitsSmallInteger(v) ? Oop(smallInteger: v) : integer(BigInt(v))
+                return Oop.fitsSmallInteger(v) ? Oop(smallInteger: v) : largeInteger(v)
             case .quo, .rem:
                 guard y != 0 else { return .none }
                 let v = op == .quo ? x / y : x % y
-                return Oop.fitsSmallInteger(v) ? Oop(smallInteger: v) : integer(BigInt(v))
+                return Oop.fitsSmallInteger(v) ? Oop(smallInteger: v) : largeInteger(v)
             case .bitAnd: return Oop(smallInteger: x & y)
             case .bitOr: return Oop(smallInteger: x | y)
             case .bitXor: return Oop(smallInteger: x ^ y)
@@ -360,9 +364,17 @@ extension Machine {
                     if v >> y == x && Oop.fitsSmallInteger(v) { return Oop(smallInteger: v) }
                 }
                 guard y <= 1 << 16 else { return .none }
-                return integer(BigInt(x).shifted(Int(y)))
+                return largeArith(.bitShift, a, b)
             }
         }
+        return largeArith(op, a, b)
+    }
+
+    /// `integerArith` with a LargeInteger on either side, or a SmallInteger
+    /// result that overflowed: through `BigInt` (Swift arrays, so out of line
+    /// and off the checked paths).
+    @inline(never)
+    func largeArith(_ op: ArithOp, _ a: Oop, _ b: Oop) -> Oop {
         guard let x = bigInt(a), let y = bigInt(b) else { return .none }
         let c = BigInt.compare(x, y)
         switch op {
