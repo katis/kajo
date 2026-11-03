@@ -1,9 +1,11 @@
 # Module 8: object model v1 in the VM, the kernel, the compiler, the image
 
-Status: brief (2026-11-03); the six questions of the proposal were answered
-by the owner the same day and the answers are folded in below. Becomes the
-description of the module as built. 8a starts after module 7 is built,
-because both change the interpreter's store and poll paths; 8b after 8a.
+Status: 8a (the VM side) built 2026-11-03, described in
+`docs/modules/object-model.md`; 8b (the Smalltalk side) is next and not
+started. The six questions of the proposal were answered by the owner the
+same day and the answers are folded in below. 8a's deviations from this
+brief are listed in object-model.md; the String section below holds as
+written for the VM side.
 
 Decisions it implements: ADR 0009 in full (sections 2 to 12, with section 8
 rewritten for a single String and section 9's bit moved to 50), ADR 0002's

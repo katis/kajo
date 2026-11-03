@@ -2,7 +2,8 @@
 
 Date: 2026-11-02
 Status: proposed (accepted in principle by the project owner; each section
-is revised as the module that implements it is built)
+is revised as the module that implements it is built). Sections 2 to 11
+built in module 8a; see "Built (8a)".
 
 ## Context
 
@@ -278,6 +279,71 @@ cost module 2 measured as nil.
   that must touch them hops to main. Read-only marks (section 9) catch the
   violations the convention misses.
 - No global interpreter lock, now or later.
+
+## Built (8a, 2026-11-03)
+
+Module 8a (`docs/modules/object-model.md`) built sections 2 to 11 in the
+VM; section 12 is the kernel's (8b). What each became:
+
+- **1** (module 4 to 7, unchanged): the format word gained the kind,
+  sealed and behaviors bits around the weak and ephemeron ones.
+- **2**: SmallFloat `..10` (the double rotated, the exponent offset by 768
+  into nine bits: 2^-255 to 2^257 and both zeros; plus or minus 2^-255
+  boxed, since zero takes its pattern) and Character `0100`; `1000` and
+  `1100` spare. The open question is closed: the encoding is a bijection
+  on its range, and a property test against Swift's `Double` (200 000
+  values) round-trips every one bit for bit. Every "is it a reference"
+  site tests `raw & 0xF`; the six that tested `raw & 1` were insertion
+  barriers.
+- **3**: Contexts are materialized into `hdr[4]` on demand and detached
+  (temps copied, frame nil) by return, by being cut, and when their
+  Process ends; liveness is checked against the frame's context word,
+  never trusted from the index. Contexts of other Processes answer as dead
+  (walking a running Process's stack from another is not built). Snapshots
+  of Processes are not (the image loader refuses a Process).
+- **4**: closures with copied values and temp vectors; a block's frame
+  keeps its closure in the word before the header; a block that returns
+  non-locally carries its home Context (materialized when the closure is
+  made). `cannotReturn:` is sent to the closure.
+- **5**: unwind and handler marks are method flags; non-local return with
+  no mark between cuts in the VM, with one sends `aboutToReturn:through:`
+  and the kernel unwinds over `terminateTo:` and
+  `findNextUnwindContextUpTo:` (Smalltalk-80's protocol, shown in kasm in
+  the test kernel), as do `on:do:`, `signal`, `resume:` and `return:`.
+- **6**: classic metaclasses (Object class's superclass is Class); the
+  format word's kinds; sealed classes generalise module 2's structural
+  ones and include every metaclass.
+- **7**: LargeIntegers normalized; overflow in the special sends makes one
+  without a send; arithmetic, comparison, bit operations and shifts as
+  primitives; checked against `Int128`.
+- **8**: one UTF-8 String, interned Symbols in a heap table (strong in 8a),
+  no `at:put:` on either, byte-offset positions checked at scalar
+  boundaries; Symbols are no longer host-side names.
+- **9**: bit 50, checked in every store path with no extra instruction on
+  `store_ivar`; set with an atomic or rather than a store, because module
+  7's young collector compare-and-swaps young headers concurrently (it now
+  keeps the bit when its swap fails).
+- **10**: as written, plus `push_new_array` (making a temp vector) and the
+  rule that `==`, `~~`, `class`, `isNil`, `notNil` are answered inline and
+  never sent (no fallback for those three, a deviation). The opcode table,
+  the assembler and the one bytecode verifier (kasm and image) read it.
+- **11**: super through the method class, `perform:` family and
+  `respondsTo:` as primitives, installation in a stop with every worker's
+  cache flushed before it runs again.
+
+Open questions for the owner:
+
+- Is it acceptable that `class`, `isNil` and `notNil` can never be
+  overridden (no proxies that answer `isNil` true)? Pharo inlines `==`
+  and `class` only.
+- `attemptToModify:at:value:` is sent to the object with the object again
+  as its first argument, following the selector literally; a two-argument
+  `modificationForbiddenAt:value:` would be shorter. Which spelling does
+  the kernel want?
+- The symbol table is strong; the ADR's weak set needs weak buckets with
+  tombstones. Is a strong table acceptable until the image grows large?
+- A Process cannot be saved in an image in 8a (the third open question
+  below is still open).
 
 ## Consequences
 

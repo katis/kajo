@@ -65,6 +65,37 @@ as they are understood.
   selector: the lookup cache, else the superclass chain's method
   dictionaries; then the method's primitive, or a new frame. With no
   method, `doesNotUnderstand:` is sent with a Message if the class has it.
+  A **super send** looks up from the superclass of the class the running
+  method was compiled in.
+- **Special send**: a bytecode for a common selector (`+`, `<`, `at:`,
+  `value`, ...) with a fast path inline, an out-of-line tier (overflow,
+  floats, Arrays, closures) and a full send of the selector otherwise.
+- **Bytecode set v1**: ADR 0009's encoding: module 2's 27 opcodes, the
+  special sends, closures, temp vectors, thisContext, super, block and
+  non-local returns, and the **extension prefix** `ext` that widens the
+  next instruction's first operand.
+- **Closure**: a BlockClosure: a block method (a CompiledMethod flagged as
+  a block, held in its outer method's literals), the receiver of its home,
+  its home Context if it can return non-locally, and copied values.
+- **Temp vector**: an Array holding the temps a method and its closures
+  both write after capture, reached with `push_tv_slot` and
+  `store_tv_slot`.
+- **Context**: a frame made into a heap object on demand (thisContext, a
+  closure's home, the Context primitives). **Live** while its frame index
+  names a frame on the current Process's stack whose context word is it;
+  **detached** (dead) once the frame returned or was cut: its temps copied,
+  its frame and sender nil.
+- **Non-local return**: `^` in a block: return from the block's home
+  method. Straight to the home when no unwind mark lies between, else
+  through the kernel (`aboutToReturn:through:`); a home that returned
+  sends `cannotReturn:`.
+- **Unwind mark**: a method flag on `ensure:` and `ifCurtailed:`: frames a
+  non-local return or an exception's return must not cut without running
+  their block. **Handler mark**: the flag on `on:do:` that a signal's walk
+  looks for.
+- **Return marker**: a SmallInteger in a frame's context word for a frame
+  the VM sent itself: drop the answer (after a refused store) or return it
+  from the caller too (after a failed non-local return).
 - **Primitive failure**: a primitive refusing its receiver or arguments
   (wrong type, bound or argument count). The method's bytecodes then run
   as an ordinary activation; a method with none stops with a VMError.
@@ -74,23 +105,36 @@ as they are understood.
   traps on one and leaves the stack as it was for inspection.
 - **Structural class**: Class, Method and MethodDict, the objects whose
   shape the interpreter trusts. No primitive reads, writes, creates or
-  exchanges their instances.
+  exchanges their instances. Module 8 generalises it as **sealed**: a
+  bit of the class format, set for CompiledMethod, MethodDictionary,
+  Process, Semaphore, BlockClosure, Context, Metaclass, Behavior,
+  ClassDescription, Class and every metaclass.
 
 ## Memory
 
 - **Oop**: a 64-bit tagged word. Low bit 1: a SmallInteger, 63-bit two's
-  complement. Low four bits 0 and nonzero: an object reference, the byte
-  offset of the object's entry in the entry table (ADR 0003). The other
-  low-nibble patterns are reserved for future immediates. 0 is no object.
-  Oops never change when objects move.
+  complement. Low bits `10`: a SmallFloat; `0100`: a Character. Low four
+  bits 0 and nonzero: an object reference, the byte offset of the object's
+  entry in the entry table (ADR 0003). `1000` and `1100` are spare. 0 is no
+  object. Oops never change when objects move. A word is a reference
+  exactly when its low four bits are 0 (never test `raw & 1` for it).
+- **Immediate**: an oop that is its own value: SmallInteger, SmallFloat,
+  Character. Never a reference, never young, always read-only.
+- **SmallFloat**: an immediate double whose exponent fits nine bits (about
+  1e-77 to 1e77, and zero), with its full mantissa; other doubles are a
+  boxed **Float** (an 8-byte object).
+- **Character**: an immediate Unicode scalar (not a grapheme).
+- **LargeInteger**: a LargePositiveInteger or LargeNegativeInteger, a byte
+  object holding the magnitude little-endian. **Normalized**: no leading
+  zero byte, and never a value a SmallInteger can hold.
 - **Entry**: 16 bytes in the entry table: the state word (the body's offset
   in the heap, offset + 2^32 while RELOCATING, or a free-list link with bit
   63 set) and the header word. Entry 0 is never used.
 - **Header**: the object's header word, kept in its entry, not in the body.
   Bits 0..21 class index, 22..45 slot or byte count, 46 mark (reserved;
   marks live in a side byte map), 47 byte object, 48 fired ephemeron,
-  52..55 nursery index, 56 young, 57..59 age, 60 pinned for good, 61 frame
-  pin, 62..63 scavenge claim tag. Written only with the world stopped, or
+  49 deferred free, 50 read-only, 52..55 nursery index, 56 young, 57..59
+  age, 60 pinned for good, 61 frame pin, 62..63 scavenge claim tag. Written only with the world stopped, or
   by the allocating worker before the oop escapes.
   docs/modules/object-memory.md has the full layout and which bits each
   module uses.
@@ -142,9 +186,20 @@ as they are understood.
   is reachable some other way; when it is not, a full collection fires the
   ephemeron once: queues it for finalization and keeps key and value alive
   for that collection.
+- **Metaclass**: the class of a class. Every class is the sole instance
+  of its metaclass; a metaclass is an instance of Metaclass.
+  `Foo class superclass` is `Foo superclass class`.
+- **Read-only**: header bit 50: every store path refuses the object and
+  sends it `attemptToModify:at:value:`. Method literals are read-only.
+- **Symbol table**: the Array of buckets of interned Symbols; a lookup
+  compares bytes, a new Symbol is inserted with the world stopped.
+- **Image file**: module 1's snapshot with a method table and the special
+  objects, loaded only after every object-model rule and every method has
+  been verified.
 - **Format**: a class's format word beside the class table: named slots,
-  and weak or ephemeron (ADR 0009 section 6). The header keeps only
-  pointers or bytes.
+  weak or ephemeron, the kind (pointers fixed or variable, bytes, 16-,
+  32-, 64-bit words), sealed, and whether the instances are behaviors (ADR
+  0009 section 6). The header keeps only pointers or bytes.
 - **Finalization queue**: the fired ephemerons, a root, taken one at a
   time by a Process that a Semaphore wakes; finalizers never run on a
   collector thread.
