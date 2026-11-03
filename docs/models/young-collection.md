@@ -24,6 +24,13 @@ one after another (`swift test --filter YoungCollectionModelTests
 and time; every violation prints its interleaving as a numbered list of
 steps.
 
+Module 7 is built (2026-11-03): docs/modules/young-collection.md, "The
+model and the code", maps every step below to its production function. No
+step changed order, so the model is unchanged; what the production code adds
+beyond it (the collector thread as a round and epoch participant, deferred
+frees released at stop-the-world pauses, batched acknowledgements) is argued
+there under Deviations.
+
 ## What the model found
 
 In order of how much module 7 should care. Items marked "reasoning" are

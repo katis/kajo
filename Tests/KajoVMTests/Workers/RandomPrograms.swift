@@ -388,7 +388,11 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
         let yc = rt.vm.youngCounters
         randomScavenges.add(config, rt.vm.nurseryCounters.scavenges + yc.collectionsLocal + yc.collectionsOffloaded)
     case .cycleEveryScavenge, .markingAlwaysOn:
-        randomScavenges.add(config, rt.vm.markingCounters.cyclesCompleted)
+        // Cycles started: under ThreadSanitizer with busy loops the
+        // utility-QoS marker of ten small programs may finish none (module
+        // 7's loaded sanitizer run); the verifier checks every final mark
+        // that does run.
+        randomScavenges.add(config, rt.vm.markingCounters.cycles)
         #expect(rt.vm.markingCounters.missed == 0)
     case .relocateEveryLiveBlock:
         let r = rt.vm.relocationCounters
