@@ -48,10 +48,12 @@ private let fragmentSource = fragmentKernel(fragmentIterations)
 
 /// `run: i of: 4` on four workers; the summed checksum and the runtime
 /// (stopped by the caller).
-private func runKernel(_ src: String, heapBlocks: Int, relocate: Bool?, perturb: Bool = false) throws -> (Int64, Runtime) {
+private func runKernel(_ src: String, heapBlocks: Int, relocate: Bool?, perturb: Bool = false,
+                       young: YoungMode = YoungConfig().mode) throws -> (Int64, Runtime) {
     let rt = try Runtime(src, background: 4, heapBlocks: heapBlocks, entries: 1 << 21, pollEvery: 256, start: false,
                          configure: { c in
                              c.nursery.bytes = 1 << 20
+                             c.young.mode = young
                              guard let relocate else {
                                  c.marking.enabled = false  // the oracle
                                  return
@@ -111,7 +113,9 @@ private func underRelocation(_ src: String, heapBlocks: Int, _ name: String) thr
     #else
     let (src, heap) = (fragmentKernel(800_000), 512 * 32)
     #endif
-    let (_, rt) = try runKernel(src, heapBlocks: heap, relocate: true, perturb: true)
+    // Module 7: the stops come from stop-the-world scavenges (young
+    // collections without stopping the world would leave only the cycle's).
+    let (_, rt) = try runKernel(src, heapBlocks: heap, relocate: true, perturb: true, young: .stw)
     // The pass's totals are added when it ends; under load the utility-QoS
     // marker can still be in its first pass when the kernel finishes (one
     // loaded run: a 20 s final mark, 3357 objects copied, none counted yet),
