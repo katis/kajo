@@ -249,6 +249,12 @@ extension ObjectMemory {
             unsafe g.pointee.roots.append(v)
             if v == 0 { unsafe g.pointee.freeRootSlots.append(Int32(i)) }
         }
+        // Module 8b: the nil object is a root (the image boot registers it);
+        // one no root holds would be swept by the next collection while
+        // the memory still names it (the snapshot fuzzer's third crash).
+        if L.nilObject != 0 && !(0..<L.rootCount).contains(where: { SnapshotLayout.word(b, L.rootsAt + $0 * 8) == L.nilObject }) {
+            throw .malformed("the nil object is not a root")
+        }
         let h = heap
         lockPools()
         unsafe pools.pointee.highWater = L.highWater

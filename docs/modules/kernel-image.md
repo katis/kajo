@@ -470,6 +470,16 @@ The owner's answers (2026-11-03), built here:
   The barrier site `symbolTable` is unchanged (`aBarrierSiteSwitchedOff`
   passes).
 
+Module 1 (found by this module's gate run of `just fuzz snapshot 600`,
+40 s into it; the input crashes the starting commit too): the snapshot
+loader refuses a snapshot whose nil object is not one of its roots. The
+image boot registers nil as a root and every snapshot taken from an image
+has it, but the loader never checked: a one-bit mutation of the seed named
+a nil object no root held, the collection `FuzzEntry.snapshot` runs after
+loading swept it, and the verifier trapped ("object memory verifier, after
+sweep: the nil object (a root) is @3"). The input is a regression fixture
+(`crash-nil-not-root.img`, `fuzzFoundInputsNeverTrap`).
+
 What the kernel needed:
 
 - Primitives (`ObjectModel/KernelPrimitives.swift`): 75 Float
@@ -576,6 +586,7 @@ are read-only), SUnitTest, TranscriptTest, CompilerTest.
 | an inlined argument is copied | the loop's increment counted as an assignment (the first version) | `ProcessTest>>testManyProcessesWithASharedQueue` | fails: the forked blocks shared the counter's temp vector and read a later value |
 | the loader roots the Symbols it interns | no root between interning a selector and storing it (the first weak-table version) | `loadingSurvivesACollectionAtEveryAllocation` | fails: `img.lookup(Leaf, step:)` finds nothing (the selector was collected) |
 | a compilation leaks nothing | `Variable.scope` a strong reference (the first version: a cycle with the scope's variable lists) | `aCompilationFreesItsScopes`; `just fuzz syntax 600` | the test fails (the method scope, a variable and a block scope outlive the tree); the first 600 s libFuzzer run of the syntax target stopped after 4.5 minutes with "libFuzzer: out-of-memory (used: 2049Mb; limit: 2048Mb)", allocations in `Compiler.declare` and `Scope.init` |
+| the snapshot loader refuses a nil that is not a root | the check removed (the starting commit's loader) | `fuzzFoundInputsNeverTrap(crash-nil-not-root)`, replayed through the fuzz entry | on the starting commit the replay traps: "object memory verifier, after sweep: the nil object (a root) is @3" |
 | nested results emit no events | every TestResult emitting (the first version) | `kajo test` | SUnitSample's deliberate failures appeared as `test.failed` events and in the summary, while `run.finished` counted none |
 
 The `ios-check` recipe gained `-package-name kajo`: KajoVM's `package`
