@@ -1,0 +1,5 @@
+; fragment.kasm's 2 000 000 iterations per worker, for eight workers (module 7's matrix)
+method UndefinedObject fragmentIters temps=0
+  push_lit 16000000
+  return_top
+end

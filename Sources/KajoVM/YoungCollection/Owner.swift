@@ -202,14 +202,28 @@ private func sampleForTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingP
 /// The trigger on this module's samples (module 5's rule: floor,
 /// predictor, forced).
 private func youngTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingPointer) -> CycleTrigger? {
+    // Old entries: module 5's estimate (kept at stops) plus what young
+    // collections promoted since it last changed (read from a running
+    // participant: written in stops only, before this thread last took the
+    // safepoint mutex). Without it the entries trigger never fires and the
+    // table fills (a full collection).
+    let logged = unsafe mk.pointee.log.pointee.oldEntries
+    let promoted = unsafe y.pointee.promotedObjects.pointee.load(ordering: .relaxed)
     unsafe pthread_mutex_lock(y.pointee.samplerLock)
-    let samples = unsafe y.pointee.sampler.pointee.samples
+    let sp = unsafe y.pointee.sampler
+    if unsafe sp.pointee.oldEntries != logged || sp.pointee.lastCollections == .max {
+        unsafe sp.pointee.oldEntries = logged
+        unsafe sp.pointee.lastPromotedObjects = promoted
+        unsafe sp.pointee.lastCollections = 0
+    }
+    let entries = unsafe logged &+ (promoted &- sp.pointee.lastPromotedObjects)
+    let samples = unsafe sp.pointee.samples
     unsafe pthread_mutex_unlock(y.pointee.samplerLock)
     var rate = 0.0
     if samples.count >= 2, let a = samples.first, let b = samples.last, b.ns > a.ns {
         rate = Double(b.promoted &- a.promoted) / (Double(b.ns &- a.ns) / 1e9)
     }
-    return unsafe decideTrigger(mk, rate: rate, oldEntries: nil, record: false)
+    return unsafe decideTrigger(mk, rate: rate, oldEntries: entries, record: false)
 }
 
 /// The initial-mark pause of young collection without stopping the world

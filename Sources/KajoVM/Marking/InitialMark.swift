@@ -55,7 +55,9 @@ func countOldEntriesAtPause(_ vm: VMPointer, _ mk: MarkingPointer) { unsafe coun
 private func countOldEntries(_ vm: VMPointer, _ mk: MarkingPointer) {
     let om = unsafe mk.pointee.om
     let log = unsafe mk.pointee.log
-    let promoted = unsafe vm.pointee.nursery?.pointee.state.pointee.counters.promotedObjects ?? 0
+    // Module 7: promotion by young collections counts too.
+    let promoted = unsafe (vm.pointee.nursery?.pointee.state.pointee.counters.promotedObjects ?? 0)
+        &+ (vm.pointee.young?.pointee.promotedObjects.pointee.load(ordering: .relaxed) ?? 0)
     let allocated = om.allocationCounters.allocations
     let collections = om.counters.collections
     if unsafe log.pointee.lastCollections != collections {
