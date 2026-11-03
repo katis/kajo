@@ -23,6 +23,7 @@ final class Runtime {
         var c = ObjectMemoryConfig()
         c.heapBytes = heapBlocks * BlockHeap.blockBytes
         c.reserveBytes = vc.nursery.reserveBytes(workers: background + 2)
+        c.nurseryRegionBytes = vc.nursery.regionBytes(workers: background + 2)
         c.entryCapacity = entries
         c.entryChunk = 256
         c.stress = stress

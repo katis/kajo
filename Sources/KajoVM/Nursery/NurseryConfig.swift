@@ -48,6 +48,16 @@ struct NurseryConfig: Sendable {
         return blocks * BlockHeap.blockBytes
     }
 
+    /// Module 7: the nursery region for `workers` nurseries, a multiple of
+    /// the block size (`ObjectMemoryConfig.nurseryRegionBytes`): mapped
+    /// twice, so young collection without stopping the world can copy a
+    /// young body while mutators read it through the alias.
+    func regionBytes(workers: Int) -> Int {
+        guard enabled else { return 0 }
+        let b = stride * workers
+        return (b + BlockHeap.blockBytes - 1) / BlockHeap.blockBytes * BlockHeap.blockBytes
+    }
+
     func validate(workers: Int) -> String? {
         let e = effective
         if !e.enabled { return nil }

@@ -54,11 +54,11 @@ import Testing
     #expect(h.isPinnedForGood && !h.isFramePinned)
     // Every bit this module does not use is reserved and visible as such.
     // (module 4 uses bits 48 and 52 to 63: young, nursery, age, claim tag,
-    // fired ephemeron).
+    // fired ephemeron; module 7 bit 49, a deferred entry free).
     #expect(Header(raw: Header.youngBit | 1).reservedBits == 0)
     #expect(Header(raw: Header.markBit).reservedBits == Header.markBit)
-    #expect(Header(raw: 1 << 49).reservedBits == 1 << 49)
-    #expect(Header.reservedMask == Header.markBit | 7 << 49)
+    #expect(Header(raw: 1 << 50).reservedBits == 1 << 50)
+    #expect(Header.reservedMask == Header.markBit | 3 << 50)
 }
 
 @Test func bodyWordCountsCoverTheBlockLimit() {

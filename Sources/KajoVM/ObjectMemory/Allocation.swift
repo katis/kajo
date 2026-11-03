@@ -1,3 +1,6 @@
+import Synchronization
+
+
 /// An allocation context: a caller's private block (bump allocation) and
 /// private free-entry list (experiments/object-representation SPEC, B).
 /// Module 3 gives one to each worker. A context is used by one thread at a
@@ -129,17 +132,20 @@ extension ObjectMemory {
     /// shares it.
     @inline(__always)
     func initializeObject(_ e: UInt64, at off: UInt64, header: UInt64, bytes: UInt64, fill: UInt64) {
+        // Relaxed atomic stores (plain `str` on arm64): module 7's young
+        // collectors read a fresh object through a published slot with
+        // relaxed atomic loads (concurrent-young amendment 13).
         let words = bytes &>> 3
-        let body = Int(truncatingIfNeeded: off)
-        unsafe heapBase.storeBytes(of: BackRef.make(entryIndex: e &>> 4, words: words), toByteOffset: body, as: UInt64.self)
+        let body = unsafe (heapBase + Int(truncatingIfNeeded: off)).assumingMemoryBound(to: Atomic<UInt64>.self)
+        unsafe body.pointee.store(BackRef.make(entryIndex: e &>> 4, words: words), ordering: .relaxed)
         var i = 1
         let n = Int(truncatingIfNeeded: words)
         while i < n {
-            unsafe heapBase.storeBytes(of: fill, toByteOffset: body &+ i &<< 3, as: UInt64.self)
+            unsafe body[i].store(fill, ordering: .relaxed)
             i &+= 1
         }
-        setHeaderWord(e, header)
-        setStateWord(e, off)
+        unsafe headerAtomic(e).pointee.store(header, ordering: .relaxed)
+        unsafe stateWordAtomic(e).pointee.store(off, ordering: .relaxed)
     }
 
     /// The one out-of-line call of the allocation path: refill the block or

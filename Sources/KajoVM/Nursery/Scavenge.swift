@@ -47,37 +47,79 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         }
     }
     var youngBytes: UInt64 = 0
-    var remHolders: UInt64 = 0
+    var listed = 0
     for k in 0..<count {
         let a = unsafe n.alloc(k)
+        let v = unsafe n.survivors(k)
         let used = unsafe a.pointee.top &- a.pointee.edenStart
-        youngBytes &+= used &+ (unsafe a.pointee.survFromTop &- a.pointee.survFromStart)
+        youngBytes &+= used &+ (unsafe v.pointee.survFromTop &- v.pointee.survFromStart)
         unsafe a.pointee.youngAllocations &+= UInt64(a.pointee.stash.next)
         unsafe a.pointee.youngBytes &+= used
-        let rc = unsafe a.pointee.rem.count
-        remHolders &+= UInt64(rc)
-        if let rb = unsafe a.pointee.rem.baseAddress {
-            var off = 0
-            while off < rc {
-                unsafe ph.pointee.tasks.append(ScavengeTask(words: rb + off, count: Swift.min(NurseryShared.remTaskHolders, rc - off),
-                                                            remembered: true))
-                unsafe off += NurseryShared.remTaskHolders
-            }
-        }
-        let s = unsafe n.scav(k)
-        unsafe s.pointee.survCur = a.pointee.survToStart
-        unsafe s.pointee.survEnd = a.pointee.survToStart &+ n.pointee.survivorBytes
+        listed &+= unsafe v.pointee.carried.count
+    }
+    for i in unsafe 0..<n.pointee.bufferOwners {
+        // Participants: a stopper outside the worker table (module 5's
+        // marker, module 7's young collector thread) has no nursery and no
+        // survivor-to: it promotes everything it copies (amendment 15).
+        let s = unsafe n.scav(i)
+        let v: UnsafeMutablePointer<NurserySurvivors>? = i < count ? unsafe n.survivors(i) : nil
+        unsafe s.pointee.survCur = v?.pointee.survToStart ?? 0
+        unsafe s.pointee.survEnd = v.map { unsafe $0.pointee.survToStart &+ n.pointee.survivorBytes } ?? 0
         unsafe s.pointee.stack.removeAll()
         unsafe s.pointee.nextRem.removeAll()
         unsafe s.pointee.survLog.removeAll()
         unsafe s.pointee.weak.removeAll()
         unsafe s.pointee.stats = ParticipantStats()
+        for k in 0..<count { listed &+= unsafe n.remBuffer(i, k).pointee.count }
     }
     // Nothing young and nothing remembered (a promote-all right after a
     // scavenge, or a stress flag's stop): no scavenge at all.
-    if youngBytes == 0 && remHolders == 0 { return }
+    if youngBytes == 0 && listed == 0 {
+        unsafe releaseDeferred(n)
+        return
+    }
     var expect: ScavengeExpectation? = nil
     if om.config.verify { expect = unsafe verifyBeforeScavenge(n, roots: ph.pointee.roots) }
+    // Remembered holders: every owner's buffer for every nursery and every
+    // carried list, each holder once (its word is cleared as it is taken).
+    // Young holders are dropped (module 7, concurrent-young amendment 12):
+    // another participant may promote one while it is scanned; they are
+    // traced if reachable and the copy remembers them again.
+    unsafe ph.pointee.holders.removeAll()
+    unsafe ph.pointee.rememberYoung = n.alloc(0).pointee.rememberYoungHolders
+    var dropped: UInt64 = 0
+    func takeHolders(_ list: UnsafeMutablePointer<RawArray<UInt64>>) {
+        for i in unsafe 0..<list.pointee.count {
+            let o = unsafe list.pointee[i]
+            let r = unsafe n.remMarker(o)
+            if unsafe r.pointee.load(ordering: .relaxed) == 0 { continue }
+            unsafe r.pointee.store(0, ordering: .relaxed)
+            if om.headerWord(o) & Header.youngBit != 0 {
+                dropped &+= 1
+                continue
+            }
+            unsafe ph.pointee.holders.append(o)
+        }
+        unsafe list.pointee.removeAll()
+    }
+    for i in unsafe 0..<n.pointee.bufferOwners {
+        for k in 0..<count {
+            unsafe takeHolders(n.remBuffer(i, k))
+            unsafe n.delBuffer(i, k).pointee.removeAll()
+        }
+    }
+    for k in 0..<count { unsafe takeHolders(n.survivors(k).pointer(to: \NurserySurvivors.carried)!) }
+    let remHolders = unsafe UInt64(ph.pointee.holders.count)
+    if let rb = unsafe ph.pointee.holders.baseAddress {
+        let rc = unsafe ph.pointee.holders.count
+        var off = 0
+        while off < rc {
+            unsafe ph.pointee.tasks.append(ScavengeTask(words: rb + off, count: Swift.min(NurseryShared.remTaskHolders, rc - off),
+                                                        remembered: true))
+            unsafe off += NurseryShared.remTaskHolders
+        }
+    }
+    unsafe log.pointee.counters.youngHoldersDropped &+= dropped
     unsafe n.pointee.taskNext.pointee.store(0, ordering: .relaxed)
     unsafe n.pointee.sweepNext.pointee.store(0, ordering: .relaxed)
     unsafe n.pointee.inCopy.pointee.store(0, ordering: .relaxed)
@@ -139,17 +181,34 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
     for k in 0..<count {
         let a = unsafe n.alloc(k)
         let s = unsafe n.scav(k)
+        let v = unsafe n.survivors(k)
         unsafe a.pointee.top = a.pointee.edenStart
-        // The holders that still name young objects and the survivors'
-        // entries carry over to the next scavenge.
-        unsafe swap(&a.pointee.rem, &s.pointee.nextRem)
-        unsafe s.pointee.nextRem.removeAll()
-        unsafe swap(&a.pointee.survLog, &s.pointee.survLog)
+        // The survivors' entries carry over to the next scavenge.
+        unsafe swap(&v.pointee.survLog, &s.pointee.survLog)
         unsafe s.pointee.survLog.removeAll()
         // Flip: survivor-to becomes survivor-from.
-        unsafe a.pointee.survFromTop = s.pointee.survCur
-        unsafe a.pointee.survTo = 1 &- a.pointee.survTo
+        unsafe v.pointee.survFromTop = s.pointee.survCur
+        unsafe v.pointee.survTo = 1 &- v.pointee.survTo
     }
+    // The holders that still name young objects go to the carried list of
+    // every nursery whose bit they have (each holder is in one participant's
+    // list: the first `fetch_or` that turned its word from 0 listed it).
+    for p in parts {
+        let s = unsafe n.scav(p)
+        for i in unsafe 0..<s.pointee.nextRem.count {
+            let o = unsafe s.pointee.nextRem[i]
+            var bits = unsafe n.remMarker(o).pointee.load(ordering: .relaxed) & 0xFFFF
+            while bits != 0 {
+                let k = bits.trailingZeroBitCount
+                bits &= bits &- 1
+                unsafe n.survivors(k).pointee.carried.append(o)
+            }
+        }
+        unsafe s.pointee.nextRem.removeAll()
+    }
+    // Module 7: every deferred entry free is released (the world is stopped
+    // and every remembered list was taken above: nothing names one).
+    unsafe releaseDeferred(n)
     unsafe log.pointee.counters.scavenges = number
     if unsafe ph.pointee.promoteAll { unsafe log.pointee.counters.promoteAllScavenges &+= 1 }
     unsafe log.pointee.counters.youngBytesScavenged &+= youngBytes
@@ -187,7 +246,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     var sc = unsafe Scavenger(n: n, om: n.pointee.om, ctx: w.pointee.interp.context, me: me, tag: ph.tag, ageLimit: ph.ageLimit,
                               promoteAll: ph.promoteAll, dropCarried: ph.dropCarried, forgetPromoted: ph.forgetPromoted,
                               formats: ph.formats.unsafelyUnwrapped, rem: n.pointee.rem, nilRaw: n.pointee.om.nilObject.raw,
-                              w: sw.pointee)
+                              rememberYoung: ph.rememberYoung, w: sw.pointee)
     unsafe n.pointee.inCopy.pointee.wrappingAdd(1, ordering: .acquiringAndReleasing)
     let ntasks = unsafe ph.tasks.count
     while true {
@@ -276,8 +335,9 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     let dropCarried: Bool
     let forgetPromoted: Bool
     let formats: UnsafeMutablePointer<UInt64>
-    let rem: UnsafeMutablePointer<Atomic<UInt16>>
+    let rem: UnsafeMutablePointer<Atomic<UInt32>>
     let nilRaw: UInt64
+    let rememberYoung: Bool
     var w: ScavengeWorker
 
     @inline(__always)
@@ -289,24 +349,24 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     /// claims it first. Answers the nursery bit of the object if it is
     /// young after this scavenge (its holder must then be remembered), else 0.
     @inline(__always)
-    mutating func scanWord(_ v: UInt64) -> UInt16 {
+    mutating func scanWord(_ v: UInt64) -> UInt32 {
         if v & Oop.objectTagMask != 0 || v == 0 { return 0 }
         let h = unsafe headerAtomic(v).pointee.load(ordering: .relaxed)
         if h & Header.youngBit == 0 { return 0 }
-        if unsafe h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
+        if unsafe h & tag != 0 { return UInt32(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
         return unsafe evacuate(v, h)
     }
 
     /// Claim and copy a young object (docs/modules/nursery.md "Claiming").
     @inline(never)
-    mutating func evacuate(_ v: UInt64, _ h0: UInt64) -> UInt16 {
+    mutating func evacuate(_ v: UInt64, _ h0: UInt64) -> UInt32 {
         let hp = unsafe headerAtomic(v)
         var h = h0
         let size = Header(raw: h0).bodyBytes
         var decision = ClaimDecision.promote
         while true {
             if h & Header.youngBit == 0 { return 0 }  // promoted by another participant
-            if unsafe h & tag != 0 { return UInt16(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
+            if unsafe h & tag != 0 { return UInt32(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
             let room = unsafe w.survCur &+ size <= w.survEnd
             let (nh, d) = unsafe claimedHeader(h, tag: tag, ageLimit: ageLimit, participant: me, promoteAll: promoteAll, hasRoom: room)
             let (won, cur) = unsafe hp.pointee.compareExchange(expected: h, desired: nh, ordering: .relaxed)
@@ -356,7 +416,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             }
         }
         if h & Header.bytesBit == 0 { unsafe w.stack.append(v) }
-        return unsafe decision == .survive ? UInt16(truncatingIfNeeded: 1 &<< me) : 0
+        return unsafe decision == .survive ? UInt32(truncatingIfNeeded: 1 &<< me) : 0
     }
 
     /// Scan the slots of copied objects until the stack is empty. A promoted
@@ -370,11 +430,11 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             // compare-and-swaps on this header are atomic accesses to
             // ThreadSanitizer, so a plain load would be reported.
             let h = unsafe headerAtomic(o).pointee.load(ordering: .relaxed)
-            let bits = unsafe scanSlots(o, h)
-            if unsafe bits != 0 && h & Header.youngBit == 0 && !forgetPromoted {
-                unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(bits, ordering: .relaxed)
-                unsafe w.nextRem.append(o)
-            }
+            var bits = unsafe scanSlots(o, h)
+            // A survivor (young in this participant's nursery) is remembered
+            // for the other nurseries it names (module 7 only).
+            if h & Header.youngBit != 0 { bits = unsafe rememberYoung ? bits & ~(1 &<< UInt32(truncatingIfNeeded: me)) : 0 }
+            if unsafe bits != 0 && !(h & Header.youngBit == 0 && forgetPromoted) { unsafe note(o, bits) }
             k &+= 1
             if unsafe k & 1023 == 0 && w.stack.count >= 8
                 && n.pointee.idle.pointee.load(ordering: .relaxed) > 0
@@ -389,7 +449,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     /// rule), only the named slots of a weak one (then remembered for the
     /// weak pass). Answers the nursery bits of the young objects it names.
     @inline(__always)
-    mutating func scanSlots(_ o: UInt64, _ h: UInt64) -> UInt16 {
+    mutating func scanSlots(_ o: UInt64, _ h: UInt64) -> UInt32 {
         var count = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
         let f = unsafe formats[Int(truncatingIfNeeded: h & Header.classMask)]
         if _slowPath(f & ClassFormat.weakBit != 0) {
@@ -401,7 +461,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         }
         let base = unsafe (om.heapBase + Int(truncatingIfNeeded: om.bodyOffset(Oop(raw: o))) + 8)
             .assumingMemoryBound(to: UInt64.self)
-        var bits: UInt16 = 0
+        var bits: UInt32 = 0
         var i = 0
         while i < count {
             bits |= unsafe scanWord(base[i])
@@ -417,20 +477,25 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         while k < count {
             let o = unsafe holders[k]
             let h = unsafe om.headerWord(o)  // old: never written during a scavenge
-            var bits: UInt16 = 0
+            var bits: UInt32 = 0
             if h & Header.bytesBit == 0 {
                 bits = unsafe scanSlots(o, h)
                 unsafe w.stats.remSlots &+= (h & Header.countMask) &>> Header.countShift
             }
-            if unsafe bits != 0 && !dropCarried {
-                unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(bits, ordering: .relaxed)
-                unsafe w.nextRem.append(o)
-            } else {
-                unsafe rem[Int(truncatingIfNeeded: o &>> 4)].store(0, ordering: .relaxed)
-            }
+            if unsafe bits != 0 && !dropCarried { unsafe note(o, bits) }
             k &+= 1
         }
         unsafe w.stats.remHolders &+= UInt64(count)
+    }
+
+    /// `o` names young objects of the nurseries in `bits` after this
+    /// scavenge: set its remembered bits; the call that turned its word
+    /// from 0 lists it (the words of every holder were cleared in prep).
+    @inline(__always)
+    mutating func note(_ o: UInt64, _ bits: UInt32) {
+        if unsafe rem[Int(truncatingIfNeeded: o &>> 4)].bitwiseOr(bits, ordering: .relaxed).oldValue == 0 {
+            unsafe w.nextRem.append(o)
+        }
     }
 
     // MARK: work sharing
@@ -529,7 +594,8 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             unsafe st.next = 0
             unsafe st.count = j &+ unused
         }
-        let log = unsafe a.pointee.survLog
+        let sv = unsafe n.survivors(k)
+        let log = unsafe sv.pointee.survLog
         for i in 0..<log.count {
             let e = log[i]
             let raw = UInt64(e) &<< 4
@@ -545,7 +611,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         }
         if oldWord >= 0 { unsafe om.oldMap.insert(word: oldWord, bits: oldBits) }
         swept &+= UInt64(log.count)
-        unsafe a.pointee.survLog.removeAll()
+        unsafe sv.pointee.survLog.removeAll()
         unsafe a.pointee.stash = st
         // A stash that grew past what an eden can use gives the rest back.
         let keep = Int(truncatingIfNeeded: unsafe n.pointee.edenBytes / 16) &+ 4096
@@ -570,7 +636,7 @@ private func processWeakSlots(_ n: NurseryPointer, parts: [Int]) -> UInt64 {
         for i in 0..<weak.count {
             let o = Oop(raw: weak[i])
             let h = om.header(o)
-            var bits: UInt16 = 0
+            var bits: UInt32 = 0
             var j = om.classFormat(h.classIndex).namedSlots
             let count = Int(h.count)
             while j < count {
@@ -583,16 +649,40 @@ private func processWeakSlots(_ n: NurseryPointer, parts: [Int]) -> UInt64 {
                         }
                     } else {
                         let hv = om.header(v)
-                        if hv.isYoung { bits |= UInt16(truncatingIfNeeded: 1 &<< hv.nurseryIndex) }
+                        if hv.isYoung { bits |= UInt32(truncatingIfNeeded: 1 &<< hv.nurseryIndex) }
                     }
                 }
                 j &+= 1
             }
-            if bits != 0 && !h.isYoung {
+            if h.isYoung { bits = unsafe n.pointee.phase.pointee.rememberYoung ? bits & ~remBit(h.nurseryIndex) : 0 }
+            if bits != 0 {
                 let r = unsafe n.remMarker(o.raw)
                 if unsafe r.pointee.bitwiseOr(bits, ordering: .relaxed).oldValue == 0 { unsafe s.pointee.nextRem.append(o.raw) }
             }
         }
     }
     return niled
+}
+
+/// Module 7: release every deferred entry free of every nursery (world
+/// stopped, every remembered list taken by the scavenge's prep, so nothing
+/// names one: the nursery's own free, done at this pause instead of its
+/// next collection). The entries go back to their nursery's stash.
+func releaseDeferred(_ n: NurseryPointer) {
+    let om = unsafe n.pointee.om
+    var released: UInt64 = 0
+    for k in unsafe 0..<n.pointee.count {
+        let v = unsafe n.survivors(k)
+        let a = unsafe n.alloc(k)
+        for i in unsafe 0..<v.pointee.deferred.count {
+            let raw = unsafe v.pointee.deferred[i]
+            unsafe n.remMarker(raw).pointee.store(0, ordering: .relaxed)
+            om.setStateWord(raw, EntryState.free(next: 0))
+            om.setHeaderWord(raw, 0)
+            unsafe a.pointee.stash.append(UInt32(truncatingIfNeeded: raw &>> 4))
+            released &+= 1
+        }
+        unsafe v.pointee.deferred.removeAll()
+    }
+    unsafe n.pointee.state.pointee.counters.deferredReleased &+= released
 }

@@ -11,16 +11,22 @@ import Darwin
     static let blockShift: UInt64 = 15
 
     let base: UnsafeMutableRawPointer
+    /// The block range: offsets `[0, bytes)`.
     let bytes: Int
+    /// Module 7: bytes mapped twice after the block range, for the nursery
+    /// region (young bodies may be RELOCATING while a young collector copies
+    /// them, so the alias must cover them too). 0: none.
+    let extraBytes: Int
     let blockCount: Int
     let memoryEntry: mach_port_t
     let used: UnsafeMutablePointer<UInt32>
     let inUse: UnsafeMutablePointer<Bool>
 
-    init(bytes: Int) throws(ObjectMemoryError) {
-        let (p, entry) = try unsafe VirtualMemory.reserveTwice(bytes)
+    init(bytes: Int, extraBytes: Int = 0) throws(ObjectMemoryError) {
+        let (p, entry) = try unsafe VirtualMemory.reserveTwice(bytes + extraBytes)
         unsafe base = p
         self.bytes = bytes
+        self.extraBytes = extraBytes
         blockCount = bytes / BlockHeap.blockBytes
         memoryEntry = entry
         unsafe used = .allocate(capacity: blockCount)
@@ -30,7 +36,7 @@ import Darwin
     }
 
     func release() {
-        unsafe VirtualMemory.releaseTwice(base, bytes, memoryEntry)
+        unsafe VirtualMemory.releaseTwice(base, bytes + extraBytes, memoryEntry)
         unsafe used.deallocate()
         unsafe inUse.deallocate()
     }

@@ -164,7 +164,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
         // Survivors are roots (ADR 0007): every slot, weak and ephemeron
         // slots included (their referents survive this cycle).
         for k in unsafe 0..<n.pointee.count {
-            let surv = unsafe n.alloc(k).pointee.survLog
+            let surv = unsafe n.survivors(k).pointee.survLog
             for i in 0..<surv.count { unsafe greySlots(mk, om, m, UInt64(surv[i]) &<< 4) }
         }
     }

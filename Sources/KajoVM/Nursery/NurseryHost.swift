@@ -61,13 +61,20 @@ extension VM {
     /// The remembered marker of `o` is set.
     func isRemembered(_ o: Oop) -> Bool {
         guard let n = unsafe state.pointee.nursery else { return false }
-        return inspect { _ in unsafe n.remMarker(o.raw).pointee.load(ordering: .relaxed) != 0 }
+        return inspect { _ in unsafe n.remMarker(o.raw).pointee.load(ordering: .relaxed) & 0xFFFF != 0 }
     }
 
-    /// Holders in worker `i`'s remembered buffer.
+    /// Holders in worker `i`'s remembered buffers (every nursery's).
     func rememberedBufferCount(worker i: Int) -> Int {
         guard let n = unsafe state.pointee.nursery else { return 0 }
-        return inspect { _ in unsafe n.alloc(i).pointee.rem.count }
+        return inspect { _ in (0..<(unsafe n.pointee.count)).reduce(0) { unsafe $0 + n.remBuffer(i, $1).pointee.count } }
+    }
+
+    /// The remembered word of `o` (bit n: in nursery n's set; bit 16 + n:
+    /// pending).
+    func rememberedWord(_ o: Oop) -> UInt32 {
+        guard let n = unsafe state.pointee.nursery else { return 0 }
+        return inspect { _ in unsafe n.remMarker(o.raw).pointee.load(ordering: .relaxed) }
     }
 
     func space(of o: Oop) -> NurserySpace {
@@ -78,8 +85,9 @@ extension VM {
             if !h.isYoung { return s < UInt64(om.heap.bytes) ? .old : .other }
             guard let n = unsafe state.pointee.nursery, unsafe h.nurseryIndex < n.pointee.count else { return .other }
             let a = unsafe n.alloc(h.nurseryIndex).pointee
+            let v = unsafe n.survivors(h.nurseryIndex).pointee
             if unsafe s >= a.edenStart && s < a.top { return .eden(h.nurseryIndex) }
-            if unsafe s >= a.survFromStart && s < a.survFromTop { return .survivorFrom(h.nurseryIndex) }
+            if unsafe s >= v.survFromStart && s < v.survFromTop { return .survivorFrom(h.nurseryIndex) }
             return .other
         }
     }

@@ -22,14 +22,15 @@ import Synchronization
         let config = requested.effective
         guard config.heapBytes > 0, config.heapBytes % BlockHeap.blockBytes == 0,
               config.reserveBytes >= 0, config.reserveBytes % BlockHeap.blockBytes == 0,
-              UInt64(config.heapBytes + config.reserveBytes) <= VirtualMemory.aliasDistance else {
-            throw .invalidConfig("heapBytes and reserveBytes must be multiples of \(BlockHeap.blockBytes), at most 4 GiB together")
+              config.nurseryRegionBytes >= 0, config.nurseryRegionBytes % BlockHeap.blockBytes == 0,
+              UInt64(config.heapBytes + config.reserveBytes + config.nurseryRegionBytes) <= VirtualMemory.aliasDistance else {
+            throw .invalidConfig("heapBytes, reserveBytes and nurseryRegionBytes must be multiples of \(BlockHeap.blockBytes), at most 4 GiB together")
         }
         guard config.entryCapacity >= 2, UInt64(config.entryCapacity) <= 1 << 32 else {
             throw .invalidConfig("entryCapacity must be in 2...2^32")
         }
         guard config.entryChunk >= 1 else { throw .invalidConfig("entryChunk must be positive") }
-        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes)
+        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes, extraBytes: config.nurseryRegionBytes)
         let tableBytes = config.entryCapacity * 16
         let table: UnsafeMutableRawPointer
         let marks: UnsafeMutableRawPointer
@@ -113,9 +114,18 @@ import Synchronization
         unsafe table.storeBytes(of: v, toByteOffset: Int(truncatingIfNeeded: raw), as: UInt64.self)
     }
 
+    /// A relaxed atomic load (a plain `ldr` on arm64): module 7's young
+    /// collectors decide a young object's header (age, promotion) with a
+    /// compare-and-swap while mutators read its class and count.
     @inline(__always)
     func headerWord(_ raw: UInt64) -> UInt64 {
-        unsafe table.load(fromByteOffset: Int(truncatingIfNeeded: raw &+ 8), as: UInt64.self)
+        unsafe headerAtomic(raw).pointee.load(ordering: .relaxed)
+    }
+
+    /// The header word as an atomic (module 7's claim).
+    @inline(__always)
+    func headerAtomic(_ raw: UInt64) -> UnsafeMutablePointer<Atomic<UInt64>> {
+        unsafe (table + Int(truncatingIfNeeded: raw &+ 8)).assumingMemoryBound(to: Atomic<UInt64>.self)
     }
 
     @inline(__always)
@@ -449,6 +459,8 @@ extension ObjectMemory: @unchecked Sendable {}
     /// lie; empty when there is none.
     var nurseryStart: UInt64 = 0
     var nurseryEnd: UInt64 = 0
+    /// Module 7: the region lies in the heap's doubly mapped memory.
+    var nurseryAliased = false
     /// Run before every operation that needs nothing young (collect,
     /// compact, become, forward, reshape, snapshot): module 4 promotes
     /// everything. The argument is the operation's extra roots, or nil when

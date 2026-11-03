@@ -28,47 +28,67 @@ private func strongSlots(_ om: ObjectMemory, _ h: Header) -> Int {
     return f.isWeak ? Swift.min(Int(h.count), f.namedSlots) : Int(h.count)
 }
 
-/// Remembered set: every old holder of a young object is remembered for
-/// its nursery and is in exactly one buffer; every buffered holder is
-/// old, used and marked.
+/// Remembered set, at a pause: every holder of a young object of nursery
+/// n that is old (or, with young collection without stopping the world,
+/// young in another nursery) has bit n and is in a list of nursery n (an
+/// owner's buffer n or nursery n's carried list); every listed holder is
+/// used and has the bit; no word has a bit without a list or a pending
+/// bit. Stop-the-world configuration (module 4's rule): only old holders,
+/// in exactly one list per nursery. Deferred entry frees (module 7) may be
+/// named by stale lists and are skipped.
 private func checkRemembered(_ n: NurseryPointer, _ out: inout Issues) {
     let om = unsafe n.pointee.om
     let hw = om.highWater
-    var inBuffer = RawArray<UInt8>(repeating: 0, count: Int(hw))
-    defer { inBuffer.free() }
-    for k in 0..<(unsafe n.pointee.count) {
-        let rem = unsafe n.alloc(k).pointee.rem
-        for i in 0..<rem.count {
-            let o = Oop(raw: rem[i])
+    let count = unsafe n.pointee.count
+    let strict = unsafe !n.alloc(0).pointee.rememberYoungHolders
+    var inList = RawArray<UInt32>(repeating: 0, count: Int(hw))
+    defer { inList.free() }
+    func visit(_ list: RawArray<UInt64>, _ k: Int, _ name: String) {
+        let bit = remBit(k)
+        for i in 0..<list.count {
+            let o = Oop(raw: list[i])
             guard o.isObject && o.entryIndex < hw && om.isUsedReference(o) else {
-                out.fail("remembered buffer \(k) holds \(o), not a used entry")
+                out.fail("\(name) holds \(o), not a used entry")
                 continue
             }
-            if inBuffer[Int(o.entryIndex)] != 0 { out.fail("entry \(o.entryIndex) is twice in the remembered buffers") }
-            inBuffer[Int(o.entryIndex)] = 1
-            if om.header(o).isYoung { out.fail("young entry \(o.entryIndex) is in remembered buffer \(k)") }
-            if unsafe n.remMarker(o.raw).pointee.load(ordering: .relaxed) == 0 {
-                out.fail("entry \(o.entryIndex) is in remembered buffer \(k) with a clear marker")
+            let h = om.header(o)
+            if h.isDeferredFree { continue }
+            if strict && inList[Int(o.entryIndex)] & bit != 0 { out.fail("entry \(o.entryIndex) is twice in nursery \(k)'s lists") }
+            inList[Int(o.entryIndex)] |= bit
+            if strict && h.isYoung { out.fail("young entry \(o.entryIndex) is in \(name)") }
+            if h.isYoung && h.nurseryIndex == k { out.fail("entry \(o.entryIndex), young in nursery \(k), is in \(name)") }
+            if unsafe n.remMarker(o.raw).pointee.load(ordering: .relaxed) & bit == 0 {
+                out.fail("entry \(o.entryIndex) is in \(name) with its bit clear")
             }
         }
+    }
+    for k in 0..<count {
+        for i in unsafe 0..<n.pointee.bufferOwners {
+            unsafe visit(n.remBuffer(i, k).pointee, k, "remembered buffer \(k) of owner \(i)")
+        }
+        unsafe visit(n.survivors(k).pointee.carried, k, "nursery \(k)'s carried list")
     }
     var e: UInt64 = 1
     while e < hw {
         defer { e &+= 1 }
         let raw = e &<< 4
-        let marker = unsafe n.remMarker(raw).pointee.load(ordering: .relaxed)
-        if marker != 0 && inBuffer[Int(e)] == 0 { out.fail("entry \(e) is marked remembered but in no buffer") }
+        let word = unsafe n.remMarker(raw).pointee.load(ordering: .relaxed)
+        if word & 0xFFFF_0000 != 0 { out.fail("entry \(e) has pending remembered bits 0x\(String(word, radix: 16)) at a pause") }
+        if word & 0xFFFF & ~inList[Int(e)] != 0 {
+            out.fail("entry \(e) is marked remembered (0x\(String(word, radix: 16))) but in no list of those nurseries")
+        }
         // Module 5: a pending-dead entry (a lazy sweep will free it) left
         // the remembered set at the final mark and may name anything.
         if EntryState.isFree(om.stateWord(raw)) || om.isPendingDead(e) { continue }
         let h = Header(raw: om.headerWord(raw))
-        if h.isYoung || h.isBytes { continue }
+        if h.isBytes || h.isDeferredFree || (h.isYoung && strict) { continue }
         for i in 0..<Int(h.count) {
             let v = om.load(Oop(raw: raw), i)
             if young(om, v.raw) {
-                let bit = UInt16(truncatingIfNeeded: 1 &<< om.header(v).nurseryIndex)
-                if marker & bit == 0 {
-                    out.fail("entry \(e) is old, names young \(v) (nursery \(om.header(v).nurseryIndex)) in slot \(i), and is not remembered for it")
+                let m = om.header(v).nurseryIndex
+                if h.isYoung && h.nurseryIndex == m { continue }
+                if word & remBit(m) == 0 {
+                    out.fail("entry \(e) (\(h.isYoung ? "young in \(h.nurseryIndex)" : "old")) names young \(v) (nursery \(m)) in slot \(i), and is not remembered for it")
                 }
             }
         }
@@ -101,7 +121,7 @@ func verifyBeforeScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>) -> Scave
         let raw = e &<< 4
         if EntryState.isFree(om.stateWord(raw)) || om.isPendingDead(e) { continue }
         let h = Header(raw: om.headerWord(raw))
-        if h.isYoung { continue }
+        if h.isYoung || h.isDeferredFree { continue }
         let strong = strongSlots(om, h)
         for i in 0..<strong { visit(om.load(Oop(raw: raw), i).raw) }
         if !h.isBytes {
@@ -140,7 +160,7 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
     defer { logged.free() }
     if after {
         for k in 0..<(unsafe n.pointee.count) {
-            let log = unsafe n.alloc(k).pointee.survLog
+            let log = unsafe n.survivors(k).pointee.survLog
             for i in 0..<log.count {
                 let e = Int(log[i])
                 if e == 0 || e >= Int(hw) { out.fail("survivor log \(k) holds entry \(e)"); continue }
@@ -156,6 +176,7 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
         let s = om.stateWord(raw)
         if EntryState.isFree(s) { continue }
         let h = Header(raw: om.headerWord(raw))
+        if h.isDeferredFree { continue }
         if !h.isYoung {
             if s &+ h.bodyBytes > UInt64(om.heap.bytes) { out.fail("old entry \(e) has its body at \(s), outside old space") }
             continue
@@ -163,9 +184,10 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
         let k = h.nurseryIndex
         guard unsafe k < n.pointee.count else { out.fail("young entry \(e) names nursery \(k), which does not exist"); continue }
         let a = unsafe n.alloc(k).pointee
+        let v = unsafe n.survivors(k).pointee
         let end = s &+ h.bodyBytes
         let inEden = unsafe s >= a.edenStart && end <= a.top
-        let inFrom = unsafe s >= a.survFromStart && end <= a.survFromTop
+        let inFrom = unsafe s >= v.survFromStart && end <= v.survFromTop
         if after {
             if !inFrom { out.fail("young entry \(e) is not in nursery \(k)'s survivor-from after a scavenge (body at \(s))") }
             if h.age == 0 || h.age >= ageLimit { out.fail("young entry \(e) has age \(h.age) after a scavenge (N = \(ageLimit))") }
@@ -209,7 +231,7 @@ func verifyAfterScavenge(_ n: NurseryPointer, roots: RawArray<UInt64>, expected 
             continue
         }
         let h = Header(raw: om.headerWord(raw))
-        if h.isBytes || om.isPendingDead(e) { continue }
+        if h.isBytes || h.isDeferredFree || om.isPendingDead(e) { continue }
         for i in 0..<Int(h.count) {
             let v = om.load(Oop(raw: raw), i)
             if !om.isValidReferenceOrInteger(v, highWater: hw) { out.fail("entry \(e) slot \(i) names \(v), a freed entry") }

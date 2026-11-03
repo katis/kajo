@@ -108,7 +108,7 @@ func theHeapVerifierCatches(_ c: HeapCorruption) throws {
     case .sizeDisagreesWithHeader:
         om.setHeader(s.a, Header(classIndex: 2, count: 1, isBytes: false))
     case .relocatingState: om.setStateWord(s.a.raw, om.bodyOffset(s.a) | EntryState.relocatingBit)
-    case .reservedHeaderBit: om.setHeaderWord(s.a.raw, om.header(s.a).raw | 1 << 49)
+    case .reservedHeaderBit: om.setHeaderWord(s.a.raw, om.header(s.a).raw | 1 << 50)
     case .unregisteredClass: om.setHeader(s.b, Header(classIndex: 999, count: 1, isBytes: false))
     case .freeEntryWithHeader: om.setHeaderWord(s.garbage.raw, Header(classIndex: 2, count: 0, isBytes: false).raw)
     case .twoEntriesOneBody:

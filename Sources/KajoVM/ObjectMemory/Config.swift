@@ -56,6 +56,12 @@ struct ObjectMemoryConfig: Sendable {
     /// scavenge's promotion may take (module 4 sizes it from the nurseries,
     /// `NurseryConfig.reserveBytes`). A multiple of the block size.
     var reserveBytes = 0
+    /// Module 7: bytes mapped twice after the blocks for the nursery region
+    /// (`NurseryConfig.regionBytes`), so a young body can be RELOCATING
+    /// while a young collector copies it. 0: the nurseries go into plain
+    /// memory beyond the blocks, and only stop-the-world scavenges collect
+    /// them. A multiple of the block size.
+    var nurseryRegionBytes = 0
     /// Entries reserved; the table never grows in module 1.
     var entryCapacity = 1 << 22
     /// Entries per refill of an allocation context.

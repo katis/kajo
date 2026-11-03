@@ -8,7 +8,9 @@
 ///     bit  46      mark, full collection     reserved: module 1 marks in a side byte map
 ///     bit  47      byte object
 ///     bit  48      fired ephemeron: queued for finalization once, strong since
-///     bits 49..51  unused                    reserved
+///     bit  49      deferred free             a dead young entry whose free its
+///                                            nursery deferred (module 7)
+///     bits 50..51  unused                    reserved
 ///     bits 52..55  nursery index             young objects only (module 4)
 ///     bit  56      young                     module 4
 ///     bits 57..59  age: scavenges survived   young objects only (module 4)
@@ -16,10 +18,13 @@
 ///     bit  61      frame pin: not moved by the current collection
 ///     bits 62..63  scavenge claim tag        young objects only (module 4)
 ///
-/// Header bits are written only with the world stopped (or by the
-/// allocating worker before the oop escapes); mutators never write a
-/// header another thread reads (AGENTS.md). An old header has every
-/// young-only bit clear: promotion clears them in the claim.
+/// Header bits are written only with the world stopped, by the allocating
+/// worker before the oop escapes, or (module 7) by the one collector of a
+/// young object's nursery while mutators read it: a compare-and-swap that
+/// changes only the young-only bits, so every header load is a relaxed
+/// atomic load. Mutators never write a header another thread reads
+/// (AGENTS.md). An old header has every young-only bit clear: promotion
+/// clears them in the claim.
 struct Header: Hashable, Sendable {
     var raw: UInt64
 
@@ -37,6 +42,10 @@ struct Header: Hashable, Sendable {
     static let framePinBit: UInt64 = 1 << 61
     static let claimShift: UInt64 = 62
     static let firedBit: UInt64 = 1 << 48
+    /// Module 7: a dead young entry whose free its nursery deferred
+    /// (concurrent-young amendments 10 and 17): used, dead, in no young log,
+    /// its slot count 0. Every verifier skips it by this bit.
+    static let deferredBit: UInt64 = 1 << 49
 
     static let nurseryMask: UInt64 = 0xF << nurseryShift
     static let ageMask: UInt64 = 7 << ageShift
@@ -53,8 +62,8 @@ struct Header: Hashable, Sendable {
     static let countMask: UInt64 = ((1 << countBits) - 1) << countShift
     /// Bits this module defines and uses.
     static let usedMask: UInt64 = classMask | countMask | bytesBit | pinnedForGoodBit | framePinBit | firedBit
-        | youngBit | youngOnlyMask
-    /// Bits reserved for later modules (46, 49 to 51); zero in every header.
+        | youngBit | youngOnlyMask | deferredBit
+    /// Bits reserved for later modules (46, 50, 51); zero in every header.
     static let reservedMask: UInt64 = ~usedMask
 
     static let maxClassIndex: UInt64 = classMask
@@ -91,6 +100,8 @@ struct Header: Hashable, Sendable {
     // MARK: young objects (module 4)
 
     var isYoung: Bool { raw & Header.youngBit != 0 }
+    /// Module 7: a deferred entry free (see `deferredBit`).
+    var isDeferredFree: Bool { raw & Header.deferredBit != 0 }
     /// Scavenges survived; young objects only.
     var age: UInt64 { (raw & Header.ageMask) &>> Header.ageShift }
     /// The nursery the body lies in; young objects only.

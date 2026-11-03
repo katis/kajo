@@ -44,21 +44,26 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     // scan it.
     var filtered: UInt64 = 0
     if !config.testSwitches.noRememberedFilter, let n = unsafe vm.pointee.nursery {
-        for k in unsafe 0..<n.pointee.count {
-            let a = unsafe n.alloc(k)
+        func filter(_ list: UnsafeMutablePointer<RawArray<UInt64>>) {
             var j = 0
-            let count = unsafe a.pointee.rem.count
+            let count = unsafe list.pointee.count
             for i in 0..<count {
-                let o = unsafe a.pointee.rem[i]
+                let o = unsafe list.pointee[i]
                 if unsafe isUnmarkedSnapshotEntry(mk, om, o) {
                     unsafe n.remMarker(o).pointee.store(0, ordering: .relaxed)
                     filtered &+= 1
                 } else {
-                    unsafe a.pointee.rem[j] = o
+                    unsafe list.pointee[j] = o
                     j &+= 1
                 }
             }
-            unsafe a.pointee.rem.truncate(j)
+            unsafe list.pointee.truncate(j)
+        }
+        // Every list of every nursery (module 7: per-nursery buffers and
+        // carried lists; a holder may be in several, and leaves them all).
+        for k in unsafe 0..<n.pointee.count {
+            for i in unsafe 0..<n.pointee.bufferOwners { unsafe filter(n.remBuffer(i, k)) }
+            unsafe filter(n.survivors(k).pointer(to: \NurserySurvivors.carried)!)
         }
     }
     let t2 = nanoseconds()

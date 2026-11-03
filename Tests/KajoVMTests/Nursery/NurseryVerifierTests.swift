@@ -32,7 +32,7 @@ enum NurseryCorruption: CaseIterable, Sendable {
     var needle: String {
         switch self {
         case .youngInTheWrongNursery: "neither eden nor survivor-from"
-        case .markerWithoutBuffer: "in no buffer"
+        case .markerWithoutBuffer: "in no list"
         case .holderNotRemembered: "not remembered"
         case .survivorOutOfItsLog: "survivor log"
         }
@@ -57,7 +57,7 @@ func theNurseryVerifierCatches(_ c: NurseryCorruption) throws {
     case .survivorOutOfItsLog:
         rt.scavenge()   // p survives, logged in its nursery's survivor log
         let reports = rt.vm.inspect { _ in
-            for k in 0..<n.pointee.count { n.alloc(k).pointee.survLog.removeAll() }
+            for k in 0..<n.pointee.count { n.survivors(k).pointee.survLog.removeAll() }
             return verifyNurseryAfterScavenge(n)
         }
         #expect(reports.contains { $0.contains(c.needle) }, "\(reports.prefix(2))")

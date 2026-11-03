@@ -44,27 +44,37 @@ func storeWithBarrier(_ s: StatePointer, _ flag: UnsafeMutablePointer<Atomic<UIn
 }
 
 /// The barrier's slow path: `o` names a young object of the nursery in
-/// `hv` and is not young in that nursery. An old holder is remembered for
-/// that nursery (its marker bit set; pushed on this worker's buffer when
-/// the marker was clear); a young holder never is: a stop-the-world
-/// scavenge traces it if it is reachable (module 7 keeps per-nursery sets
-/// for it). Relaxed atomics: the scavenge reads the markers and buffers
-/// after the stop's handshake (module 7's handshake will need seq_cst).
+/// `hv` and is not young in that nursery. The holder is remembered for
+/// that nursery: its remembered bit set and, when this call set it, the
+/// holder pushed on this worker's buffer for that nursery. A young holder
+/// of another nursery is remembered too when young collection runs without
+/// stopping the world (module 7: a local collection of the value's nursery
+/// scans it); in the stop-the-world configuration only old holders are
+/// (module 4: a scavenge traces every young holder that is reachable).
+///
+/// The load of the remembered word is seq_cst, and so is the store before
+/// it at every site (the interpreter's checked store, the array copy):
+/// a young collector clears a holder's bit with a seq_cst `fetch_and`
+/// before it reads the holder's slots, so either it sees this store or
+/// this load sees the cleared bit and remembers the holder again
+/// (concurrent-young SPEC point 2; docs/models/young-collection.md
+/// findings 1 and 4: do not lean on the post-store check's reload).
 @inline(never)
 func rememberSlow(_ s: StatePointer, _ o: Oop, _ hv: UInt64, _ site: UInt8) {
     guard let a = unsafe s.pointee.young, let n = unsafe workerOf(s).pointee.vm?.pointee.nursery else { return }
     if unsafe site == a.pointee.skipSite { return }
     unsafe a.pointee.barrierSlowCalls &+= 1
     let om = unsafe s.pointee.om
-    if om.headerWord(o.raw) & Header.youngBit != 0 {
+    if unsafe om.headerWord(o.raw) & Header.youngBit != 0 && !a.pointee.rememberYoungHolders {
         unsafe a.pointee.barrierYoungHolders &+= 1
         return
     }
-    let bit = UInt16(truncatingIfNeeded: 1 &<< ((hv & Header.nurseryMask) &>> Header.nurseryShift))
+    let k = Int(truncatingIfNeeded: (hv & Header.nurseryMask) &>> Header.nurseryShift)
+    let bit = remBit(k)
     let r = unsafe n.remMarker(o.raw)
-    if unsafe r.pointee.load(ordering: .relaxed) & bit != 0 { return }
-    if unsafe r.pointee.bitwiseOr(bit, ordering: .relaxed).oldValue == 0 {
-        unsafe a.pointee.rem.append(o.raw)
+    if unsafe r.pointee.load(ordering: .sequentiallyConsistent) & bit != 0 { return }
+    if unsafe r.pointee.bitwiseOr(bit, ordering: .sequentiallyConsistent).oldValue & bit == 0 {
+        unsafe (a.pointee.buffers + k).pointee.append(o.raw)
     }
 }
 

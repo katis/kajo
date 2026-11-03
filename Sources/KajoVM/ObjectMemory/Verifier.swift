@@ -139,6 +139,12 @@ extension ObjectMemory {
             if !hd.isYoung && hd.raw & Header.youngOnlyMask != 0 {
                 out.fail("entry \(e): an old header with young-only bits 0x\(String(hd.raw & Header.youngOnlyMask, radix: 16))")
             }
+            // Module 7: a deferred entry free is used and dead; its body
+            // may be reused (every verifier skips it by the header bit).
+            if hd.isDeferredFree {
+                if !hd.isYoung { out.fail("entry \(e): a deferred entry free with an old header") }
+                continue
+            }
             if hd.isYoung {
                 // Module 4's nursery verifier checks where in its nursery;
                 // here only that a young body is in the nursery region and

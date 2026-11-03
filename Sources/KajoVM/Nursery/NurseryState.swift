@@ -11,7 +11,8 @@ import Synchronization
 // shared that way.
 
 /// A worker's young allocation state, in its own 128-byte aligned lines.
-/// The allocation fast path reads the first fields only.
+/// The allocation fast path reads the first fields only. Written by its
+/// worker inside the VM (and by the stopper with the world stopped).
 @unsafe struct NurseryAlloc {
     /// Eden bump region: heap offsets.
     var top: UInt64
@@ -22,21 +23,29 @@ import Synchronization
     /// Young header bits of this nursery: young | index << 52.
     let youngMark: UInt64
     /// Free entries for young objects; `[0, next)` were handed out since
-    /// the last scavenge (the entry sweep's input).
+    /// the last collection of this eden (the entry sweep's input).
     var stash: EntryStash
-    /// Holders this worker's barrier remembered (old objects naming a young
-    /// one), and the holders a scavenge carried to it.
-    var rem: RawArray<UInt64>
-    /// Entries of the survivors in this nursery's survivor-from.
-    var survLog: RawArray<UInt32>
+    /// This worker's remembered buffers (`[0, 16)`, one per nursery) and
+    /// deletion buffers (`[16, 32)`, module 7): written only by its own
+    /// barrier, handed over at round acknowledgements under the safepoint
+    /// mutex (module 7) or taken by the stopper.
+    let buffers: UnsafeMutablePointer<RawArray<UInt64>>
     let index: Int
-    let edenStart: UInt64
-    /// Survivor halves: `survivorStart[survTo]` is survivor-to (empty
-    /// between scavenges), the other is survivor-from, filled to
-    /// `survFromTop`.
-    let survivorStart: (UInt64, UInt64)
-    var survTo: Int
-    var survFromTop: UInt64
+    /// The eden being allocated in: the whole eden, or (module 7, an
+    /// offloaded nursery) the current half.
+    var edenStart: UInt64
+    /// The whole eden.
+    let edenBase: UInt64
+    let edenBytes: UInt64
+    /// Module 7: the eden is two halves (an offloaded nursery); `half` is
+    /// the one being allocated in, `halfBytes` its size.
+    let halves: Bool
+    var half: Int
+    let halfBytes: UInt64
+    /// Module 7: the barrier remembers a young holder of another nursery
+    /// too (young collection without stopping the world); off in the
+    /// stop-the-world configuration (module 4's rule: old holders only).
+    let rememberYoungHolders: Bool
     /// The barrier site the test switch turns off (0: none).
     let skipSite: UInt8
     var barrierSlowCalls: UInt64 = 0
@@ -48,6 +57,35 @@ import Synchronization
     var youngAllocations: UInt64 = 0
     var youngBytes: UInt64 = 0
     var stashRefills: UInt64 = 0
+}
+
+/// A nursery's survivor spaces and remembered lists (module 7 moved them
+/// out of `NurseryAlloc`): written by whoever collects the nursery (its
+/// owner, the young collector thread, one at a time) or by the stopper
+/// with the world stopped. Never by the allocating worker.
+@unsafe struct NurserySurvivors {
+    /// Survivor halves: `survivorStart[survTo]` is survivor-to (empty
+    /// between collections), the other is survivor-from, filled to
+    /// `survFromTop`.
+    let survivorStart: (UInt64, UInt64)
+    var survTo: Int
+    var survFromTop: UInt64
+    /// Entries of the survivors in this nursery's survivor-from.
+    var survLog = RawArray<UInt32>()
+    /// Holders kept in this nursery's remembered set by its last
+    /// collection (and every remembered holder after a stop-the-world
+    /// scavenge).
+    var carried = RawArray<UInt64>()
+    /// Module 7: dead young entries whose free waits (amendments 10, 17).
+    var deferred = RawArray<UInt64>()
+    /// Module 7: the stash of the eden half being collected (offload): the
+    /// owner swaps it with its own at a flip.
+    var stash2 = unsafe EntryStash()
+    /// Module 7: the collection in flight: survivor-to bump, the entries of
+    /// the survivors it copied, the holders it keeps.
+    var survCur: UInt64 = 0
+    var nextLog = RawArray<UInt32>()
+    var nextCarried = RawArray<UInt64>()
 
     var survFromStart: UInt64 { unsafe survTo == 0 ? survivorStart.1 : survivorStart.0 }
     var survToStart: UInt64 { unsafe survTo == 0 ? survivorStart.0 : survivorStart.1 }
@@ -60,7 +98,8 @@ import Synchronization
     var survEnd: UInt64 = 0
     /// Copied objects whose slots are still to scan.
     var stack = RawArray<UInt64>()
-    /// Holders this participant scanned that still name a young object.
+    /// Holders this participant scanned that still name a young object
+    /// (their remembered bits set; carried to their nurseries at the end).
     var nextRem = RawArray<UInt64>()
     /// Entries of the survivors it copied (into its survivor-to).
     var survLog = RawArray<UInt32>()
@@ -110,6 +149,12 @@ struct ParticipantStats: Sendable {
     var tasks = unsafe RawArray<ScavengeTask>()
     /// Root values of this scavenge, the tasks' storage for roots.
     var roots = RawArray<UInt64>()
+    /// The remembered holders of every nursery, once each (the tasks'
+    /// storage for remembered holders).
+    var holders = RawArray<UInt64>()
+    /// Module 7: copied young objects are remembered for the other
+    /// nurseries they name (young collection without stopping the world).
+    var rememberYoung = false
     /// Class formats (the class table does not change in a stop).
     var formats: UnsafeMutablePointer<UInt64>? = nil
     var classCount = 0
@@ -130,6 +175,11 @@ struct NurseryCounters: Sendable {
     var youngBytesScavenged: UInt64 = 0
     var rememberedHolders: UInt64 = 0
     var rememberedSlots: UInt64 = 0
+    /// Module 7: young holders taken out of the remembered lists before a
+    /// scavenge (amendment 12), and deferred entry frees a scavenge
+    /// released.
+    var youngHoldersDropped: UInt64 = 0
+    var deferredReleased: UInt64 = 0
     var entriesSwept: UInt64 = 0
     var entriesFreed: UInt64 = 0
     var weakSlotsNiled: UInt64 = 0
@@ -193,11 +243,22 @@ struct ScavengeRecord: Sendable {
     let largeLimit: UInt64
     /// Per worker.
     let alloc: UnsafeMutablePointer<UnsafeMutablePointer<NurseryAlloc>>
+    /// Per buffer owner: a stopper outside the worker table takes part too.
     let scav: UnsafeMutablePointer<UnsafeMutablePointer<ScavengeWorker>>
-    /// The remembered set's marker: 16 bits per entry beside the table,
-    /// bit n = the holder names a young object of nursery n. Nonzero
-    /// exactly while the holder is in one remembered buffer.
-    let rem: UnsafeMutablePointer<Atomic<UInt16>>
+    /// Per nursery (module 7).
+    let surv: UnsafeMutablePointer<UnsafeMutablePointer<NurserySurvivors>>
+    /// Every buffer owner's remembered and deletion buffers (32 per owner,
+    /// `NurseryAlloc.buffers`): the workers, then the marker's slot (never
+    /// used) and module 7's young collector thread.
+    let buffers: UnsafeMutablePointer<UnsafeMutablePointer<RawArray<UInt64>>>
+    let bufferOwners: Int
+    /// The remembered word: 32 bits per entry beside the table. Bit n: the
+    /// holder is in nursery n's remembered set (some owner's buffer n, or
+    /// nursery n's carried list) because it names a young object of
+    /// nursery n. Bit 16 + n (module 7, amendment 9): kept for nursery n's
+    /// next collection, set only during n's collection and folded into
+    /// bit n at its end.
+    let rem: UnsafeMutablePointer<Atomic<UInt32>>
     let remBytes: Int
     let phase: UnsafeMutablePointer<ScavengePhase>
     // Parallel-phase atomics, each in its own line.
@@ -246,10 +307,24 @@ extension UnsafeMutablePointer where Pointee == NurseryShared {
     @inline(__always)
     func scav(_ i: Int) -> UnsafeMutablePointer<ScavengeWorker> { unsafe pointee.scav[i] }
     @inline(__always)
-    func remMarker(_ o: UInt64) -> UnsafeMutablePointer<Atomic<UInt16>> {
+    func survivors(_ k: Int) -> UnsafeMutablePointer<NurserySurvivors> { unsafe pointee.surv[k] }
+    @inline(__always)
+    func remMarker(_ o: UInt64) -> UnsafeMutablePointer<Atomic<UInt32>> {
         unsafe pointee.rem + Int(truncatingIfNeeded: o &>> 4)
     }
+    /// Owner `i`'s remembered buffer for nursery `n`.
+    @inline(__always)
+    func remBuffer(_ i: Int, _ n: Int) -> UnsafeMutablePointer<RawArray<UInt64>> { unsafe pointee.buffers[i] + n }
+    /// Owner `i`'s deletion buffer for nursery `n` (module 7).
+    @inline(__always)
+    func delBuffer(_ i: Int, _ n: Int) -> UnsafeMutablePointer<RawArray<UInt64>> { unsafe pointee.buffers[i] + (16 &+ n) }
 }
+
+/// The remembered word's bits for nursery `n`: membership and pending.
+@inline(__always)
+func remBit(_ n: Int) -> UInt32 { 1 &<< UInt32(truncatingIfNeeded: n) }
+@inline(__always)
+func pendingBit(_ n: Int) -> UInt32 { 1 &<< UInt32(truncatingIfNeeded: 16 &+ n) }
 
 // MARK: - creation
 
@@ -275,7 +350,10 @@ private func atomicLine<T: AtomicRepresentable>(_ v: T) -> UnsafeMutablePointer<
 
 extension NurseryShared {
     /// Nurseries for `workers` workers in a region reserved from `om`.
-    static func make(_ requested: NurseryConfig, om: ObjectMemory, workers: Int) -> NurseryPointer {
+    /// `offloaded`: nursery 0's eden is two halves (module 7); `youngHolders`:
+    /// the barrier remembers young holders of other nurseries too.
+    static func make(_ requested: NurseryConfig, om: ObjectMemory, workers: Int, offloaded: Bool = false,
+                     youngHolders: Bool = false, halfBytes: Int = 0) -> NurseryPointer {
         let config = requested.effective
         if let problem = config.validate(workers: workers) { preconditionFailure("nursery: \(problem)") }
         let stride = UInt64(config.stride)
@@ -284,25 +362,41 @@ extension NurseryShared {
         let start = om.reserveNurseryRegion(bytes: Int(stride) * workers)
         let large = Swift.min(UInt64(config.largeObjectBytes), eden / 2)
         let alloc = UnsafeMutablePointer<UnsafeMutablePointer<NurseryAlloc>>.allocate(capacity: workers)
-        let scav = UnsafeMutablePointer<UnsafeMutablePointer<ScavengeWorker>>.allocate(capacity: workers)
+        let survs = UnsafeMutablePointer<UnsafeMutablePointer<NurserySurvivors>>.allocate(capacity: workers)
+        let owners = workers + 2
+        let scav = UnsafeMutablePointer<UnsafeMutablePointer<ScavengeWorker>>.allocate(capacity: owners)
+        for i in workers..<owners { unsafe scav[i] = lined(ScavengeWorker()) }
+        let buffers = UnsafeMutablePointer<UnsafeMutablePointer<RawArray<UInt64>>>.allocate(capacity: owners)
+        for i in 0..<owners {
+            let raw = UnsafeMutableRawPointer.allocate(byteCount: (MemoryLayout<RawArray<UInt64>>.stride * 32 + 127) & ~127,
+                                                       alignment: 128)
+            let b = unsafe raw.bindMemory(to: RawArray<UInt64>.self, capacity: 32)
+            unsafe b.initialize(repeating: RawArray(), count: 32)
+            unsafe buffers[i] = b
+        }
         let fastLimit = config.stress.contains(.scavengeAtEveryAllocation) || om.config.stress.contains(.collectAtEveryAllocation)
             ? 0 : large
         for i in 0..<workers {
             let base = start &+ UInt64(i) &* stride
+            let halves = offloaded && i == 0
+            let half = halves ? Swift.min(eden / 2, halfBytes > 0 ? UInt64(halfBytes) : eden / 2) & ~127 : eden
             unsafe alloc[i] = lined(NurseryAlloc(
-                top: base, end: base &+ eden, fastLimit: fastLimit,
+                top: base, end: base &+ half, fastLimit: fastLimit,
                 youngMark: Header.youngBit | UInt64(i) &<< Header.nurseryShift, stash: EntryStash(),
-                rem: RawArray(), survLog: RawArray(), index: i, edenStart: base,
-                survivorStart: (base &+ eden, base &+ eden &+ surv), survTo: 0, survFromTop: base &+ eden &+ surv,
+                buffers: buffers[i], index: i, edenStart: base, edenBase: base, edenBytes: eden,
+                halves: halves, half: 0, halfBytes: half, rememberYoungHolders: youngHolders,
                 skipSite: config.testSwitches.skipBarrierAt?.rawValue ?? 0))
             unsafe om.registerStash(alloc[i].pointer(to: \NurseryAlloc.stash)!)
             unsafe scav[i] = lined(ScavengeWorker())
+            unsafe survs[i] = lined(NurserySurvivors(survivorStart: (base &+ eden, base &+ eden &+ surv), survTo: 0,
+                                                     survFromTop: base &+ eden &+ surv))
+            unsafe om.registerStash(survs[i].pointer(to: \NurserySurvivors.stash2)!)
         }
-        let remBytes = (Int(om.entryCapacity) * 2 + 16383) & ~16383
+        let remBytes = (Int(om.entryCapacity) * 4 + 16383) & ~16383
         let remRaw: UnsafeMutableRawPointer
         do { unsafe remRaw = try unsafe VirtualMemory.reserve(remBytes) } catch { preconditionFailure("nursery: \(error)") }
-        // Zero-filled pages: every marker starts as Atomic(0).
-        let rem = unsafe remRaw.bindMemory(to: Atomic<UInt16>.self, capacity: Int(om.entryCapacity))
+        // Zero-filled pages: every remembered word starts as Atomic(0).
+        let rem = unsafe remRaw.bindMemory(to: Atomic<UInt32>.self, capacity: Int(om.entryCapacity))
         let storage = unsafe UnsafeMutablePointer<UInt64>.allocate(capacity: PacketPool.words * PacketPool.capacity)
         let length = unsafe UnsafeMutablePointer<Int>.allocate(capacity: PacketPool.capacity)
         unsafe length.initialize(repeating: 0, count: PacketPool.capacity)
@@ -310,7 +404,8 @@ extension NurseryShared {
         for i in unsafe 0..<PacketPool.capacity { unsafe pool.free.append(Int32(i)) }
         let s = unsafe lined(NurseryShared(
             config: config, om: om, count: workers, regionStart: start, stride: stride, edenBytes: eden,
-            survivorBytes: surv, largeLimit: large, alloc: alloc, scav: scav, rem: rem, remBytes: remBytes,
+            survivorBytes: surv, largeLimit: large, alloc: alloc, scav: scav, surv: survs, buffers: buffers,
+            bufferOwners: owners, rem: rem, remBytes: remBytes,
             phase: lined(ScavengePhase()), taskNext: atomicLine(0), sweepNext: atomicLine(0), inCopy: atomicLine(0),
             idle: atomicLine(0), copyEnd: atomicLine(UInt64(0)), packets: lined(pool), packetLock: makeMutex(),
             poolCount: atomicLine(0), state: lined(NurseryLog()), fullRequested: atomicLine(false)))
@@ -323,9 +418,18 @@ extension NurseryShared {
             let a = unsafe s.alloc[i]
             unsafe s.om.unregisterStash(a.pointer(to: \NurseryAlloc.stash)!)
             unsafe a.pointee.stash.free()
-            unsafe a.pointee.rem.free()
-            unsafe a.pointee.survLog.free()
             unsafe unlined(a)
+            let v = unsafe s.surv[i]
+            unsafe s.om.unregisterStash(v.pointer(to: \NurserySurvivors.stash2)!)
+            unsafe v.pointee.stash2.free()
+            unsafe v.pointee.survLog.free()
+            unsafe v.pointee.carried.free()
+            unsafe v.pointee.deferred.free()
+            unsafe v.pointee.nextLog.free()
+            unsafe v.pointee.nextCarried.free()
+            unsafe unlined(v)
+        }
+        for i in unsafe 0..<s.bufferOwners {
             let w = unsafe s.scav[i]
             unsafe w.pointee.stack.free()
             unsafe w.pointee.nextRem.free()
@@ -333,12 +437,19 @@ extension NurseryShared {
             unsafe w.pointee.weak.free()
             unsafe unlined(w)
         }
+        for i in unsafe 0..<s.bufferOwners {
+            for j in 0..<32 { unsafe s.buffers[i][j].free() }
+            unsafe UnsafeMutableRawPointer(s.buffers[i]).deallocate()
+        }
+        unsafe s.buffers.deallocate()
         unsafe s.om.releaseNurseryPages(s.regionStart, Int(s.stride) * s.count)
         unsafe s.alloc.deallocate()
         unsafe s.scav.deallocate()
+        unsafe s.surv.deallocate()
         unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.rem), s.remBytes)
         unsafe s.phase.pointee.tasks.free()
         unsafe s.phase.pointee.roots.free()
+        unsafe s.phase.pointee.holders.free()
         unsafe unlined(s.phase)
         unsafe s.packets.pointee.storage.deallocate()
         unsafe s.packets.pointee.length.deallocate()

@@ -107,6 +107,7 @@ public enum Headless {
         var config = ObjectMemoryConfig()
         config.heapBytes = options.heapMiB << 20
         config.reserveBytes = vc.nursery.reserveBytes(workers: options.workers + 2)
+        config.nurseryRegionBytes = vc.nursery.regionBytes(workers: options.workers + 2)
         config.entryCapacity = options.entries
         config.stress = StressFlags(parsing: options.stress)
         config.verify = options.verify

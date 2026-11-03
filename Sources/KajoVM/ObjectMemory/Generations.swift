@@ -213,19 +213,27 @@ extension ObjectMemory {
     // MARK: - nursery region
 
     /// Reserve `bytes` of heap offsets beyond the block range for the
-    /// nurseries: plain anonymous memory between the heap and its alias
-    /// (`VirtualMemory.reserveTwice`), never a block, never aliased.
+    /// nurseries, never a block. When the object memory was made with
+    /// `nurseryRegionBytes` of at least `bytes`, the region is the doubly
+    /// mapped memory right after the blocks (module 7: a RELOCATING young
+    /// body is still read through the alias); otherwise plain anonymous
+    /// memory between the heap and its alias, never aliased (module 4).
     /// Answers the region's first offset. Once per object memory.
     func reserveNurseryRegion(bytes: Int) -> UInt64 {
-        let start = (UInt64(heap.bytes) &+ 4095) & ~4095
         precondition(unsafe gc.pointee.nurseryEnd == 0, "the nursery region is reserved once")
+        let aliased = heap.extraBytes >= bytes
+        let start = aliased ? UInt64(heap.bytes) : (UInt64(heap.bytes &+ heap.extraBytes) &+ 4095) & ~4095
         precondition(start &+ UInt64(bytes) <= VirtualMemory.aliasDistance, "nurseries do not fit below the alias")
         unsafe gc.pointee.nurseryStart = start
         unsafe gc.pointee.nurseryEnd = start &+ UInt64(bytes)
+        unsafe gc.pointee.nurseryAliased = aliased
         return start
     }
 
     var nurseryRegion: Range<UInt64> { unsafe gc.pointee.nurseryStart..<gc.pointee.nurseryEnd }
+
+    /// Module 7: the nursery region is covered by the alias mapping.
+    var nurseryRegionAliased: Bool { unsafe gc.pointee.nurseryAliased }
 
     /// Return nursery pages to the system (the VM is being destroyed or the
     /// region is empty). Plain anonymous memory, so `madvise` frees it.
