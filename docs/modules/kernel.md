@@ -138,10 +138,40 @@ one kernel class whose protocol does not follow prior art:
 The module doc records every place the index-free protocol made kernel
 code awkward, as evidence for or against the choice.
 
+## Pragmas (decided here, open to change behind the module)
+
+Pragmas (`<keyword: literal ...>` at the start of a method, Smalltalk-80's
+syntax for `<primitive: n>`) are the kernel's one metadata mechanism, in
+Pharo's style: a method carries its own registration, and a consumer asks
+the image for every method tagged with a pragma instead of keeping a list.
+
+- The compiler parses pragmas into `Pragma` objects (selector, arguments,
+  method) stored as literals of the `CompiledMethod`; `method pragmas`,
+  `pragmaAt:`, `Pragma allNamed:in:` and `allNamed:` are the protocol.
+- **A pragma index** in the image, keyed by pragma selector, updated by
+  method installation and removal, so a query is a dictionary lookup and
+  not a scan of every method; the index is rebuilt by the image loader.
+- **Unconsumed pragmas warn.** A consumer declares the pragma selectors it
+  understands (itself a class-side pragma, `<consumesPragmas: #(...)>`);
+  the compiler warns on a pragma no consumer declares, as a compile
+  warning the headless CLI emits as an event and the development UI shows,
+  never silently as Pharo does (a typo in `<expectedFailure>` is a test
+  that quietly passes). Compilation still succeeds.
+- Class-level tags are the Tonel header's category and tags, and behavior
+  tags are class-side pragma methods; there is no third mechanism.
+- Initial uses in 8b: `<primitive: n>` with its failure code path; main
+  thread affinity (ADR 0004: a method tagged for the UI thread, which the
+  scheduler checks in checked builds and the UI shows); the development
+  protocol (methods and event vocabularies exposed to the remote UI and
+  to agents); test tags (`<slow>`, `<device>`, `<expectedFailure>`) that
+  `kajo test --tag` selects by and the NDJSON events carry. Type or
+  protocol annotations, if ever wanted, ride in the same slot as an
+  optional tool (Strongtalk's way), never as a VM feature.
+
 ## Test harness and the event protocol (question 5)
 
 - `TestCase`, `TestResult`, `TestSuite` in the SUnit style in the kernel;
-  `kajo test [image] [--filter pattern]` runs them headless.
+  `kajo test [image] [--filter pattern] [--tag tag]` runs them headless.
 - The CLI's machine-readable output is a **stream of NDJSON events** on
   stdout, one JSON object per line, timestamped with the time each
   happened (not when it was written: AGENTS.md), versioned with `"v": 1`.
