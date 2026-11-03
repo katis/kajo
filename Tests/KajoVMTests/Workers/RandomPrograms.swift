@@ -244,26 +244,29 @@ end
 /// every young allocation (eight workers). Module 5 adds a marking cycle at
 /// every scavenge (four workers, tiny nurseries, a marker thread, every
 /// verifier) and the same with the barrier's flag never cleared, and
-/// perturbation reaches the marker. Every answer is the model's, which is
-/// also the no-nursery oracle's.
+/// perturbation reaches the marker. Module 6 adds relocation of every live
+/// snapshot block in every such cycle (four workers, tiny nurseries,
+/// perturbation reaching the relocator between objects and inside copies).
+/// Every answer is the model's, which is also the no-nursery oracle's.
 enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     case oneWorker, eightWorkers, collectEveryAllocation, tinyEntryChunks, stopEveryPoll, preemptEveryPoll, perturbed
     case noNursery, tinyNurseries, promoteAll, scavengeEveryAllocation
     case cycleEveryScavenge, markingAlwaysOn
+    case relocateEveryLiveBlock
 
     var testDescription: String { rawValue }
 
     var workers: Int {
         switch self {
         case .oneWorker, .tinyNurseries: 1
-        case .cycleEveryScavenge, .markingAlwaysOn: 4
+        case .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock: 4
         default: 8
         }
     }
 
     func runtime(_ p: RandomProgram) throws -> Runtime {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
-                      .cycleEveryScavenge, .markingAlwaysOn].contains(self)
+                      .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock].contains(self)
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
@@ -279,13 +282,19 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                case .preemptEveryPoll: c.stress = .preemptEveryPoll
                                case .perturbed: c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                case .noNursery: c.nursery.bytes = 0
-                               case .tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn:
+                               case .tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock:
                                    // Smaller than `tinyNurseries`: these programs
                                    // allocate tens of KiB in all.
                                    c.nursery.bytes = 24 << 10
                                    c.nursery.survivorBytes = 2 << 10
                                    if self == .promoteAll { c.nursery.stress = .promoteAll }
                                    if self == .cycleEveryScavenge { c.marking.stress = .cycleAtEveryScavenge }
+                                   if self == .relocateEveryLiveBlock {
+                                       c.marking.stress = .cycleAtEveryScavenge
+                                       c.relocation.stress = [.relocateEveryLiveBlock, .relocateAtEveryCycle]
+                                       c.relocation.cap = 1
+                                       c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
+                                   }
                                    if self == .markingAlwaysOn {
                                        c.marking.stress = [.cycleAtEveryScavenge, .markingAlwaysOn]
                                        c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
@@ -336,6 +345,10 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     case .cycleEveryScavenge, .markingAlwaysOn:
         randomScavenges.add(config, rt.vm.markingCounters.cyclesCompleted)
         #expect(rt.vm.markingCounters.missed == 0)
+    case .relocateEveryLiveBlock:
+        let r = rt.vm.relocationCounters
+        randomScavenges.add(config, r.objectsMoved)
+        #expect(rt.vm.markingCounters.missed == 0 && r.parksWhileRelocating == 0 && r.verifierFailures == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     default: break
     }
@@ -367,9 +380,9 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
         }
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
-    if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn].contains(config) {
+    if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
-        // cycle), the configuration must.
+        // cycle, or moves an object), the configuration must.
         #expect(randomScavenges.take(config) > 0)
     }
     #expect(failed.isEmpty, "failing seeds: \(failed)")
