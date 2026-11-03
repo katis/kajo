@@ -191,3 +191,55 @@ the relocator never parks between the CAS and the switch (to-space
 allocation stays before the CAS); body addresses are always computed from
 the offset just loaded. Both halves of the post-store check must be
 seq_cst, each on its own.
+
+## Built: concurrent relocation (module 6, 2026-11-03)
+
+Built in `Sources/KajoVM/Relocation/` (docs/modules/relocation.md) on module
+5's marker thread, between the final mark and the sweep, as decided: the
+state word is the single switch (CAS to `off + 2^32`, copy, release store of
+the new offset), RELOCATING leads to the old body through the heap's second
+mapping, a post-store check at every mutator store (`stlr`, `ldar`, compare,
+one out-of-line call that redoes the store and runs the barrier), pins for
+good at image build, frame pins at the final mark, two hazard slots per
+worker and a count of held slots for the one primitive that needs them (the
+new array copy), evacuated blocks freed by epoch or at the next pause. Every
+finding of the model check is in the code (the `enterVM` 0, seq_cst epoch
+scans, no park or allocation between the CAS and the switch, body addresses
+from the state word just loaded) and each rule has a test that fails with it
+switched off. Choices made here: a relocation is planned when the last cycle
+found old space under 75 percent dense; the selected blocks leave the block
+pool; the state word and slot loads are relaxed atomics (the same `ldr`);
+the relocator needs no timer.
+
+Measured (M2 Max, release, five interleaved runs, medians, against module
+5's binary):
+
+| | one worker | eight workers |
+|---|--:|--:|
+| `storeheavy`, `ivars`, `sends`, `fib`, `arith` (aligned builds) | 0.993 to 1.003 | 0.993 to 1.000 |
+| `oldheap` 64 / 256 / 512 MiB (plain builds) | 1.095 / 1.059 / 1.050 | 1.049 / 1.033 / 1.014 |
+| `fragment`, old space at the end: off / default / every cycle | 240 / 101 / 18 MB | 232 / 68 / 75 MB |
+| `oldheap` 256 MiB, every live block every cycle: objects moved per 10 s, checksum | 165 M, equal to the oracle 5 of 5 | 111 M, equal 5 of 5 |
+
+The check costs nothing measurable on stores that hit (against a build with
+the raw store in its place: 0.4 percent on `storeheavy`) and 5 to 10 percent
+with one worker on the kernel whose stores miss, as the experiment found.
+Conflicts are rare (at most 176 stores redone and 30 spins in five runs, the
+longest spin 0.027 ms). With every live block relocated in every cycle
+eight workers ran as fast as the oracle and lost its 80 ms full
+collections. Plain `-O` builds shift the hot kernels by up to 6 percent
+either way through code placement; the aligned builds are the comparison.
+
+**For the owner: should ADR 0007 be accepted?** The evidence the proposal
+asked for is in: the relocation half is built on the production VM with the
+model's findings as requirements, every rule has a failing-without test
+(post-store check, frame pins, hazard slots, epochs, the `enterVM` 0, no
+park while relocating), the suite and the random programs run with every
+live block relocated in every cycle against the oracle under
+ThreadSanitizer, and the cost is as stated in "Costs and conditions"
+(nothing on cache-hot stores, 5 to 10 percent on a cache-missing kernel with
+one worker, less with eight). Still open: the alias mapping has compiled for
+iOS (`just ios-check`) but not run on a device; the main thread's spin time
+is zero only headlessly (module 9's app measures it); the cheaper store
+check is not built. Accepting would make the double mapping and the
+post-store check the old-space design until a cheaper check is measured.
