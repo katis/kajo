@@ -396,18 +396,28 @@ func relocationAtPauseStart(_ vm: VMPointer) {
     if unsafe inUse > st.pointee.counters.peakBlocksInUse { unsafe st.pointee.counters.peakBlocksInUse = inUse }
 }
 
-/// At the end of every pause that follows relocation work (a selection, a
+/// At the end of a pause that follows relocation work (a selection, a
 /// moved or reverted object, a freed block, the end of a cycle) since the
 /// last one that verified: the relocation verifier (when the object memory
 /// verifies). Nothing it checks changes without such work (module 1's,
-/// 4's and 5's verifiers keep checking the rest). An O(entries) walk at
-/// every stop made a host that polls every 0.5 ms (module 5's marker-thread
-/// tests) stop the world most of the time, and a utility-QoS marker under
-/// load could not finish a cycle within their bounds.
+/// 4's and 5's verifiers keep checking the rest). While a cycle's
+/// relocation is under way (from its final mark to its end) only the
+/// collectors' and the cycle's own stops verify (scavenges, full
+/// collections, final marks, applies), not a host's inspection
+/// (`StopKind.other`); the first stop of any kind after the cycle ends
+/// does. An O(entries) walk at every stop made a host that polls every
+/// 0.5 ms (module 5's marker-thread tests) stop the world most of the
+/// time, and a utility-QoS marker under load missed their bounds.
 func relocationAtPauseEnd(_ vm: VMPointer) {
     guard let r = unsafe vm.pointee.relocation, unsafe r.pointee.om.config.verify else { return }
     let st = unsafe r.pointee.state
     guard unsafe st.pointee.verifyDue else { return }
+    if unsafe st.pointee.hasCurrent {
+        unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+        let kind = unsafe vm.pointee.safepoint.pointee.kind
+        unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+        if kind == .other { return }
+    }
     unsafe st.pointee.verifyDue = false
     let issues = unsafe verifyRelocation(vm, r)
     unsafe r.pointee.state.pointee.counters.verifierRuns &+= 1
