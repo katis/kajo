@@ -204,7 +204,10 @@ Safety:
    test that work after idling completes within a bound.
  - A wall-clock assertion in a test (a 300 ms spinner accrued 200 to 400 ms,
    N wakeups in a window) fails under load. Assert agreement between two
-   readings of the same quantity, or run until a CPU budget is spent.
+   readings of the same quantity, or run until a CPU budget is spent. The
+   idle test's CPU probe was the latest instance: a 50 ms window gave the
+   spinner 23 ms under ThreadSanitizer and twelve busy loops; it now spins
+   until the probe has seen 30 ms.
  - "Wait until the Process is running" is not "wait until its frame holds
    the object": the state is set before the frame is installed. Tests that
    need a value on a stack wait on a flag the program sets after the store.
@@ -353,6 +356,38 @@ Safety:
  - A terminated Process's result slot is a root. Tests that expect
    objects to be reclaimed must release the Processes that answered them,
    or the "dead" objects stay reachable through the host's Process roots.
+ - Every mutator load of a state word or a slot that a relocator may write
+   concurrently is a relaxed atomic load, for ThreadSanitizer and for C++;
+   on arm64 it is the same `ldr`. The compiler does not merge atomic
+   loads, so a send and a return that read the method's state word five
+   times cost 4 to 6 percent until they read it once.
+ - A verifier at every pause can starve the program it verifies. An
+   O(entries) relocation verifier at every host inspection stop kept the
+   world stopped most of the time and the utility-QoS marker missed its
+   bounds under load. Run a verifier at the pauses that follow the work it
+   checks, and measure the verifier's own cost under load.
+ - ThreadSanitizer does not intercept `vm_allocate` and `vm_deallocate`,
+   so its shadow survives address reuse and two tests whose side tables
+   happened to share an address were reported as a race. Reserve with
+   `mmap` and `munmap`, which it intercepts.
+ - Pins for good are not a test switch. Turning them off moved a running
+   method's bytecodes; the block was freed by epoch and reused as to-space
+   under the worker's pc. Only frame pins can be switched off in a test.
+ - Block stamps alone do not keep an allocator out of a block being
+   evacuated: a selected block with a tail is still in the pool. Selected
+   blocks leave the pool at selection.
+ - A concurrent pass that polls at every object makes one object of
+   progress per stop under a stop storm (a host polling counters every
+   0.5 ms under ThreadSanitizer left a cycle unfinished in 30 s). Poll
+   every N objects or bytes, still only between objects.
+ - The marker is a stopper too, and at utility QoS twelve default-QoS busy
+   loops starved one final mark to 20 s. A QoS policy for a thread has to
+   cover every role it plays, the stopper role included; open until the
+   young collector's policy (module 7) settles it.
+ - For an A/B of two binaries, build both with
+   `-align-all-nofallthru-blocks=5 -align-loops=32`: `storeheavy` was 6
+   percent slower in plain builds and 0.3 percent in aligned ones, and a
+   build with the check removed was within 0.5 percent of a build with it.
 
 ## Verification
 
@@ -379,7 +414,10 @@ live old data, the barrier costs 1.4 percent on `ivars` with marking off), 0007 
 spaces and concurrent relocation of old space through the entry table
 (proposed; old-space work is off the frame budget, scavenges remain; the age
 half is built in module 4, the relocation half is model checked in
-`docs/models/relocation.md`), 0008
+`docs/models/relocation.md` and built in module 6: the post-store check is
+within noise on the hot kernels in aligned builds and 5 to 10 percent on
+cache-missing stores, `fragment` ends at 18 MB against 240 with relocation
+off, zero stores redone on the hot kernels), 0008
 young collection without stopping the world, offloaded for the main thread
 and local for background workers (proposed; no collector pause on the main
 thread exceeds a frame, acknowledgements and the initial mark remain; model
@@ -417,7 +455,13 @@ cover.
    initial mark at the end of a scavenge, final mark with the remembered
    filter, ephemerons and weak slots, lazy sweep into pending runs applied
    at the next pause, triggers and counted fallbacks, the QoS policy, the
-   final-mark verifier; `kajo run --gc cm|stw`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
+   final-mark verifier; `kajo run --gc cm|stw`), `Relocation/` (module 6,
+   built; `docs/modules/relocation.md`: the post-store check in every heap
+   store, pins for good and frame pins, hazard slots and the array-copy
+   primitive, epoch words and pending blocks, selection by live bytes,
+   the relocation pass on the marker thread between final mark and sweep,
+   the relocation verifier, the model-step table; `kajo run --reloc
+   on|off`), `Headless.swift` the public entry `kajo run` uses. `Sources/kajo/` the
    CLI; `Sources/fuzz-kasm/` and `Sources/fuzz-snapshot/` the libFuzzer
    targets (`just fuzz kasm|snapshot <seconds>`, needs a swift.org
    toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
