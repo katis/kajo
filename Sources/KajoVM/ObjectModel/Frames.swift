@@ -1,3 +1,4 @@
+import Darwin
 import Synchronization
 
 // Frames, Contexts, returns and unwinding (ADR 0009 sections 3 to 5).
@@ -486,7 +487,7 @@ private func terminateTo(_ m: Machine, _ ctx: Oop, _ rh: Int, _ target: Oop) -> 
     if let rc = unsafe callerHeader(base, rh) { m.detachFrames(from: rc, downTo: uh) }
     let delta = regs.fp - fpD
     let count = regs.sp - regs.fp + 1
-    unsafe (base + fpD).update(from: base + regs.fp, count: count)
+    unsafe _ = memmove(base + fpD, base + regs.fp, count * 8)  // overlapping: the frame moves down
     let nh = rh - delta
     unsafe base[nh + Frame.callerPC] = links.0
     unsafe base[nh + Frame.callerFP] = links.1

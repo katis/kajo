@@ -193,8 +193,8 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 
 /// `aBehavior addSelector: aSymbol withMethod: aMethod` and `removeSelector:`
 /// (ADR 0009 section 11). The method must have been compiled for the
-/// receiver (its method class is the receiver, so `super` and the
-/// instance-variable checks hold) and passes the bytecode verifier against
+/// receiver under that selector (its method class is the receiver, so
+/// `super` and the instance-variable checks hold) and passes the bytecode verifier against
 /// the receiver's shape. The new method dictionary is built and stored in a
 /// stop: every worker is parked, and each flushes its lookup cache when it
 /// sees the stop (module 3's epoch) before it runs again, so no worker can
@@ -209,7 +209,7 @@ private func primInstallMethod(_ m: Machine, _ c: PrimitiveCall, remove: Bool) -
     let ci = UInt64(ciOop.smallIntegerValue)
     if !remove {
         guard c.arg1.isObject, om.classIndex(of: c.arg1) == WellKnown.method,
-              om.load(c.arg1, MethodLayout.methodClass) == c.receiver,
+              om.load(c.arg1, MethodLayout.methodClass) == c.receiver, om.load(c.arg1, MethodLayout.selector) == c.arg0,
               methodFlags(om, c.arg1.raw) & MethodFlags.block == 0,
               verifyHeapMethod(om, c.arg1, classIndex: ci, nilObject: m.nilObject) == nil else { return .none }
     }
@@ -218,7 +218,7 @@ private func primInstallMethod(_ m: Machine, _ c: PrimitiveCall, remove: Bool) -
         ok = installInDictionary(m, c.receiver, c.arg0, remove ? nil : c.arg1)
     }
     if let vm = unsafe workerOf(m.state).pointee.vm {
-        unsafe stopWorld(vm, workerOf(m.state), retry: true, keeping: [c.receiver, c.arg0, c.arg1]) { _ in work() }
+        unsafe stopWorld(vm, workerOf(m.state), retry: true, keeping: [c.receiver, c.arg0, c.arg1].filter { $0 != .none }) { _ in work() }
         unsafe workerOf(m.state).pointee.seenEpoch = vm.pointee.safepoint.pointee.epoch
     } else {
         work()

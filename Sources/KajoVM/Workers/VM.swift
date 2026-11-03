@@ -206,11 +206,15 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     /// no method takes the selector or the record table is full.
     func spawn(receiver: Oop, selector: String, arguments: [Oop] = [], priority: Int = Priority.normal,
                main: Bool = false, exit: Oop = .none, keep keepIt: Bool = true) -> Oop? {
-        guard let sel = image.symbol(selector), arguments.count <= 16 else { return nil }
-        let cls = receiver.isSmallInteger ? WellKnown.smallInteger : image.om.classIndex(of: receiver)
-        guard let method = image.lookup(cls, sel),
-              image.om.load(method, MethodLayout.argc).smallIntegerValue == Int64(arguments.count) else { return nil }
+        guard arguments.count <= 16 else { return nil }
         return unsafe host { w in
+            // Module 8: the selector is found in the heap's symbol table, so
+            // the lookups run inside the VM (host code reads no heap object
+            // outside it).
+            guard let sel = image.symbol(selector) else { return nil }
+            let cls = classIndexOf(image.om, receiver.raw)
+            guard let method = image.lookup(cls, sel),
+                  image.om.load(method, MethodLayout.argc).smallIntegerValue == Int64(arguments.count) else { return nil }
             let temp = ([receiver, exit] + arguments).filter(\.isObject).map { image.om.addRoot($0) }
             let p = unsafe createProcess(state, w, receiver: receiver, method: method, args: arguments,
                                          priority: priority, main: main, exit: exit)

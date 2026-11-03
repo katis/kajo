@@ -385,3 +385,73 @@ func readOnlyFlipsRaceNoYoungCollection(_ mode: YoungMode) throws {
     rt.noFailures()
     rt.stop()
 }
+
+// MARK: - installation and the other workers' caches
+
+private let installSrc = pairSrc + """
+class Q Object 0
+method Q answer temps=0
+  push_int 1
+  return_top
+end
+method Q doesNotUnderstand: temps=0
+  push_int 99
+  return_top
+end
+method Class removeSelector: temps=0 prim=98
+end
+; send `answer` until it answers 99 (global 10 := 1 once it has run), at
+; most 200 million times
+method UndefinedObject spinAsk temps=1
+  push_int 0
+  store_temp 0
+loop:
+  push_nil
+  push_int 10
+  push_int 1
+  send g:put: 2
+  pop
+  push_lit @Q
+  send basicNew 0
+  send answer 0
+  push_int 99
+  eq
+  jump_if_true done
+  push_temp 0
+  push_int 1
+  add
+  store_temp 0
+  push_temp 0
+  push_lit 200000000
+  lt
+  jump_if_true loop
+  push_int -1
+  return_top
+done:
+  push_temp 0
+  return_top
+end
+method UndefinedObject removeAnswer temps=0
+  push_lit @Q
+  push_lit #answer
+  send removeSelector: 1
+  pop
+  push_int 0
+  return_top
+end
+"""
+
+/// The rule: a method dictionary changes in a stop, and every worker
+/// flushes its lookup cache when it sees the stop, before it runs again.
+/// A Process spinning on `answer` on one worker sees the method removed by
+/// another worker's Process (its cached line would keep answering 1).
+@Test func aRemovedMethodIsGoneFromEveryWorkersCache() throws {
+    let rt = try Runtime(installSrc, background: 2, start: true)
+    let spinner = rt.spawn("spinAsk")
+    #expect(eventually { rt.global(10) != rt.image.nilObject })
+    let remover = rt.spawn("removeAnswer")
+    rt.waitAllTerminated()
+    #expect(rt.result(remover) == 0)
+    #expect(rt.result(spinner) >= 0)  // -1: it never saw the removal
+    rt.stop()
+}

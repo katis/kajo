@@ -257,8 +257,10 @@ func superLooksUpFromTheMethodsClass(_ broken: Bool) throws {
     #expect(bytes.contains(Opcode.ext.rawValue))
 }
 
-/// Installing a method in a running image: the next send finds it (the
-/// lookup cache was flushed after the install, which ran in a stop).
+/// Installing a method in a running image: removal and installation take
+/// effect at the next send (the lookup cache is flushed after the change,
+/// which runs in a stop in a VM); a method compiled for another class, or
+/// under another selector, is refused.
 @Test func anInstalledMethodIsFoundByTheNextSend() throws {
     let h = try omHarness("""
     class Q Object 0
@@ -271,8 +273,8 @@ func superLooksUpFromTheMethodsClass(_ broken: Bool) throws {
       push_int 2
       return_top
     end
-    method R steal temps=0
-      push_int 3
+    method Q doesNotUnderstand: temps=0
+      push_int 99
       return_top
     end
     method UndefinedObject ask temps=0
@@ -284,17 +286,20 @@ func superLooksUpFromTheMethodsClass(_ broken: Bool) throws {
     """ + runOf(" push_int 0\n return_top"))
     defer { h.destroy() }
     #expect(try h.value("ask", []) == 1)
-    // Install R>>steal into R as #answer: a method compiled for R only.
     let om = h.om, img = h.image
-    let r = om.classOop(img.classIndex(named: "R")!), q = om.classOop(img.classIndex(named: "Q")!)
-    let steal = try #require(img.lookup(img.classIndex(named: "R")!, img.symbol("steal")!))
-    // Q refuses R's method (compiled for another class).
+    let q = om.classOop(img.classIndex(named: "Q")!), r = om.classOop(img.classIndex(named: "R")!)
+    let answer = img.symbol("answer")!
+    let qAnswer = try #require(img.lookup(img.classIndex(named: "Q")!, answer))
+    let rAnswer = try #require(img.lookup(img.classIndex(named: "R")!, answer))
     let m = h.interpreter.machine
-    #expect(objectModelPrimitive(97, m, PrimitiveCall(receiver: q, argc: 2, arg0: img.symbol("answer")!, arg1: steal)) == .none)
-    #expect(objectModelPrimitive(97, m, PrimitiveCall(receiver: r, argc: 2, arg0: img.symbol("answer")!, arg1: steal)) == r)
-    #expect(h.interpreter.counters.methodsInstalled == 1)
+    func prim(_ n: Int, _ rcv: Oop, _ a0: Oop, _ a1: Oop = .none) -> Oop {
+        objectModelPrimitive(n, m, PrimitiveCall(receiver: rcv, argc: n == 97 ? 2 : 1, arg0: a0, arg1: a1))
+    }
+    #expect(prim(98, q, answer) == q)                     // removed: the next send finds doesNotUnderstand:
+    #expect(try h.value("ask", []) == 99)
+    #expect(prim(97, q, answer, rAnswer) == .none)        // compiled for R
+    #expect(prim(97, q, img.symbol("ask")!, qAnswer) == .none)  // under another selector
+    #expect(prim(97, q, answer, qAnswer) == q)            // back
     #expect(try h.value("ask", []) == 1)
-    #expect(try img.lookup(img.classIndex(named: "R")!, img.symbol("answer")!) == steal)
-    #expect(objectModelPrimitive(98, m, PrimitiveCall(receiver: r, argc: 1, arg0: img.symbol("answer")!, arg1: .none)) == r)
-    #expect(img.lookup(img.classIndex(named: "R")!, img.symbol("answer")!) == nil)
+    #expect(h.interpreter.counters.methodsInstalled == 2)
 }
