@@ -1,0 +1,1 @@
+f: x | t | t := x + 1. ^ [:y | t + y] value: #(1 $a 's' #s (2)) size

@@ -32,7 +32,7 @@ ios-check:
 arc-check:
     scripts/check-hot-path-arc.sh
 
-# Fuzz a loader (kasm or snapshot) for SECONDS: libFuzzer if the toolchain has it, else replay and mutate
+# Fuzz a reader (kasm, snapshot or syntax) for SECONDS: libFuzzer if the toolchain has it, else replay and mutate
 fuzz TARGET SECONDS="60":
     scripts/fuzz.sh {{TARGET}} {{SECONDS}}
 
@@ -51,3 +51,11 @@ soak SEEDS="1000" BASE="1":
 # Exhaustive interleaving models of the concurrent protocols (docs/models/).
 model-check:
     cd models && swift test
+
+# Module 8b: build the kernel image from kernel/ (OUT defaults to kernel.img)
+build-image OUT="kernel.img":
+    swift run kajo build-image -o {{OUT}}
+
+# Module 8b: build kernel/ and run its tests headless (NDJSON on stdout)
+kernel-test *ARGS:
+    swift run kajo test {{ARGS}}

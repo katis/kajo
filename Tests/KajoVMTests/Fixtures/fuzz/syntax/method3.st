@@ -1,0 +1,1 @@
+h 1 to: 10 by: 2 do: [:i | a := i]. [b < 3] whileTrue: [b := b + 1]. ^ {a. b. thisContext} ifNil: [16r1F] ifNotNil: [:v | -2.5e3]

@@ -119,3 +119,33 @@ import Testing
         #expect(try runClassSide(files, "T", "logic") == 21)
     }
 }
+
+/// The in-suite stand-in for `just fuzz syntax`: seeded mutations of
+/// kernel class files and method sources (byte flips, deletions,
+/// duplications, swaps) through the reader and the compiler; each ends in
+/// a CompileError or a verified method.
+@Test func mutatedSourcesCompileOrAreRefused() throws {
+    let seeds = try KernelBuild.sources(in: [kernelDirectory]).prefix(40).map(\.text)
+    var rng: UInt64 = 0x5EED_5EED
+    func next(_ n: Int) -> Int {
+        rng = rng &* 6364136223846793005 &+ 1442695040888963407
+        return Int((rng >> 33) % UInt64(max(n, 1)))
+    }
+    var compiled = 0
+    for k in 0..<1500 {
+        var b = seeds[k % seeds.count]
+        for _ in 0..<(1 + next(4)) {
+            guard !b.isEmpty else { break }
+            let i = next(b.count)
+            switch next(5) {
+            case 0: b[i] ^= UInt8(1 << next(8))
+            case 1: b.remove(at: i)
+            case 2: b.insert(b[next(b.count)], at: i)
+            case 3: b.swapAt(i, next(b.count))
+            default: b[i] = Array("[]()^:=.;#$'\"|<>-0123456789e".utf8)[next(28)]
+            }
+        }
+        if FuzzSyntax.run(b) { compiled += 1 }
+    }
+    #expect(compiled > 0)
+}
