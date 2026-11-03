@@ -262,7 +262,7 @@ private func installInDictionary(_ m: Machine, _ cls: Oop, _ sel: Oop, _ method:
 func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nilObject: Oop,
                       limits: LoaderLimits = LoaderLimits(), depth: Int = 0) -> String? {
     if depth > 64 { return "blocks nested deeper than 64 (or a cycle)" }
-    guard method.isObject, om.classIndex(of: method) == WellKnown.method, !om.isBytes(method),
+    guard method.isObject, om.isUsedReference(method), om.classIndex(of: method) == WellKnown.method, !om.isBytes(method),
           om.count(of: method) == UInt64(MethodLayout.size) else { return "not a CompiledMethod" }
     func int(_ i: Int) -> Int? {
         let v = om.load(method, i)
@@ -280,18 +280,21 @@ func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nil
     }
     if !isBlock && (copied != 0 || flags & MethodFlags.needsHome != 0) { return "a method's header" }
     let bc = om.load(method, MethodLayout.bytecodes), lits = om.load(method, MethodLayout.literals)
-    guard bc.isObject, om.classIndex(of: bc) == WellKnown.byteArray, om.isBytes(bc) else { return "bytecodes not a ByteArray" }
-    guard lits.isObject, om.classIndex(of: lits) == WellKnown.array, !om.isBytes(lits),
+    guard bc.isObject, om.isUsedReference(bc), om.classIndex(of: bc) == WellKnown.byteArray, om.isBytes(bc) else {
+        return "bytecodes not a ByteArray"
+    }
+    guard lits.isObject, om.isUsedReference(lits), om.classIndex(of: lits) == WellKnown.array, !om.isBytes(lits),
           om.count(of: lits) <= UInt64(limits.maxLiterals) else { return "literals not an Array" }
     let sel = om.load(method, MethodLayout.selector)
     if isBlock { if sel != nilObject { return "a block method with a selector" } }
     else {
-        guard sel.isObject, om.classIndex(of: sel) == WellKnown.symbol,
+        guard sel.isObject, om.isUsedReference(sel), om.classIndex(of: sel) == WellKnown.symbol, om.isBytes(sel),
               let name = String(validating: om.bytes(of: sel), as: UTF8.self), isSelector(name), arity(of: name) == argc
         else { return "the selector does not match the argument count" }
     }
     let mc = om.load(method, MethodLayout.methodClass)
-    guard mc.isObject, om.isBehavior(mc), om.load(mc, ClassLayout.classIndex) == Oop(smallInteger: Int64(classIndex))
+    guard mc.isObject, om.isUsedReference(mc), om.isBehavior(mc), !om.isBytes(mc), om.count(of: mc) >= UInt64(ClassLayout.size),
+          om.load(mc, ClassLayout.classIndex) == Oop(smallInteger: Int64(classIndex))
     else { return "the method class is not the class it is installed in" }
     let bytes = om.bytes(of: bc)
     if bytes.isEmpty && prim == 0 { return "no bytecodes and no primitive" }
@@ -310,10 +313,10 @@ func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nil
             let l = om.load(lits, k)
             guard l.isObject else { return .other }
             let lc = om.classIndex(of: l)
-            if lc == WellKnown.symbol, let name = String(validating: om.bytes(of: l), as: UTF8.self), isSelector(name) {
+            if lc == WellKnown.symbol, om.isBytes(l), let name = String(validating: om.bytes(of: l), as: UTF8.self), isSelector(name) {
                 return .selector(arity: arity(of: name))
             }
-            if lc == WellKnown.method && om.count(of: l) == UInt64(MethodLayout.size) {
+            if lc == WellKnown.method && !om.isBytes(l) && om.count(of: l) == UInt64(MethodLayout.size) {
                 let fl = om.load(l, MethodLayout.flags), cp = om.load(l, MethodLayout.copied), a = om.load(l, MethodLayout.argc)
                 if fl.isSmallInteger, cp.isSmallInteger, a.isSmallInteger, fl.smallIntegerValue & MethodFlags.block != 0 {
                     return .block(args: Int(a.smallIntegerValue), copied: Int(cp.smallIntegerValue),

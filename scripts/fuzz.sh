@@ -22,10 +22,14 @@ run=$root/.build/fuzz-run/$target
 mkdir -p $run/corpus
 log=$run/libfuzzer-build.log
 toolchains=${KAJO_FUZZ_TOOLCHAINS:-swift}
+# Under swiftly the `swift` on the path is already the swift.org toolchain,
+# and swiftly refuses to run with TOOLCHAINS set: set it only for Xcode's.
+tc=()
+swift --version 2>&1 | grep -q 'swiftlang-' && tc=(TOOLCHAINS=$toolchains)  # Xcode's names its build swiftlang-
 flags=(-c release --product fuzz-$target --scratch-path .build/fuzz -Xswiftc -sanitize=fuzzer,address -Xswiftc -DKAJO_LIBFUZZER)
-if TOOLCHAINS=$toolchains swift build $flags >$log 2>&1; then
-  bin=$(TOOLCHAINS=$toolchains swift build $flags --show-bin-path)/fuzz-$target
-  echo "libFuzzer build: ok ($(TOOLCHAINS=$toolchains swift --version 2>&1 | head -1))"
+if env $tc swift build $flags >$log 2>&1; then
+  bin=$(env $tc swift build $flags --show-bin-path)/fuzz-$target
+  echo "libFuzzer build: ok ($(env $tc swift --version 2>&1 | head -1))"
   cd $run && $bin -max_total_time=$seconds -print_final_stats=1 corpus $seeds
   exit $?
 fi

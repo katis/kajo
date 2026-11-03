@@ -2,6 +2,7 @@
 // loader checks the object model's rules and every method before anything
 // runs, all or nothing.
 
+import Foundation
 import Testing
 @testable import KajoVM
 
@@ -213,4 +214,15 @@ private func theImageLoaderRejects(_ c: Corruption) throws {
         if FuzzEntry.image(b) { loaded += 1 } else { rejected += 1 }
     }
     #expect(rejected > 0 && loaded + rejected == 300)
+}
+
+/// Regressions found by `just fuzz snapshot`: each loads cleanly or is
+/// refused, never traps.
+@Test(arguments: ["crash-wellknown-name"])
+func fuzzFoundImagesAreRefused(_ name: String) throws {
+    // A Character where a well-known class's name Symbol was (one bit):
+    // the loader read its bytes as an object's (signal 11 in release).
+    let url = URL(fileURLWithPath: "\(fixturesDir)/fuzz/snapshot/\(name).img")
+    let b = [UInt8](try Data(contentsOf: url))
+    #expect(!FuzzEntry.image(b))
 }

@@ -124,6 +124,9 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
     let hw = om.highWater
     func used(_ o: Oop) -> Bool { om.isUsedReference(o) }
     func isA(_ o: Oop, _ c: UInt64) -> Bool { o.isObject && used(o) && om.classIndex(of: o) == c }
+    /// A pointer object with at least `n` slots (before any slot is read).
+    func slots(_ o: Oop, _ n: Int) -> Bool { o.isObject && used(o) && !om.isBytes(o) && om.count(of: o) >= UInt64(n) }
+    func isMethod(_ o: Oop) -> Bool { isA(o, WellKnown.method) && slots(o, MethodLayout.size) }
     // Registered classes first (everything below indexes formats by class).
     let classCount = om.classCount
     guard classCount > Int(2 * WellKnown.count) else { throw fail("fewer classes than the well-known ones") }
@@ -174,7 +177,7 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
     // Classes and metaclasses.
     for i in 1..<UInt64(classCount) {
         let c = om.classOop(i)
-        guard c.isObject, used(c), om.isBehavior(c), !om.isBytes(c),
+        guard slots(c, ClassLayout.size), om.isBehavior(c),
               om.load(c, ClassLayout.classIndex) == Oop(smallInteger: Int64(i)) else { throw fail("class \(i)'s object") }
         let mi = om.classIndex(of: c)
         let mf = om.classFormat(mi)
@@ -187,10 +190,11 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         if mi != WellKnown.metaclass {
             // c is a class: its metaclass is a Metaclass naming it back.
             let mc = om.classOop(mi)
-            guard isA(mc, WellKnown.metaclass), om.load(mc, MetaclassLayout.thisClass) == c else {
+            guard isA(mc, WellKnown.metaclass), slots(mc, MetaclassLayout.size), om.load(mc, MetaclassLayout.thisClass) == c else {
                 throw fail("class \(i)'s metaclass does not name it")
             }
         } else {
+            guard slots(c, MetaclassLayout.size) else { throw fail("metaclass \(i)'s object") }
             let this = om.load(c, MetaclassLayout.thisClass)
             guard this.isObject, used(this), om.classIndex(of: this) == i else { throw fail("metaclass \(i)'s class") }
         }
@@ -198,7 +202,7 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         var s = om.load(c, ClassLayout.superclass)
         var steps = 0
         while s != nilObj {
-            guard s.isObject, used(s), om.isBehavior(s), steps < classCount else { throw fail("class \(i)'s superclass chain") }
+            guard slots(s, ClassLayout.size), om.isBehavior(s), steps < classCount else { throw fail("class \(i)'s superclass chain") }
             s = om.load(s, ClassLayout.superclass)
             steps += 1
         }
@@ -210,14 +214,15 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
             for k in 0..<Int(om.count(of: d) / 2) {
                 let key = om.load(d, 2 * k), meth = om.load(d, 2 * k + 1)
                 if key == nilObj { continue }
-                guard isA(key, WellKnown.symbol), isA(meth, WellKnown.method), om.load(meth, MethodLayout.methodClass) == c,
+                guard isA(key, WellKnown.symbol), isMethod(meth), om.load(meth, MethodLayout.methodClass) == c,
                       om.load(meth, MethodLayout.selector) == key else { throw fail("class \(i)'s method dictionary entry \(k)") }
             }
         }
     }
     for d in WellKnown.definitions {
-        let c = om.classOop(d.index)
-        guard om.classFormat(d.index) == d.format, om.bytes(of: om.load(c, ClassLayout.name)) == Array(d.name.utf8) else {
+        let name = om.load(om.classOop(d.index), ClassLayout.name)
+        guard om.classFormat(d.index) == d.format, isA(name, WellKnown.symbol),
+              om.bytes(of: name) == Array(d.name.utf8) else {
             throw fail("well-known class \(d.name)")
         }
     }
@@ -239,7 +244,7 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
             guard om.load(o, ContextLayout.frame) == nilObj else { throw fail("a live Context") }
         case WellKnown.blockClosure:
             let bm = om.load(o, ClosureLayout.method)
-            guard isA(bm, WellKnown.method), om.load(bm, MethodLayout.flags).isSmallInteger,
+            guard isMethod(bm), om.load(bm, MethodLayout.flags).isSmallInteger,
                   om.load(bm, MethodLayout.flags).smallIntegerValue & MethodFlags.block != 0,
                   om.load(bm, MethodLayout.copied) == Oop(smallInteger: Int64(h.count) - Int64(ClosureLayout.size)) else {
                 throw fail("closure \(o) does not fit its block method")
@@ -256,8 +261,9 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         throw fail("the method table names \(methodTable.count) methods, the heap holds \(methods.count)")
     }
     for meth in methodTable {
+        guard isMethod(meth) else { throw fail("method \(meth) is not a CompiledMethod") }
         let mc = om.load(meth, MethodLayout.methodClass)
-        guard mc.isObject, used(mc), om.isBehavior(mc), om.load(mc, ClassLayout.classIndex).isSmallInteger else {
+        guard slots(mc, ClassLayout.size), om.isBehavior(mc), om.load(mc, ClassLayout.classIndex).isSmallInteger else {
             throw fail("method \(meth)'s class")
         }
         let ci = UInt64(om.load(mc, ClassLayout.classIndex).smallIntegerValue)
