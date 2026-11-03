@@ -547,11 +547,11 @@ From kernel.md and ADR 0009, each with its reason:
 ## Tests
 
 Swift: 300 `KajoVMTests` (module 8a: 297; the 3 new `WeakSymbolTests`)
-and 19 `KajoCompilerTests` (new):
+and 20 `KajoCompilerTests` (new):
 
 | file | tests |
 |---|---|
-| CompilerTests | the instructions of a method, **captured and assigned variables in a temp vector**, captured and unassigned ones copied, inlined control flow without closures, non-local return marks its blocks, literal and brace arrays, pragmas, 20 malformed sources refused, compiled methods run (loops, closures, non-local return, nil tests, class-side state, cascades, nested blocks, logic), **1500 seeded mutations of kernel files compile or are refused** |
+| CompilerTests | the instructions of a method, **captured and assigned variables in a temp vector**, captured and unassigned ones copied, inlined control flow without closures, non-local return marks its blocks, literal and brace arrays, pragmas, 20 malformed sources refused, compiled methods run (loops, closures, non-local return, nil tests, class-side state, cascades, nested blocks, logic), **1500 seeded mutations of kernel files compile or are refused**, **a compilation frees its scopes and variables** |
 | KernelImageTests | **the kernel builds without warnings and loads**, **its tests pass headless and the events are the v1 protocol in time order**, filter and tag select, **a failure carries its message and frames into the events, the summary and JUnit**, the Transcript is an event with its Process, **load and save round trip to the same bytes and the reloaded image's tests pass**, the build is deterministic before initialization, broken class files refuse the build, an unconsumed pragma warns |
 | WeakSymbolTests | **an unreferenced Symbol is collected, its slot is reused by the next interning of the same bytes, one Symbol per spelling**, a referenced Symbol survives, the table survives image round trips with tombstones |
 
@@ -575,7 +575,13 @@ are read-only), SUnitTest, TranscriptTest, CompilerTest.
 | the two compilers agree | the Smalltalk compiler's `push_int` range to 126 | `CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid` | fails: "1 differ, the first: Character>>isLetter: bytecodes #[... 36 1 2 22 ...] against #[... 36 11 127 22 ...]" |
 | an inlined argument is copied | the loop's increment counted as an assignment (the first version) | `ProcessTest>>testManyProcessesWithASharedQueue` | fails: the forked blocks shared the counter's temp vector and read a later value |
 | the loader roots the Symbols it interns | no root between interning a selector and storing it (the first weak-table version) | `loadingSurvivesACollectionAtEveryAllocation` | fails: `img.lookup(Leaf, step:)` finds nothing (the selector was collected) |
+| a compilation leaks nothing | `Variable.scope` a strong reference (the first version: a cycle with the scope's variable lists) | `aCompilationFreesItsScopes`; `just fuzz syntax 600` | the test fails (the method scope, a variable and a block scope outlive the tree); the first 600 s libFuzzer run of the syntax target stopped after 4.5 minutes with "libFuzzer: out-of-memory (used: 2049Mb; limit: 2048Mb)", allocations in `Compiler.declare` and `Scope.init` |
 | nested results emit no events | every TestResult emitting (the first version) | `kajo test` | SUnitSample's deliberate failures appeared as `test.failed` events and in the summary, while `run.finished` counted none |
+
+The `ios-check` recipe gained `-package-name kajo`: KajoVM's `package`
+declarations need a package name on the bare `swiftc` command line (the
+gate's first run on this module failed with "the package access level used
+on 'Opcode' requires a package name").
 
 ## Unsafe surface
 

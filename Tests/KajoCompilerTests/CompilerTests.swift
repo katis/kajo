@@ -149,3 +149,25 @@ import Testing
     }
     #expect(compiled > 0)
 }
+
+/// A compilation leaves nothing behind: the scopes and variables are freed
+/// with the method's tree (a Variable's strong reference to its Scope made
+/// a cycle, and the syntax fuzzer ran out of memory).
+@Test func aCompilationFreesItsScopes() throws {
+    weak var methodScope: Scope?
+    weak var blockScope: Scope?
+    weak var variable: Variable?
+    do {
+        let tree = try parseMethod(Array("f: a | t | t := 0. a do: [:e | t := t + e]. ^ [t]".utf8), file: "t")
+        var c = Compiler(context: ClassContext(className: "Object", classSide: false, instanceVariables: [],
+                                               isClassName: { _ in false }), file: "t")
+        _ = try c.compile(tree)
+        methodScope = tree.scope
+        variable = tree.scope.declared.first
+        blockScope = tree.scope.locals.first?.scope
+        #expect(methodScope != nil && variable != nil && blockScope != nil)
+    }
+    #expect(methodScope == nil)
+    #expect(variable == nil)
+    #expect(blockScope == nil)
+}

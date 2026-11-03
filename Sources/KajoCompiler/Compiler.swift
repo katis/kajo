@@ -53,12 +53,16 @@ enum Binding {
 
 /// A temporary or argument, of a method, a real block or an inlined block.
 final class Variable {
+    // `scope` is unowned: a scope holds its variables (`declared`,
+    // `locals`), and a strong reference back leaked every compilation (the
+    // syntax fuzzer ran out of memory after 4.5 minutes). The method's tree
+    // owns every scope for as long as its variables are used.
     /// `inlinedArgument`: an inlined block's argument, a local of the real
     /// scope that only the inlined code writes.
     enum Kind { case argument, temporary, hidden, inlinedArgument }
     let name: String
     let kind: Kind
-    let scope: Scope
+    unowned let scope: Scope
     let seq: Int
     var captured = false
     var written = false

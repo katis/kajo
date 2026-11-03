@@ -26,7 +26,7 @@ bench:
 # Check that the VM core compiles for iOS (every file under Sources/KajoVM)
 ios-check:
     xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk $(xcrun --sdk iphoneos --show-sdk-path) \
-        -parse-as-library -module-name KajoVM -strict-memory-safety $(find Sources/KajoVM -name '*.swift')
+        -parse-as-library -module-name KajoVM -package-name kajo -strict-memory-safety $(find Sources/KajoVM -name '*.swift')
 
 # Release disassembly: no retain/release on the allocation, store, dispatch, send and primitive paths; one jump table
 arc-check:
