@@ -64,7 +64,7 @@ extension YoungShared {
     static func uninstall(_ vm: VMPointer) {
         guard let y = unsafe vm.pointee.young else { return }
         let s = unsafe y.pointee
-        if s.config.stress.contains(.barrierAlwaysOn) { unsafe barrierWord(vm.pointee.flag).pointee.wrappingSubtract(2, ordering: .relaxed) }
+        if unsafe s.config.stress.contains(.barrierAlwaysOn) { unsafe barrierWord(vm.pointee.flag).pointee.wrappingSubtract(2, ordering: .relaxed) }
         for k in unsafe 0..<s.count {
             let h = unsafe s.hs[k]
             unsafe h.pointee.acked.deallocate()
@@ -262,7 +262,7 @@ extension VM {
     /// Test: the young verifier now, in a stop from the host worker.
     func verifyYoung() {
         guard let y = unsafe state.pointee.young else { return }
-        unsafe host { w in unsafe stopWorld(state, w, retry: true) { stop in unsafe verifyYoungInStop(state, y, stop) } }
+        _ = unsafe host { w in unsafe stopWorld(state, w, retry: true) { stop in unsafe verifyYoungInStop(state, y, stop) } }
     }
 
     /// Test: is worker `i` inside the VM?

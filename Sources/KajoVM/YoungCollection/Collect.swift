@@ -96,7 +96,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     var col = unsafe Collector(vm: vm, y: y, c: c, k: k, ctx: c.pointee.interp.context)
 
     // H0, H1.
-    if let hk = sw.hook { unsafe hk(sw.hookContext, k, 0) }
+    if let hk = unsafe sw.hook { unsafe hk(sw.hookContext, k, 0) }
     unsafe runRound(vm, y, c, k, .h0)
     let t1 = nanoseconds()
     st.h0Ns = t1 &- st.startNs
@@ -104,7 +104,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe runRound(vm, y, c, k, .h1)
     let t2 = nanoseconds()
     st.h1Ns = t2 &- t1
-    if let hk = sw.hook { unsafe hk(sw.hookContext, k, 1) }
+    if let hk = unsafe sw.hook { unsafe hk(sw.hookContext, k, 1) }
 
     // T1: parked Processes, global roots, the new half, carried holders,
     // everything handed.
@@ -126,7 +126,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     carried.free()
     unsafe col.processHanded()
     unsafe col.drainGrey()
-    if let hk = sw.hook { unsafe hk(sw.hookContext, k, 3) }
+    if let hk = unsafe sw.hook { unsafe hk(sw.hookContext, k, 3) }
     let t3 = nanoseconds()
     st.t1Ns = t3 &- t2
     st.rounds = 2
@@ -174,7 +174,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     // The epoch rule (step 6): the old eden and survivor-from are reused,
     // and deferred entries freed, only after every participant passed a
     // safepoint after the last switch.
-    if let hk = sw.hook { unsafe hk(sw.hookContext, k, 2) }
+    if let hk = unsafe sw.hook { unsafe hk(sw.hookContext, k, 2) }
     let s = unsafe vm.pointee.epoch.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent).oldValue
     if sw.epochRule { unsafe waitEpoch(vm, y, c, s) }
     unsafe col.freeDeferred(stash, &st)

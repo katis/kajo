@@ -7,6 +7,7 @@
 // verifier runs at a stop after every collection.
 
 import Darwin
+import Foundation
 import Synchronization
 import Testing
 @testable import KajoVM
@@ -423,6 +424,7 @@ private func deferredAcrossAFullCollection(own: Bool) throws -> (failures: UInt6
     rt.vm.collectYoung(worker: 2)            // the nursery's free, if it kept the entry
     rt.vm.verifyYoung()
     let lists = rt.vm.inspect { $0.verifyFreeLists() }
+    if !lists.isEmpty, ProcessInfo.processInfo.environment["KAJO_SHOW_REPORTS"] != nil { print("REPORT: \(lists[0])") }
     let f = rt.verifierFailures + UInt64(lists.count)
     let sum: Int64? = f == 0 ? sumKeep(rt) : nil
     rt.stop(verifyHeap: f == 0 && (sum ?? 0) == 20_100)

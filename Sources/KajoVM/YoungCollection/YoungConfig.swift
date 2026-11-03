@@ -89,7 +89,7 @@ typealias YoungHook = @convention(c) (UnsafeMutableRawPointer?, Int, Int) -> Voi
 
 /// Switches that turn a rule off so a test can show the rule matters
 /// (docs/modules/young-collection.md "Tests"). Never set outside tests.
-struct YoungTestSwitches: @unchecked Sendable {
+@safe struct YoungTestSwitches: @unchecked Sendable {
     /// The barrier records the young value a store overwrites while its
     /// nursery is collected.
     var youngDeletionBarrier = true

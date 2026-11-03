@@ -5,6 +5,7 @@
 // verifier runs at a stop after every collection.
 
 import Darwin
+import Foundation
 import Synchronization
 import Testing
 @testable import KajoVM
@@ -378,7 +379,13 @@ final class NSLockish: @unchecked Sendable {
 }
 
 extension Runtime {
-    var verifierFailures: UInt64 { image.om.counters.verifierFailures }
+    var verifierFailures: UInt64 {
+        let n = image.om.counters.verifierFailures
+        if n > 0, ProcessInfo.processInfo.environment["KAJO_SHOW_REPORTS"] != nil {
+            print("REPORT: \(image.om.verifierReports.first ?? "-")")
+        }
+        return n
+    }
 
     /// Run every ready "any" Process on worker `i` to completion.
     func drain(on i: Int) { while vm.runOneSlice(worker: i) {} }

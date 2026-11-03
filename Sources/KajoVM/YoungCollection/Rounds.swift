@@ -244,13 +244,13 @@ func waitServicing(_ vm: VMPointer, _ w: WorkerPointer, _ cond: () -> Bool) {
     let y = unsafe vm.pointee.young
     let participant = unsafe isRoundParticipant(vm, w)
     while cond() {
-        if participant, let y, unsafe owedLocked(y, i) != nil {
+        if participant, let y = unsafe y, unsafe owedLocked(y, i) != nil {
             unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
             unsafe serviceRounds(vm, w)
             unsafe pthread_mutex_lock(vm.pointee.safepointLock)
             continue
         }
-        if let y, unsafe i == y.pointee.collectorIndex && !y.work(i).pointee.busy && y.pointee.queue.pointee.count > 0 {
+        if let y = unsafe y, unsafe i == y.pointee.collectorIndex && !y.work(i).pointee.busy && y.pointee.queue.pointee.count > 0 {
             unsafe drainQueueLocked(vm, y, w)
             continue
         }
