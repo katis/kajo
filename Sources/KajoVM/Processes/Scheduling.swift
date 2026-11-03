@@ -46,7 +46,7 @@ func makeReadyLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, fromBlocked:
     let nilObject = unsafe vm.pointee.nilObject
     let main = intSlot(om, p, ProcessLayout.affinity) == Affinity.main
     let q = queueIndex(main: main, priority: intSlot(om, p, ProcessLayout.priority))
-    setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.ready.rawValue))
+    unsafe setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.ready.rawValue))
     let r = unsafe records(vm, intSlot(om, p, ProcessLayout.record))
     if unsafe fromBlocked && r.pointee.runnableSince == 0 { unsafe r.pointee.runnableSince = ticks() }
     unsafe clearingStore(w, p, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
@@ -76,7 +76,7 @@ func dequeueLocked(_ vm: VMPointer, main: Bool, minPriority: Int, for w: WorkerP
             unsafe vm.pointee.queues[q] = next == nilObject ? 0 : next.raw
             if next == nilObject { unsafe vm.pointee.queues[queueCount + q] = 0 }
             unsafe clearingStore(w, head, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
-            setIntSlot(w, head, ProcessLayout.state, Int(ProcessState.running.rawValue))
+            unsafe setIntSlot(w, head, ProcessLayout.state, Int(ProcessState.running.rawValue))
             unsafe records(vm, intSlot(om, head, ProcessLayout.record)).pointee.runningOn = w.pointee.index
             return head
         }
@@ -139,12 +139,12 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
     unsafe base[0] = method.raw
     unsafe base[1] = receiver.raw
     for (i, a) in args.enumerated() { unsafe base[2 + i] = a.raw }
-    setIntSlot(w, p, ProcessLayout.priority, max(0, min(Priority.count - 1, priority)))
-    setIntSlot(w, p, ProcessLayout.affinity, main ? Affinity.main : Affinity.any)
-    setIntSlot(w, p, ProcessLayout.sp, 1 + args.count)
-    setIntSlot(w, p, ProcessLayout.pc, -1)
-    setIntSlot(w, p, ProcessLayout.fp, 0)
-    setIntSlot(w, p, ProcessLayout.hdr, 0)
+    unsafe setIntSlot(w, p, ProcessLayout.priority, max(0, min(Priority.count - 1, priority)))
+    unsafe setIntSlot(w, p, ProcessLayout.affinity, main ? Affinity.main : Affinity.any)
+    unsafe setIntSlot(w, p, ProcessLayout.sp, 1 + args.count)
+    unsafe setIntSlot(w, p, ProcessLayout.pc, -1)
+    unsafe setIntSlot(w, p, ProcessLayout.fp, 0)
+    unsafe setIntSlot(w, p, ProcessLayout.hdr, 0)
     // p was allocated above with no safepoint since: young (or old with
     // nothing young, without a nursery); the barrier is kept anyway.
     unsafe barrierStore(w, p, ProcessLayout.exitSemaphore, exit == .none ? nilObject : exit, .exitSemaphore)
@@ -161,7 +161,7 @@ func createProcess(_ vm: VMPointer, _ w: WorkerPointer, receiver: Oop, method: O
         return .none
     }
     unsafe records(vm, ri).pointee = ProcessRecord(process: p, base: base, end: base + words)
-    setIntSlot(w, p, ProcessLayout.record, ri)
+    unsafe setIntSlot(w, p, ProcessLayout.record, ri)
     let id = unsafe vm.pointee.sched.pointee.nextId
     unsafe vm.pointee.sched.pointee.nextId += 1
     om.store(p, ProcessLayout.id, Oop(smallInteger: id))
@@ -183,8 +183,8 @@ private func finishLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, _ resul
     let ri = intSlot(om, p, ProcessLayout.record)
     let base = unsafe records(vm, ri).pointee.base
     unsafe barrierStore(w, p, ProcessLayout.result, result, .processResult)
-    setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.terminated.rawValue))
-    setIntSlot(w, p, ProcessLayout.record, -1)
+    unsafe setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.terminated.rawValue))
+    unsafe setIntSlot(w, p, ProcessLayout.record, -1)
     unsafe clearingStore(w, p, ProcessLayout.waitingOn, nilObject)  // a deletion: the SATB barrier sees it
     unsafe records(vm, ri).pointee = ProcessRecord(nextFree: vm.pointee.sched.pointee.recordFree)
     unsafe vm.pointee.sched.pointee.recordFree = ri
@@ -283,13 +283,12 @@ func detachLocked(_ vm: VMPointer, _ w: WorkerPointer, unconditionally: Bool = f
 /// `fp` and `hdr` as the worker saved them) and detach it, unless the
 /// broken order is switched on (then `finishSuspend` detaches). Lock held.
 func suspendLocked(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int) {
-    let om = unsafe vm.pointee.om
     let p = unsafe w.pointee.current
     let r = unsafe w.pointee.interp.regs
-    setIntSlot(w, p, ProcessLayout.sp, sp)
-    setIntSlot(w, p, ProcessLayout.pc, pc)
-    setIntSlot(w, p, ProcessLayout.fp, r.fp)
-    setIntSlot(w, p, ProcessLayout.hdr, r.hdr)
+    unsafe setIntSlot(w, p, ProcessLayout.sp, sp)
+    unsafe setIntSlot(w, p, ProcessLayout.pc, pc)
+    unsafe setIntSlot(w, p, ProcessLayout.fp, r.fp)
+    unsafe setIntSlot(w, p, ProcessLayout.hdr, r.hdr)
     if unsafe !vm.pointee.config.testSwitches.publishBeforeClearing { unsafe detachLocked(vm, w) }
 }
 
@@ -332,7 +331,7 @@ func signalLocked(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop) -> Bool {
     let nilObject = unsafe vm.pointee.nilObject
     let first = om.load(sem, SemaphoreLayout.firstWaiter)
     if first == nilObject {
-        setIntSlot(w, sem, SemaphoreLayout.excessSignals, intSlot(om, sem, SemaphoreLayout.excessSignals) &+ 1)
+        unsafe setIntSlot(w, sem, SemaphoreLayout.excessSignals, intSlot(om, sem, SemaphoreLayout.excessSignals) &+ 1)
         return false
     }
     let next = om.load(first, ProcessLayout.next)
@@ -362,7 +361,7 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     unsafe schedLock(vm)
     let excess = intSlot(om, sem, SemaphoreLayout.excessSignals)
     if excess > 0 {
-        setIntSlot(w, sem, SemaphoreLayout.excessSignals, excess - 1)
+        unsafe setIntSlot(w, sem, SemaphoreLayout.excessSignals, excess - 1)
         unsafe schedUnlock(vm)
         return false
     }
@@ -373,7 +372,7 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     let p = unsafe w.pointee.current
     unsafe records(vm, w.pointee.record).pointee.runnableSince = 0
     unsafe suspendAfterPrimitiveLocked(vm, w, argc: argc, result: sem)
-    setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.waiting.rawValue))
+    unsafe setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.waiting.rawValue))
     unsafe barrierStore(w, p, ProcessLayout.waitingOn, sem, .waitingOn)
     unsafe clearingStore(w, p, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
     let last = om.load(sem, SemaphoreLayout.lastWaiter)
@@ -393,7 +392,6 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
 /// registers as given, at the back of its (possibly new) queue.
 func requeueCurrent(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int, affinity: Int? = nil,
                     result: (argc: Int, value: Oop)? = nil, reason: LeaveReason, hop: Bool = false) {
-    let om = unsafe vm.pointee.om
     unsafe schedLock(vm)
     if unsafe terminatePendingLocked(vm, w) {
         unsafe schedUnlock(vm)
@@ -411,7 +409,7 @@ func requeueCurrent(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int, affin
     } else {
         unsafe suspendLocked(vm, w, sp: sp, pc: pc)
     }
-    if let affinity { setIntSlot(w, p, ProcessLayout.affinity, affinity) }
+    if let affinity { unsafe setIntSlot(w, p, ProcessLayout.affinity, affinity) }
     let needMain = unsafe makeReadyLocked(vm, w, p, fromBlocked: false)
     unsafe schedUnlock(vm)
     unsafe finishSuspend(vm, w, reason)
