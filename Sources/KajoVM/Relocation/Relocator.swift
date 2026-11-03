@@ -188,12 +188,12 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
     // still stay: moving the running method's bytecodes lets the worker
     // execute a freed block's next contents (ThreadSanitizer showed it).
     let pins = unsafe r.pointee.config.testSwitches.pinRule ? Header.pinnedForGoodBit | Header.framePinBit : Header.pinnedForGoodBit
-    let flag = unsafe vm.pointee.flag
     let w0 = nanoseconds(), c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     var aborted = false, noSpace = false
     var moved: UInt64 = 0, movedBytes: UInt64 = 0, pinned: UInt64 = 0, hazards: UInt64 = 0, cas: UInt64 = 0
     var evacuated: UInt64 = 0
     var n = 0
+    var sincePoll: UInt64 = 0
     outer: while unsafe st.pointee.cursor < st.pointee.selected.count {
         let b = unsafe Int(st.pointee.selected[st.pointee.cursor])
         var skipped = false
@@ -201,9 +201,14 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
         let end = off &+ heap.usedBytes(b)
         while off < end {
             // Between objects: the only place the relocator yields or polls.
+            // A poll every 64 objects or 16 KiB copied, whichever comes
+            // first, as the marker polls every 128 traced objects: the
+            // time to safepoint stays bounded, and a stop storm still
+            // leaves the pass a batch of objects per stop.
             unsafe perturb(vm, mw)
             n &+= 1
-            if unsafe n & 63 == 0 || flag.pointee.load(ordering: .relaxed) != 0 {
+            if n & 63 == 0 || sincePoll >= 16384 {
+                sincePoll = 0
                 if unsafe !markerPoll(vm, mk, cycle: cycle, phase: .sweeping) {
                     aborted = true
                     break outer
@@ -230,6 +235,7 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
             case .moved:
                 moved &+= 1
                 movedBytes &+= words &<< 3
+                sincePoll &+= words &<< 3
             case .hazard:
                 skipped = true
                 hazards &+= 1

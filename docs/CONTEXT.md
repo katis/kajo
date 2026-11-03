@@ -99,9 +99,13 @@ as they are understood.
 - **Block**: 32 KiB unit of the heap; bodies are bump-allocated in blocks.
 - **Allocation context**: a caller's private block and private free-entry
   list; one per worker.
-- **Pin**: a header bit that keeps a body from moving. Pinned for good:
-  objects the interpreter holds raw pointers into. Frame pin: objects a
-  running frame names, for the current collection only.
+- **Pin**: a header bit that keeps a body from moving. **Pinned for good**
+  (bit 60): set when the image is built on every method, its bytecodes and
+  literal Array (the interpreter's two cached raw pointers point into
+  these), every class, every symbol, nil, true and false. **Frame pin**
+  (bit 61): set at a final mark on every old object the running frames
+  name, cleared by the pause that applies or aborts the cycle. Neither the
+  relocator nor a compaction moves a pinned body.
 - **Nursery**: a worker's region for young objects (module 4): an eden
   and two survivor halves, beyond the block range. Every worker has one;
   all are collected together by a scavenge.
@@ -201,3 +205,32 @@ as they are understood.
 - **Weak keep-alive**: the read barrier on `at:` of a weak slot while a
   cycle marks: the referent is recorded like an overwritten value, since
   the marker never traces weak slots.
+- **Relocation**: moving live old objects out of sparse blocks while the
+  world runs (module 6), by the marker thread between the final mark and
+  the sweep. The **relocation set** is the blocks chosen at the final mark:
+  snapshot blocks whose live bytes (counted by the marker) are under a
+  threshold, up to a cap on the free blocks under the soft limit. An
+  **evacuated block** is one all of whose live objects moved.
+- **RELOCATING**: the state of an entry whose body is being copied: its
+  state word is the old offset + 2^32, which leads to the intact old body
+  through the heap's second mapping, so reads and stores need no check.
+  Entered by a CAS, left by the **switch** (one release store of the new
+  offset) or a revert. Never seen at a pause.
+- **Post-store check**: after every mutator store into a heap object, the
+  state word reloaded (the store and the reload both seq_cst); if it
+  changed or was RELOCATING, one out-of-line call waits out the copy and
+  stores again into the body the entry now leads to.
+- **Hazard slot**: one of two words per worker in which a primitive that
+  keeps a body pointer across a loop (the array copy) publishes the object;
+  the relocator reverts and skips a hazarded object.
+- **Epoch**: a global counter the relocator increments when it evacuates a
+  block, and each worker's epoch word: the epoch it last saw where it held
+  no body pointer (a poll slow path, a park), 0 while entering the VM,
+  quiescent outside it.
+- **Pending block**: an evacuated block waiting until every worker's epoch
+  word is past the epoch recorded with it, or the next pause, whichever is
+  first; then it is freed and handed to the allocators. Every pause frees
+  every pending block first.
+- **Apply** (module 6): the pause that publishes a sweep also ends the
+  cycle's relocation: frame pins cleared, blocks left in the relocation
+  set returned to the pool.

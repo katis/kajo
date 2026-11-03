@@ -10,9 +10,12 @@ import Darwin
 import Testing
 @testable import KajoVM
 
+/// The ring (32 768 nodes per worker) must wrap for fragment to keep
+/// nodes and copy them: at least 4 x 32 768 iterations. Under
+/// ThreadSanitizer (10 to 50 times slower) the smallest that still does.
 #if DEBUG
-private let oldheapIterations = 1_000_000
-private let fragmentIterations = 160_000  // the ring (32 768 per worker) must wrap for keepers and copies
+private let oldheapIterations = underThreadSanitizer ? 300_000 : 1_000_000
+private let fragmentIterations = underThreadSanitizer ? 140_000 : 160_000
 #else
 private let oldheapIterations = 4_000_000
 private let fragmentIterations = 400_000
