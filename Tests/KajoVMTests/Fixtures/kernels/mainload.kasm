@@ -1,0 +1,101 @@
+; The main thread's load for `kajo run --main-ms` (module 7's headless
+; scenarios): one `mainTick:work:` per frame, a main-affine Process the
+; driver spawns and runs in a turn. `alloc` Pairs (x = i, y = the previous
+; one) of which every 64th replaces a slot of a ring of 256 (global 6,
+; made at the first tick): a few survivors, the rest garbage; then `work`
+; iterations of arithmetic. Answers the number of Pairs.
+class MPair Object 2
+
+method MPair x:y: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  return_self
+end
+
+; t0 = alloc, t1 = work, t2 = i, t3 = p, t4 = ring, t5 = acc
+method UndefinedObject mainTick:work: temps=4
+  push_nil
+  push_int 6
+  send globalAt: 1
+  store_temp 4
+  push_temp 4
+  push_nil
+  identical
+  jump_if_false ready
+  push_lit @Array
+  push_lit 256
+  send new: 1
+  store_temp 4
+  push_nil
+  push_int 6
+  push_temp 4
+  send globalAt:put: 2
+  pop
+ready:
+  push_int 0
+  store_temp 2
+  push_nil
+  store_temp 3
+aloop:
+  push_temp 2
+  push_temp 0
+  lt
+  jump_if_false work
+  push_lit @MPair
+  send basicNew 0
+  push_temp 2
+  push_temp 3
+  send x:y: 2
+  store_temp 3
+  push_temp 2
+  push_int 64
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false anext
+  push_temp 4
+  push_temp 2
+  push_int 64
+  send // 1
+  push_lit 256
+  send \\ 1
+  push_int 1
+  add
+  push_temp 3
+  send at:put: 2
+  pop
+  push_nil
+  store_temp 3
+anext:
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump aloop
+work:
+  push_int 0
+  store_temp 5
+  push_int 0
+  store_temp 2
+wloop:
+  push_temp 2
+  push_temp 1
+  lt
+  jump_if_false done
+  push_temp 5
+  push_temp 2
+  add
+  push_int 7
+  send \\ 1
+  store_temp 5
+  push_temp 2
+  push_int 1
+  add
+  store_temp 2
+  jump wloop
+done:
+  push_temp 0
+  return_top
+end

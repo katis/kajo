@@ -1,0 +1,277 @@
+; Fixture copied from experiments/concurrent-young/kernels/share.kasm (2026-11-03),
+; with `setup:`: the shared Array of global 5 is made by the host's driver
+; (`kajo run` sends `nil setup: workers` first when the method exists).
+; share: workers allocate young Boxes and exchange them through a shared
+; Array (global 5, created by the host before the kernel starts, promoted
+; after N scavenges), so that most references into a nursery come from
+; other workers' stacks, rings and nurseries (SPEC.md "Kernels").
+;
+; Per iteration i of worker w (3 000 000 iterations in total, split):
+;  - a Box (a = key, b = 7 key + 3, next = this worker's previous Box,
+;    chains of 16) in w's nursery;
+;  - the Box is deposited at shared[w * 256 + i \\ 256 + 1], overwriting the
+;    Box deposited 256 iterations earlier (deletion records while a
+;    collection runs; an old or young holder of a young value);
+;  - an Array of 4 as young garbage;
+;  - every 2nd iteration the neighbour's Box at the same position is taken,
+;    checked, its `next` followed and checked, and kept in w's ring of 512
+;    (a holder, young then old, of other nurseries' young objects).
+; Checksum: sum of own keys + per ring slot (1 + 1000000 x check) + 1000000
+; x every failed check. `check` answers b - 7 a - 3, 0 for an intact Box, so
+; the checksum does not depend on which Boxes a worker happened to take.
+class Box Object 3
+
+method Box a:b:n: temps=0
+  push_temp 0
+  store_ivar 0
+  push_temp 1
+  store_ivar 1
+  push_temp 2
+  store_ivar 2
+  return_self
+end
+
+method Box next temps=0
+  push_ivar 2
+  return_top
+end
+
+method Box check temps=0
+  push_ivar 1
+  push_ivar 0
+  push_int 7
+  mul
+  sub
+  push_int 3
+  sub
+  return_top
+end
+
+method UndefinedObject box:prev: temps=0
+  push_lit @Box
+  send basicNew 0
+  push_temp 0
+  push_temp 0
+  push_int 7
+  mul
+  push_int 3
+  add
+  push_temp 1
+  send a:b:n: 3
+  return_top
+end
+
+; args t0 = w, t1 = n. t2 iters, t3 i, t4 ring, t5 prev, t6 key/box/next,
+; t7 taken, t8 sum, t9 shared, t10 own base, t11 neighbour base
+method UndefinedObject run:of: temps=10
+  push_lit 3000000
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_nil
+  push_int 5
+  send globalAt: 1
+  store_temp 9
+  push_temp 0
+  push_lit 256
+  mul
+  store_temp 10
+  push_temp 0
+  push_int 1
+  add
+  push_temp 1
+  send \\ 1
+  push_lit 256
+  mul
+  store_temp 11
+  push_lit @Array
+  push_lit 512
+  send new: 1
+  store_temp 4
+  push_int 1
+  store_temp 3
+rinit:
+  push_temp 3
+  push_lit 512
+  le
+  jump_if_false rdone
+  push_temp 4
+  push_temp 3
+  push_nil
+  push_temp 3
+  push_nil
+  send box:prev: 2
+  send at:put: 2
+  pop
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump rinit
+rdone:
+  push_int 0
+  store_temp 8
+  push_nil
+  store_temp 5
+  push_int 1
+  store_temp 3
+loop:
+  push_temp 3
+  push_temp 2
+  le
+  jump_if_false done
+  push_temp 0
+  push_lit 10000000
+  mul
+  push_temp 3
+  add
+  store_temp 6
+  push_temp 8
+  push_temp 6
+  add
+  store_temp 8
+  push_nil
+  push_temp 6
+  push_temp 5
+  send box:prev: 2
+  store_temp 6
+  push_temp 6
+  store_temp 5
+  push_temp 3
+  push_int 16
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false nochain
+  push_nil
+  store_temp 5
+nochain:
+  push_temp 9
+  push_temp 10
+  push_temp 3
+  push_lit 256
+  send \\ 1
+  add
+  push_int 1
+  add
+  push_temp 6
+  send at:put: 2
+  pop
+  push_lit @Array
+  push_int 4
+  send new: 1
+  pop
+  push_temp 3
+  push_int 2
+  send \\ 1
+  push_int 0
+  eq
+  jump_if_false next
+  push_temp 9
+  push_temp 11
+  push_temp 3
+  push_lit 256
+  send \\ 1
+  add
+  push_int 1
+  add
+  send at: 1
+  store_temp 7
+  push_temp 7
+  push_nil
+  identical
+  jump_if_true next
+  push_temp 8
+  push_temp 7
+  send check 0
+  push_lit 1000000
+  mul
+  add
+  store_temp 8
+  push_temp 7
+  send next 0
+  store_temp 6
+  push_temp 6
+  push_nil
+  identical
+  jump_if_true keep
+  push_temp 8
+  push_temp 6
+  send check 0
+  push_lit 1000000
+  mul
+  add
+  store_temp 8
+keep:
+  push_temp 4
+  push_temp 3
+  push_lit 512
+  send \\ 1
+  push_int 1
+  add
+  push_temp 7
+  send at:put: 2
+  pop
+next:
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump loop
+done:
+  push_int 1
+  store_temp 3
+rsum:
+  push_temp 3
+  push_lit 512
+  le
+  jump_if_false fin
+  push_temp 8
+  push_temp 4
+  push_temp 3
+  send at: 1
+  send check 0
+  push_lit 1000000
+  mul
+  add
+  push_int 1
+  add
+  store_temp 8
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump rsum
+fin:
+  push_temp 8
+  return_top
+end
+
+; The app (Y6): the kernel body forever on n = t0 workers.
+method UndefinedObject shareLoop: temps=0
+loop:
+  push_nil
+  push_nil
+  send workerId 0
+  push_temp 0
+  send \\ 1
+  push_temp 0
+  send run:of: 2
+  pop
+  jump loop
+end
+
+; global 5 := the shared Array, 256 slots per worker.
+method UndefinedObject setup: temps=0
+  push_nil
+  push_int 5
+  push_lit @Array
+  push_temp 0
+  push_lit 256
+  mul
+  send new: 1
+  send globalAt:put: 2
+  pop
+  push_int 0
+  return_top
+end

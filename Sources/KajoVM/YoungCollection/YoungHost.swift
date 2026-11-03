@@ -58,11 +58,13 @@ extension YoungShared {
             sampler: linedValue(YoungSampler()), samplerLock: makeMutex(), peekGate: boxed(Atomic<Int>(0)),
             peekHeld: boxed(Atomic<Int>(0)), copyWindow: linedValue(EnterWindowHook())))
         unsafe vm.pointee.young = y
+        if config.stress.contains(.barrierAlwaysOn) { unsafe barrierWord(vm.pointee.flag).pointee.wrappingAdd(2, ordering: .relaxed) }
     }
 
     static func uninstall(_ vm: VMPointer) {
         guard let y = unsafe vm.pointee.young else { return }
         let s = unsafe y.pointee
+        if s.config.stress.contains(.barrierAlwaysOn) { unsafe barrierWord(vm.pointee.flag).pointee.wrappingSubtract(2, ordering: .relaxed) }
         for k in unsafe 0..<s.count {
             let h = unsafe s.hs[k]
             unsafe h.pointee.acked.deallocate()

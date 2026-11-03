@@ -47,6 +47,20 @@ public enum Headless {
         /// Sample old space in use every this many ms (0: never); the
         /// samples are in the report (`oldSamples`).
         public var sampleMs = 0
+        /// Module 7: how nurseries are collected (`stw`, `local`,
+        /// `offload`: the policy) and its stress flags (`everyhalf`,
+        /// `everypoll`).
+        public var young = "offload"
+        public var youngStress = ""
+        /// Module 7's headless scenarios: for this many ms (0: none; -1:
+        /// while the background Processes run) the
+        /// calling thread acts as the shell's main thread, one frame every
+        /// `frameMs`: a main-affine `nil mainTick: mainAlloc work: mainWork`
+        /// (mainload.kasm) run in turns of at most a frame.
+        public var mainMs = 0
+        public var mainAlloc = 0
+        public var mainWork = 0
+        public var frameMs = 1000.0 / 120.0
 
         public init() {}
     }
@@ -102,6 +116,10 @@ public enum Headless {
         vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
         vc.relocation.threshold = options.relocationThreshold
         vc.relocation.cap = options.relocationCap
+        guard let mode = YoungMode(name: options.young) else { return failed(.unsupported("--young: stw, local or offload")) }
+        vc.young.mode = mode
+        vc.young.stress = YoungStress(parsing: options.youngStress)
+        vc.young.verify = options.verify
 
         if let problem = vc.nursery.validate(workers: options.workers + 2) { return failed(.unsupported("nursery: \(problem)")) }
         var config = ObjectMemoryConfig()
@@ -133,6 +151,11 @@ public enum Headless {
         }
         vm.start()
         let n = options.workers
+        // A kernel's shared state (`nil setup: workers`, when it has one).
+        if let s = vm.spawn(receiver: image.nilObject, selector: "setup:", arguments: [Oop(smallInteger: Int64(n))]) {
+            vm.waitUntilAllTerminated()
+            vm.release(s)
+        }
         let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         var processes: [Oop] = []
         for i in 0..<n {
@@ -143,6 +166,11 @@ public enum Headless {
             processes.append(p)
         }
         var samples: [(ms: Double, mb: Double)] = []
+        var main: MainLoad? = nil
+        if options.mainMs != 0 {
+            main = mainLoad(vm, image, options, workers: processes)
+            if main == nil { return failed(.unsupported("--main-ms needs mainload.kasm (UndefinedObject>>mainTick:work:)")) }
+        }
         if options.sampleMs > 0 {
             while vm.liveProcessCount > 0 {
                 usleep(UInt32(options.sampleMs * 1000))
@@ -178,6 +206,8 @@ public enum Headless {
         report += nurseryReport(vm, stops: stops, ms: ms)
         report += markingReport(vm, stops: stops)
         report += relocationReport(vm)
+        report += youngReport(vm, ms: ms)
+        if let main { report += main.report() }
         if !samples.isEmpty {
             report.append(("oldSamples", samples.map { unsafe String(format: "%.0f:%.1f", $0.ms, $0.mb) }.joined(separator: ",")))
         }
@@ -189,7 +219,8 @@ public enum Headless {
             ("collections", m.collections), ("compactions", m.compactions), ("allocations", m.allocations),
             ("allocatedBytes", m.allocatedBytes), ("weakSlotsNiled", m.weakSlotsNiled), ("ephemeronsQueued", m.ephemeronsQueued),
         ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
-                              "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors"].contains($0.name) },
+                              "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
+                              "stopperQoSRaises"].contains($0.name) },
         report: report)
     }
 }
@@ -319,5 +350,166 @@ func relocationReport(_ vm: VM) -> [(String, String)] {
         ("parksWhileRelocating", "\(c.parksWhileRelocating)"),
         ("oldEndMB", unsafe String(format: "%.1f", endMB)),
         ("oldPeakMB", unsafe String(format: "%.1f", Double(c.peakBlocksInUse &* blockBytes) / 1e6)),
+    ]
+}
+
+// MARK: - module 7: the main thread's load and the young report
+
+/// What the main thread did in a headless scenario (`--main-ms`).
+struct MainLoad {
+    var ms = 0.0
+    var frames = 0
+    var turns = 0
+    var late = 0
+    var inVMNs: UInt64 = 0
+    var cpuNs: UInt64 = 0
+    var parkNs: UInt64 = 0
+    var stopNs: UInt64 = 0
+    var waitNs: UInt64 = 0
+    var collectorNs: UInt64 = 0
+    var young = YoungWorkerCounters()
+
+    func report() -> [(String, String)] {
+        func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
+        let per10 = ms > 0 ? 10_000 / ms : 0
+        func p10(_ ns: UInt64) -> String { f(Double(ns) / 1e6 * per10) }
+        let y = young
+        // Stopped because another worker allocated: parked in stops (module
+        // 4's scavenges and the cycle's pauses), rounds of other nurseries'
+        // collections (and the polls that found none owed), waits before a
+        // stop and for a pending stop. Its own: flips or own collections,
+        // waits for the collector, eden reuse, own rounds.
+        let others = parkNs &+ y.acksOtherNs &+ y.serviceNs &+ y.stopWaitNs &+ y.drainWaitNs
+        let own = y.flipNs &+ y.ownNs &+ y.collectorWaitNs &+ y.acksOwnNs
+        return [
+            ("mainMs", f(ms)), ("mainFrames", "\(frames)"), ("mainTurns", "\(turns)"), ("mainLateFrames", "\(late)"),
+            ("mainInVMMsPer10s", p10(inVMNs)), ("mainCpuMsPer10s", p10(cpuNs)),
+            ("mainStoppedOthersMsPer10s", p10(others)), ("mainStoppedOwnMsPer10s", p10(own)),
+            ("mainParkMsPer10s", p10(parkNs)), ("mainCopyInStopsMsPer10s", p10(collectorNs)),
+            ("mainStopMsPer10s", p10(stopNs)), ("mainEnterLeaveWaitMsPer10s", p10(waitNs)),
+            ("mainAcksOther", "\(y.acksOther)"), ("mainAcksOtherMsPer10s", p10(y.acksOtherNs)),
+            ("mainAckOtherMeanUs", y.acksOther == 0 ? "-" : f(Double(y.acksOtherNs) / Double(y.acksOther) / 1e3)),
+            ("mainAcksOwn", "\(y.acksOwn)"), ("mainAcksOwnMsPer10s", p10(y.acksOwnNs)),
+            ("mainAckMaxMs", f(Double(y.ackMaxNs) / 1e6)), ("mainServiceMsPer10s", p10(y.serviceNs)),
+            ("mainFlips", "\(y.flips)"), ("mainFlipMsPer10s", p10(y.flipNs)), ("mainFlipMaxMs", f(Double(y.flipMaxNs) / 1e6)),
+            ("mainOwnCollections", "\(y.ownCollections)"), ("mainOwnMsPer10s", p10(y.ownNs)),
+            ("mainOwnMaxMs", f(Double(y.ownMaxNs) / 1e6)),
+            ("mainCollectorWaits", "\(y.collectorWaits)"), ("mainCollectorWaitMsPer10s", p10(y.collectorWaitNs)),
+            ("mainEdenWaits", "\(y.edenWaits)"), ("mainEdenWaitMsPer10s", p10(y.edenWaitNs)),
+            ("mainStopWaitMsPer10s", p10(y.stopWaitNs)), ("mainDrainWaitMsPer10s", p10(y.drainWaitNs)),
+        ]
+    }
+}
+
+/// The calling thread acts as the shell's main thread for `--main-ms`: a
+/// frame every `frameMs`, each a main-affine `mainTick:work:` run in turns
+/// of at most a frame. Then it waits for the background Processes.
+private func mainLoad(_ vm: VM, _ image: Image, _ options: Headless.Options, workers: [Oop]) -> MainLoad? {
+    var m = MainLoad()
+    let frameNs = UInt64(options.frameMs * 1e6)
+    let t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+    // A negative duration: while the background Processes run.
+    let end = options.mainMs > 0 ? t0 + UInt64(options.mainMs) * 1_000_000 : UInt64.max
+    let y0 = vm.youngWorkerCounters(0)
+    var next = t0
+    while clock_gettime_nsec_np(CLOCK_UPTIME_RAW) < end && (options.mainMs > 0 || workers.contains { vm.state(of: $0) != .terminated }) {
+        guard let p = vm.spawn(receiver: image.nilObject, selector: "mainTick:work:",
+                               arguments: [Oop(smallInteger: Int64(options.mainAlloc)), Oop(smallInteger: Int64(options.mainWork))],
+                               main: true) else { return nil }
+        m.frames += 1
+        var spent: UInt64 = 0
+        repeat {
+            let st = vm.runMain(budgetNs: frameNs)
+            m.turns += 1
+            m.inVMNs &+= st.ns
+            m.cpuNs &+= st.cpuNs
+            m.parkNs &+= st.parkNs
+            m.stopNs &+= st.stopNs
+            m.collectorNs &+= st.collectorNs
+            m.waitNs &+= st.enterWaitNs &+ st.leaveWaitNs
+            spent &+= st.ns
+        } while vm.state(of: p) != .terminated && spent < frameNs * 4
+        vm.release(p)
+        next &+= frameNs
+        let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+        if now > next { m.late += 1; next = now } else { usleep(UInt32((next - now) / 1000)) }
+    }
+    m.ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e6
+    let y1 = vm.youngWorkerCounters(0)
+    m.young = YoungWorkerCounters(
+        acksOwn: y1.acksOwn &- y0.acksOwn, acksOwnNs: y1.acksOwnNs &- y0.acksOwnNs, acksOther: y1.acksOther &- y0.acksOther,
+        acksOtherNs: y1.acksOtherNs &- y0.acksOtherNs, ackMaxNs: y1.ackMaxNs, serviceNs: y1.serviceNs &- y0.serviceNs,
+        ownCollections: y1.ownCollections &- y0.ownCollections, ownNs: y1.ownNs &- y0.ownNs, ownMaxNs: y1.ownMaxNs,
+        flips: y1.flips &- y0.flips, flipNs: y1.flipNs &- y0.flipNs, flipMaxNs: y1.flipMaxNs,
+        collectorWaits: y1.collectorWaits &- y0.collectorWaits, collectorWaitNs: y1.collectorWaitNs &- y0.collectorWaitNs,
+        collectorWaitMaxNs: y1.collectorWaitMaxNs, edenWaits: y1.edenWaits &- y0.edenWaits,
+        edenWaitNs: y1.edenWaitNs &- y0.edenWaitNs, edenWaitMaxNs: y1.edenWaitMaxNs,
+        stopWaitNs: y1.stopWaitNs &- y0.stopWaitNs, drainWaitNs: y1.drainWaitNs &- y0.drainWaitNs)
+    _ = workers
+    return m
+}
+
+/// Module 7's line: collections by mode, rounds per collection and their
+/// latency (p50, p99, max, the slowest participant of the worst), each
+/// mode's collection time (p50, p99), the copy rate, objects survived and
+/// promoted, overflow, eden-reuse waits, carried holders, deletion
+/// records, deferred frees pending and released, snapshot exclusions,
+/// fallbacks by cause, the young-root scan, the collector's QoS and CPU.
+func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
+    guard vm.hasYoungCollection else { return [("young", "stw")] }
+    let c = vm.youngCounters
+    let log = vm.youngLog
+    let rounds = vm.roundLog
+    func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
+    func msS(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
+    func pct(_ xs: [UInt64], _ q: Double) -> String {
+        let s = xs.sorted()
+        return s.isEmpty ? "-" : msS(s[min(s.count - 1, Int(Double(s.count) * q))])
+    }
+    let local = log.filter { !$0.offloaded }.map(\.totalNs)
+    let off = log.filter(\.offloaded).map(\.totalNs)
+    let lat = rounds.map(\.latencyNs)
+    let worst = rounds.max { $0.latencyNs < $1.latencyNs }
+    var edenWaits: UInt64 = 0, edenNs: UInt64 = 0, edenMax: UInt64 = 0, del: UInt64 = 0
+    for i in 0..<(vm.config.backgroundWorkers + 2) {
+        let w = vm.youngWorkerCounters(i)
+        edenWaits &+= w.edenWaits
+        edenNs &+= w.edenWaitNs
+        edenMax = max(edenMax, w.edenWaitMaxNs)
+        del &+= w.deletionRecords
+    }
+    let copied = log.reduce(UInt64(0)) { $0 &+ $1.survivedBytes &+ $1.promotedBytes }
+    let cpu = log.reduce(UInt64(0)) { $0 &+ $1.cpuNs }
+    let fb = c.fallbacks
+    return [
+        ("young", c.mode.name), ("ycLocal", "\(c.collectionsLocal)"), ("ycOffloaded", "\(c.collectionsOffloaded)"),
+        ("ycInline", "\(c.offloadedInline)"),
+        ("ycRoundsPerCollection", log.isEmpty ? "-" : f(Double(log.map(\.rounds).reduce(0, +)) / Double(log.count))),
+        ("ackP50ms", pct(lat, 0.5)), ("ackP99ms", pct(lat, 0.99)), ("ackMaxMs", lat.max().map(msS) ?? "-"),
+        ("ackSlowest", worst.map { "\($0.slowest)" } ?? "-"),
+        ("ycLocalP50ms", pct(local, 0.5)), ("ycLocalP99ms", pct(local, 0.99)),
+        ("ycOffP50ms", pct(off, 0.5)), ("ycOffP99ms", pct(off, 0.99)),
+        ("ycH0P50ms", pct(log.map(\.h0Ns), 0.5)), ("ycH1P50ms", pct(log.map(\.h1Ns), 0.5)),
+        ("ycT1P50ms", pct(log.map(\.t1Ns), 0.5)), ("ycDrainRoundsP50ms", pct(log.map(\.drainRoundsNs), 0.5)),
+        ("ycSweepP50ms", pct(log.map(\.sweepNs), 0.5)), ("ycEpochWaitP50ms", pct(log.map(\.epochWaitNs), 0.5)),
+        ("ycEpochWaitP99ms", pct(log.map(\.epochWaitNs), 0.99)), ("ycCpuP50ms", pct(log.map(\.cpuNs), 0.5)),
+        ("ycCopyMBs", cpu == 0 ? "-" : f(Double(copied) / Double(cpu) * 1e3)),
+        ("ycSurvived", "\(log.reduce(0) { $0 &+ $1.survivedObjects })"), ("ycPromoted", "\(c.promotedObjects)"),
+        ("ycPromotedMB", f(Double(c.promotedBytes) / 1e6)),
+        ("ycOverflowMB", f(Double(log.reduce(UInt64(0)) { $0 &+ $1.overflowBytes }) / 1e6)),
+        ("edenWaits", "\(edenWaits)"), ("edenWaitMs", msS(edenNs)), ("edenWaitMaxMs", msS(edenMax)),
+        ("ycCarried", "\(log.last?.carried ?? 0)"), ("ycHolders", "\(log.reduce(0) { $0 &+ $1.holders })"),
+        ("deletionRecords", "\(del)"), ("ycCrossRemembered", "\(log.reduce(0) { $0 &+ $1.crossRemembered })"),
+        ("deferred", "\(log.reduce(0) { $0 &+ $1.deferred })"), ("deferredFreed", "\(log.reduce(0) { $0 &+ $1.deferredFrees })"),
+        ("deferredReleasedAtPauses", "\(vm.nurseryCounters.deferredReleased)"),
+        ("snapshotExclusions", "\(c.snapshotExclusions)"),
+        ("fallbackStopWanted", "\(fb[0])"), ("fallbackEntries", "\(fb[1])"), ("fallbackSoftLimit", "\(fb[2])"),
+        ("hazardRetries", "\(log.reduce(0) { $0 &+ $1.hazardRetries })"),
+        ("youngRootScans", "\(c.initialMarks)"),
+        ("youngRootScanMeanMs", c.initialMarks == 0 ? "-" : msS(c.youngRootScanNs / c.initialMarks)),
+        ("youngRootScanMaxMs", msS(c.youngRootScanMaxNs)),
+        ("collectorQoS", "\(c.collectorQoS)"), ("collectorCpuMs", msS(c.collectorCpuNs)),
+        ("collectorWakeups", "\(c.collectorWakeups)"),
+        ("ycVerifies", "\(c.verifierRuns)"),
     ]
 }

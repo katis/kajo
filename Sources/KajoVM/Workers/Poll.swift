@@ -34,9 +34,9 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
     if attention > 1 { unsafe serviceRounds(vm, w) }
     // While rounds are open every poll reaches this slow path (the word
     // stays nonzero until the slowest participant acknowledges), so polls
-    // cost more: the budget is checked at each of them too, or a turn
-    // would overrun by the time of 1024 slow polls (module 7).
-    if unsafe s.pointee.countdown != 0 && attention <= 1 { return false }
+    // cost more: the budget is checked at every 64th of them too, or a
+    // turn would overrun by the time of 1024 slow polls (module 7).
+    if unsafe s.pointee.countdown != 0 && (attention <= 1 || s.pointee.countdown & 63 != 0) { return false }
     unsafe s.pointee.countdown = w.pointee.pollEvery
     unsafe perturb(vm, w)
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }

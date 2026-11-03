@@ -234,3 +234,34 @@ as they are understood.
 - **Apply** (module 6): the pause that publishes a sweep also ends the
   cycle's relocation: frame pins cleared, blocks left in the relocation
   set returned to the pool.
+- **Local collection** (module 7): a nursery collected by its owning worker
+  while every other worker runs: a concurrent mark of the nursery's young
+  objects (Y) whose action on a marked object is the copy (module 6's
+  protocol through the entry's state word). The owner's pause is the whole
+  collection.
+- **Offloaded collection**: the main worker's nursery collected by the
+  young collector thread while the main worker allocates in the other half
+  of its eden. The owner's pause is the **flip**: handing the full half and
+  its stash to the collection and switching to the other half.
+- **Round**: one step of a young collection's handshake: every participant
+  inside the VM does a piece of work for it at its next safepoint and
+  acknowledges. H0 turns the barrier on (clears the participant's stale
+  deletion records), H1 hands over roots (its stack) and buffers, a drain
+  round hands over buffers again; collection stops after the first drain
+  round that copied nothing.
+- **Acknowledgement**: a participant's part of a round, done at a poll or
+  in a wait; or **by proxy**: done by the collector under the safepoint
+  mutex for a participant outside the VM, or in a blocking region (whose
+  flushed stack it scans).
+- **Blocking region**: a primitive that may block long without touching the
+  heap (the shell call, a test primitive) brackets itself; inside, rounds
+  are acknowledged by proxy and the worker's epoch word is kept.
+- **Deferred free**: a dead young entry that a remembered list may still
+  name (its remembered word was nonzero at the sweep): it gets slot count 0
+  and the deferred header bit, and its nursery frees it after the epoch, or
+  at its next collection if another collection re-armed it, or at a
+  stop-the-world scavenge's pause. Neither young nor old: no snapshot holds
+  it, every verifier skips it.
+- **Young-root scan**: the initial mark without a scavenge: every
+  nursery's eden (or current half) and survivor-from bodies are walked and
+  their slots greyed, since young objects are not snapshot entries.

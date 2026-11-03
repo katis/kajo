@@ -14,6 +14,11 @@
 #     module 6's post-store slow paths and conflict call, the hazard
 #     acquire and the array copy primitive with its copy loop, the epoch
 #     enter and the pending-block free, the relocation pass and its copy;
+#     module 7's flag-word store path with every bit (`storeWithBarriers`,
+#     the young deletion record inlined), the acknowledgement slow path
+#     (`serviceRounds`, the round opener, the waits), the collector's copy
+#     loop (`Collector.evacuate`, `copyBody`, the grey drain, the holder
+#     scan, the handed buffers, the entry sweep), the resume scan;
 #  2. the dispatch loop `interpret` is one jump table: one indirect branch
 #     and one jump-table relocation;
 #  3. module 6's post-store check is inline in `interpret`'s store_ivar:
@@ -51,6 +56,9 @@ wanted=(
   Hazard 'hazardAcquire(_:_:_:_:)|primReplace(_:_:)|copySlots(_:_:_:_:_:_:_:_:_:)'
   Epoch 'epochEnter(_:_:)|tryFreePending(_:_:atPause:)|addPending(_:_:)'
   Relocator 'relocatePass(_:_:cycle:)|relocCopy(_:_:_:_:)'
+  Rounds 'serviceRounds(_:_:)|runRound(_:_:_:_:_:)|waitServicing(_:_:_:)|youngEnterLocked(_:_:)|youngLeaveLocked(_:_:)|blockingBegin(_:_:)'
+  Collect 'Collector.evacuate(_:_:)|copyBody(_:from:to:bytes:)|Collector.drainGrey()|Collector.scanHolder(_:)|Collector.processHanded()|Collector.sweep(_:_:)|Collector.freeDeferred(_:_:)|waitEpoch(_:_:_:_:)'
+  Mutator 'youngResumeCheck(_:_:_:_:)|primSlowPeek(_:_:)'
 )
 fail=0
 found=0

@@ -115,7 +115,10 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     var carried = RawArray<UInt64>()
     unsafe swap(&carried, &v.pointee.carried)
     if sw.carryHolders {
-        for i in 0..<carried.count { unsafe col.scanHolder(carried[i]) }
+        for i in 0..<carried.count {
+            unsafe col.scanHolder(carried[i])
+            if i & 255 == 255 { unsafe col.servicePoint() }
+        }
     } else {
         // Test switch: the holders kept by the last collection are forgotten.
         for i in 0..<carried.count { unsafe n.remMarker(carried[i]).pointee.bitwiseAnd(~remBit(k), ordering: .relaxed) }
@@ -470,7 +473,10 @@ struct CollectionTally {
     mutating func visitRoots() {
         let roots = unsafe work.pointee.roots
         unsafe st.stackRoots &+= UInt64(roots.count)
-        for i in 0..<roots.count { _ = unsafe classify(roots[i]) }
+        for i in 0..<roots.count {
+            _ = unsafe classify(roots[i])
+            if i & 255 == 255 { unsafe servicePoint() }
+        }
         unsafe work.pointee.roots.removeAll()
     }
 
@@ -488,10 +494,16 @@ struct CollectionTally {
             unsafe servicePoint()
             let b = unsafe work.pointee.pubs[i]
             if unsafe b.remembered {
-                for j in unsafe 0..<b.list.count { unsafe scanHolder(b.list[j]) }
+                for j in unsafe 0..<b.list.count {
+                    unsafe scanHolder(b.list[j])
+                    if j & 255 == 255 { unsafe servicePoint() }
+                }
             } else {
                 unsafe st.deletionRecords &+= UInt64(b.list.count)
-                for j in unsafe 0..<b.list.count { _ = unsafe classify(b.list[j]) }
+                for j in unsafe 0..<b.list.count {
+                    _ = unsafe classify(b.list[j])
+                    if j & 255 == 255 { unsafe servicePoint() }
+                }
             }
             var l = unsafe b.list
             l.free()
@@ -651,6 +663,9 @@ struct CollectionTally {
                     j &+= 1
                 }
                 i &+= 1
+                // No body pointer is held here: other collections' rounds
+                // and epoch waits do not wait for the whole sweep.
+                if i & 4095 == 0 { unsafe servicePoint() }
             }
             let unused = unsafe st2.count &- taken
             if unused > 0 && j < taken { unsafe (base + j).update(from: base + taken, count: unused) }

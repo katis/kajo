@@ -1,0 +1,6 @@
+; Background workers with nothing to do (module 7's heavy main-thread
+; scenario: `kajo run ... idle.kasm mainload.kasm --main-ms 10000`).
+method UndefinedObject run:of: temps=0
+  push_int 0
+  return_top
+end

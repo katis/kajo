@@ -8,7 +8,8 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--gc cm|stw] [--stress cycle,alwayson,neverapply] [--floor 0.6]
                 [--safety 2] [--escalate-below 0.25] [--reloc on|off]
                 [--stress everyblock,everycycle] [--reloc-threshold 0.5]
-                [--reloc-cap 0.5] [--sample-ms N]
+                [--reloc-cap 0.5] [--sample-ms N] [--young stw|local|offload]
+                [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
        kajo version
 
 Loads the files in order into a fresh image, runs one Process per worker
@@ -49,6 +50,7 @@ case "run":
             options.nurseryStress = v.filter { ["tinynursery", "promoteall", "scavenge"].contains($0) }.joined(separator: ",")
             options.markingStress = v.filter { ["cycle", "alwayson", "neverapply"].contains($0) }.joined(separator: ",")
             options.relocationStress = v.filter { ["everyblock", "everycycle"].contains($0) }.joined(separator: ",")
+            options.youngStress = v.filter { ["everyhalf", "everypoll", "barrieron"].contains($0) }.joined(separator: ",")
         case "--nursery": options.nurseryKB = Int(value()) ?? -1
         case "--survivor": options.survivorKB = Int(value()) ?? -1
         case "--age": options.age = Int(value()) ?? 0
@@ -62,6 +64,10 @@ case "run":
         case "--reloc-threshold": options.relocationThreshold = Double(value()) ?? 0.5
         case "--reloc-cap": options.relocationCap = Double(value()) ?? 0.5
         case "--sample-ms": options.sampleMs = Int(value()) ?? 0
+        case "--young": options.young = value()
+        case "--main-ms": options.mainMs = Int(value()) ?? 0
+        case "--main-alloc": options.mainAlloc = Int(value()) ?? 0
+        case "--main-work": options.mainWork = Int(value()) ?? 0
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }

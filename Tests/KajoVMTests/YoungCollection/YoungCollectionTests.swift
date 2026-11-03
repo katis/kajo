@@ -282,12 +282,17 @@ private func newHalf(scan: Bool) throws -> UInt64 {
     rt.spawn("mkY", main: true)
     rt.runOn(0)
     rt.spawn("hold", main: true)
+    // The collector thread acts as worker 0 once the test thread has
+    // returned from the flip (its `leaveVM` writes worker 0's counters).
+    let flipped = Flag()
     hooks.set(0) { k in
         guard k == 0 else { return }
-        while vm.isInside(worker: 0) { usleep(100) }
+        while !flipped.isSet { usleep(100) }
+        #expect(!vm.isInside(worker: 0))
         #expect(vm.runOneSlice(worker: 0))
     }
     vm.flipYoung(worker: 0)
+    flipped.set()
     #expect(vm.waitYoungDone(0))
     hooks.set(0, nil)
     vm.verifyYoung()

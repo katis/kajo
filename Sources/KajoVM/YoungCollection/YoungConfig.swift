@@ -36,9 +36,12 @@ struct YoungConfig: Sendable {
     /// The collector thread's QoS (ADR 0008's device policy: user-initiated;
     /// the marker at utility, module 5).
     var collectorQoS = QOS_CLASS_USER_INITIATED
-    /// The young verifier at a stop after every `verifyEvery`-th collection
-    /// (checked builds; the tests turn it on).
-    var verify = checkedBuild
+    /// The young verifier at a stop after every `verifyEvery`-th collection.
+    /// Off by default even in checked builds: a heap walk at a stop after
+    /// every collection starves long kernels (the lesson module 6 recorded
+    /// for its verifier); the young-collection tests, the random programs'
+    /// young configurations and the shared-objects test turn it on.
+    var verify = false
     var verifyEvery = 1
     var stress: YoungStress = []
     var testSwitches = YoungTestSwitches()
@@ -56,16 +59,22 @@ struct YoungStress: OptionSet, Sendable {
     /// 16 objects it copies: every poll of every participant services a
     /// round.
     static let roundAtEveryPoll = YoungStress(rawValue: 2)
+    /// The flag word's young bits are never clear: every pointer store
+    /// takes the barrier's slow path with the young deletion check, as
+    /// while a collection runs (the barrier's cost with a collection
+    /// running, measured without one).
+    static let barrierAlwaysOn = YoungStress(rawValue: 4)
 
     init(rawValue: UInt8) { self.rawValue = rawValue }
 
-    /// `everyhalf`, `everypoll`, comma separated.
+    /// `everyhalf`, `everypoll`, `barrieron`, comma separated.
     init(parsing s: String) {
         var f: YoungStress = []
         for part in s.split(separator: ",") {
             switch part {
             case "everyhalf": f.insert(.collectAtEveryHalf)
             case "everypoll": f.insert(.roundAtEveryPoll)
+            case "barrieron": f.insert(.barrierAlwaysOn)
             default: break
             }
         }

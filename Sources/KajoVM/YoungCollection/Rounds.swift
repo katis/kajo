@@ -114,6 +114,15 @@ private func roundWork(_ vm: VMPointer, _ y: YoungPointer, _ i: Int, _ k: Int, _
     }
 }
 
+/// A round a participant owes, with what its work hands over.
+@unsafe struct OwedRound {
+    var k: Int
+    var round: UInt64
+    var kind: RoundKind
+    var roots = RawArray<UInt64>()
+    var pubs = unsafe RawArray<PublishedBuffer>()
+}
+
 /// Mutex held: the first round participant `i` owes, or nil.
 @inline(__always)
 private func owedLocked(_ y: YoungPointer, _ i: Int) -> (k: Int, round: UInt64, kind: RoundKind)? {
@@ -163,21 +172,42 @@ func serviceRounds(_ vm: VMPointer, _ w: WorkerPointer) {
     var own = false, any = false
     var roots = RawArray<UInt64>()
     var pubs = unsafe RawArray<PublishedBuffer>()
+    // Every round owed now, taken in one hold of the mutex, worked on
+    // outside it, acknowledged in one more (at most one round per
+    // collection is open at a time). Raw arrays: no ARC on this path.
+    var owed = unsafe RawArray<OwedRound>()
     while true {
         unsafe pthread_mutex_lock(vm.pointee.safepointLock)
-        guard let (k, round, kind) = unsafe owedLocked(y, i) else {
-            unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
-            break
+        for k in unsafe 0..<y.pointee.count {
+            let h = unsafe y.handshake(k)
+            if unsafe h.pointee.active && h.pointee.need > 0 && h.pointee.acked[i] != h.pointee.round {
+                unsafe owed.append(OwedRound(k: k, round: h.pointee.round, kind: h.pointee.kind))
+            }
         }
         unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+        if unsafe owed.isEmpty { break }
         any = true
-        if k == i { own = true }
         unsafe perturb(vm, w)
-        unsafe roundWork(vm, y, i, k, kind, scan: true, &roots, &pubs)
+        for j in unsafe 0..<owed.count {
+            var o = unsafe owed[j]
+            if unsafe o.k == i { own = true }
+            unsafe roundWork(vm, y, i, o.k, o.kind, scan: true, &o.roots, &o.pubs)
+            unsafe owed[j] = o
+        }
         unsafe pthread_mutex_lock(vm.pointee.safepointLock)
-        unsafe acknowledgedLocked(vm, y, k, i, round, &roots, &pubs)
+        for j in unsafe 0..<owed.count {
+            var o = unsafe owed[j]
+            unsafe acknowledgedLocked(vm, y, o.k, i, o.round, &o.roots, &o.pubs)
+            unsafe owed[j] = o
+        }
         unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+        for j in unsafe 0..<owed.count {
+            unsafe owed[j].roots.free()
+            unsafe owed[j].pubs.free()
+        }
+        unsafe owed.removeAll()
     }
+    unsafe owed.free()
     roots.free()
     unsafe pubs.free()
     unsafe work.pointee.seenSerial = serial
