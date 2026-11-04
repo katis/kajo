@@ -153,9 +153,9 @@ its replies in exactly that form (`DevProtocol reply:result:`).
 ### The transport
 
 `ProtocolServer` (`Sources/KajoDev/Server.swift`) listens on a
-Unix-domain socket (created with umask 077; a stale socket file is
-replaced, a live one or any other file refused; the path must fit
-`sun_path`, 103 bytes). Each connection has a reading thread and a serial
+Unix-domain socket (mode 0600, the user's alone, before it listens; a
+stale socket file is replaced, a live one or any other file refused; the
+path must fit `sun_path`, 103 bytes). Each connection has a reading thread and a serial
 writing queue; a client that stops reading is dropped once 64 MiB wait
 for it, and a line longer than 1 MiB is a refusal. `kajo run <image>
 --protocol <socket>` is a headless target (`DevTarget`: the image in a
@@ -661,6 +661,9 @@ the source maps (89 KB), the tests. `kajo test` runs 192 kernel tests
   metadata; the readers read `#author`; `ClassDefinition>>package`;
   `Smalltalk garbageCollect` frees obsolete classes; `writePackage:into:`.
 - **9a**: `ShellVM.openProtocol`, `postRequest`, `queuedRequests`; the
+  snapshot test waits for the resumed image's hook (`Smalltalk
+  resumeCount`: the hook detaches every wrapper it finds, and a counter
+  built before it ran was detached once under load); the
   bridge's inbox; `ShellRuntime.serveProtocol(socket:)`, `stopProtocol`;
   the demo's and the scenario's `protocol=`; `debugstop=1`.
 - The CLI: `kajo run --protocol`, `eval`, `compile`, `browse`, `debug`,
@@ -742,8 +745,8 @@ outputs are kept with the gates' (`m9b/broken/`).
 
 ## Unsafe surface
 
-`Sources/KajoVM` lines with `unsafe` (comments excluded): UNSAFE_KAJOVM,
-against 4608 at the start (77766ad): `Processes/Debugging.swift` 96 (the
+`Sources/KajoVM` lines with `unsafe` (comments excluded): 4753,
+against 4608 at the start (77766ad): `Processes/Debugging.swift` 97 (the
 records and the scheduler lock, the stack of the running Process for the
 resend and the step marker, the countdown, the interrupt's push),
 `Shell/ShellBridge.swift` 16 (the inbox's mutex), `Shell/ShellPrimitives.swift`
@@ -751,14 +754,14 @@ resend and the step marker, the countdown, the interrupt's push),
 interrupt and the step at the poll and the resume), `Processes/Scheduling.swift`
 7 (the dequeue's hand-over, the wait's check), `ObjectMemory/Roots.swift`
 3 (holes), `ObjectModel/LiveClasses.swift` 1, `ObjectModelPrimitives.swift`
-1, `Frames.swift` 1. `KajoDev` (strict memory safety on) has 15: the
-socket calls in `Server.swift` (11) and `Client.swift` (4);
+1, `Frames.swift` 1. `KajoDev` (strict memory safety on) has 16: the
+socket calls in `Server.swift` (12) and `Client.swift` (4);
 `fuzz-protocol` 1 (libFuzzer's buffer). Counted on the final commit's
 clean build (0 warnings).
 
 ## Hot-path check
 
-`just arc-check` on the final code: ARC_LINE. Nothing of this module is on
+`just arc-check` on the final code: 135 functions, zero `swift_retain`/`swift_release`; `interpret` 1056 instructions (as at the start), one jump table. Nothing of this module is on
 the checked dispatch, send, return or allocation paths: the new primitives
 are reached through `primitive`'s switch (one out-of-line call each
 range); the step is in `pollSlow` (out of line, after its early return)
@@ -825,7 +828,42 @@ images; a window with a toolbar.
 
 ## Gates
 
-GATES_SECTION
+The code and this doc but for this table, the unsafe count and the
+hot-path paragraph are e40c1f5's; every gate ran on e40c1f5, Mac mini (M2
+Pro), swift.org 6.4.2, 2026-11-04 22:35 to 2026-11-05 00:27, every output
+in a file, each step logged with the commit it ran on (`gates.log`, 0
+files changed). Three earlier attempts found three things, fixed before
+this run: 8d's `LiveCompileTest>>testSealedClassesStayClosed` written for
+the old sealing rule, a race in 9a's snapshot test (the resumed image's
+hook detached a counter built before it ran; the test now waits for
+`Smalltalk resumeCount`), and the image loader's bad-version case naming 4
+(now current); then `just test-release` found an interrupt refused for a
+Process on its first slice (fixed: e40c1f5).
+
+| gate | result |
+|---|---|
+| `swift test` | 312 + 70 passed, 229 + 70 s |
+| under load (12 busy loops) | 312 + 70 passed, 273 + 85 s |
+| ThreadSanitizer | 312 + 70 passed, 0 reports, 500 + 1758 s |
+| ThreadSanitizer under load | 312 + 70 passed, 0 reports, 632 + 2170 s (the busy loops kept at twelve throughout) |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release in 135 functions, `interpret` 1056 instructions, one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 312 + 70 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | passed: 1000 seeds under every configuration, no failing seed; the snapshot modes saving 762 to 981 of 1000 |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.30 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 3.36 million runs (the version 4 seeds), no crash |
+| `just fuzz syntax 600` | libFuzzer build ok, 0.96 million runs, no crash |
+| `just fuzz protocol 600` | libFuzzer build ok, 3.64 million runs, no crash |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| clean build | exit 0, 0 errors, 0 warnings |
+
+(312 is `KajoVMTests`, 70 `KajoCompilerTests`, whose kernel-image suite
+runs the kernel's 192 SUnit tests.) The four fuzzers ran at the same time,
+one core each. The clean build took 10 s from an empty scratch path (the
+toolchain's compilation cache); `just ios-check` typechecks every KajoVM
+file with strict memory safety from nothing and reports no warning either.
 
 ## Commands
 
