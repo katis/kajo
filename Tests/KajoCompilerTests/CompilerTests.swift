@@ -246,3 +246,18 @@ import Testing
     let (unknown, _) = try compileMethod(Array("f ^ NoSuchClass".utf8), file: "t", in: FuzzSyntax.context)
     #expect(!FuzzEntry.makeAndRun(unknown))
 }
+
+/// Module 8d's syntax fuzzer run found a binary chain of thousands of sends
+/// overflowing the Swift stack in code generation (a left-deep tree); a
+/// chain longer than the nesting limit is a CompileError, a short chain
+/// compiles.
+@Test func aMessageChainPastTheNestingLimitIsRefused() throws {
+    let long = "f: x ^ x" + String(repeating: " + 1", count: 5000)
+    #expect(throws: CompileError.self) { _ = try compile(long) }
+    let unary = "f: x ^ x" + String(repeating: " yourself", count: 300)
+    #expect(throws: CompileError.self) { _ = try compile(unary) }
+    _ = try compile("f: x ^ x" + String(repeating: " + 1", count: 20))
+    let input = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/syntax/crash-long-binary-chain.st"))
+    #expect(!FuzzSyntax.run([UInt8](input)))
+}

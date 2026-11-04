@@ -633,10 +633,27 @@ struct Parser {
         return r
     }
 
+    /// Module 8d (the syntax fuzzer's make-and-run run): a chain of unary
+    /// and binary sends is a left-deep tree, so a chain of thousands
+    /// overflowed the Swift stack in code generation. A chain is held to
+    /// the nesting limit like brackets are.
+    func chainLength(_ n: Node) -> Int {
+        var k = 0
+        var x: Node = n
+        while let s = x as? SendNode, k <= Parser.maxDepth {
+            k += 1
+            x = s.receiver
+        }
+        return k
+    }
+
     mutating func parseUnaryMessages(_ receiver: Node) throws(CompileError) -> Node {
         var r = receiver
+        var k = chainLength(r)
         while case .identifier(let name) = token.kind {
             r = SendNode(r, name, [], line: token.line)
+            k += 1
+            if k > Parser.maxDepth { throw fail("a message chain longer than \(Parser.maxDepth)") }
             try advance()
         }
         return r
@@ -644,6 +661,7 @@ struct Parser {
 
     mutating func parseBinaryMessages(_ receiver: Node) throws(CompileError) -> Node {
         var r = receiver
+        var k = chainLength(r)
         while true {
             let op: String
             switch token.kind {
@@ -655,6 +673,8 @@ struct Parser {
             try advance()
             let a = try parseUnaryMessages(try parsePrimary())
             r = SendNode(r, op, [a], line: line)
+            k += 1
+            if k > Parser.maxDepth { throw fail("a message chain longer than \(Parser.maxDepth)") }
         }
     }
 
