@@ -216,6 +216,10 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         if o.isObject && hostRoots[o] == nil { hostRoots[o] = image.om.addRoot(o) }
     }
 
+    /// Module 9a: `keep` for the host surface's own allocations (inside
+    /// `host`).
+    func keepForHost(_ o: Oop) { keep(o) }
+
     /// The host no longer needs `o` (a Process, Semaphore or Array it got).
     func release(_ o: Oop) {
         unsafe host { _ in

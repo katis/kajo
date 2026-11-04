@@ -242,6 +242,10 @@ enum Counter: Int, CaseIterable {
     /// Processes that left a worker at a poll because a save held the
     /// scheduler, and Processes resumed from an image.
     case snapshots, snapshotsRefused, snapshotRetries, snapshotNs, holdPreemptions, processesResumed
+    /// Module 9a: view primitives that reached the view host on main, that
+    /// hopped there, shell events taken by the kernel's event loop, handle
+    /// releases.
+    case viewCalls, viewHops, shellEvents, viewReleases
 }
 
 /// A snapshot of the counters.

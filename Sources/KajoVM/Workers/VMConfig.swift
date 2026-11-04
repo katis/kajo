@@ -120,6 +120,11 @@ struct VMTestSwitches: Sendable {
     /// Module 8b: an NDJSON event from primitive 140 (one JSON object, no
     /// newline). Any VM thread, inside the VM; must not block for long.
     var event: (@convention(c) (UnsafeMutableRawPointer?, UnsafePointer<UInt8>, Int) -> Void)? = nil
+    /// Module 9a: the shell's bridge (an unretained `ShellBridge`, kept
+    /// alive by its `ShellVM`): the view host, the event queue and the
+    /// handle releases of primitives 150 to 154. nil outside a shell, where
+    /// those primitives fail (or answer that there is no shell).
+    var host: UnsafeMutableRawPointer? = nil
 
     init(context: UnsafeMutableRawPointer? = nil,
          wakeMain: (@convention(c) (UnsafeMutableRawPointer?) -> Void)? = nil,

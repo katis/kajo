@@ -185,7 +185,9 @@ Smalltalk class >> primSnapshot: aPathOrNil [
 Smalltalk class >> resumeAfterSnapshot [
 	"The image resumed in a new VM: arm again what lived in the old one's host (the Delays' timers) and make sure the finalization Process exists. The Transcript and the event stream go to the new host by themselves."
 	Delay resumeAfterSnapshot.
-	Ephemeron resumeAfterSnapshot
+	Ephemeron resumeAfterSnapshot.
+	View resumeAfterSnapshot.
+	UIEventLoop resumeAfterSnapshot
 ]
 
 { #category : #'entry points' }
