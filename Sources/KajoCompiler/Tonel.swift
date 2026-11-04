@@ -105,11 +105,21 @@ struct TonelReader {
             if b[i] == 10 { line += 1; i += 1 }
             else if b[i] == 32 || b[i] == 9 || b[i] == 13 { i += 1 }
             else if b[i] == 34 {
-                let s = i + 1
+                // A doubled quote inside is one quote (module 8e: the
+                // writer doubles them, as Pharo's Tonel does).
+                var text: [UInt8] = []
                 i += 1
-                while i < b.count && b[i] != 34 { if b[i] == 10 { line += 1 }; i += 1 }
-                guard i < b.count else { throw fail("unterminated comment") }
-                comment = String(decoding: b[s..<i], as: UTF8.self)
+                while true {
+                    guard i < b.count else { throw fail("unterminated comment") }
+                    if b[i] == 34 {
+                        if i + 1 < b.count && b[i + 1] == 34 { text.append(34); i += 2; continue }
+                        break
+                    }
+                    if b[i] == 10 { line += 1 }
+                    text.append(b[i])
+                    i += 1
+                }
+                comment = String(decoding: text, as: UTF8.self)
                 i += 1
             } else { break }
         }
@@ -293,8 +303,17 @@ struct TonelReader {
             guard i < b.count else { throw fail("a method without a body") }
             let open = i
             let close = try matchingBracket(open)
-            var src = Array(b[patternStart..<close])
-            src[open - patternStart] = 32
+            // Module 8e: the recorded source is the pattern without the
+            // blanks before `[`, then the body as it stands between the
+            // brackets (a blank between them when the body starts with
+            // neither a blank nor a line break), so the Tonel writer in
+            // Smalltalk puts `[` and `]` back where they were.
+            var end = open
+            while end > patternStart, [9, 10, 13, 32].contains(b[end - 1]) { end -= 1 }
+            var src = Array(b[patternStart..<end])
+            let body = b[(open + 1)..<close]
+            if let first = body.first, ![9, 10, 13, 32].contains(first) { src.append(32) }
+            src += body
             i = close + 1
             guard owner == name else {
                 throw CompileError("a method of \(owner) in \(name)'s file", file: file, line: methodLine)

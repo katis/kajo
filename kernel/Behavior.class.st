@@ -165,26 +165,64 @@ Behavior >> removeSelector: aSymbol [
 	self primRemoveSelector: aSymbol.
 	Pragma noteRemoved: old.
 	Smalltalk forgetSourceOf: old.
+	Smalltalk forgetCategoryOf: aSymbol in: self.
 	^ old
 ]
 
 { #category : #compiling }
 Behavior >> compile: aString [
-	"Compile a method's source with the compiler in Smalltalk, have the VM make and verify it, install it (replacing a method of that selector), record its source and keep the pragma index (module 8d). Answers the selector; a CompileError when the source or the VM refuses it, InstallForbidden in a release image."
-	| method old |
+	"Compile a method's source with the compiler in Smalltalk, have the VM make and verify it, install it (replacing a method of that selector), record its source and keep the pragma index (module 8d) and its category: the replaced method's, else 'as yet unclassified' (module 8e). Answers the selector; a CompileError when the source or the VM refuses it, InstallForbidden in a release image."
+	^ self compile: aString classified: nil
+]
+
+{ #category : #compiling }
+Behavior >> compile: aString classified: aCategoryOrNil [
+	"compile:, the method filed under aCategoryOrNil (a String or Symbol; nil keeps the replaced method's category, or 'as yet unclassified')."
+	| method old category |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: nil; signal].
 	method := (Compiler compile: aString in: self) makeMethodIn: self.
 	old := self compiledMethodAt: method selector ifAbsent: [nil].
+	category := aCategoryOrNil isNil
+		ifTrue: [(self categoryOf: method selector) ifNil: [Behavior defaultCategory]]
+		ifFalse: [aCategoryOrNil asSymbol].
 	self addSelector: method selector withMethod: method.
 	Smalltalk noteSource: aString of: method.
+	Smalltalk noteCategory: category of: method selector in: self.
 	old ifNotNil: [:m | Smalltalk forgetSourceOf: m].
 	^ method selector
 ]
 
 { #category : #compiling }
-Behavior >> compile: aString classified: aCategory [
-	"The category is not kept: methods have no categories in the image yet."
-	^ self compile: aString
+Behavior class >> defaultCategory [
+	^ #'as yet unclassified'
+]
+
+{ #category : #organization }
+Behavior >> categoryOf: aSelector [
+	"The category (a Symbol) the method aSelector of this class is filed under, or nil (module 8e)."
+	^ Smalltalk categoryOfSelector: aSelector in: self
+]
+
+{ #category : #organization }
+Behavior >> organization [
+	"Each category of this class's methods, a Symbol, to its selectors, sorted (an IdentityDictionary)."
+	| d |
+	d := IdentityDictionary new.
+	self selectors do: [:sel | (d at: ((self categoryOf: sel) ifNil: [Behavior defaultCategory]) ifAbsentPut: [OrderedCollection new]) add: sel].
+	d keys do: [:k | d at: k put: ((d at: k) asArray sort: [:a :b | a <= b])].
+	^ d
+]
+
+{ #category : #organization }
+Behavior >> categories [
+	"The categories of this class's methods, sorted."
+	^ self organization keys asArray sort: [:a :b | a <= b]
+]
+
+{ #category : #organization }
+Behavior >> selectorsInCategory: aCategory [
+	"The selectors filed under aCategory (a String or Symbol), sorted."
+	^ self organization at: aCategory asSymbol ifAbsent: [#()]
 ]
 
 { #category : #methods }

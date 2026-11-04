@@ -1,10 +1,13 @@
-"The system: the classes, the class definitions the image build recorded (kernelDefinitions), the kernel's initialization, and the entry point kajo run and kajo test start at (the image names this class in its special objects; each run starts a fresh Process sending run:of:, setup: or test: to it)."
+"The system: the classes, their definitions (ClassDefinition, handed over by the image build and kept by the class definition protocol, module 8e), every method's source and category, the kernel's initialization, and the entry point kajo run and kajo test start at (the image names this class in its special objects; each run starts a fresh Process sending run:of:, setup: or test: to it)."
 Class {
 	#name : #Smalltalk,
 	#superclass : #Object,
 	#classInstVars : [
 		'sources',
-		'classNames'
+		'classNames',
+		'definitions',
+		'organizations',
+		'undeclared'
 	],
 	#category : #'Kernel-System'
 }
@@ -70,17 +73,86 @@ Smalltalk class >> rebuildClassNames [
 
 { #category : #sources }
 Smalltalk class >> recordSources: anArray [
-	"The image build hands every method's source over: 'Class[ class]', the selector and the source, a line each."
-	anArray do: [:s | | i j spec sel cls m |
+	"The image build hands every method's source over: 'Class[ class]', the selector, the category and the source, a line each (the source last)."
+	| lf |
+	lf := String with: Character lf.
+	anArray do: [:s | | i j k spec sel cls m cat |
 		i := s indexOf: Character lf.
-		j := s indexOfSubstring: (String with: Character lf) startingAt: i + 1.
+		j := s indexOfSubstring: lf startingAt: i + 1.
+		k := s indexOfSubstring: lf startingAt: j + 1.
 		spec := s copyFrom: 1 to: i - 1.
 		sel := (s copyFrom: i + 1 to: j - 1) asSymbol.
+		cat := s copyFrom: j + 1 to: k - 1.
 		cls := (spec endsWith: ' class')
 			ifTrue: [(self at: (spec copyFrom: 1 to: spec byteSize - 6) asSymbol) class]
 			ifFalse: [self at: spec asSymbol].
 		m := cls compiledMethodAt: sel.
-		self noteSource: (s copyFrom: j + 1 to: s byteSize) of: m]
+		self noteSource: (s copyFrom: k + 1 to: s byteSize) of: m.
+		cat isEmpty ifFalse: [self noteCategory: cat asSymbol of: sel in: cls]]
+]
+
+{ #category : #sources }
+Smalltalk class >> recordDefinitions: anArray [
+	"The image build hands every class definition over, superclasses first (module 8e): the name, the superclass, the instance variables, the class-side instance variables, the category, the format kind and the comment, a line each (the comment last; names separated by blanks)."
+	| lf |
+	lf := String with: Character lf.
+	definitions := IdentityDictionary new.
+	anArray do: [:s | | fields start cls |
+		fields := OrderedCollection new.
+		start := 1.
+		6 timesRepeat: [ | j |
+			j := s indexOfSubstring: lf startingAt: start.
+			fields add: (s copyFrom: start to: j - 1).
+			start := j + 1].
+		fields add: (s copyFrom: start to: s byteSize).
+		cls := self at: (fields at: 1) asSymbol.
+		definitions at: cls put: (ClassDefinition
+			instVarNames: ((fields at: 3) substrings collect: [:n | n asSymbol])
+			classInstVarNames: ((fields at: 4) substrings collect: [:n | n asSymbol])
+			category: (fields at: 5) asSymbol
+			kind: (fields at: 6) asSymbol
+			comment: (fields at: 7))]
+]
+
+{ #category : #sources }
+Smalltalk class >> noteDefinition: aClassDefinition of: aClass [
+	definitions isNil ifTrue: [definitions := IdentityDictionary new].
+	definitions at: aClass put: aClassDefinition
+]
+
+{ #category : #sources }
+Smalltalk class >> forgetDefinitionOf: aClass [
+	definitions isNil ifTrue: [^ nil].
+	^ definitions removeKey: aClass ifAbsent: [nil]
+]
+
+{ #category : #sources }
+Smalltalk class >> noteCategory: aSymbol of: aSelector in: aBehavior [
+	"A method's category, kept per class and side by selector (module 8e)."
+	organizations isNil ifTrue: [organizations := IdentityDictionary new].
+	(organizations at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aSymbol
+]
+
+{ #category : #sources }
+Smalltalk class >> categoryOfSelector: aSelector in: aBehavior [
+	organizations isNil ifTrue: [^ nil].
+	^ (organizations at: aBehavior ifAbsent: [^ nil]) at: aSelector ifAbsent: [nil]
+]
+
+{ #category : #sources }
+Smalltalk class >> forgetCategoryOf: aSelector in: aBehavior [
+	organizations isNil ifTrue: [^ nil].
+	^ (organizations at: aBehavior ifAbsent: [^ nil]) removeKey: aSelector ifAbsent: [nil]
+]
+
+{ #category : #sources }
+Smalltalk class >> forgetClass: aClass [
+	"Every record of aClass and its class side: definition, sources, categories (Smalltalk removeClass:)."
+	self forgetDefinitionOf: aClass.
+	sources isNil ifFalse: [sources removeKey: aClass ifAbsent: [nil]. sources removeKey: aClass class ifAbsent: [nil]].
+	organizations isNil ifFalse: [organizations removeKey: aClass ifAbsent: [nil]. organizations removeKey: aClass class ifAbsent: [nil]].
+	undeclared isNil ifFalse: [undeclared removeKey: aClass ifAbsent: [nil]].
+	classNames := nil
 ]
 
 { #category : #sources }
@@ -98,7 +170,9 @@ Smalltalk class >> noteSource: aString of: aCompiledMethod [
 
 { #category : #sources }
 Smalltalk class >> definitionOf: aClass [
-	^ self kernelDefinitions detect: [:d | d first == aClass name] ifNone: [nil]
+	"aClass's ClassDefinition, or nil."
+	definitions isNil ifTrue: [^ nil].
+	^ definitions at: aClass ifAbsent: [nil]
 ]
 
 { #category : #sources }
@@ -108,23 +182,34 @@ Smalltalk class >> instanceVariableNamesOf: aClass [
 	aClass isNil ifTrue: [^ #()].
 	aClass isMeta ifTrue: [
 		d := self definitionOf: aClass theNonMetaClass.
-		own := d isNil ifTrue: [#()] ifFalse: [d at: 4].
+		own := d isNil ifTrue: [#()] ifFalse: [d classInstVarNames].
 		^ (aClass superclass isMeta ifTrue: [self instanceVariableNamesOf: aClass superclass] ifFalse: [#()]) , own].
 	d := self definitionOf: aClass.
-	own := d isNil ifTrue: [#()] ifFalse: [d at: 3].
+	own := d isNil ifTrue: [#()] ifFalse: [d instVarNames].
 	^ (self instanceVariableNamesOf: aClass superclass) , own
 ]
 
 { #category : #sources }
 Smalltalk class >> categoryOf: aClass [
-	^ (self definitionOf: aClass) ifNil: [''] ifNotNil: [:d | d at: 5]
+	"aClass's category, a String ('' when none)."
+	^ (self definitionOf: aClass) ifNil: [''] ifNotNil: [:d | d category asString]
+]
+
+{ #category : #classes }
+Smalltalk class >> classesSuperclassesFirst [
+	"Every class, each after its superclass, classes at the same depth by name."
+	| depth |
+	depth := IdentityDictionary new.
+	^ self allClasses asArray sort: [:a :b | | da db |
+		da := depth at: a ifAbsentPut: [a allSuperclasses size].
+		db := depth at: b ifAbsentPut: [b allSuperclasses size].
+		da < db or: [da = db and: [a name <= b name]]]
 ]
 
 { #category : #initialization }
 Smalltalk class >> initializeKernel [
 	"Run by the image build before the image is saved: each class's own class-side initialize, superclasses first, then the pragma index."
-	self kernelDefinitions do: [:d | | c |
-		c := self at: d first.
+	self classesSuperclassesFirst do: [:c |
 		(c class includesSelector: #initialize) ifTrue: [c initialize]].
 	Pragma rebuildIndex.
 	Ephemeron forgetProcess

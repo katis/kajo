@@ -4,11 +4,13 @@ import KajoVM
 /// The image build (module 8b): Tonel files to a verified image. Every
 /// class is defined (the well-known ones re-parented as their files say),
 /// every method compiled by the bootstrap compiler and verified by the
-/// assembler, a synthesized `Smalltalk class >> kernelDefinitions` records
-/// the class definitions for the kernel's own tools (the compiler in
-/// Smalltalk reads instance variable names from it), the entry point is
-/// `Smalltalk`, and the kernel's class-side `initialize` methods run in a
-/// VM before the image is saved. Any error refuses the whole build.
+/// assembler, the entry point is `Smalltalk`, and in a VM before the image
+/// is saved: the class definitions are handed to the kernel (`Smalltalk
+/// recordDefinitions:`, module 8e: the instance variable names, category,
+/// format kind and comment of every class, which the compiler in Smalltalk
+/// and the Tonel writer read; 8b synthesized a method that answered them),
+/// the kernel's class-side `initialize` methods run, and every method's
+/// source and category are handed over. Any error refuses the whole build.
 public struct KernelBuild: Sendable {
     public struct Options: Sendable {
         /// Run `Smalltalk initializeKernel` in a VM before saving.
@@ -54,11 +56,15 @@ public struct KernelBuild: Sendable {
         defer { image.destroyImage() }
         try plan.load(into: image)
         if options.initialize && image.hasClass("Smalltalk") {
+            if let problem = image.runToCompletion(className: "Smalltalk", selector: "recordDefinitions:", strings: plan.definitionRecords) {
+                throw CompileError("Smalltalk recordDefinitions: \(problem)")
+            }
             if let problem = image.runToCompletion(className: "Smalltalk", selector: "initializeKernel") {
                 throw CompileError("Smalltalk initializeKernel: \(problem)")
             }
-            // Every method's source, kept in the image (Smalltalk sourceOf:),
-            // in Arrays of at most 2000 Strings: "Class[ class]\nselector\nsource".
+            // Every method's source and category, kept in the image
+            // (Smalltalk sourceOf:, Behavior>>categoryOf:), in Arrays of at
+            // most 2000 Strings: "Class[ class]\nselector\ncategory\nsource".
             let sources = plan.sources
             var start = 0
             while start < sources.count {
@@ -79,8 +85,12 @@ struct Plan {
     var classes: [TonelClass] = []
     var definitions: [KernelClassDefinition] = []
     var compiled: [AssembledMethod] = []
-    /// "Class[ class]\nselector\nsource" per compiled method.
+    /// "Class[ class]\nselector\ncategory\nsource" per compiled method.
     var sources: [String] = []
+    /// Module 8e: per class, in definition order (superclasses first),
+    /// "name\nsuperclass\ninstVars\nclassInstVars\ncategory\nkind\ncomment"
+    /// (names separated by blanks; the comment last, it may hold line breaks).
+    var definitionRecords: [String] = []
     var warnings: [String] = []
     /// Instance variable names (inherited first) and class-side ones.
     var instanceVariables: [String: [String]] = [:]
@@ -166,6 +176,9 @@ struct Plan {
             default: throw CompileError("\(c.name): unknown #type \(c.type!)", file: c.file, line: c.line)
             }
             kinds[c.name] = kind
+            definitionRecords.append([c.name, c.superclass ?? "nil", c.instanceVariables.joined(separator: " "),
+                                      c.classInstanceVariables.joined(separator: " "), c.category, kind, c.comment]
+                .joined(separator: "\n"))
             definitions.append(KernelClassDefinition(name: c.name, superclass: c.superclass, instSize: all.count, kind: kind,
                                                      metaSlots: allMeta.count, classVariables: c.classVariables, file: c.file,
                                                      line: c.line))
@@ -181,10 +194,6 @@ struct Plan {
             guard known.contains(e.name) else { throw CompileError("an extension of unknown class \(e.name)", file: e.file, line: e.line) }
             all += e.methods
         }
-        if let st = ordered.first(where: { $0.name == "Smalltalk" }) {
-            all.append(TonelMethod(className: "Smalltalk", classSide: true, category: "kernel",
-                                   source: Array(kernelDefinitionsSource(ordered, kinds).utf8), line: st.line))
-        }
         for m in all {
             let file = (ordered.first { $0.name == m.className } ?? extensions.first { $0.name == m.className })?.file ?? ""
             let ctx = ClassContext(className: m.className, classSide: m.classSide,
@@ -194,7 +203,8 @@ struct Plan {
                                    classVariables: pools[m.className] ?? [:])
             let (am, pragmas) = try compileMethod(m.source, file: file, line: m.line, in: ctx)
             compiled.append(am)
-            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n" + String(decoding: m.source, as: UTF8.self))
+            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n\(m.category)\n"
+                           + String(decoding: m.source, as: UTF8.self))
             for p in pragmas {
                 if p.selector == "consumesPragmas:", m.classSide, case .array(let xs) = p.arguments[0] {
                     for case .symbol(let s) in xs { consumed.insert(s) }
@@ -217,19 +227,4 @@ struct Plan {
             throw CompileError(error.message, file: error.file, line: error.line)
         }
     }
-}
-
-/// `Smalltalk class >> kernelDefinitions`: per class, its name, superclass,
-/// instance variables (its own), class-side instance variables, category,
-/// format kind and (module 8d) class variables, as a literal Array.
-func kernelDefinitionsSource(_ classes: [TonelClass], _ kinds: [String: String]) -> String {
-    func sym(_ s: String) -> String { "#" + s }
-    func str(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "''") + "'" }
-    var out = "kernelDefinitions\n\t\"Generated by the image build from the class files.\"\n\t^ #(\n"
-    for c in classes {
-        out += "\t\t(\(sym(c.name)) \(c.superclass.map(sym) ?? "nil") (\(c.instanceVariables.map(sym).joined(separator: " "))) "
-        out += "(\(c.classInstanceVariables.map(sym).joined(separator: " "))) \(str(c.category)) \(sym(kinds[c.name] ?? "fixed")) "
-        out += "(\(c.classVariables.map(sym).joined(separator: " "))))\n"
-    }
-    return out + "\t)"
 }
