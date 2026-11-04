@@ -50,7 +50,7 @@ extension ObjectMemory {
             if h.count < UInt64(namedSlots) { throw .layoutOutOfRange }
             if UInt64(layout.count) &+ h.count &- UInt64(namedSlots) > UInt64(Header.maxSlots) { throw .tooLarge }
         }
-        prepareOldSpaceOperation(nil)
+        if !prepareOldSpaceOperation(nil).isEmpty { throw .heapFull }
         retireAllContexts()
         guard let ctx = unsafe gc.pointee.collectorContext else { preconditionFailure("no collector context") }
         var bodies = RawArray<UInt64>()

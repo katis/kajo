@@ -75,6 +75,12 @@ extension Machine {
         let fullStress = om.config.stress.contains(.collectAtEveryAllocation)
         var force = unsafe a.pointee.fastLimit == 0
         var fulls = 0
+        // Collections after which the eden still had no room: only objects
+        // the reserve's fallback kept can fill it. The second such one was
+        // the full collection the first requested, so old space cannot take
+        // them: out of memory, a failure the program sees.
+        var collected = false
+        var noRoom = 0
         while true {
             if !force {
                 if unsafe a.pointee.stash.next == a.pointee.stash.count, unsafe om.refillStash(stash, atLeast: 1024) {
@@ -83,7 +89,16 @@ extension Machine {
                 if unsafe a.pointee.top &+ size <= a.pointee.end && a.pointee.stash.next < a.pointee.stash.count {
                     return unsafe placeYoung(a, om, header: header, bytes: size, fill: fill)
                 }
+                if unsafe collected && a.pointee.keptEnd != 0 && a.pointee.top == a.pointee.keptEnd
+                    && a.pointee.top &+ size > a.pointee.end {
+                    noRoom += 1
+                    if noRoom >= 2 {
+                        fail(.outOfMemory)
+                        return .none
+                    }
+                }
             }
+            collected = true
             let tableFull = unsafe !force && a.pointee.stash.next == a.pointee.stash.count
             if tableFull && fulls > 0 {
                 fail(.outOfMemory)
@@ -133,14 +148,25 @@ func youngPause(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext, full: 
 }
 
 /// A full collection in a stop: module 1's mark-sweep, which first has the
-/// hook promote everything. A pending request is satisfied.
+/// hook promote everything. A pending request is satisfied. A mark-sweep
+/// frees whole blocks only, so an old space whose blocks each keep a few
+/// live objects (the shells' ring) stays past its soft limit, and every
+/// scavenge after it promotes into the reserve until the reserve is gone:
+/// then the full collection compacts too (docs/modules/reserve-and-depth.md).
 func fullCollection(_ vm: VMPointer, _ stop: StopContext) {
     unsafe markStop(vm, .full)
-    if let n = unsafe vm.pointee.nursery {
+    let om = unsafe vm.pointee.om
+    let n = unsafe vm.pointee.nursery
+    if let n = unsafe n {
         unsafe n.pointee.fullRequested.pointee.store(false, ordering: .relaxed)
         unsafe n.pointee.state.pointee.counters.fullCollectionsRun &+= 1
     }
-    unsafe vm.pointee.om.collect(extraRoots: stop.roots())
+    let roots = stop.roots()
+    om.collect(extraRoots: roots)
+    if om.isOverSoftLimit {
+        if let n = unsafe n { unsafe n.pointee.state.pointee.counters.fullCompactions &+= 1 }
+        om.compact(extraRoots: roots)
+    }
 }
 
 /// A scavenge left old space past its soft limit and no full collection
@@ -192,18 +218,21 @@ extension NurseryShared {
                                           halfBytes: half)
         unsafe vm.pointee.nursery = n
         for i in 0..<count { unsafe vm.worker(i).pointee.interp.young = n.alloc(i) }
-        let needed = config.reserveBytes(workers: count) / BlockHeap.blockBytes
+        let needed = config.testSwitches.promotionReserveBlocks ?? config.reserveBytes(workers: count) / BlockHeap.blockBytes
         let blocks = om.heap.blockCount
-        let soft = Swift.min(om.config.heapBytes / BlockHeap.blockBytes, blocks - needed)
+        let soft = config.testSwitches.promotionReserveBlocks != nil ? blocks - needed
+            : Swift.min(om.config.heapBytes / BlockHeap.blockBytes, blocks - needed)
         precondition(soft >= 1, "nursery: a heap of \(blocks) blocks cannot keep a promotion reserve of \(needed); "
                      + "set ObjectMemoryConfig.reserveBytes to NurseryConfig.reserveBytes(workers:)")
         om.softLimitBlocks = soft
         om.setBeforeOldSpaceOperation { extra in unsafe promoteAllForOldSpace(vm, extra) }
+        om.setAfterOldSpaceSweep { unsafe dropFreedHolders(n) }
     }
 
     static func uninstall(_ vm: VMPointer) {
         guard let n = unsafe vm.pointee.nursery else { return }
         unsafe vm.pointee.om.setBeforeOldSpaceOperation(nil)
+        unsafe vm.pointee.om.setAfterOldSpaceSweep(nil)
         for i in unsafe 0..<vm.pointee.workerCount { unsafe vm.worker(i).pointee.interp.young = nil }
         unsafe NurseryShared.destroy(n)
         unsafe vm.pointee.nursery = nil
@@ -214,7 +243,7 @@ extension NurseryShared {
 /// reshape or snapshot, which need nothing young. The world is stopped by
 /// the worker that runs the operation; promote everything with its roots
 /// (the operation's, or the stop's when it was given none).
-private func promoteAllForOldSpace(_ vm: VMPointer, _ extra: [Oop]?) {
+private func promoteAllForOldSpace(_ vm: VMPointer, _ extra: [Oop]?) -> [Oop] {
     let sp = unsafe vm.pointee.safepoint
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
     let requested = unsafe sp.pointee.requested
@@ -226,5 +255,53 @@ private func promoteAllForOldSpace(_ vm: VMPointer, _ extra: [Oop]?) {
     let roots = unsafe extra ?? gatherRoots(vm, [])
     // The stopper may be outside the worker table (module 7's young
     // collector, module 5's marker): it promotes everything it copies.
-    unsafe scavenge(vm, participantWorker(vm, stopper), roots: roots, promoteAll: true)
+    let p = unsafe participantWorker(vm, stopper)
+    unsafe scavenge(vm, p, roots: roots, promoteAll: true)
+    let kept = unsafe youngLeft(vm)
+    if kept.isEmpty { return [] }
+    // The reserve's fallback kept objects young: old space had no block
+    // for them. Collect old space around them (roots; the sweep leaves
+    // young entries to their nursery), compact when that leaves it past
+    // its soft limit, and promote again. What is still young then does not
+    // fit old space: the caller collects around it or refuses.
+    let om = unsafe vm.pointee.om
+    if let n = unsafe vm.pointee.nursery { unsafe n.pointee.state.pointee.counters.reclaimsAroundYoung &+= 1 }
+    om.collectOldSpace(extraRoots: roots + kept)
+    if om.isOverSoftLimit { om.compactOldSpace(extraRoots: roots + kept) }
+    unsafe scavenge(vm, p, roots: roots, promoteAll: true)
+    return unsafe youngLeft(vm)
+}
+
+/// Every young object (world stopped, right after a scavenge: each is in
+/// its nursery's survivor log, survivors and kept ones alike).
+private func youngLeft(_ vm: VMPointer) -> [Oop] {
+    guard let n = unsafe vm.pointee.nursery else { return [] }
+    var out: [Oop] = []
+    for k in unsafe 0..<n.pointee.count {
+        let log = unsafe n.survivors(k).pointee.survLog
+        for i in 0..<log.count { out.append(Oop(raw: UInt64(log[i]) &<< 4)) }
+    }
+    return out
+}
+
+/// After a sweep of old space (world stopped): a holder the sweep freed
+/// leaves the carried lists and its remembered word is cleared, before its
+/// entry can be reused (only young objects kept in place leave holders
+/// listed across a full collection).
+private func dropFreedHolders(_ n: NurseryPointer) {
+    let om = unsafe n.pointee.om
+    for k in unsafe 0..<n.pointee.count {
+        let c = unsafe n.survivors(k).pointer(to: \NurserySurvivors.carried)!
+        var j = 0
+        for i in unsafe 0..<c.pointee.count {
+            let o = unsafe c.pointee[i]
+            if EntryState.isFree(om.stateWord(o)) {
+                unsafe n.remMarker(o).pointee.store(0, ordering: .relaxed)
+                continue
+            }
+            unsafe c.pointee[j] = o
+            j += 1
+        }
+        unsafe c.pointee.truncate(j)
+    }
 }

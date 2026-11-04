@@ -7,7 +7,15 @@ extension ObjectMemory {
     /// A full mark-sweep. World stopped. `extraRoots` are marked but not
     /// rewritten (oops never change, ADR 0003).
     func collect(extraRoots: [Oop] = []) {
-        prepareOldSpaceOperation(extraRoots)
+        let young = prepareOldSpaceOperation(extraRoots)
+        collectOldSpace(extraRoots: young.isEmpty ? extraRoots : extraRoots + young)
+    }
+
+    /// The mark-sweep without the hook: what `collect` runs once nothing
+    /// is young, and what module 4 runs around young objects its
+    /// promote-all kept (given as roots; the sweep leaves young entries to
+    /// their nursery). World stopped.
+    func collectOldSpace(extraRoots: [Oop]) {
         retireAllContexts()
         verifyAtPause("before collection", phase: .idle)
         mark(extraRoots: extraRoots)
@@ -228,6 +236,7 @@ extension ObjectMemory {
         }
         rebuildBlockPool()
         unsafe gc.pointee.counters.blocksFreed &+= freed
+        if let h = unsafe gc.pointee.afterOldSpaceSweep { h() }
     }
 
     /// Free unmarked used entries, unmark the rest, rebuild the entry runs
@@ -252,8 +261,8 @@ extension ObjectMemory {
         var live = RawArray<Bool>(repeating: false, count: heap.blockCount)
         var runs = RunBuilder(chunk: UInt64(config.entryChunk))
         var swept: UInt64 = 0
-        // The old map is rebuilt on the way: nothing is young here (the
-        // hook promoted everything), so it is the live entries.
+        // The old map is rebuilt on the way: the live old entries (young
+        // ones are left to their nursery).
         let old = oldMap
         var bits: UInt64 = 0
         var e: UInt64 = 1
@@ -262,6 +271,10 @@ extension ObjectMemory {
             let s = stateWord(raw)
             if EntryState.isFree(s) {
                 runs.add(raw, self)
+            } else if headerWord(raw) & Header.youngBit != 0 {
+                // Young (kept in place by the reserve's fallback): its
+                // nursery owns the entry and the body.
+                setMark(e, 0)
             } else if markByte(e) != 0 {
                 setMark(e, 0)
                 live[BlockHeap.block(ofOffset: s)] = true

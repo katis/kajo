@@ -133,9 +133,20 @@ struct SnapshotLayout {
 extension ObjectMemory {
     // MARK: - save
 
-    /// The whole object memory as snapshot bytes. World stopped.
+    /// The whole object memory as snapshot bytes. World stopped. A host
+    /// caller: old space must be able to take every young object.
     func snapshot() -> [UInt8] {
-        prepareOldSpaceOperation(nil)
+        guard let s = trySnapshot() else {
+            preconditionFailure("kajo: snapshot: old space cannot take every young object (the heap is full of live data)")
+        }
+        return s
+    }
+
+    /// As `snapshot`, or nil when young objects are left that old space
+    /// could not take (the promotion reserve's fallback kept them): an
+    /// image holds no young object.
+    func trySnapshot() -> [UInt8]? {
+        if !prepareOldSpaceOperation(nil).isEmpty { return nil }
         retireAllContexts()
         verifyAtPause("before snapshot", phase: .idle)
         let h = heap

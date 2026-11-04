@@ -293,6 +293,13 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     /// poll; tiny nurseries, perturbation, the young verifier after every
     /// collection.
     case stwScavenge, localCollection, offloadCollection, roundEveryPoll
+    /// The promotion reserve's fallback (docs/modules/reserve-and-depth.md):
+    /// a heap one block larger than the image, no promotion reserve, no
+    /// concurrent marking (only full collections free old space), tiny
+    /// nurseries; the stop-the-world scavenge keeps what finds no block,
+    /// and local collection is refused its promotion room and stops the
+    /// world for that scavenge.
+    case exhaustedReserve, exhaustedReserveLocal
 
     var testDescription: String { rawValue }
 
@@ -301,6 +308,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         case .oneWorker, .tinyNurseries: 1
         case .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock: 4
         case .localCollection, .offloadCollection, .roundEveryPoll: 4
+        case .exhaustedReserve, .exhaustedReserveLocal: 4
         default: 8
         }
     }
@@ -308,12 +316,15 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     func runtime(_ p: RandomProgram) throws -> Runtime {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
                       .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
-                      .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll].contains(self)
+                      .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll,
+                      .exhaustedReserve, .exhaustedReserveLocal].contains(self)
         let source = self == .offloadCollection ? mainTasks(p.source) : p.source
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
-        return try Runtime(source, background: workers, heapBlocks: 256, stress: stress, verify: verify,
+        let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
+        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks : 256,
+                           reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
                            configure: { c in
                                // Programs allocate tens of KiB: 512 KiB
                                // nurseries keep the promotion reserve (and
@@ -351,6 +362,14 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    c.young.verify = true
                                    if self == .roundEveryPoll { c.young.stress = .roundAtEveryPoll }
                                    c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
+                               case .exhaustedReserve, .exhaustedReserveLocal:
+                                   c.nursery.bytes = 24 << 10
+                                   c.nursery.survivorBytes = 2 << 10
+                                   c.nursery.testSwitches.promotionReserveBlocks = 0
+                                   c.nursery.stress = .promoteAll
+                                   c.marking.enabled = false
+                                   c.young.mode = self == .exhaustedReserve ? .stw : .local
+                                   c.young.verify = true
                                default: break
                                }
                            }, after: { img in
@@ -366,6 +385,10 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                            })
     }
 }
+
+/// The exhausted-reserve configurations' whole heap (the image takes one
+/// block): every program's live data fits, its garbage does not.
+let exhaustedHeapBlocks = Int(ProcessInfo.processInfo.environment["KAJO_EXHAUSTED_BLOCKS"] ?? "") ?? 3
 
 /// Even tasks forked with main affinity (`offloadCollection`): the main
 /// worker's nursery is the offloaded one.
@@ -450,6 +473,8 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
         #expect(rt.vm.markingCounters.missed == 0 && r.parksWhileRelocating == 0 && r.verifierFailures == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     case .stwScavenge: #expect(!rt.vm.hasYoungCollection)
+    case .exhaustedReserve, .exhaustedReserveLocal:
+        randomScavenges.add(config, rt.vm.nurseryCounters.exhaustedScavenges)
     case .localCollection, .offloadCollection, .roundEveryPoll:
         let yc = rt.vm.youngCounters
         randomScavenges.add(config, yc.collectionsLocal + yc.collectionsOffloaded)
@@ -488,7 +513,7 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
     if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
-        .localCollection, .offloadCollection, .roundEveryPoll].contains(config) {
+        .localCollection, .offloadCollection, .roundEveryPoll, .exhaustedReserve, .exhaustedReserveLocal].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
         // cycle, or moves an object), the configuration must.
         #expect(randomScavenges.take(config) > 0)

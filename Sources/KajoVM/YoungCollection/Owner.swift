@@ -9,7 +9,10 @@ import Synchronization
 
 /// Owner `w`'s eden is full (allocation slow path, registers flushed,
 /// `held` the oop the slow path keeps): collect its nursery locally, or
-/// flip (offload). Answers after the eden has room again.
+/// flip (offload). Answers after the eden has room again. When the
+/// collection's promotion room cannot be promised (the reserve's rule) it
+/// stops the world for module 4's scavenge instead, which keeps what finds
+/// no block in place and asks for the full collection that makes room.
 func collectOwnNursery(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, held: Oop) {
     let k = unsafe w.pointee.index
     let c = unsafe y.counters(k)
@@ -30,7 +33,10 @@ func collectOwnNursery(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, h
             if unsafe dt > c.pointee.collectorWaitMaxNs { unsafe c.pointee.collectorWaitMaxNs = dt }
         }
         let t0 = nanoseconds()
-        unsafe openYoungCollection(vm, y, w, offload: true)
+        if unsafe !openYoungCollection(vm, y, w, offload: true) {
+            unsafe scavengeForReserve(vm, w, held: held)
+            return
+        }
         let dt = nanoseconds() &- t0
         unsafe c.pointee.flips &+= 1
         unsafe c.pointee.flipNs &+= dt
@@ -48,10 +54,14 @@ func collectOwnNursery(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, h
         return
     }
     let t0 = nanoseconds()
-    unsafe openYoungCollection(vm, y, w, offload: false)
+    if unsafe !openYoungCollection(vm, y, w, offload: false) {
+        unsafe scavengeForReserve(vm, w, held: held)
+        return
+    }
     let rec = unsafe collectYoung(vm, y, w, k)
     // The epoch rule passed inside the collection: the old eden is reused.
     unsafe a.pointee.top = a.pointee.edenStart
+    unsafe a.pointee.keptEnd = 0
     let dt = nanoseconds() &- t0
     unsafe c.pointee.ownCollections &+= 1
     unsafe c.pointee.ownNs &+= dt
@@ -61,6 +71,15 @@ func collectOwnNursery(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, h
     unsafe c.pointee.edenWaitNs &+= ew
     if unsafe ew > c.pointee.edenWaitMaxNs { unsafe c.pointee.edenWaitMaxNs = ew }
     unsafe afterYoungCollection(vm, y, w)
+}
+
+/// A young collection could not be opened (the reserve's rule): module 4's
+/// stop-the-world scavenge, or the full collection one requested, in a
+/// stop of its own (`held` kept as a root).
+private func scavengeForReserve(_ vm: VMPointer, _ w: WorkerPointer, held: Oop) {
+    _ = unsafe stopWorld(vm, w, retry: true, keeping: held == .none ? [] : [held]) { stop in
+        unsafe youngPause(vm, w, stop, full: false)
+    }
 }
 
 // MARK: - the young collector thread (offload)

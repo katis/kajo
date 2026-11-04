@@ -21,6 +21,11 @@ extension VM {
     /// A scavenge in a stop of its own.
     func scavenge() { unsafe host { w in unsafe scavengeNow(state, w) } }
 
+    /// Module 4's full collection (the soft limit's), in a stop of its own.
+    func runFullCollection() {
+        unsafe host { w in _ = unsafe stopWorld(state, w, retry: true) { stop in unsafe fullCollection(state, stop) } }
+    }
+
     /// Module 1's snapshot, in a stop: everything is promoted first, so
     /// nothing in an image is young.
     func snapshot() -> [UInt8] {

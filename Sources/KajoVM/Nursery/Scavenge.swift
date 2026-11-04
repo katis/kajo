@@ -69,6 +69,8 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         unsafe s.pointee.nextRem.removeAll()
         unsafe s.pointee.survLog.removeAll()
         unsafe s.pointee.weak.removeAll()
+        unsafe s.pointee.kept.removeAll()
+        unsafe s.pointee.exhausted = false
         unsafe s.pointee.stats = ParticipantStats()
         for k in 0..<count { listed &+= unsafe n.remBuffer(i, k).pointee.count }
     }
@@ -154,6 +156,8 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         rec.promotedBytes &+= st.promotedBytes
         rec.survivedBytes &+= st.survivedBytes
         rec.overflowBytes &+= st.overflowBytes
+        rec.keptObjects &+= st.keptObjects
+        rec.keptBytes &+= st.keptBytes
         rec.remSlots &+= st.remSlots
         rec.entriesFreed &+= st.entriesFreed
         rec.packets &+= st.packetsExported
@@ -172,23 +176,40 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         unsafe log.pointee.counters.survivedBytes &+= st.survivedBytes
         unsafe log.pointee.counters.overflowObjects &+= st.overflowObjects
         unsafe log.pointee.counters.overflowBytes &+= st.overflowBytes
+        unsafe log.pointee.counters.keptObjects &+= st.keptObjects
+        unsafe log.pointee.counters.keptBytes &+= st.keptBytes
         unsafe log.pointee.counters.rememberedSlots &+= st.remSlots
         unsafe log.pointee.counters.entriesSwept &+= st.entriesSwept
         unsafe log.pointee.counters.entriesFreed &+= st.entriesFreed
     }
     var copied: UInt64 = 0
-    for p in parts { copied &+= unsafe n.scav(p).pointee.stats.promotedObjects &+ n.scav(p).pointee.stats.survivedObjects }
+    for p in parts {
+        let st = unsafe n.scav(p).pointee.stats
+        copied &+= st.promotedObjects &+ st.survivedObjects &+ st.keptObjects
+    }
     for k in 0..<count {
         let a = unsafe n.alloc(k)
         let s = unsafe n.scav(k)
         let v = unsafe n.survivors(k)
         unsafe a.pointee.top = a.pointee.edenStart
+        unsafe a.pointee.keptEnd = 0
         // The survivors' entries carry over to the next scavenge.
         unsafe swap(&v.pointee.survLog, &s.pointee.survLog)
         unsafe s.pointee.survLog.removeAll()
         // Flip: survivor-to becomes survivor-from.
         unsafe v.pointee.survFromTop = s.pointee.survCur
         unsafe v.pointee.survTo = 1 &- v.pointee.survTo
+    }
+    // The reserve's fallback: promotion found no block and objects were
+    // kept in place. Place them in their nurseries (before the holders go
+    // to the carried lists: a move across nurseries widens their bits),
+    // and ask for the full collection that makes room.
+    if rec.keptObjects > 0 {
+        unsafe placeKept(n, parts: parts)
+        unsafe log.pointee.counters.exhaustedScavenges &+= 1
+        if unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
+            unsafe log.pointee.counters.fullCollectionsRequested &+= 1
+        }
     }
     // The holders that still name young objects go to the carried list of
     // every nursery whose bit they have (each holder is in one participant's
@@ -358,34 +379,46 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
     }
 
     /// Claim and copy a young object (docs/modules/nursery.md "Claiming").
+    /// A promotion takes its body before the claim is published, so that
+    /// when no block is left the claim writes a kept header (young, this
+    /// tag) instead: no participant ever reads "old" for an object that
+    /// stays young (docs/modules/reserve-and-depth.md).
     @inline(never)
     mutating func evacuate(_ v: UInt64, _ h0: UInt64) -> UInt32 {
         let hp = unsafe headerAtomic(v)
         var h = h0
         let size = Header(raw: h0).bodyBytes
         var decision = ClaimDecision.promote
+        var dst: UInt64 = 0
         while true {
             if h & Header.youngBit == 0 { return 0 }  // promoted by another participant
             if unsafe h & tag != 0 { return UInt32(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift)) }
             let room = unsafe w.survCur &+ size <= w.survEnd
-            let (nh, d) = unsafe claimedHeader(h, tag: tag, ageLimit: ageLimit, participant: me, promoteAll: promoteAll, hasRoom: room)
+            var (nh, d) = unsafe claimedHeader(h, tag: tag, ageLimit: ageLimit, participant: me, promoteAll: promoteAll, hasRoom: room)
+            var bumped = false
+            if d != .survive {
+                if unsafe !w.exhausted, let p = unsafe om.bumpPromotion(ctx, bytes: size) {
+                    dst = p
+                    bumped = true
+                } else {
+                    nh = unsafe keptHeader(h)
+                    d = .keep
+                }
+            }
             let (won, cur) = unsafe hp.pointee.compareExchange(expected: h, desired: nh, ordering: .relaxed)
             if won {
                 h = nh
                 decision = d
                 break
             }
+            // Lost: give the body back (this participant's own block).
+            if bumped { unsafe om.unbumpPromotion(ctx, to: dst) }
             h = cur
         }
-        let dst: UInt64
+        if decision == .keep { return unsafe keep(v, h, size) }
         if decision == .survive {
             dst = unsafe w.survCur
             unsafe w.survCur = dst &+ size
-        } else {
-            guard let d = unsafe om.bumpPromotion(ctx, bytes: size) else {
-                preconditionFailure("kajo: promotion found no block: the promotion reserve is exhausted (counted in reserveExhaustions)")
-            }
-            dst = d
         }
         let src = unsafe om.bodyOffset(Oop(raw: v))
         if size <= 128 {
@@ -419,6 +452,29 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         return unsafe decision == .survive ? UInt32(truncatingIfNeeded: 1 &<< me) : 0
     }
 
+    /// The reserve's fallback (out of line): promotion found no block. The
+    /// header was claimed young with this tag in its own nursery, so every
+    /// participant and the entry sweep read it as a survivor; the body
+    /// stays where it is until the stopper places it after the join
+    /// (`placeKept`). From the first failure on this participant keeps
+    /// without asking the pool again.
+    @inline(never)
+    mutating func keep(_ v: UInt64, _ h: UInt64, _ size: UInt64) -> UInt32 {
+        unsafe w.exhausted = true
+        unsafe w.kept.append(v)
+        unsafe w.stats.keptObjects &+= 1
+        unsafe w.stats.keptBytes &+= size
+        if h & Header.bytesBit == 0 { unsafe w.stack.append(v) }
+        return UInt32(truncatingIfNeeded: 1 &<< ((h & Header.nurseryMask) &>> Header.nurseryShift))
+    }
+
+    /// A kept object's header: young in its own nursery, its age, this
+    /// scavenge's tag (the other cleared).
+    @inline(__always)
+    func keptHeader(_ h: UInt64) -> UInt64 {
+        unsafe h & ~Header.claimMask | tag
+    }
+
     /// Scan the slots of copied objects until the stack is empty. A promoted
     /// object that names a young one joins the remembered set. Every 1024
     /// objects, if a participant is idle and the pool is empty, export the
@@ -431,9 +487,12 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
             // ThreadSanitizer, so a plain load would be reported.
             let h = unsafe headerAtomic(o).pointee.load(ordering: .relaxed)
             var bits = unsafe scanSlots(o, h)
-            // A survivor (young in this participant's nursery) is remembered
-            // for the other nurseries it names (module 7 only).
-            if h & Header.youngBit != 0 { bits = unsafe rememberYoung ? bits & ~(1 &<< UInt32(truncatingIfNeeded: me)) : 0 }
+            // A survivor (young in this participant's nursery, or kept in its
+            // own) is remembered for the other nurseries it names (module 7
+            // only).
+            if h & Header.youngBit != 0 {
+                bits = unsafe rememberYoung ? bits & ~(1 &<< UInt32(truncatingIfNeeded: (h & Header.nurseryMask) &>> Header.nurseryShift)) : 0
+            }
             if unsafe bits != 0 && !(h & Header.youngBit == 0 && forgetPromoted) { unsafe note(o, bits) }
             k &+= 1
             if unsafe k & 1023 == 0 && w.stack.count >= 8
@@ -618,6 +677,109 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         if unsafe st.count > keep { unsafe om.trimStash(a.pointer(to: \NurseryAlloc.stash)!, keep: keep) }
         unsafe w.stats.entriesSwept &+= swept
         unsafe w.stats.entriesFreed &+= freed
+    }
+}
+
+/// Stopper, after the join and the flip: give the objects kept in place
+/// (the reserve's fallback) a body their nursery keeps. Every eden was
+/// reset and every survivor half flipped, so the kept bodies lie in space
+/// that is free now: an eden (either half) or the survivor half that was
+/// survivor-from and is survivor-to next. A nursery's kept bodies in the
+/// eden half being allocated in slide down to its start in address order
+/// (each destination at or below its source, as module 1's compaction);
+/// the rest follow in that eden, then in the free tail of the nursery's
+/// new survivor-from, both of which every collector reads as young (module
+/// 7's Y is the eden part and survivor-from). They join the nursery's
+/// survivor log, the next entry sweep's input. What fits nowhere in its
+/// own nursery goes to another's eden or tail with that nursery's index,
+/// and every holder remembered for the first nursery is remembered for the
+/// second too. The kept bodies sum to no more than the young bytes that
+/// neither survived nor were promoted, so the nurseries hold them; a body
+/// that still fits nowhere would be a broken invariant, not a provisioning
+/// failure.
+private func placeKept(_ n: NurseryPointer, parts: [Int]) {
+    let om = unsafe n.pointee.om
+    let count = unsafe n.pointee.count
+    let ph = unsafe n.pointee.phase
+    unsafe ph.pointee.kept.removeAll()
+    var byNursery = [[(entry: UInt64, off: UInt64)]](repeating: [], count: count)
+    for p in parts {
+        let s = unsafe n.scav(p)
+        for i in unsafe 0..<s.pointee.kept.count {
+            let e = unsafe s.pointee.kept[i]
+            unsafe ph.pointee.kept.append(e)
+            byNursery[om.header(Oop(raw: e)).nurseryIndex].append((e, om.stateWord(e)))
+        }
+        unsafe s.pointee.kept.removeAll()
+    }
+    // Destinations: per nursery its eden half's free part, then its new
+    // survivor-from's free tail.
+    func move(_ e: UInt64, from src: UInt64, to dst: UInt64, bytes: UInt64) {
+        if src != dst {
+            unsafe memmove(om.heapBase + Int(truncatingIfNeeded: dst), om.heapBase + Int(truncatingIfNeeded: src),
+                           Int(truncatingIfNeeded: bytes))
+            om.setStateWord(e, dst)
+        }
+    }
+    func place(_ e: UInt64, _ src: UInt64, into k: Int) -> Bool {
+        let a = unsafe n.alloc(k)
+        let v = unsafe n.survivors(k)
+        let bytes = Header(raw: om.headerWord(e)).bodyBytes
+        if unsafe a.pointee.top &+ bytes <= a.pointee.end {
+            let dst = unsafe a.pointee.top
+            move(e, from: src, to: dst, bytes: bytes)
+            unsafe a.pointee.top = dst &+ bytes
+            unsafe a.pointee.keptEnd = dst &+ bytes
+        } else if unsafe v.pointee.survFromTop &+ bytes <= v.pointee.survFromStart &+ n.pointee.survivorBytes {
+            let dst = unsafe v.pointee.survFromTop
+            move(e, from: src, to: dst, bytes: bytes)
+            unsafe v.pointee.survFromTop = dst &+ bytes
+        } else {
+            return false
+        }
+        unsafe v.pointee.survLog.append(UInt32(truncatingIfNeeded: e &>> 4))
+        return true
+    }
+    var left: [(entry: UInt64, off: UInt64, from: Int)] = []
+    for k in 0..<count where !byNursery[k].isEmpty {
+        let a = unsafe n.alloc(k)
+        let lo = unsafe a.pointee.edenStart, hi = unsafe a.pointee.end
+        // First the bodies inside the eden half being allocated in, in
+        // address order: sliding down never overwrites one not yet moved.
+        let inside = byNursery[k].filter { $0.off >= lo && $0.off < hi }.sorted { $0.off < $1.off }
+        let outside = byNursery[k].filter { $0.off < lo || $0.off >= hi }
+        for x in inside { if !place(x.entry, x.off, into: k) { left.append((x.entry, x.off, k)) } }
+        for x in outside { if !place(x.entry, x.off, into: k) { left.append((x.entry, x.off, k)) } }
+    }
+    if left.isEmpty { return }
+    // Across nurseries: the body takes the other nursery's index; the
+    // holders remembered for its first nursery are remembered for the
+    // other as well (a superset is sound: a holder is scanned once more).
+    var widen = [UInt32](repeating: 0, count: count)
+    for x in left {
+        var placed = false
+        for j in 0..<count where j != x.from {
+            if place(x.entry, x.off, into: j) {
+                let hp = unsafe om.headerAtomic(x.entry)
+                let h = unsafe hp.pointee.load(ordering: .relaxed)
+                unsafe hp.pointee.store(h & ~Header.nurseryMask | UInt64(j) &<< Header.nurseryShift, ordering: .relaxed)
+                widen[x.from] |= remBit(j)
+                unsafe n.pointee.state.pointee.counters.keptMovedAcross &+= 1
+                placed = true
+                break
+            }
+        }
+        precondition(placed, "kajo: the nurseries cannot hold the objects a scavenge kept: a broken invariant")
+    }
+    for p in parts {
+        let s = unsafe n.scav(p)
+        for i in unsafe 0..<s.pointee.nextRem.count {
+            let r = unsafe n.remMarker(s.pointee.nextRem[i])
+            var add: UInt32 = 0
+            let bits = unsafe r.pointee.load(ordering: .relaxed)
+            for k in 0..<count where bits & remBit(k) != 0 { add |= widen[k] }
+            if add != 0 { unsafe r.pointee.bitwiseOr(add, ordering: .relaxed) }
+        }
     }
 }
 

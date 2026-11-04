@@ -399,6 +399,9 @@ extension ObjectMemory: @unchecked Sendable {}
     var softLimitBlocks: Int
     /// Promotion refills that found no block (the reserve was too small).
     var reserveExhausted: UInt64 = 0
+    /// Module 7 under the reserve's rule: blocks promised to young
+    /// collections in flight (`reservePromotion`).
+    var promotionReserved = 0
     /// Module 5: free-entry runs a lazy sweep produced, published at the
     /// next pause; the stamp of each block's last refill and the stamp
     /// given now (the current marking cycle's).
@@ -469,8 +472,13 @@ extension ObjectMemory: @unchecked Sendable {}
     /// Run before every operation that needs nothing young (collect,
     /// compact, become, forward, reshape, snapshot): module 4 promotes
     /// everything. The argument is the operation's extra roots, or nil when
-    /// it was given none (the hook gathers the stop's roots itself).
-    var beforeOldSpaceOperation: (([Oop]?) -> Void)? = nil
+    /// it was given none (the hook gathers the stop's roots itself). It
+    /// answers the young objects it could not promote (the promotion
+    /// reserve's fallback kept them in place; usually none).
+    var beforeOldSpaceOperation: (([Oop]?) -> [Oop])? = nil
+    /// Run after every sweep of old space (module 4: remembered lists drop
+    /// holders the sweep freed, which only kept young objects can leave).
+    var afterOldSpaceSweep: (() -> Void)? = nil
     /// Module 5: the snapshot of a pending lazy sweep (OldMap.swift).
     var pendingDead: EntryBitmap? = nil
     /// Module 5: a concurrent marking cycle owns the mark map (marks are set

@@ -57,6 +57,10 @@ import Synchronization
     var youngAllocations: UInt64 = 0
     var youngBytes: UInt64 = 0
     var stashRefills: UInt64 = 0
+    /// The eden's top right after a scavenge placed kept objects in it (the
+    /// reserve's fallback), else 0: an eden still at this top and too full
+    /// for an allocation holds nothing but kept objects.
+    var keptEnd: UInt64 = 0
 }
 
 /// A nursery's survivor spaces and remembered lists (module 7 moved them
@@ -105,6 +109,11 @@ import Synchronization
     var survLog = RawArray<UInt32>()
     /// Weak objects it scanned (their weak slots wait for the sweep).
     var weak = RawArray<UInt64>()
+    /// Young objects it kept in place because promotion found no block
+    /// (the reserve's fallback): the stopper places them after the join.
+    var kept = RawArray<UInt64>()
+    /// Promotion found no block in this scavenge: keep without asking.
+    var exhausted = false
     var stats = ParticipantStats()
 }
 
@@ -116,6 +125,8 @@ struct ParticipantStats: Sendable {
     var survivedBytes: UInt64 = 0
     var overflowObjects: UInt64 = 0
     var overflowBytes: UInt64 = 0
+    var keptObjects: UInt64 = 0
+    var keptBytes: UInt64 = 0
     var remHolders: UInt64 = 0
     var remSlots: UInt64 = 0
     var entriesSwept: UInt64 = 0
@@ -160,6 +171,9 @@ struct ParticipantStats: Sendable {
     var classCount = 0
     var dropCarried = false
     var forgetPromoted = false
+    /// The objects the last scavenge kept in place (the reserve's
+    /// fallback), for its verifier and the promote-all hook.
+    var kept = RawArray<UInt64>()
 }
 
 /// Counters of every scavenge so far (the stopper writes them).
@@ -185,6 +199,20 @@ struct NurseryCounters: Sendable {
     var weakSlotsNiled: UInt64 = 0
     var fullCollectionsRequested: UInt64 = 0
     var fullCollectionsRun: UInt64 = 0
+    /// Full collections whose mark-sweep left old space past its soft
+    /// limit and that compacted (a fragmented old space).
+    var fullCompactions: UInt64 = 0
+    /// The promotion reserve's fallback: scavenges in which promotion found
+    /// no block, and the young objects they kept in place.
+    var exhaustedScavenges: UInt64 = 0
+    var keptObjects: UInt64 = 0
+    var keptBytes: UInt64 = 0
+    /// Kept objects that had to move to another nursery's eden (none but
+    /// in a nursery whose own eden and survivor space were full).
+    var keptMovedAcross: UInt64 = 0
+    /// Old-space operations whose promote-all kept objects: old space was
+    /// collected around them and promote-all ran again.
+    var reclaimsAroundYoung: UInt64 = 0
     var verifierRuns: UInt64 = 0
     var scavengeNs: UInt64 = 0
     /// Summed per worker on read.
@@ -214,6 +242,10 @@ struct ScavengeRecord: Sendable {
     var promotedBytes: UInt64 = 0
     var survivedBytes: UInt64 = 0
     var overflowBytes: UInt64 = 0
+    /// Promotion found no block: objects kept in place (the reserve's
+    /// fallback).
+    var keptObjects: UInt64 = 0
+    var keptBytes: UInt64 = 0
     var remHolders: UInt64 = 0
     var remSlots: UInt64 = 0
     var entriesFreed: UInt64 = 0
@@ -444,6 +476,7 @@ extension NurseryShared {
             unsafe w.pointee.nextRem.free()
             unsafe w.pointee.survLog.free()
             unsafe w.pointee.weak.free()
+            unsafe w.pointee.kept.free()
             unsafe unlined(w)
         }
         for i in unsafe 0..<s.bufferOwners {
@@ -459,6 +492,7 @@ extension NurseryShared {
         unsafe s.phase.pointee.tasks.free()
         unsafe s.phase.pointee.roots.free()
         unsafe s.phase.pointee.holders.free()
+        unsafe s.phase.pointee.kept.free()
         unsafe unlined(s.phase)
         unsafe s.packets.pointee.storage.deallocate()
         unsafe s.packets.pointee.length.deallocate()

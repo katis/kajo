@@ -79,6 +79,8 @@ enum RoundKind: UInt8, Sendable {
 /// One collection (docs/modules/young-collection.md "Counters"). ns.
 struct YoungRecord: Sendable {
     var nursery = 0
+    /// Promotion blocks promised at the opening, released at the end.
+    var reservedBlocks = 0
     var offloaded = false
     /// The participant that collected (the owner, or the collector thread).
     var collector = -1
@@ -136,6 +138,10 @@ enum YoungFallback: Int, Sendable, CaseIterable {
     case softLimit
     /// A stress flag.
     case stress
+    /// The promotion room a collection needs could not be promised (the
+    /// reserve's rule, docs/modules/reserve-and-depth.md): a
+    /// stop-the-world scavenge, whose fallback keeps objects in place.
+    case reserve
 }
 
 /// Guarded by the safepoint mutex.

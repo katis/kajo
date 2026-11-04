@@ -168,7 +168,13 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
     let tag = unsafe n.pointee.phase.pointee.tag
     var logged = RawArray<UInt8>(repeating: 0, count: Int(hw))
     defer { logged.free() }
+    // Objects the scavenge kept in place (the reserve's fallback): young
+    // in its eden or survivor-from, of any age.
+    var kept = RawArray<UInt8>(repeating: 0, count: Int(hw))
+    defer { kept.free() }
     if after {
+        let kl = unsafe n.pointee.phase.pointee.kept
+        for i in 0..<kl.count where kl[i] &>> 4 < hw { kept[Int(truncatingIfNeeded: kl[i] &>> 4)] = 1 }
         for k in 0..<(unsafe n.pointee.count) {
             let log = unsafe n.survivors(k).pointee.survLog
             for i in 0..<log.count {
@@ -198,7 +204,11 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
         let end = s &+ h.bodyBytes
         let inEden = unsafe s >= a.edenStart && end <= a.top
         let inFrom = unsafe s >= v.survFromStart && end <= v.survFromTop
-        if after {
+        if after && kept[Int(e)] != 0 {
+            if !inEden && !inFrom { out.fail("kept entry \(e) is in neither eden nor survivor-from of nursery \(k) (body at \(s))") }
+            if h.raw & tag == 0 { out.fail("kept entry \(e) lacks this scavenge's claim tag") }
+            if logged[Int(e)] != UInt8(k &+ 1) { out.fail("kept entry \(e) is not in nursery \(k)'s survivor log") }
+        } else if after {
             if !inFrom { out.fail("young entry \(e) is not in nursery \(k)'s survivor-from after a scavenge (body at \(s))") }
             if h.age == 0 || h.age >= ageLimit { out.fail("young entry \(e) has age \(h.age) after a scavenge (N = \(ageLimit))") }
             if h.raw & tag == 0 { out.fail("young entry \(e) lacks this scavenge's claim tag") }
@@ -210,7 +220,17 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
     if after {
         for k in 0..<(unsafe n.pointee.count) {
             let a = unsafe n.alloc(k).pointee
-            if unsafe a.top != a.edenStart { out.fail("nursery \(k)'s eden is not empty after a scavenge") }
+            // Only kept bodies, each its entry's, from the eden's start.
+            var off = unsafe a.edenStart
+            while unsafe off < a.top {
+                let br = om.heap.word(atOffset: off)
+                let e = BackRef.entryIndex(br)
+                if e == 0 || e >= hw || kept[Int(e)] == 0 || om.stateWord(e &<< 4) != off {
+                    out.fail("nursery \(k)'s eden holds more than its kept objects after a scavenge (at \(off))")
+                    break
+                }
+                off &+= BackRef.words(br) &<< 3
+            }
         }
     }
 }

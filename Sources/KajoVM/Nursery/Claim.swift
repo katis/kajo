@@ -14,6 +14,9 @@ enum ClaimDecision: Equatable, Sendable {
     case promote
     /// Promoted because the winner's survivor-to had no room.
     case promoteOverflow
+    /// Promotion found no block: kept young in place (the reserve's
+    /// fallback, docs/modules/reserve-and-depth.md).
+    case keep
 }
 
 /// The claim tag bit of scavenge `number` (`sameTag`: the test switch that

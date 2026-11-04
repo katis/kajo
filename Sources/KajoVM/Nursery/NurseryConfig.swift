@@ -111,6 +111,11 @@ struct NurseryTestSwitches: Sendable {
     var sameClaimTag = false
     /// Weak slots whose young referent died keep naming it.
     var keepDeadWeakSlots = false
+    /// The promotion reserve held back past the soft limit, in blocks,
+    /// instead of `reserveBytes(workers:)` (0: none, so promotion runs out
+    /// of blocks as soon as the heap is full): the reserve's fallback under
+    /// test (docs/modules/reserve-and-depth.md).
+    var promotionReserveBlocks: Int? = nil
 }
 
 /// Every store of an oop into a heap object that may make an old object

@@ -269,8 +269,9 @@ private func saveInStop(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext
         if case .primitive = form { om.store(state, SavedScheduler.saver, me) }
     }
     for (i, v) in queueWords.enumerated() { om.store(queues, i, v) }
-    let snap = om.snapshot()
+    let snap = om.trySnapshot()
     for (o, i, v) in restore.reversed() { om.store(o, i, v) }
+    guard let snap else { return nil }
     return image.encodedImage(snapshot: snap)
 }
 

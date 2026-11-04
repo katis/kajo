@@ -15,8 +15,9 @@ import Synchronization
 /// (registers flushed): open collection `k`. Waits (servicing rounds,
 /// parking) while a stop is wanted or requested. `offload`: the full eden
 /// half and its stash go to the collection, the owner flips to the other
-/// half (its pause is this flip).
-func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, offload: Bool) {
+/// half (its pause is this flip). False, with nothing opened, when the
+/// promotion room the collection may need cannot be promised.
+func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, offload: Bool) -> Bool {
     let sp = unsafe vm.pointee.safepoint
     let k = unsafe w.pointee.index
     let n = unsafe y.pointee.nursery
@@ -27,6 +28,17 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
     let tw = nanoseconds()
     unsafe waitServicing(vm, w) { unsafe sp.pointee.stwWanted > 0 || sp.pointee.requested }
     unsafe y.counters(k).pointee.stopWaitNs &+= nanoseconds() &- tw
+    // The reserve's rule: everything in Y may be promoted, in blocks that
+    // lose at most a large object's worth each to their tails (bodies past
+    // `largeLimit` are allocated old), plus the block being filled.
+    let yBytes = unsafe (a.pointee.top &- a.pointee.edenStart) &+ (v.pointee.survFromTop &- v.pointee.survFromStart)
+    let usable = unsafe UInt64(BlockHeap.blockBytes) &- n.pointee.largeLimit
+    let blocks = Int((yBytes &+ usable &- 1) / usable) &+ 1
+    if unsafe !n.pointee.om.reservePromotion(blocks: blocks) {
+        unsafe y.pointee.log.pointee.fallbacks[YoungFallback.reserve.rawValue] &+= 1
+        unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+        return false
+    }
     // This eden's allocations so far (module 4's counters).
     unsafe a.pointee.youngAllocations &+= UInt64(a.pointee.stash.next)
     unsafe a.pointee.youngBytes &+= a.pointee.top &- a.pointee.edenStart
@@ -38,6 +50,7 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
     unsafe r[3].store(v.pointee.survFromTop, ordering: .relaxed)
     var rec = YoungRecord()
     rec.nursery = k
+    rec.reservedBlocks = blocks
     rec.offloaded = offload
     rec.openNs = nanoseconds()
     rec.youngBytes = unsafe (a.pointee.top &- a.pointee.edenStart) &+ (v.pointee.survFromTop &- v.pointee.survFromStart)
@@ -49,6 +62,7 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
         unsafe a.pointee.half = 1 &- a.pointee.half
         unsafe a.pointee.edenStart = a.pointee.edenBase &+ UInt64(a.pointee.half) &* a.pointee.halfBytes
         unsafe a.pointee.top = a.pointee.edenStart
+        unsafe a.pointee.keptEnd = 0
         unsafe a.pointee.end = a.pointee.edenStart &+ a.pointee.halfBytes
     }
     unsafe y.pointee.seq[k].wrappingAdd(1, ordering: .relaxed)
@@ -68,6 +82,7 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
         unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     }
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    return true
 }
 
 // MARK: - the collection
@@ -178,6 +193,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     let s = unsafe vm.pointee.epoch.pointee.wrappingAdd(1, ordering: .sequentiallyConsistent).oldValue
     if sw.epochRule { unsafe waitEpoch(vm, y, c, s) }
     unsafe col.freeDeferred(stash, &st)
+    unsafe n.pointee.om.releasePromotion(blocks: st.reservedBlocks)
     let t6 = nanoseconds()
     st.epochWaitNs = t6 &- t5
     st.totalNs = t6 &- st.startNs
@@ -334,7 +350,9 @@ struct CollectionTally {
             nh = (h0 & ~(Header.ageMask | Header.claimMask)) | age &<< Header.ageShift
         } else {
             guard let d = unsafe om.bumpPromotion(ctx, bytes: size) else {
-                preconditionFailure("kajo: promotion found no block: the promotion reserve is exhausted (counted in reserveExhaustions)")
+                // Promised at the opening (`reservePromotion`): a broken
+                // invariant, not a provisioning failure.
+                preconditionFailure("kajo: a young collection found no promotion block although its room was promised")
             }
             dst = d
             nh = h0 & ~(Header.youngOnlyMask | Header.youngBit)

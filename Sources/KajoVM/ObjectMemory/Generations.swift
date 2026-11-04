@@ -218,6 +218,36 @@ extension ObjectMemory {
         return promotionRefill(ctx, bytes: bytes)
     }
 
+    /// A young collection that runs beside mutators (module 7) cannot keep
+    /// objects in place, so it opens only with its promotion room promised:
+    /// `blocks` out of those no mutator may take (past the larger of the
+    /// soft limit and the blocks in use) that no collection in flight was
+    /// promised. Promised blocks are counted until `releasePromotion`, also
+    /// once taken: conservative, never short. False when they do not fit.
+    func reservePromotion(blocks: Int) -> Bool {
+        lockPools()
+        defer { unlockPools() }
+        let p = unsafe pools.pointee
+        let free = heap.blockCount - Swift.max(p.blocksInUse, p.softLimitBlocks) - p.promotionReserved
+        if blocks > free { return false }
+        unsafe pools.pointee.promotionReserved += blocks
+        return true
+    }
+
+    func releasePromotion(blocks: Int) {
+        lockPools()
+        unsafe pools.pointee.promotionReserved -= blocks
+        unlockPools()
+    }
+
+    /// Undo the last `bumpPromotion` of `ctx`, which answered `offset`
+    /// (a participant that lost the claim it bumped for). Nothing else
+    /// bumps `ctx` meanwhile.
+    @inline(__always)
+    func unbumpPromotion(_ ctx: AllocContext, to offset: UInt64) {
+        unsafe ctx.state.pointee.top = offset
+    }
+
     @inline(never)
     func promotionRefill(_ ctx: AllocContext, bytes: UInt64) -> UInt64? {
         if !refillBlock(ctx, bytes: bytes, reserve: true) { return nil }
@@ -402,13 +432,21 @@ extension ObjectMemory {
 
     // MARK: - the hook before old-space operations
 
-    func setBeforeOldSpaceOperation(_ hook: (([Oop]?) -> Void)?) {
+    func setBeforeOldSpaceOperation(_ hook: (([Oop]?) -> [Oop])?) {
         unsafe gc.pointee.beforeOldSpaceOperation = hook
+    }
+
+    func setAfterOldSpaceSweep(_ hook: (() -> Void)?) {
+        unsafe gc.pointee.afterOldSpaceSweep = hook
     }
 
     /// Module 4: promote everything before an operation that needs nothing
     /// young. No-op without a nursery.
-    func prepareOldSpaceOperation(_ extraRoots: [Oop]?) {
-        if let h = unsafe gc.pointee.beforeOldSpaceOperation { h(extraRoots) }
+    /// The young objects the hook could not promote: empty when nothing is
+    /// young. Collect and compact take them as roots and leave them alone;
+    /// the other operations refuse to run while any is left.
+    func prepareOldSpaceOperation(_ extraRoots: [Oop]?) -> [Oop] {
+        if let h = unsafe gc.pointee.beforeOldSpaceOperation { return h(extraRoots) }
+        return []
     }
 }

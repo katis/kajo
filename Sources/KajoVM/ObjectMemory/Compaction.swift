@@ -49,7 +49,13 @@ extension ObjectMemory {
     /// (ADR 0003); no slot anywhere is rewritten. Pinned objects stay.
     /// World stopped.
     func compact(extraRoots: [Oop] = []) {
-        prepareOldSpaceOperation(extraRoots)
+        let young = prepareOldSpaceOperation(extraRoots)
+        compactOldSpace(extraRoots: young.isEmpty ? extraRoots : extraRoots + young)
+    }
+
+    /// The compaction without the hook (as `collectOldSpace`): young
+    /// objects given as roots stay where they are.
+    func compactOldSpace(extraRoots: [Oop]) {
         retireAllContexts()
         verifyAtPause("before compaction", phase: .idle)
         mark(extraRoots: extraRoots)
@@ -65,6 +71,7 @@ extension ObjectMemory {
         var live = sweepEntries()
         live.free()
         rebuildBlockPool()
+        if let h = unsafe gc.pointee.afterOldSpaceSweep { h() }
         unsafe gc.pointee.counters.compactions &+= 1
         unsafe gc.pointee.counters.collections &+= 1
         unsafe gc.pointee.counters.objectsMoved &+= UInt64(plan.moves.count)
@@ -89,7 +96,7 @@ extension ObjectMemory {
         if !config.testSwitches.ignorePins {
             var e: UInt64 = 1
             while e < hw {
-                if markByte(e) != 0, Header(raw: headerWord(e &<< 4)).isPinned {
+                if markByte(e) != 0, Header(raw: headerWord(e &<< 4)).isPinned, !Header(raw: headerWord(e &<< 4)).isYoung {
                     plan.pinnedBlocks[BlockHeap.block(ofOffset: stateWord(e &<< 4))] = true
                     plan.pinnedObjects &+= 1
                 }

@@ -11,7 +11,8 @@ final class Runtime {
     let image: Image
     let vm: VM
 
-    init(_ src: String, background: Int, heapBlocks: Int = 2048, entries: Int = 1 << 20, sliceMs: Double = 5,
+    init(_ src: String, background: Int, heapBlocks: Int = 2048, reserveBlocks: Int? = nil, entries: Int = 1 << 20,
+         sliceMs: Double = 5,
          pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true, pinsForGood: Bool = true,
          configure: (inout VMConfig) -> Void = { _ in }, switches: TestSwitches = TestSwitches(),
          before: (Image) -> Void = { _ in }, after: (Image) -> Void = { _ in }) throws {
@@ -23,7 +24,7 @@ final class Runtime {
         configure(&vc)
         var c = ObjectMemoryConfig()
         c.heapBytes = heapBlocks * BlockHeap.blockBytes
-        c.reserveBytes = vc.nursery.reserveBytes(workers: background + 2)
+        c.reserveBytes = reserveBlocks.map { $0 * BlockHeap.blockBytes } ?? vc.nursery.reserveBytes(workers: background + 2)
         c.nurseryRegionBytes = vc.nursery.regionBytes(workers: background + 2)
         c.entryCapacity = entries
         c.entryChunk = 256
