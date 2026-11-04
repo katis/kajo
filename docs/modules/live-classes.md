@@ -462,7 +462,7 @@ swift.org Swift 6.4.2, 2026-11-04.
 ### The kernels against the starting commit
 
 The starting commit's `kajo` (6bef327, from a worktree) against this
-module's (0255675), both built `-c release -Xswiftc -enable-testing` with
+module's (0255675, the same code as d3f0a41), both built `-c release -Xswiftc -enable-testing` with
 `-align-all-nofallthru-blocks=5 -align-loops=32`; five runs interleaved,
 `--slice-ms 0`, 12:48 to 12:52 (load average 5.8 falling to 2.5
 1-minute, a build had just ended); median (min to max) ms. The Smalltalk
@@ -620,7 +620,12 @@ none. Counted on the final commit's clean build (0 warnings).
 
 ## Hot-path check
 
-ARCCHECK
+`just arc-check` on the final code: 135 functions, zero
+`swift_retain`/`swift_release`; `interpret` 1056 instructions (as at the
+start), one jump table. Nothing of this module is on the checked paths:
+primitives 145 to 149 are reached through `primitive`'s switch (one call
+to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
+(`sourcesDirectory`) that only the file primitives read, by member.
 
 ## Not done
 
@@ -670,7 +675,34 @@ ARCCHECK
 
 ## Gates
 
-GATES
+The code and this doc but for this table and the hot-path paragraph are
+d3f0a41's; every gate ran on d3f0a41, Mac mini (M2 Pro), swift.org 6.4.2,
+2026-11-04 12:54 to 14:54, every output in a file, each step logged with
+the commit it ran on:
+
+| gate | result |
+|---|---|
+| `swift test` | 312 + 54 passed, 218 + 55 s |
+| under load (12 busy loops) | 312 + 54 passed, 254 + 67 s |
+| ThreadSanitizer | 312 + 54 passed, 0 reports, 616 + 1461 s |
+| ThreadSanitizer under load | 312 + 54 passed, 0 reports, 664 + 1617 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release in 135 functions, `interpret` 1056 instructions, one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 312 + 54 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | passed: 1000 seeds under every configuration, no failing seed; the snapshot modes saving 762 to 980 of 1000 |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.44 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 3.64 million runs (the `live-class.img` seed in the corpus), no crash |
+| `just fuzz syntax 600` | libFuzzer build ok, 1.20 million runs, no crash |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| clean build | exit 0, 0 errors, 0 warnings |
+
+(312 is `KajoVMTests`, 54 `KajoCompilerTests`, whose kernel-image suite
+runs the kernel's 179 SUnit tests.) The clean build took 10 s from an
+empty scratch path (the toolchain's compilation cache); `just ios-check`
+typechecks every KajoVM file with strict memory safety from nothing and
+reports no warning either.
 
 ## Commands
 
