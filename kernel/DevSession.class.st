@@ -272,11 +272,11 @@ DevSession >> classRemove: className [
 
 { #category : #'requests-change' }
 DevSession >> methodCompile: className source: source category: category side: side [
-	"Compile and install a method (side: instance, the default, or class); its author is the session's client, its package the session's. Answers the selector and the files to write."
+	"Compile and install a method (side: instance, the default, or class); its author is the session's client, its package the session's; its source is kept in the form its file reads back as. Answers the selector and the files to write."
 	<devProtocol>
 	| b sel o |
 	b := self behaviorNamed: className side: side.
-	sel := b compile: source classified: category.
+	sel := b compile: (TonelWriter canonicalSource: source) classified: category.
 	o := self changed: b.
 	o at: 'selector' put: sel.
 	^ o

@@ -20,6 +20,7 @@ public final class ProtocolClient: @unchecked Sendable {
     private var events: [JSONValue] = []  // under changed
     private var eventCount = 0  // under changed: events ever received
     private var closed = false  // under changed
+    private var closing = false  // under changed: close() was called
     private var nextId = 1  // under lock
     private var reader: Thread?
     /// Called on the reading thread for every event (not replies).
@@ -170,13 +171,22 @@ public final class ProtocolClient: @unchecked Sendable {
         }
     }
 
-    public var isClosed: Bool {
+    private var readerDone: Bool {
         changed.lock()
         defer { changed.unlock() }
         return closed
     }
 
+    public var isClosed: Bool {
+        changed.lock()
+        defer { changed.unlock() }
+        return closed || closing
+    }
+
     public func close() {
+        changed.lock()
+        closing = true
+        changed.unlock()
         shutdown(fd, SHUT_RDWR)
         changed.lock()
         let wasClosed = closed
@@ -184,7 +194,7 @@ public final class ProtocolClient: @unchecked Sendable {
         if !wasClosed {
             // the reader ends on EOF
             var spins = 0
-            while !isClosed && spins < 200 {
+            while !readerDone && spins < 200 {
                 usleep(5_000)
                 spins += 1
             }

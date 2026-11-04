@@ -138,6 +138,7 @@ public final class MCPServer {
             }
         }
         client?.close()
+        client = nil
         return 0
     }
 }

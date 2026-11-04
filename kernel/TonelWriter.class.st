@@ -31,6 +31,12 @@ TonelWriter class >> write: aClass package: aName into: aDirectory [
 ]
 
 { #category : #writing }
+TonelWriter class >> canonicalSource: aString [
+	"The source a method compiled from aString is recorded with when it is read back from the file this writer writes (module 9b: a development session compiles this, so the image and its files agree method for method): the pattern, then the body the writer puts on lines of its own, ending with a line break."
+	^ (self patternAndBodyOf: aString) inject: '' into: [:a :b | a , b]
+]
+
+{ #category : #writing }
 TonelWriter class >> hasMethodsOf: aClass package: aName [
 	^ (Array with: aClass with: aClass class) anySatisfy: [:b |
 		b selectors anySatisfy: [:sel | (Smalltalk packageOfSelector: sel in: b) = aName]]
@@ -72,19 +78,14 @@ TonelWriter class >> list: aKey of: names [
 
 { #category : #writing }
 TonelWriter class >> method: aSelector in: aBehavior category: aCategory [
-	| lf src end pattern body author |
+	| lf src pattern body author parts |
 	lf := String lf.
 	src := Smalltalk sourceOf: (aBehavior compiledMethodAt: aSelector).
 	src isNil ifTrue: [^ self error: aBehavior name , '>>' , aSelector , ' has no source'].
 	author := Smalltalk authorOfSelector: aSelector in: aBehavior.
-	end := Scanner patternEndIn: src.
-	pattern := src copyFrom: 1 to: end.
-	body := src copyFrom: end + 1 to: src byteSize.
-	(body includesSubstring: lf)
-		ifTrue: [
-			(body beginsWith: lf) ifFalse: [body := lf , (String tab) , (self withoutLeadingBlanks: body)].
-			(body endsWith: lf) ifFalse: [body := body , lf]]
-		ifFalse: [body := lf , (String tab) , body trimmed , lf].
+	parts := self patternAndBodyOf: src.
+	pattern := parts first.
+	body := parts last.
 	^ lf , '{ #category : ' , (self ston: aCategory) , (author ifNil: [''] ifNotNil: [:a | ', #author : ' , (self ston: a)]) , ' }' , lf
 		, aBehavior theNonMetaClass name , (aBehavior isMeta ifTrue: [' class'] ifFalse: ['']) , ' >> ' , pattern , ' [' , body , ']' , lf
 ]
@@ -105,6 +106,22 @@ TonelWriter class >> methodsOf: aClass package: aName [
 			(org at: cat) do: [:sel |
 				(Smalltalk packageOfSelector: sel in: b) = aName ifTrue: [out add: (self method: sel in: b category: cat)]]]].
 	^ out
+]
+
+{ #category : #writing }
+TonelWriter class >> patternAndBodyOf: aString [
+	"{pattern. body} as the writer writes a method of the recorded source aString: the body on a line of its own (indented by a tab when it was on the pattern's line) and ending with a line break."
+	| lf end pattern body |
+	lf := String lf.
+	end := Scanner patternEndIn: aString.
+	pattern := aString copyFrom: 1 to: end.
+	body := aString copyFrom: end + 1 to: aString byteSize.
+	(body includesSubstring: lf)
+		ifTrue: [
+			(body beginsWith: lf) ifFalse: [body := lf , (String tab) , (self withoutLeadingBlanks: body)].
+			(body endsWith: lf) ifFalse: [body := body , lf]]
+		ifFalse: [body := lf , (String tab) , body trimmed , lf].
+	^ Array with: pattern with: body
 ]
 
 { #category : #writing }

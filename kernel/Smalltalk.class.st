@@ -141,6 +141,14 @@ Smalltalk class >> evaluate: aString [
 ]
 
 { #category : #'entry points' }
+Smalltalk class >> evaluateStrings: anArray [
+	"Each doit's value as a String (itself when it is one, else its printString), for hosts and tests that spawn it."
+	^ anArray collect: [:src | | v |
+		v := Compiler evaluate: src.
+		v isString ifTrue: [v] ifFalse: [v printString]]
+]
+
+{ #category : #'entry points' }
 Smalltalk class >> garbageCollect [
 	"A full collection; then the removed classes nothing names any more are freed (module 9b: their class-table indices become holes a new class takes). Answers how many were freed."
 	self primGarbageCollect.
