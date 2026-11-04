@@ -133,10 +133,12 @@ DevProtocol class >> reply: aReplyTo result: anObject [
 
 { #category : #requests }
 DevProtocol class >> finishActive: aValue [
-	"The active request's reply, unless someone else took it (a stopped Process, a debugger command)."
+	"The active request's reply, unless someone else took it (a stopped Process, a debugger command). A result that cannot be written is an error reply, never no reply (module 9c)."
 	| entry |
 	entry := self takeReplyOf: ProcessorScheduler activeProcess.
-	entry isNil ifFalse: [self reply: entry first result: aValue]
+	entry isNil ifFalse: [
+		[self reply: entry first result: aValue]
+			on: Error do: [:e | self reply: entry first error: 'the reply could not be written: ' , e messageText]]
 ]
 
 { #category : #requests }
