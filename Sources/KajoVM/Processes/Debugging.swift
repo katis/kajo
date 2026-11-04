@@ -39,7 +39,11 @@ import Darwin
 
 enum InterruptKind {
     static let terminate = 1
+    /// Stop for the debugger, the pc at a send (rewound at a poll).
     static let debugStop = 2
+    /// Stop for the debugger, the pc after a send (a step's return, a
+    /// waiting Process's wait).
+    static let debugStopAfterSend = 3
 }
 
 enum StepMode {
@@ -153,6 +157,8 @@ func interrupt(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, kind: Int) -> Bool
             unsafe vm.shared(r.pointee.runningOn).pointee.attention.store(ri + 1, ordering: .relaxed)
         }
     } else if state == Int(ProcessState.waiting.rawValue) {
+        // Resumed after its wait's send: a stop there is after a send.
+        if kind == InterruptKind.debugStop { unsafe r.pointee.interrupt = InterruptKind.debugStopAfterSend }
         unsafe unlinkLocked(vm, w, p)
         unsafe clearingStore(w, p, ProcessLayout.waitingOn, vm.pointee.nilObject)  // a deletion: the SATB barrier sees it
         needMain = unsafe makeReadyLocked(vm, w, p, fromBlocked: true)
@@ -174,7 +180,8 @@ func runInterrupt(_ s: StatePointer, _ p: Oop, _ kind: Int) -> Regs {
     unsafe base[top] = p.raw
     unsafe s.pointee.regs.sp = top
     if let vm = unsafe workerOf(s).pointee.vm { unsafe vm.count(.interrupts) }
-    let sel = kind == InterruptKind.terminate ? VMSelector.terminateUnwinding : VMSelector.stopForDebugger
+    let sel = kind == InterruptKind.terminate ? VMSelector.terminateUnwinding
+        : kind == InterruptKind.debugStop ? VMSelector.stopForDebugger : VMSelector.stopForDebuggerAfterSend
     return unsafe markedSend(s, s.pointee.specialSelectors[sel], 0, FrameMarker.discard)
 }
 
@@ -218,11 +225,11 @@ func stepPoll(_ vm: VMPointer, _ w: WorkerPointer, _ s: StatePointer, rewind: In
 }
 
 /// The stepped Process stops: requeued with the debugger's interrupt.
-private func stepStop(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int) {
+private func stepStop(_ vm: VMPointer, _ w: WorkerPointer, sp: Int, pc: Int, kind: Int = InterruptKind.debugStop) {
     let ri = unsafe w.pointee.record
     unsafe records(vm, ri).pointee.stepMode = StepMode.off
     unsafe schedLock(vm)
-    unsafe records(vm, ri).pointee.interrupt = InterruptKind.debugStop
+    unsafe records(vm, ri).pointee.interrupt = kind
     unsafe schedUnlock(vm)
     unsafe requeueCurrent(vm, w, sp: sp, pc: pc, reason: .suspended)
     unsafe vm.count(.stepStops)
@@ -238,7 +245,7 @@ func stepAfterReturn(_ s: StatePointer, _ r: Regs, returning: Int) -> Regs {
     guard unsafe rec.pointee.stepMode != StepMode.off && rec.pointee.stepFrame == returning else { return r }
     unsafe save(s, r.pc, r.sp, r.fp, r.hdr)
     let saved = unsafe s.pointee.regs
-    unsafe stepStop(vm, w, sp: saved.sp, pc: saved.pc)
+    unsafe stepStop(vm, w, sp: saved.sp, pc: saved.pc, kind: InterruptKind.debugStopAfterSend)
     return unsafe leavingWithoutStack(s)
 }
 

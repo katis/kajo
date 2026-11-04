@@ -73,8 +73,14 @@ Process >> primStep: aMode frame: aContext [
 
 { #category : #debugging }
 Process >> stopForDebugger [
-	"Sent by the VM to the Process itself where a step stopped it (module 9b): the debugger takes over until a client acts."
-	^ Debugger stepStopped
+	"Sent by the VM to the Process itself where a step or a suspend stopped it at a send (module 9b): the debugger takes over until a client acts."
+	^ Debugger stepStoppedAtSend: true
+]
+
+{ #category : #debugging }
+Process >> stopForDebuggerAfterSend [
+	"As stopForDebugger, where the Process is after a send (a step out of a frame, a suspend of a waiting Process)."
+	^ Debugger stepStoppedAtSend: false
 ]
 
 { #category : #terminating }

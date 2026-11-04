@@ -16,8 +16,13 @@ public final class MCPServer {
     let options: ClientOptions
     private var client: ProtocolClient?
     private var kinds: [String: String] = [:]  // tool name -> request kind
+    private let output: (String) -> Void
 
-    public init(options: ClientOptions) { self.options = options }
+    /// `output` gets each message (one line, no newline); stdout by default.
+    public init(options: ClientOptions, output: @escaping (String) -> Void = { FileHandle.standardOutput.write(Data(($0 + "\n").utf8)) }) {
+        self.options = options
+        self.output = output
+    }
 
     static func toolName(_ kind: String) -> String { kind.replacingOccurrences(of: ".", with: "_") }
 
@@ -94,12 +99,15 @@ public final class MCPServer {
     }
 
     private func write(_ v: JSONValue) {
-        FileHandle.standardOutput.write(Data(writeJSON(v) + [10]))
+        output(String(decoding: writeJSON(v), as: UTF8.self))
     }
 
     /// Serve until stdin ends.
-    public func run() throws -> Int32 {
-        while let line = readLine(strippingNewline: true) {
+    public func run() throws -> Int32 { serve { readLine(strippingNewline: true) } }
+
+    /// Serve the messages `next` answers until it answers nil.
+    public func serve(_ next: () -> String?) -> Int32 {
+        while let line = next() {
             if line.isEmpty { continue }
             var limits = JSONLimits()
             limits.bytes = 16 << 20

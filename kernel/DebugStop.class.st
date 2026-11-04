@@ -11,15 +11,22 @@ Class {
 		'commands',
 		'mutex',
 		'resumeValue',
-		'resuming'
+		'resuming',
+		'atSend'
 	],
 	#category : #'Kernel-Development'
 }
 
 { #category : #accessing }
+DebugStop >> atSend: aBoolean [
+	"Whether the first frame's pc is at a send it is about to make (a step stopped at a poll) rather than after one."
+	atSend := aBoolean
+]
+
+{ #category : #accessing }
 DebugStop >> errorText [
 	exception isNil ifTrue: [^ reason].
-	^ [exception printString] on: Error do: [:e | exception class name]
+	^ [exception class name , ': ' , exception messageText] on: Error do: [:e | exception class name]
 ]
 
 { #category : #accessing }
@@ -41,7 +48,8 @@ DebugStop >> setProcess: aProcess exception: anException reason: aString frames:
 	semaphore := Semaphore new.
 	commands := OrderedCollection new.
 	mutex := Mutex new.
-	resuming := false
+	resuming := false.
+	atSend := false
 ]
 
 { #category : #accessing }
@@ -122,12 +130,13 @@ DebugStop >> retrySendReplyTo: aReplyTo session: aSession [
 
 { #category : #commands }
 DebugStop >> step: aMode frame: anIndex replyTo: aReplyTo session: aSession [
-	"Let the Process go on and stop it again where the step ends: into, over or out of frame anIndex. After an error the frame goes on after the send that failed (so into is over there)."
+	"Let the Process go on and stop it again where the step ends: into, over or out of frame anIndex. A frame that is not at a send it is about to make goes on after its last send (after an error, into is over: the frame goes on after the send that failed)."
 	| mode f |
 	mode := (#('into' 'over' 'out') indexOf: aMode asString).
 	mode = 0 ifTrue: [^ self error: 'a step is into, over or out'].
 	f := self frameAt: anIndex.
-	reason = 'error' ifTrue: [mode = 1 ifTrue: [mode := 2]. mode := mode + 4].
+	reason = 'error' ifTrue: [mode = 1 ifTrue: [mode := 2]].
+	(anIndex = 1 and: [atSend]) ifFalse: [mode := mode + 4].
 	DevProtocol reply: aReplyTo result: true.
 	self leave.
 	resumeValue := nil.
@@ -173,7 +182,7 @@ DebugStop >> frameSummary: anIndex [
 	f := frames at: anIndex.
 	o := JsonObject new.
 	pc := f pc.
-	range := (anIndex = 1 and: [reason ~= 'error'])
+	range := (anIndex = 1 and: [atSend])
 		ifTrue: [f method sourceRangeAt: pc]
 		ifFalse: [f method sourceRangeAt: pc - 1].
 	o at: 'index' put: anIndex; at: 'method' put: f method printString; at: 'pc' put: pc; at: 'range' put: range.

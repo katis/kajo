@@ -24,12 +24,13 @@ Debugger class >> park: aDebugStop [
 ]
 
 { #category : #stopping }
-Debugger class >> stepStopped [
-	"Process>>stopForDebugger: the active Process stopped where a step ended (or where a suspend found it); the frame below the VM's interrupt is the first."
+Debugger class >> stepStoppedAtSend: aBoolean [
+	"Process>>stopForDebugger: the active Process stopped where a step ended (or where a suspend found it), at a send it is about to make or after one; the frame below the VM's interrupt is the first."
 	| p reason |
 	p := ProcessorScheduler activeProcess.
 	reason := (lock critical: [suspends remove: p ifAbsent: [nil]]) isNil ifTrue: ['step'] ifFalse: ['suspended'].
-	^ self park: (DebugStop process: p exception: nil reason: reason frames: (self framesFrom: thisContext sender sender))
+	^ self park: ((DebugStop process: p exception: nil reason: reason frames: (self framesFrom: thisContext sender sender))
+		atSend: aBoolean; yourself)
 ]
 
 { #category : #stopping }

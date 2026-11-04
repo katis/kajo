@@ -328,9 +328,11 @@ final class Connection: @unchecked Sendable {
         }
         closed = true
         lock.unlock()
-        shutdown(fd, SHUT_RDWR)
-        // The fd is closed after the queued writes, so it is never reused
-        // under one of them.
-        queue.async { [fd] in Darwin.close(fd) }
+        // After the queued writes (a refusal's reply goes out first), and
+        // the fd is closed after them, so it is never reused under one.
+        queue.async { [fd] in
+            shutdown(fd, SHUT_RDWR)
+            Darwin.close(fd)
+        }
     }
 }

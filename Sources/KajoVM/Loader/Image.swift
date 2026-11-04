@@ -502,7 +502,7 @@ package final class Image {
 /// `Image.specialSelectors` (and the interpreter's `specialSelectors`).
 enum VMSelector {
     static let names = ["modificationForbiddenAt:value:", "cannotReturn:", "aboutToReturn:through:",
-                        "terminateUnwinding", "stopForDebugger"]
+                        "terminateUnwinding", "stopForDebugger", "stopForDebuggerAfterSend"]
     static let modificationForbidden = specialSelectorNames.count
     static let cannotReturn = specialSelectorNames.count + 1
     static let aboutToReturn = specialSelectorNames.count + 2
@@ -510,6 +510,9 @@ enum VMSelector {
     /// (`runInterrupt`), sent to the Process itself.
     static let terminateUnwinding = specialSelectorNames.count + 3
     static let stopForDebugger = specialSelectorNames.count + 4
+    /// A stop where the Process's pc is after a send (a step that ended by
+    /// a return, a suspend of a waiting Process), not at one.
+    static let stopForDebuggerAfterSend = specialSelectorNames.count + 5
 }
 
 /// Module 8d: the kernel's Binding, a class variable: its name (a Symbol)
