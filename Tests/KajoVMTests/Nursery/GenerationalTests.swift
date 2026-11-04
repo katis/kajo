@@ -395,10 +395,17 @@ func sharedYoungObjectsAreClaimedOnceByParallelScavengers(_ mode: YoungMode) thr
     rt.vm.signal(mutex)
     rt.spawn("makeShared")
     rt.waitAllTerminated()
-    var ps: [Oop] = []
-    for i in 0..<8 { ps.append(rt.spawn("sharer:", [int(Int64(i))])) }
-    rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
-    for p in ps { #expect(rt.result(p) == 3000 * 32) }
+    // Rounds of eight sharers until a scavenge had four participants, at
+    // most three: a parked worker joins a scavenge, and in a loaded release
+    // suite (module 8c's gate run) one round's workers were too often
+    // descheduled or idle for four to be parked in any of its scavenges.
+    for _ in 0..<3 {
+        var ps: [Oop] = []
+        for i in 0..<8 { ps.append(rt.spawn("sharer:", [int(Int64(i))])) }
+        rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
+        for p in ps { #expect(rt.result(p) == 3000 * 32) }
+        if mode != .stw || rt.vm.scavengeLog.contains(where: { $0.participants >= 4 }) { break }
+    }
     let log = rt.vm.scavengeLog
     if mode == .stw {
         #expect(log.count >= 10)

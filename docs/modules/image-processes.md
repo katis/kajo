@@ -331,6 +331,12 @@ retrace each distinct frame method once). The fib image saved by `kajo run
   test-release` the full suite (with this module's random programs beside
   it) let the seven Processes of 150 000 iterations finish before 20 stops
   ("stops >= 20" failed); alone it passed six runs of six.
+  `sharedYoungObjectsAreClaimedOnceByParallelScavengers` (stw) runs its
+  eight sharers again, at most three rounds, until a scavenge had four
+  participants: the gate run on 1a4bf66's `just test-release` had none
+  with four (the suite in release is about 8 s with this module's random
+  programs beside it, and parked workers are what join a scavenge); three
+  full release runs after it passed.
 
 ## Deviations from the brief
 
