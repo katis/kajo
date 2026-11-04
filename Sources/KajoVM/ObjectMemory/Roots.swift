@@ -58,6 +58,16 @@ extension ObjectMemory {
         return UInt64(n)
     }
 
+    /// Module 8e: take back the last `n` registrations, which nothing
+    /// refers to yet (the define primitive when the heap fills between
+    /// registering a class and making its object). World stopped.
+    func unregisterLastClasses(_ n: Int) {
+        for _ in 0..<n {
+            _ = unsafe gc.pointee.classTable.popLast()
+            _ = unsafe gc.pointee.classFormats.popLast()
+        }
+    }
+
     func classOop(_ index: UInt64) -> Oop {
         unsafe Oop(raw: gc.pointee.classTable[Int(index)])
     }

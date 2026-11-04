@@ -321,6 +321,18 @@ Behavior >> allSubclasses [
 ]
 
 { #category : #hierarchy }
+Behavior >> withAllSubclasses [
+	"The receiver, then every class that inherits from it, each after its superclass."
+	^ (OrderedCollection with: self) addAll: (self allSubclasses asArray sort: [:a :b | a allSuperclasses size <= b allSuperclasses size]); yourself
+]
+
+{ #category : #testing }
+Behavior >> isObsolete [
+	"A removed class (Smalltalk removeClass:, module 8e): its class object stays in the VM's class table, renamed AnObsolete<Name>."
+	^ self isMeta not and: [self name beginsWith: 'AnObsolete']
+]
+
+{ #category : #hierarchy }
 Behavior >> allInstVarNames [
 	^ Smalltalk instanceVariableNamesOf: self
 ]

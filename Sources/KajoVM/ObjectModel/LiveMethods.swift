@@ -125,7 +125,8 @@ private func primMakeMethod(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 /// block methods. The world is stopped (or there is no VM): nothing else
 /// changes the graph while it is read, and nothing else sees the method
 /// until the primitive answers it.
-func makeMethod(_ m: Machine, code: Oop, methodClass: Oop, classIndex ci: UInt64, roots: [Oop]) -> MakeOutcome {
+func makeMethod(_ m: Machine, code: Oop, methodClass: Oop, classIndex ci: UInt64, roots: [Oop], format: ClassFormat? = nil,
+                onMade: ((Oop, [Int: Oop]) -> Void)? = nil) -> MakeOutcome {
     let om = m.om
     var reader = CodeReader(om: om, nilObject: m.nilObject, trueObject: m.trueObject, falseObject: m.falseObject,
                             codeClass: om.classIndex(of: code))
@@ -143,11 +144,14 @@ func makeMethod(_ m: Machine, code: Oop, methodClass: Oop, classIndex ci: UInt64
     } catch {
         return .refused(error.message)
     }
-    if let issue = verifyHeapMethod(om, made.method, classIndex: ci, nilObject: m.nilObject) { return .refused(issue) }
+    if let issue = verifyHeapMethod(om, made.method, classIndex: ci, nilObject: m.nilObject, format: format) { return .refused(issue) }
     for (k, b) in made.blocks.sorted(by: { $0.key < $1.key }) {
-        if let issue = verifyHeapMethod(om, b, classIndex: ci, nilObject: m.nilObject) { return .refused("block method \(k + 1): \(issue)") }
+        if let issue = verifyHeapMethod(om, b, classIndex: ci, nilObject: m.nilObject, format: format) {
+            return .refused("block method \(k + 1): \(issue)")
+        }
     }
     if made.blocks.count != reader.blocks.count { return .refused("a block method no literal names") }
+    onMade?(made.method, made.blocks)
     return .made(made.method)
 }
 

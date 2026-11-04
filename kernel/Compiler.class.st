@@ -8,7 +8,8 @@ Class {
 		'firstSlot',
 		'seq',
 		'labelCounter',
-		'doit'
+		'doit',
+		'pendingBindings'
 	],
 	#category : #'Kernel-Compiler'
 }
@@ -37,6 +38,29 @@ Compiler class >> evaluate: aString for: anObject [
 Compiler class >> compileDoIt: aString in: aClass [
 	"The CompiledCode of a doit: the method DoIt whose body is aString, answering its last statement's value."
 	^ self new setClass: aClass; beDoIt; compile: 'DoIt ' , aString
+]
+
+{ #category : #accessing }
+Compiler class >> compile: aString in: aClass instanceVariableNames: anArray bindings: aDictionaryOrNil [
+	"Compile against the shape a class will have (module 8e): its instance variable names (all of them, inherited first) and the class variables it is about to have (a Dictionary from name to Binding, consulted before the class's own)."
+	^ self new setClass: aClass; instanceVariableNames: anArray; pendingBindings: aDictionaryOrNil; compile: aString
+]
+
+{ #category : #accessing }
+Compiler >> instanceVariableNames: anArray [
+	instVarNames := anArray collect: [:s | s asString]
+]
+
+{ #category : #accessing }
+Compiler >> pendingBindings: aDictionaryOrNil [
+	pendingBindings := aDictionaryOrNil
+]
+
+{ #category : #accessing }
+Compiler >> bindingOf: aName [
+	"The class variable aName names: one about to be declared, else the class's."
+	pendingBindings isNil ifFalse: [(pendingBindings at: aName asString ifAbsent: [nil]) ifNotNil: [:b | ^ b]].
+	^ theClass bindingOf: aName
 ]
 
 { #category : #accessing }
@@ -77,7 +101,9 @@ Compiler >> declare: aName kind: aKind in: aScope line: n [
 		(#('self' 'super' 'thisContext' 'nil' 'true' 'false') includes: aName) ifTrue: [^ self fail: '''' , aName , ''' cannot be a variable name' line: n].
 		(aScope declared anySatisfy: [:x | x name = aName]) ifTrue: [^ self fail: '''' , aName , ''' declared twice' line: n].
 		(theClass classVariableOwnerOf: aName) ifNotNil: [:owner |
-			^ self fail: '''' , aName , ''' shadows ' , owner name , '''s class variable' line: n]].
+			^ self fail: '''' , aName , ''' shadows ' , owner name , '''s class variable' line: n].
+		(pendingBindings notNil and: [pendingBindings includesKey: aName]) ifTrue: [
+			^ self fail: '''' , aName , ''' shadows a class variable' line: n]].
 	v := TempVariable name: aName kind: aKind scope: aScope seq: self nextSeq.
 	aScope declared add: v.
 	aScope real locals add: v.
@@ -116,7 +142,7 @@ Compiler >> resolve: aNode in: aScope [
 	v ifNotNil: [:x | self reference: x from: aScope. ^ aNode bind: #local to: x].
 	i := instVarNames indexOf: n.
 	i > 0 ifTrue: [^ aNode bind: #instance to: firstSlot + i - 1].
-	(theClass bindingOf: n) ifNotNil: [:b | ^ aNode bind: #classVariable to: b].
+	(self bindingOf: n) ifNotNil: [:b | ^ aNode bind: #classVariable to: b].
 	(Smalltalk classNamed: n) ifNotNil: [:c | ^ aNode bind: #global to: c].
 	^ self fail: 'undeclared variable ''' , n , '''' line: aNode line
 ]

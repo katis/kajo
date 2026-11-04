@@ -40,6 +40,15 @@ struct InterpreterCounters: Sendable, Equatable {
     /// Module 8d: methods the make primitive made, and refused.
     var methodsMade: UInt64 = 0
     var methodsRefused: UInt64 = 0
+    /// Module 8e: classes defined, redefined (reshaped, recompiled, pools
+    /// replaced) and removed from Smalltalk, such changes refused, and
+    /// the file primitives' writes and reads.
+    var classesDefined: UInt64 = 0
+    var classesRedefined: UInt64 = 0
+    var classesRemoved: UInt64 = 0
+    var classChangesRefused: UInt64 = 0
+    var filesWritten: UInt64 = 0
+    var filesRead: UInt64 = 0
     var symbolsInterned: UInt64 = 0
     /// `terminateTo:` moves.
     var terminations: UInt64 = 0

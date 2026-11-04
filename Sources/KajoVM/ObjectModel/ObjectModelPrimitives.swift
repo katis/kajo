@@ -260,7 +260,7 @@ private func installInDictionary(_ m: Machine, _ cls: Oop, _ sel: Oop, _ method:
 /// heap (the image loader's check, and the install primitive's): nil when
 /// it may run as a method of class `classIndex`, else why not.
 func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nilObject: Oop,
-                      limits: LoaderLimits = LoaderLimits(), depth: Int = 0,
+                      limits: LoaderLimits = LoaderLimits(), depth: Int = 0, format: ClassFormat? = nil,
                       traced: ((VerifiedCode) -> Void)? = nil) -> String? {
     if depth > 64 { return "blocks nested deeper than 64 (or a cycle)" }
     guard method.isObject, om.isUsedReference(method), om.classIndex(of: method) == WellKnown.method, !om.isBytes(method),
@@ -301,7 +301,9 @@ func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nil
     if bytes.isEmpty && prim == 0 { return "no bytecodes and no primitive" }
     if bytes.isEmpty && isBlock { return "an empty block method" }
     let nLits = Int(om.count(of: lits))
-    let f = om.classFormat(classIndex)
+    // Module 8e: a redefinition verifies the methods it makes against the
+    // class's format to be, before the class changes.
+    let f = format ?? om.classFormat(classIndex)
     let instSize = f.namedSlots
     let ivars: Range<Int> = f.instancesAreBehaviors ? ClassLayout.size..<max(ClassLayout.size, instSize)
         : f.isSealed || !f.kind.isPointers ? 0..<0 : 0..<instSize
@@ -333,7 +335,7 @@ func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nil
         // same class.
         for k in Set(v.closures) {
             if let issue = verifyHeapMethod(om, om.load(lits, k), classIndex: classIndex, nilObject: nilObject, limits: limits,
-                                            depth: depth + 1) {
+                                            depth: depth + 1, format: format) {
                 blockIssue = "block literal \(k): \(issue)"
                 break
             }

@@ -39,60 +39,130 @@ extension ObjectMemory {
     /// of instances reshaped. World stopped.
     @discardableResult
     func reshape(classIndex: UInt64, namedSlots: Int, layout: [Int?], fill: Oop) throws(ReshapeError) -> Int {
-        guard isRegisteredClass(classIndex) else { throw .notRegistered }
-        for j in layout { if let j, j < 0 || j >= namedSlots { throw .layoutOutOfRange } }
-        let objs = allInstances(of: classIndex)
-        for o in objs {
-            let h = header(o)
-            if h.isBytes { throw .byteObject }
-            if h.isPinned { throw .pinnedInstance }
-            if h.isReadOnly { throw .readOnlyInstance }
-            if h.count < UInt64(namedSlots) { throw .layoutOutOfRange }
-            if UInt64(layout.count) &+ h.count &- UInt64(namedSlots) > UInt64(Header.maxSlots) { throw .tooLarge }
+        var plan = try prepareReshape([ReshapeRequest(classIndex: classIndex, namedSlots: namedSlots, layout: layout)], fill: fill)
+        defer { plan.free() }
+        commitReshape(&plan)
+        verifyAtPause("after reshape", phase: .idle)
+        return plan.instances
+    }
+
+    /// Module 8e: the checks and the allocation of a reshape of several
+    /// classes at once, nothing repointed yet: a class's instances and its
+    /// subclasses' change together, and a change that cannot get every
+    /// body changes nothing. `allowPinned` admits instances pinned for good
+    /// (class objects, when a metaclass gains or loses class-side instance
+    /// variables): their bodies move in the stop like any other, the pin
+    /// stays in the header, and nothing holds a raw pointer into a class
+    /// body (the interpreter's raw pointers are a method's bytecodes and
+    /// literals). A frame pin is refused still. World stopped.
+    func prepareReshape(_ requests: [ReshapeRequest], fill: Oop, allowPinned: Bool = false) throws(ReshapeError) -> ReshapePlan {
+        var plan = ReshapePlan(fill: fill)
+        for r in requests {
+            guard isRegisteredClass(r.classIndex) else { throw .notRegistered }
+            for j in r.layout { if let j, j < 0 || j >= r.namedSlots { throw .layoutOutOfRange } }
+        }
+        // Instances of every class first: a check that fails leaves the heap
+        // untouched.
+        var objects: [[Oop]] = []
+        for r in requests {
+            let objs = allInstances(of: r.classIndex)
+            for o in objs {
+                let h = header(o)
+                if h.isBytes { throw .byteObject }
+                if h.isFramePinned || h.isPinnedForGood && !allowPinned { throw .pinnedInstance }
+                if h.isReadOnly { throw .readOnlyInstance }
+                if h.count < UInt64(r.namedSlots) { throw .layoutOutOfRange }
+                if UInt64(r.layout.count) &+ h.count &- UInt64(r.namedSlots) > UInt64(Header.maxSlots) { throw .tooLarge }
+            }
+            objects.append(objs)
         }
         if !prepareOldSpaceOperation(nil).isEmpty { throw .heapFull }
         retireAllContexts()
         guard let ctx = unsafe gc.pointee.collectorContext else { preconditionFailure("no collector context") }
-        var bodies = RawArray<UInt64>()
-        defer { bodies.free() }
-        for o in objs {
-            let words = UInt64(layout.count) &+ header(o).count &- UInt64(namedSlots) &+ 1
-            guard let off = allocateBody(ctx, bytes: words &<< 3) else {
-                // The bodies taken so far name their entries but no entry
-                // names them: dead, and walkable, until the next sweep.
-                retire(ctx)
-                throw .heapFull
+        for (k, r) in requests.enumerated() {
+            for o in objects[k] {
+                let words = UInt64(r.layout.count) &+ header(o).count &- UInt64(r.namedSlots) &+ 1
+                guard let off = allocateBody(ctx, bytes: words &<< 3) else {
+                    // The bodies taken so far name their entries but no entry
+                    // names them: dead, and walkable, until the next sweep.
+                    retire(ctx)
+                    plan.free()
+                    throw .heapFull
+                }
+                heap.setWord(atOffset: off, BackRef.make(entryIndex: o.entryIndex, words: words))
+                plan.objects.append(o.raw)
+                plan.bodies.append(off)
+                plan.request.append(Int32(k))
             }
-            heap.setWord(atOffset: off, BackRef.make(entryIndex: o.entryIndex, words: words))
-            bodies.append(off)
         }
         retire(ctx)
-        for (k, o) in objs.enumerated() {
+        plan.requests = requests
+        plan.instances = objects.reduce(0) { $0 + $1.count }
+        return plan
+    }
+
+    /// Repoint every instance the plan allocated for and set each class
+    /// format's named-slot count. Cannot fail. World stopped; the caller
+    /// verifies.
+    func commitReshape(_ plan: inout ReshapePlan) {
+        for k in 0..<plan.objects.count {
+            let o = Oop(raw: plan.objects[k])
+            let r = plan.requests[Int(plan.request[k])]
             let old = stateWord(o.raw)
-            let new = bodies[k]
+            let new = plan.bodies[k]
             let h = header(o)
-            let indexed = h.count &- UInt64(namedSlots)
+            let indexed = h.count &- UInt64(r.namedSlots)
             var j: UInt64 = 0
-            for src in layout {
-                let v = src.map { heap.word(atOffset: old &+ 8 &+ UInt64($0) &<< 3) } ?? fill.raw
+            for src in r.layout {
+                let v = src.map { heap.word(atOffset: old &+ 8 &+ UInt64($0) &<< 3) } ?? plan.fill.raw
                 heap.setWord(atOffset: new &+ 8 &+ j &<< 3, v)
                 j &+= 1
             }
             for i in 0..<indexed {
                 heap.setWord(atOffset: new &+ 8 &+ (j &+ i) &<< 3,
-                             heap.word(atOffset: old &+ 8 &+ (UInt64(namedSlots) &+ i) &<< 3))
+                             heap.word(atOffset: old &+ 8 &+ (UInt64(r.namedSlots) &+ i) &<< 3))
             }
             setHeader(o, Header(raw: h.raw & ~Header.countMask | (j &+ indexed) &<< Header.countShift))
             setStateWord(o.raw, new)
         }
         // Module 8: the class format's named-slot count follows (basicNew
         // reads it).
-        let f = classFormat(classIndex)
-        if f.namedSlots == namedSlots && f.kind.isPointers && layout.count <= Int(ClassFormat.namedMask) {
-            unsafe gc.pointee.classFormats[Int(classIndex)] = f.raw & ~ClassFormat.namedMask | UInt64(layout.count)
+        for r in plan.requests {
+            let f = classFormat(r.classIndex)
+            if f.namedSlots == r.namedSlots && f.kind.isPointers && r.layout.count <= Int(ClassFormat.namedMask) {
+                unsafe gc.pointee.classFormats[Int(r.classIndex)] = f.raw & ~ClassFormat.namedMask | UInt64(r.layout.count)
+            }
         }
-        unsafe gc.pointee.counters.reshapedObjects &+= UInt64(objs.count)
-        verifyAtPause("after reshape", phase: .idle)
-        return objs.count
+        unsafe gc.pointee.counters.reshapedObjects &+= UInt64(plan.objects.count)
+    }
+}
+
+/// One class of a reshape: its instances' named slots now, and where each
+/// new named slot comes from (an old slot, or nil for the fill).
+struct ReshapeRequest {
+    let classIndex: UInt64
+    let namedSlots: Int
+    let layout: [Int?]
+}
+
+/// What `prepareReshape` allocated: per instance its new body and its
+/// request. Freed by the owner.
+struct ReshapePlan {
+    let fill: Oop
+    var requests: [ReshapeRequest] = []
+    var objects = RawArray<UInt64>()
+    var bodies = RawArray<UInt64>()
+    var request = RawArray<Int32>()
+    var instances = 0
+
+    init(fill: Oop) { self.fill = fill }
+
+    mutating func free() {
+        objects.free()
+        bodies.free()
+        request.free()
+        objects = RawArray()
+        bodies = RawArray()
+        request = RawArray()
     }
 }

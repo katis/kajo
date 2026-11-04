@@ -9,3 +9,54 @@ Class {
 Class >> isClass [
 	^ true
 ]
+
+{ #category : #'subclass creation' }
+Class >> subclass: aName [
+	^ self subclass: aName instanceVariableNames: '' classVariableNames: '' category: nil
+]
+
+{ #category : #'subclass creation' }
+Class >> subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory [
+	"A new class (or the class of that name redefined, module 8e), its instances of the receiver's format kind."
+	^ self subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory kind: nil
+]
+
+{ #category : #'subclass creation' }
+Class >> subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString package: aCategory [
+	^ self subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory kind: nil
+]
+
+{ #category : #'subclass creation' }
+Class >> variableSubclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory [
+	^ self subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory kind: #variable
+]
+
+{ #category : #'subclass creation' }
+Class >> byteSubclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory [
+	^ self subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory kind: #bytes
+]
+
+{ #category : #'subclass creation' }
+Class >> weakSubclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory [
+	^ self subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory kind: #weak
+]
+
+{ #category : #'subclass creation' }
+Class >> subclass: aName instanceVariableNames: ivarString classVariableNames: cvarString category: aCategory kind: aKindOrNil [
+	^ ClassBuilder define: aName superclass: self instanceVariableNames: ivarString substrings classVariableNames: cvarString substrings
+		classInstanceVariableNames: nil category: aCategory kind: aKindOrNil comment: nil
+]
+
+{ #category : #'class variables' }
+Class >> addClassVarNamed: aString [
+	(self classVarNames includes: aString asSymbol) ifTrue: [^ self].
+	ClassBuilder redefine: self instanceVariableNames: self instVarNames classVariableNames: (self classVarNames copyWith: aString asSymbol)
+		classInstanceVariableNames: self class instVarNames
+]
+
+{ #category : #'class variables' }
+Class >> removeClassVarNamed: aString [
+	(self classVarNames includes: aString asSymbol) ifFalse: [^ ClassDefinitionError new signal: self name , ' has no class variable ' , aString].
+	ClassBuilder redefine: self instanceVariableNames: self instVarNames classVariableNames: (self classVarNames reject: [:n | n = aString asSymbol])
+		classInstanceVariableNames: self class instVarNames
+]

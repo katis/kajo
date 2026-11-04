@@ -653,10 +653,9 @@ extension Image {
                     throw LoadError(.unknownClass, "\(d.name): superclass \(s) not defined before it", file: d.file, line: d.line)
                 }
                 sup = si
-                if (instSizes[si] ?? 0) > d.instSize { throw fail("\(d.name) has fewer instance variables than \(s)") }
-                if (instSizes[metaclassIndex(of: si)] ?? 0) > ClassLayout.size + d.metaSlots {
-                    throw fail("\(d.name) has fewer class-side instance variables than \(s)")
-                }
+                if let problem = ClassRules.sizeProblem(name: d.name, superName: s, superNamedSlots: instSizes[si] ?? 0,
+                                                        superMetaSlots: instSizes[metaclassIndex(of: si)] ?? 0, namedSlots: d.instSize,
+                                                        metaSlots: d.metaSlots) { throw fail(problem) }
             } else if d.name != "Object" {
                 throw fail("only Object has no superclass")
             }
@@ -685,9 +684,8 @@ extension Image {
                 continue
             }
             guard let si = sup else { throw fail("only Object has no superclass") }
-            let sf = om.classFormat(si)
-            if sf.isSealed { throw fail("\(d.name) cannot subclass the sealed \(d.superclass!)") }
-            if !sf.kind.isPointers && format.kind.isPointers { throw fail("\(d.name) cannot be pointers under \(d.superclass!)") }
+            if let problem = ClassRules.subclassProblem(name: d.name, superName: d.superclass!, superFormat: om.classFormat(si),
+                                                        format: format) { throw fail(problem) }
             if UInt64(om.classCount) + 2 > UInt64(limits.maxClassIndex) {
                 throw LoadError(.tooManyClasses, "more than \(limits.maxClassIndex) classes", file: d.file, line: d.line)
             }

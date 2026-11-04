@@ -23,7 +23,8 @@ Smalltalk class >> allBehaviors [
 
 { #category : #classes }
 Smalltalk class >> allClasses [
-	^ self allBehaviors reject: [:c | c isMeta]
+	"Every class but the removed ones (module 8e)."
+	^ self allBehaviors reject: [:c | c isMeta or: [c isObsolete]]
 ]
 
 { #category : #classes }
@@ -296,4 +297,72 @@ Smalltalk class >> resumeAfterSnapshot [
 Smalltalk class >> garbageCollect [
 	<primitive: 11>
 	^ nil
+]
+
+{ #category : #classes }
+Smalltalk class >> removeClass: aClass [
+	"Remove aClass (module 8e; ClassBuilder remove:)."
+	^ ClassBuilder remove: aClass
+]
+
+{ #category : #classes }
+Smalltalk class >> removeClassNamed: aName [
+	^ self removeClass: (self at: aName asSymbol)
+]
+
+{ #category : #classes }
+Smalltalk class >> forgetClassNames [
+	classNames := nil
+]
+
+{ #category : #'class variables' }
+Smalltalk class >> undeclaredBinding: aSymbol in: aClass [
+	"A Binding for a class variable aSymbol of aClass about to be declared: the one removed from aClass earlier, if any (so the methods that hold it work again), else a new one."
+	undeclared isNil ifFalse: [
+		((undeclared at: aClass ifAbsent: [nil]) ifNotNil: [:d | d at: aSymbol ifAbsent: [nil]]) ifNotNil: [:b | ^ b]].
+	^ Binding new key: aSymbol
+]
+
+{ #category : #'class variables' }
+Smalltalk class >> noteUndeclared: aBinding in: aClass [
+	undeclared isNil ifTrue: [undeclared := IdentityDictionary new].
+	(undeclared at: aClass ifAbsentPut: [IdentityDictionary new]) at: aBinding key put: aBinding
+]
+
+{ #category : #'class variables' }
+Smalltalk class >> forgetUndeclared: aSymbol in: aClass [
+	undeclared isNil ifTrue: [^ nil].
+	^ (undeclared at: aClass ifAbsent: [^ nil]) removeKey: aSymbol ifAbsent: [nil]
+]
+
+{ #category : #sources }
+Smalltalk class >> replaceSources: anAssociationList of: aBehavior [
+	"Every source of aBehavior's methods anew, selector -> source (after a redefinition forwarded its methods to their new selves, whose identity hashes the old table does not know)."
+	sources isNil ifTrue: [sources := IdentityDictionary new].
+	sources removeKey: aBehavior ifAbsent: [nil].
+	anAssociationList do: [:a | self noteSource: a value of: (aBehavior compiledMethodAt: a key)]
+]
+
+{ #category : #primitives }
+Smalltalk class >> primDefineClass: anArray [
+	"A class from its specification (ClassBuilder), or a String saying why not (module 8e). Fails in a release image."
+	<primitive: 145>
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: nil selector: (anArray at: 1); signal].
+	^ self error: 'the VM refused to define a class'
+]
+
+{ #category : #primitives }
+Smalltalk class >> primRedefine: anArray [
+	"Reshape, recompile and re-pool classes in one stop (ClassBuilder): nil, or a String saying why not (module 8e). Fails in a release image."
+	<primitive: 146>
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: nil selector: nil; signal].
+	^ self error: 'the VM refused to redefine a class'
+]
+
+{ #category : #primitives }
+Smalltalk class >> primRemoveClass: aClass as: anObsoleteName [
+	"Unbind aClass (ClassBuilder): nil, or a String saying why not (module 8e). Fails in a release image."
+	<primitive: 147>
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: aClass selector: nil; signal].
+	^ self error: 'the VM refused to remove ' , aClass printString
 ]

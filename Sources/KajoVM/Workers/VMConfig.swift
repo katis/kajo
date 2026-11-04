@@ -32,6 +32,10 @@ struct VMConfig: Sendable {
     /// Module 7: young collection without stopping the world (needs a
     /// nursery in a doubly mapped region; `stw`: module 4's scavenge only).
     var young = YoungConfig()
+    /// Module 8e: the directory the host opened the VM with (`kajo run
+    /// --sources`, `kajo test --sources`): the file primitives (148, 149)
+    /// read and write under it and nowhere else; nil, none of them works.
+    var sourcesDirectory: String? = nil
     /// Injected yields and sleeps, seeded (docs/VERIFICATION.md layer 5).
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).

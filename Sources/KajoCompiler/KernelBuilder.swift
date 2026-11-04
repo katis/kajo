@@ -141,27 +141,21 @@ struct Plan {
             let inheritedMeta = c.superclass.map { classInstanceVariables[$0] ?? [] } ?? []
             let all = inherited + c.instanceVariables
             let allMeta = inheritedMeta + c.classInstanceVariables
-            if Set(all).count != all.count { throw CompileError("\(c.name): an instance variable name twice", file: c.file, line: c.line) }
-            if Set(allMeta).count != allMeta.count {
-                throw CompileError("\(c.name): a class-side instance variable name twice", file: c.file, line: c.line)
-            }
             instanceVariables[c.name] = all
             classInstanceVariables[c.name] = allMeta
             // Module 8d: class variables are capitalized, unique along the
             // chain, and shadow no instance variable of either side (the
-            // subclasses' are checked as each comes, below).
-            var visible = c.superclass.flatMap { classVariables[$0] } ?? [:]
-            for v in c.classVariables {
-                func refuse(_ why: String) -> CompileError { CompileError("\(c.name): class variable \(v) \(why)", file: c.file, line: c.line) }
-                guard let first = v.unicodeScalars.first, first.properties.isUppercase else { throw refuse("must begin with a capital") }
-                if let owner = visible[v] { throw refuse(owner == c.name ? "declared twice" : "shadows \(owner)'s class variable") }
-                if all.contains(v) { throw refuse("shadows an instance variable") }
-                if allMeta.contains(v) { throw refuse("shadows a class-side instance variable") }
-                visible[v] = c.name
+            // subclasses' are checked as each comes); module 8e shares the
+            // rules with the define-class primitive.
+            let inheritedPool = c.superclass.flatMap { classVariables[$0] } ?? [:]
+            if let problem = ClassRules.namesProblem(className: c.name, instanceVariables: all, classInstanceVariables: allMeta,
+                                                     ownInstanceVariables: c.instanceVariables,
+                                                     ownClassInstanceVariables: c.classInstanceVariables,
+                                                     classVariables: c.classVariables, inherited: inheritedPool) {
+                throw CompileError(problem, file: c.file, line: c.line)
             }
-            for v in c.instanceVariables + c.classInstanceVariables where visible[v] != nil {
-                throw CompileError("\(c.name): instance variable \(v) shadows \(visible[v]!)'s class variable", file: c.file, line: c.line)
-            }
+            var visible = inheritedPool
+            for v in c.classVariables { visible[v] = c.name }
             classVariables[c.name] = visible
             let superKind = c.superclass.flatMap { kinds[$0] } ?? "fixed"
             let kind: String

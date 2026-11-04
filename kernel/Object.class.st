@@ -438,3 +438,9 @@ Object >> slotAt: index [
 Object >> initialize [
 	^ self
 ]
+
+{ #category : #'error handling' }
+Object >> methodRemovedByRedefinition [
+	"Sent by a method that ran after a redefinition of its class replaced it by nothing (an old closure's block, a removed method): its class's shape changed under it (module 8e)."
+	^ self error: 'a method of ' , self class name , ' that a class redefinition removed ran'
+]
