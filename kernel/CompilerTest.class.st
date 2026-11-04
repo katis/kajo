@@ -26,7 +26,9 @@ CompilerTest >> testCompiledCodeRunsTheSame [
 	| code |
 	code := Compiler compile: 'sum: n | s | s := 0. 1 to: n do: [:i | s := s + i]. ^ s' in: Object.
 	self assert: code numArgs = 1.
-	self assert: code literals isEmpty.
+	self assert: code literals size = 1.
+	self assert: (code literals first isKindOf: ByteArray).
+	self assert: (code flags bitAnd: 16) = 16.
 	self assert: code bytecodes first = (BytecodeGenerator number: #pushInt)
 ]
 

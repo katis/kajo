@@ -551,12 +551,14 @@ struct Compiler {
             if s.isSuper {
                 e.op(.pushSelf, 0, 0, s.line)
                 for a in s.arguments { try gen(a, r, e, value: true) }
+                e.emit(.source(s.start, s.end), s.line)
                 e.emit(.send(.sendSuper, s.selector, s.arguments.count), s.line)
             } else {
                 let (start, sends) = Compiler.chain(s)
                 try gen(start, r, e, value: true)
                 for t in sends {
                     for a in t.arguments { try gen(a, r, e, value: true) }
+                    e.emit(.source(t.start, t.end), t.line)
                     send(t.selector, t.arguments.count, e, t.line)
                 }
             }
@@ -568,6 +570,7 @@ struct Compiler {
                 let last = k == c.messages.count - 1
                 if !last { e.op(.dup, 0, 0, m.line) }
                 for a in m.arguments { try gen(a, r, e, value: true) }
+                e.emit(.source(m.start, m.end), m.line)
                 if isSuper { e.emit(.send(.sendSuper, m.selector, m.arguments.count), m.line) }
                 else { send(m.selector, m.arguments.count, e, m.line) }
                 if !last { e.op(.pop, 0, 0, m.line) }

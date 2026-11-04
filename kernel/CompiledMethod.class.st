@@ -118,6 +118,59 @@ CompiledMethod >> selector [
 	^ self slotAt: 6
 ]
 
+{ #category : #debugging }
+CompiledMethod >> hasSourceMap [
+	^ (self flags bitAnd: 16) ~= 0
+]
+
+{ #category : #debugging }
+CompiledMethod >> homeMethod [
+	"The method a block method belongs to (itself for a method)."
+	self isBlockMethod ifFalse: [^ self].
+	self methodClass methodsDo: [:m | (m includesBlockMethod: self) ifTrue: [^ m]].
+	^ nil
+]
+
+{ #category : #debugging }
+CompiledMethod >> includesBlockMethod: aCompiledMethod [
+	^ self blockMethods anySatisfy: [:b | b == aCompiledMethod or: [b includesBlockMethod: aCompiledMethod]]
+]
+
+{ #category : #debugging }
+CompiledMethod >> sourceCode [
+	"The recorded source of the method (of its home method for a block method), or nil."
+	^ self homeMethod ifNotNil: [:m | Smalltalk sourceOf: m]
+]
+
+{ #category : #debugging }
+CompiledMethod >> sourceMapEntries [
+	"The pc-to-source map (module 9b), each entry {pc. start. end}: a send at pc whose source is the bytes from start (1-based) to end (inclusive) of sourceCode. Empty without a map."
+	| map out i pc next |
+	self hasSourceMap ifFalse: [^ #()].
+	map := self literals last.
+	out := OrderedCollection new.
+	i := 1.
+	pc := 0.
+	next := [| v shift b |
+		v := 0. shift := 0.
+		[b := map at: i. i := i + 1. v := v + ((b bitAnd: 127) bitShift: shift). shift := shift + 7. b >= 128] whileTrue.
+		v].
+	[i <= map size] whileTrue: [ | start |
+		pc := pc + next value.
+		start := next value.
+		out add: {pc. start + 1. start + next value}].
+	^ out asArray
+]
+
+{ #category : #debugging }
+CompiledMethod >> sourceRangeAt: aPc [
+	"{start. end} of the send at aPc or the last one before it, nil when there is none."
+	| found |
+	found := nil.
+	self sourceMapEntries do: [:e | e first <= aPc ifTrue: [found := {e at: 2. e at: 3}]].
+	^ found
+]
+
 { #category : #evaluating }
 CompiledMethod >> valueWithReceiver: anObject arguments: anArray [
 	"Run the method once on anObject, as if a send had found it, without installing it (module 8d: what Compiler evaluate: does with a doit). The receiver must be an instance of the method's class or of a subclass, anArray its arguments; a method with a primitive does not run this way."

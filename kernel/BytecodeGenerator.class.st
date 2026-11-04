@@ -1,4 +1,4 @@
-"The assembler of the Smalltalk compiler: bytecode set v1 (Sources/KajoVM/Interpreter/Opcodes.swift) in a table, a body's instructions to bytes with the literal frame in first-use order (duplicates merged, pragmas last), the ext prefix for operands past 255, jumps resolved, and the stack-depth trace the VM's verifier makes for maxStack. Instructions: {#op. opcode. a. b}, {#label. name}, {#literal. object}, {#send. opcode. selector. argc}, {#closure. aCompiledCode. copied}, {#jump. opcode. label}."
+"The assembler of the Smalltalk compiler: bytecode set v1 (Sources/KajoVM/Interpreter/Opcodes.swift) in a table, a body's instructions to bytes with the literal frame in first-use order (duplicates merged, pragmas last), the ext prefix for operands past 255, jumps resolved, and the stack-depth trace the VM's verifier makes for maxStack. Instructions: {#op. opcode. a. b}, {#label. name}, {#literal. object}, {#send. opcode. selector. argc}, {#closure. aCompiledCode. copied}, {#jump. opcode. label}, and {#source. start. end} (module 9b), the source range of the next instruction, a send: the pc-to-source map is the last literal (never merged with another), and the answer says there is one."
 Class {
 	#name : #BytecodeGenerator,
 	#superclass : #Object,
@@ -12,13 +12,15 @@ Class {
 
 { #category : #accessing }
 BytecodeGenerator >> assembleWithExtraLiterals: extra [
-	"Answer {bytes. literals. maxStack}."
-	| ins offsets bytes n k |
+	"Answer {bytes. literals. maxStack. hasSourceMap}."
+	| ins offsets bytes n k sources map |
 	literals := OrderedCollection new.
 	labels := Dictionary new.
 	ins := OrderedCollection new.
+	sources := OrderedCollection new.
 	lines do: [:l | | kind |
 		kind := l first.
+		kind == #source ifTrue: [sources add: {ins size + 1. l at: 2. l at: 3}].
 		kind == #label ifTrue: [labels at: (l at: 2) put: ins size + 1].
 		kind == #op ifTrue: [ins add: {l at: 2. l at: 3. l at: 4. nil}].
 		kind == #literal ifTrue: [ins add: {#pushLiteral. self literalIndex: (l at: 2). 0. nil}].
@@ -50,7 +52,16 @@ BytecodeGenerator >> assembleWithExtraLiterals: extra [
 			rel := (offsets at: (labels at: (inst at: 4))) - (offsets at: i + 1).
 			bytes nextPut: (rel bitAnd: 255); nextPut: ((rel bitShift: -8) bitAnd: 255)]].
 	k := self maxStackOf: ins.
-	^ {bytes contents. literals asArray. k}
+	sources isEmpty ifFalse: [
+		map := WriteStream on: (ByteArray new: 0).
+		sources inject: 0 into: [:prev :s | | pc |
+			pc := offsets at: s first.
+			BytecodeGenerator putUnsigned: pc - prev on: map.
+			BytecodeGenerator putUnsigned: (s at: 2) on: map.
+			BytecodeGenerator putUnsigned: (s at: 3) - (s at: 2) on: map.
+			pc].
+		literals add: map contents].
+	^ {bytes contents. literals asArray. k. sources notEmpty}
 ]
 
 { #category : #accessing }
@@ -161,6 +172,15 @@ BytecodeGenerator class >> pushes: op [
 	(#(#storeTemp #storeIvar #pop #jumpIfTrue #jumpIfFalse #storeTempVectorSlot #returnTop #blockReturn #nonlocalReturn #returnSelf #jump #ext) includes: op) ifTrue: [^ 0].
 	op == #dup ifTrue: [^ 2].
 	^ 1
+]
+
+{ #category : #accessing }
+BytecodeGenerator class >> putUnsigned: anInteger on: aStream [
+	"Unsigned LEB128, the source map's numbers (Sources/KajoVM/Loader/Assembler.swift, SourceMap)."
+	| x |
+	x := anInteger.
+	[x >= 128] whileTrue: [aStream nextPut: (x bitAnd: 127) + 128. x := x bitShift: -7].
+	aStream nextPut: x
 ]
 
 { #category : #accessing }

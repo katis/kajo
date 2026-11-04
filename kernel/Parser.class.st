@@ -4,13 +4,15 @@ Class {
 	#superclass : #Object,
 	#instVars : [
 		'scanner',
-		'depth'
+		'depth',
+		'lastEnd'
 	],
 	#category : #'Kernel-Compiler'
 }
 
 { #category : #accessing }
 Parser >> advance [
+	lastEnd := scanner stop - 1.
 	scanner next
 ]
 
@@ -71,7 +73,7 @@ Parser >> parseBinaryMessages: receiver [
 		line := self line.
 		self advance.
 		a := self parseUnaryMessages: self parsePrimary.
-		r := MessageNode receiver: r selector: op asSymbol arguments: {a} line: line].
+		r := (MessageNode receiver: r selector: op asSymbol arguments: {a} line: line) sourceStart: r sourceStart end: lastEnd; yourself].
 	^ r
 ]
 
@@ -118,7 +120,7 @@ Parser >> parseCascade: receiver [
 	first := self parseMessages: receiver.
 	self kind == #semicolon ifFalse: [^ first].
 	first class == MessageNode ifFalse: [^ self fail: 'a cascade needs a message before ;'].
-	messages := OrderedCollection with: {first selector. first arguments. first line}.
+	messages := OrderedCollection with: {first selector. first arguments. first line. first sourceStart. first sourceEnd}.
 	[self kind == #semicolon] whileTrue: [
 		self advance.
 		line := self line.
@@ -126,7 +128,7 @@ Parser >> parseCascade: receiver [
 		m := self parseMessages: placeholder.
 		m class == MessageNode ifFalse: [^ self fail: 'expected a message after ;'].
 		m receiver == placeholder ifFalse: [^ self fail: 'a cascade part is one message'].
-		messages add: {m selector. m arguments. line}].
+		messages add: {m selector. m arguments. line. first receiver sourceStart. lastEnd}].
 	^ CascadeNode receiver: first receiver messages: messages asArray line: receiver line
 ]
 
@@ -134,7 +136,7 @@ Parser >> parseCascade: receiver [
 Parser >> parseExpression [
 	| save name line r |
 	self kind == #identifier ifTrue: [
-		save := scanner state.
+		save := {scanner state. lastEnd}.
 		name := self value.
 		line := self line.
 		self advance.
@@ -144,13 +146,14 @@ Parser >> parseExpression [
 			r := AssignmentNode variable: (VariableNode named: name line: line) value: self parseExpression line: line.
 			self leave.
 			^ r].
-		scanner restore: save].
+		scanner restore: save first.
+		lastEnd := save last].
 	^ self parseCascade: self parsePrimary
 ]
 
 { #category : #accessing }
 Parser >> parseLiteralArrayBody [
-	| out v s lastEnd l |
+	| out v s keywordEnd l |
 	self enter.
 	out := OrderedCollection new.
 	[true] whileTrue: [
@@ -171,11 +174,11 @@ Parser >> parseLiteralArrayBody [
 		self kind == #keyword
 			ifTrue: [
 				s := self value.
-				lastEnd := scanner stop.
+				keywordEnd := scanner stop.
 				self advance.
-				[self kind == #keyword and: [scanner start = lastEnd]] whileTrue: [
+				[self kind == #keyword and: [scanner start = keywordEnd]] whileTrue: [
 					s := s , self value.
-					lastEnd := scanner stop.
+					keywordEnd := scanner stop.
 					self advance].
 				out add: s asSymbol]
 			ifFalse: [
@@ -223,7 +226,7 @@ Parser >> parseMessages: receiver [
 			self advance.
 			a := self parsePrimary.
 			args add: (self parseBinaryMessages: (self parseUnaryMessages: a))].
-		r := MessageNode receiver: r selector: selector asSymbol arguments: args asArray line: line].
+		r := (MessageNode receiver: r selector: selector asSymbol arguments: args asArray line: line) sourceStart: r sourceStart end: lastEnd; yourself].
 	^ r
 ]
 
@@ -296,6 +299,16 @@ Parser >> parsePragmas [
 
 { #category : #accessing }
 Parser >> parsePrimary [
+	"A primary with its source range (module 9b); a parenthesized expression keeps its own."
+	| start n |
+	start := scanner start - 1.
+	n := self parsePrimaryNode.
+	n sourceEnd isNil ifTrue: [n sourceStart: start end: lastEnd].
+	^ n
+]
+
+{ #category : #accessing }
+Parser >> parsePrimaryNode [
 	| line name e elements l |
 	line := self line.
 	self kind == #identifier ifTrue: [
@@ -377,7 +390,7 @@ Parser >> parseUnaryMessages: receiver [
 	| r |
 	r := receiver.
 	[self kind == #identifier] whileTrue: [
-		r := MessageNode receiver: r selector: self value asSymbol arguments: #() line: self line.
+		r := (MessageNode receiver: r selector: self value asSymbol arguments: #() line: self line) sourceStart: r sourceStart end: scanner stop - 1; yourself.
 		self advance].
 	^ r
 ]
@@ -386,6 +399,7 @@ Parser >> parseUnaryMessages: receiver [
 Parser >> setSource: aString [
 	scanner := Scanner on: aString.
 	depth := 0.
+	lastEnd := 0.
 	scanner next
 ]
 

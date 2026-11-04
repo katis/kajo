@@ -301,6 +301,14 @@ func verifyHeapMethod(_ om: ObjectMemory, _ method: Oop, classIndex: UInt64, nil
     if bytes.isEmpty && prim == 0 { return "no bytecodes and no primitive" }
     if bytes.isEmpty && isBlock { return "an empty block method" }
     let nLits = Int(om.count(of: lits))
+    // Module 9b: a source map is the last literal, a ByteArray.
+    if flags & MethodFlags.sourceMap != 0 {
+        guard nLits > 0 else { return "a source map flag with no literal" }
+        let map = om.load(lits, nLits - 1)
+        guard map.isObject, om.isUsedReference(map), om.classIndex(of: map) == WellKnown.byteArray, om.isBytes(map) else {
+            return "a source map flag but the last literal is not a ByteArray"
+        }
+    }
     // Module 8e: a redefinition verifies the methods it makes against the
     // class's format to be, before the class changes.
     let f = format ?? om.classFormat(classIndex)

@@ -1,4 +1,4 @@
-"messages: Arrays of selector, arguments and line."
+"messages: Arrays of selector, arguments, line and the source range (start, end; module 9b)."
 Class {
 	#name : #CascadeNode,
 	#superclass : #ParseNode,

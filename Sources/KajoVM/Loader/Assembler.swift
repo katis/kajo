@@ -78,6 +78,12 @@ package struct AsmLine: Sendable {
         case pushClosure(String, Int)
         /// `jump`, `jump_if_true` or `jump_if_false` to a label.
         case jump(Opcode, String)
+        /// Module 9b: the source range (byte offsets in the method's
+        /// recorded source, start inclusive, end exclusive) of the next
+        /// instruction, a send. Emits nothing; the assembler records the
+        /// instruction's pc and the range in the method's source map
+        /// (`SourceMap`), the last literal, and sets `MethodFlags.sourceMap`.
+        case source(Int, Int)
     }
 
     package let line: Int
@@ -327,7 +333,7 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
         let name: String
     }
     func assembleBody(_ b: Body, extraLiterals: [Literal]) throws(LoadError) -> (bytes: [UInt8], literals: [Literal], maxStack: Int,
-                                                                              maxIvar: Int, minIvar: Int) {
+                                                                              maxIvar: Int, minIvar: Int, hasMap: Bool) {
         struct Ins {
             let op: Opcode
             let line: Int
@@ -347,8 +353,13 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
             return literals.count - 1
         }
         var maxIvar = -1, minIvar = -1
+        // Module 9b: (instruction index, start, end) for each `.source`.
+        var sources: [(Int, Int, Int)] = []
         for l in b.lines {
             switch l.content {
+            case .source(let start, let end):
+                guard start >= 0, end >= start else { throw fail(.badOperand, "source range \(start)..<\(end)", l.line) }
+                sources.append((ins.count, start, end))
             case .label(let name):
                 if labels[name] != nil { throw fail(.duplicateLabel, "label '\(name)' defined twice", l.line) }
                 labels[name] = ins.count
@@ -387,6 +398,7 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
             guard t < ins.count else { throw fail(.badStack, "label '\(label)' is past the last instruction", i.line) }
         }
         for l in extraLiterals { _ = try literal(l, b.line) }
+        if sources.contains(where: { $0.0 >= ins.count }) { throw fail(.badOperand, "a source range after the last instruction", b.line) }
         // Lengths (with prefixes), then offsets, then bytes.
         var offsets = [Int](repeating: 0, count: ins.count + 1)
         for (k, i) in ins.enumerated() {
@@ -428,6 +440,14 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
                 bytes.append(hi)
             }
         }
+        // Module 9b: the source map is the last literal, never merged with
+        // another (an equal `#[...]` literal stays its own).
+        var hasMap = false
+        if !sources.isEmpty {
+            if literals.count == limits.maxLiterals { throw fail(.tooManyLiterals, "more than \(limits.maxLiterals) literals", b.line) }
+            literals.append(.byteArray(SourceMap.encode(sources.map { (offsets[$0.0], $0.1, $0.2) })))
+            hasMap = true
+        }
         let shape = CodeShape(argc: b.argc, addressableTemps: b.addressable, literalCount: literals.count, isBlock: b.isBlock,
                               needsHome: b.needsHome, ivarRange: 0..<Header.maxSlots, maxStackLimit: limits.maxStack)
         let lits = literals
@@ -439,7 +459,7 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
                 default: return .other
                 }
             }
-            return (bytes, literals, v.maxStack, maxIvar, minIvar)
+            return (bytes, literals, v.maxStack, maxIvar, minIvar, hasMap)
         } catch {
             let k = offsets.firstIndex(of: error.offset) ?? -1
             let line = k >= 0 && k < ins.count ? ins[k].line : (ins.last?.line ?? b.line)
@@ -456,7 +476,8 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
                                       selector: b.name, argc: b.args, temps: b.copied + b.temps + 1, primitive: 0,
                                       bytecodes: r.bytes, literals: r.literals, maxStack: r.maxStack, maxIvar: r.maxIvar,
                                       minIvar: r.minIvar,
-                                      flags: MethodFlags.block | (needsHome[k] ? MethodFlags.needsHome : 0), copied: b.copied,
+                                      flags: MethodFlags.block | (needsHome[k] ? MethodFlags.needsHome : 0)
+                                          | (r.hasMap ? MethodFlags.sourceMap : 0), copied: b.copied,
                                       blocks: [], pragmas: []))
     }
     let r = try assembleBody(Body(lines: m.body, argc: argc, addressable: argc + m.temps, isBlock: false, needsHome: false,
@@ -467,7 +488,7 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
         maxIvar = max(maxIvar, b.maxIvar)
         minIvar = minIvar < 0 ? b.minIvar : min(minIvar, b.minIvar)
     }
-    let flags = (m.unwind ? MethodFlags.unwind : 0) | (m.handler ? MethodFlags.handler : 0)
+    let flags = (m.unwind ? MethodFlags.unwind : 0) | (m.handler ? MethodFlags.handler : 0) | (r.hasMap ? MethodFlags.sourceMap : 0)
     return AssembledMethod(file: m.file, line: m.line, className: m.className, classSide: m.classSide, selector: m.selector,
                            argc: argc, temps: m.temps, primitive: m.primitive, bytecodes: r.bytes, literals: r.literals,
                            maxStack: r.maxStack, maxIvar: maxIvar, minIvar: minIvar, flags: flags, copied: 0, blocks: blocks,
@@ -550,4 +571,55 @@ func magnitudeBytes(_ v: UInt64) -> [UInt8] {
         x >>= 8
     }
     return out
+}
+
+/// Module 9b: a method's pc-to-source map, its last literal when
+/// `MethodFlags.sourceMap` is set: for each send instruction in pc order,
+/// three unsigned LEB128 numbers: the pc minus the previous entry's pc,
+/// the source start (a byte offset in the recorded source), and the
+/// range's length. The kernel's BytecodeGenerator writes the same bytes and
+/// `CompiledMethod>>sourceRangeAt:` reads them.
+package enum SourceMap {
+    package static func encode(_ entries: [(pc: Int, start: Int, end: Int)]) -> [UInt8] {
+        var out: [UInt8] = []
+        var prev = 0
+        func put(_ v: Int) {
+            var x = UInt(v)
+            while x >= 128 {
+                out.append(UInt8(x & 127) | 128)
+                x >>= 7
+            }
+            out.append(UInt8(x))
+        }
+        for e in entries {
+            put(e.pc - prev)
+            put(e.start)
+            put(e.end - e.start)
+            prev = e.pc
+        }
+        return out
+    }
+
+    /// The entries back (nil when the bytes are not a map).
+    package static func decode(_ bytes: [UInt8]) -> [(pc: Int, start: Int, end: Int)]? {
+        var out: [(Int, Int, Int)] = []
+        var i = 0, pc = 0
+        func get() -> Int? {
+            var v = 0, shift = 0
+            while i < bytes.count, shift < 56 {
+                let b = bytes[i]
+                i += 1
+                v |= Int(b & 127) << shift
+                if b < 128 { return v }
+                shift += 7
+            }
+            return nil
+        }
+        while i < bytes.count {
+            guard let d = get(), let s = get(), let n = get() else { return nil }
+            pc += d
+            out.append((pc, s, s + n))
+        }
+        return out
+    }
 }

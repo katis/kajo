@@ -318,6 +318,11 @@ struct Scanner {
 /// A node of a method's tree. Classes, so the analysis can annotate them.
 class Node {
     let line: Int
+    /// Module 9b: the node's source range (byte offsets, end exclusive);
+    /// a send's starts at its receiver's start. The source map records the
+    /// sends' ranges, and the kernel's parser computes the same ones.
+    var start = 0
+    var end = 0
     init(line: Int) { self.line = line }
 }
 
@@ -383,8 +388,8 @@ final class SendNode: Node {
 
 final class CascadeNode: Node {
     let receiver: Node
-    let messages: [(selector: String, arguments: [Node], line: Int)]
-    init(_ receiver: Node, _ messages: [(selector: String, arguments: [Node], line: Int)], line: Int) {
+    let messages: [(selector: String, arguments: [Node], line: Int, start: Int, end: Int)]
+    init(_ receiver: Node, _ messages: [(selector: String, arguments: [Node], line: Int, start: Int, end: Int)], line: Int) {
         self.receiver = receiver
         self.messages = messages
         super.init(line: line)
@@ -460,6 +465,8 @@ struct Parser {
     /// refuses blocks nested past 64. Both compilers share the limit.
     var depth = 0
     static let maxDepth = 32
+    /// Module 9b: the end of the token most recently consumed.
+    var lastEnd = 0
 
     init(_ text: [UInt8], file: String, line: Int = 1) throws(CompileError) {
         scanner = Scanner(text, file: file, line: line)
@@ -468,7 +475,10 @@ struct Parser {
 
     func fail(_ m: String) -> CompileError { CompileError(m, file: scanner.file, line: token.line) }
 
-    mutating func advance() throws(CompileError) { token = try scanner.next() }
+    mutating func advance() throws(CompileError) {
+        lastEnd = token.end
+        token = try scanner.next()
+    }
 
     mutating func expect(_ k: TokenKind, _ what: String) throws(CompileError) {
         guard token.kind == k else { throw fail("expected \(what)") }
@@ -601,7 +611,7 @@ struct Parser {
     mutating func parseExpression() throws(CompileError) -> Node {
         if case .identifier(let name) = token.kind {
             // an assignment needs the token after the identifier
-            let save = (scanner, token)
+            let save = (scanner, token, lastEnd)
             let line = token.line
             try advance()
             if token.kind == .assign {
@@ -610,7 +620,7 @@ struct Parser {
                 defer { depth -= 1 }
                 return AssignNode(VariableNode(name, line: line), try parseExpression(), line: line)
             }
-            (scanner, token) = save
+            (scanner, token, lastEnd) = save
         }
         let receiver = try parsePrimary()
         return try parseCascade(receiver)
@@ -620,7 +630,8 @@ struct Parser {
         let first = try parseMessages(receiver)
         guard token.kind == .semicolon else { return first }
         guard let send = first as? SendNode else { throw fail("a cascade needs a message before ;") }
-        var messages: [(selector: String, arguments: [Node], line: Int)] = [(send.selector, send.arguments, send.line)]
+        var messages: [(selector: String, arguments: [Node], line: Int, start: Int, end: Int)] =
+            [(send.selector, send.arguments, send.line, send.start, send.end)]
         while token.kind == .semicolon {
             try advance()
             let line = token.line
@@ -630,7 +641,7 @@ struct Parser {
             // flatten: the first message of the chain goes to the cascade's
             // receiver; further ones are not allowed without parentheses.
             guard m.receiver === placeholder else { throw fail("a cascade part is one message") }
-            messages.append((m.selector, m.arguments, line))
+            messages.append((m.selector, m.arguments, line, send.receiver.start, lastEnd))
         }
         return CascadeNode(send.receiver, messages, line: receiver.line)
     }
@@ -649,7 +660,10 @@ struct Parser {
                 let a = try parsePrimary()
                 args.append(try parseBinaryMessages(try parseUnaryMessages(a)))
             }
+            let start = r.start
             r = SendNode(r, selector, args, line: line)
+            r.start = start
+            r.end = lastEnd
         }
         return r
     }
@@ -661,7 +675,10 @@ struct Parser {
     mutating func parseUnaryMessages(_ receiver: Node) throws(CompileError) -> Node {
         var r = receiver
         while case .identifier(let name) = token.kind {
+            let start = r.start
             r = SendNode(r, name, [], line: token.line)
+            r.start = start
+            r.end = token.end
             try advance()
         }
         return r
@@ -679,11 +696,25 @@ struct Parser {
             let line = token.line
             try advance()
             let a = try parseUnaryMessages(try parsePrimary())
+            let start = r.start
             r = SendNode(r, op, [a], line: line)
+            r.start = start
+            r.end = lastEnd
         }
     }
 
     mutating func parsePrimary() throws(CompileError) -> Node {
+        let start = token.start
+        let n = try parsePrimaryNode()
+        // A parenthesized expression keeps its own range.
+        if n.end == 0 {
+            n.start = start
+            n.end = lastEnd
+        }
+        return n
+    }
+
+    mutating func parsePrimaryNode() throws(CompileError) -> Node {
         let line = token.line
         switch token.kind {
         case .identifier(let name):

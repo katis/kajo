@@ -71,8 +71,9 @@ ClassVariableTest >> testTheLiteralIsTheBinding [
 	self assert: ((ClassVariableSample >> #count) literals anySatisfy: [:l | l == b]).
 	self assert: ((ClassVariableSampleChild class >> #seen) literals anySatisfy: [:l | l == b]).
 	code := Compiler compile: 'f ^ Count := Count + 1' in: ClassVariableSampleChild.
-	self assert: code literals size = 1.
+	self assert: code literals size = 2.
 	self assert: code literals first == b.
+	self assert: (code literals last isKindOf: ByteArray).
 	code := Compiler compile: (Smalltalk sourceOf: ClassVariableSample >> #bump) in: ClassVariableSample.
 	self assert: (code matches: ClassVariableSample >> #bump) isNil
 ]

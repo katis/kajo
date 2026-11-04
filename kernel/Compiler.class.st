@@ -267,6 +267,7 @@ Compiler >> compile: aString [
 	(doit and: [returned not]) ifTrue: [self emit: e op: #pushNil. self emit: e op: #returnTop. returned := true].
 	returned ifFalse: [self emit: e op: #returnSelf].
 	r := (BytecodeGenerator new setLines: e) assembleWithExtraLiterals: pragmas.
+	(r at: 4) ifTrue: [flags := flags bitOr: 16].
 	^ CompiledCode new
 		setSelector: tree selector bytecodes: r first literals: (r at: 2) numArgs: tree arguments size
 		numTemps: scope tempCount maxStack: (r at: 3) primitive: primitive flags: flags numCopied: 0
@@ -281,7 +282,7 @@ Compiler >> assembleBlock: lines scope: s [
 	^ CompiledCode new
 		setSelector: nil bytecodes: r first literals: (r at: 2) numArgs: s argumentCount
 		numTemps: s copied size + s tempCount + 1 maxStack: (r at: 3) primitive: 0
-		flags: (home ifTrue: [12] ifFalse: [4]) numCopied: s copied size
+		flags: (home ifTrue: [12] ifFalse: [4]) + ((r at: 4) ifTrue: [16] ifFalse: [0]) numCopied: s copied size
 ]
 
 { #category : #generation }
@@ -353,10 +354,12 @@ Compiler >> gen: aNode in: r on: e value: wantValue [
 			ifTrue: [
 				self emit: e op: #pushSelf.
 				aNode arguments do: [:x | self gen: x in: r on: e value: true].
+				e add: {#source. aNode sourceStart. aNode sourceEnd}.
 				e add: {#send. #sendSuper. aNode selector. aNode arguments size}]
 			ifFalse: [
 				self gen: aNode receiver in: r on: e value: true.
 				aNode arguments do: [:x | self gen: x in: r on: e value: true].
+				e add: {#source. aNode sourceStart. aNode sourceEnd}.
 				self send: aNode selector arguments: aNode arguments size on: e].
 		wantValue ifFalse: [self emit: e op: #pop].
 		^ self].
@@ -384,6 +387,7 @@ Compiler >> genCascade: aNode in: r on: e value: wantValue [
 		last := k = aNode messages size.
 		last ifFalse: [self emit: e op: #dup].
 		(m at: 2) do: [:x | self gen: x in: r on: e value: true].
+		e add: {#source. m at: 4. m at: 5}.
 		isSuper
 			ifTrue: [e add: {#send. #sendSuper. m first. (m at: 2) size}]
 			ifFalse: [self send: m first arguments: (m at: 2) size on: e].

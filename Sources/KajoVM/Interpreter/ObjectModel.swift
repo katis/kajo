@@ -184,7 +184,10 @@ enum MethodFlags {
     /// A block method that returns non-locally, itself or through a block
     /// it creates: its closures carry a home Context.
     static let needsHome: Int64 = 8
-    static let all: Int64 = 15
+    /// Module 9b: the last literal is the pc-to-source map (`SourceMap`), a
+    /// ByteArray, read-only like the rest. The VM never reads it.
+    static let sourceMap: Int64 = 16
+    static let all: Int64 = 31
 }
 
 /// The argument of `doesNotUnderstand:`.
