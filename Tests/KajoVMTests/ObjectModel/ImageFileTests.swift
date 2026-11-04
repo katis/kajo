@@ -172,7 +172,7 @@ private func corrupt(_ c: Corruption) throws -> [UInt8] {
     func put(_ i: Int, _ v: UInt64) { for k in 0..<8 { b[8 * i + k] = UInt8(truncatingIfNeeded: v >> (8 * UInt64(k))) } }
     switch c {
     case .badMagic: b[0] ^= 1
-    case .badVersion: put(1, 4)
+    case .badVersion: put(1, 5)
     // module 8d: 8c's images (version 2) are refused, their Metaclass objects a slot short
     case .aVersion2Image: put(1, 2)
     case .unknownFlags: put(5, 2)
