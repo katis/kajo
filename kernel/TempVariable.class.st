@@ -58,6 +58,12 @@ TempVariable >> real [
 ]
 
 { #category : #accessing }
+TempVariable >> owner [
+	"The scope whose temp vector holds the variable when it is in one."
+	^ scope owner
+]
+
+{ #category : #accessing }
 TempVariable >> isCaptured [
 	^ captured
 ]

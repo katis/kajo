@@ -159,6 +159,21 @@ Compiler >> analyzeInlinedBlock: aNode in: aScope [
 	| s |
 	s := CompilerScope parent: aScope real: false seq: 0.
 	aNode scope: s.
+	self analyzeInlinedBody: aNode in: s
+]
+
+{ #category : #analysis }
+Compiler >> analyzeLoopBody: aNode in: aScope [
+	"An inlined loop's block: it owns a temp vector, made on every pass, for its captured and assigned variables."
+	| s |
+	s := CompilerScope loopIn: aScope seq: self nextSeq.
+	aScope real loops add: s.
+	aNode scope: s.
+	self analyzeInlinedBody: aNode in: s
+]
+
+{ #category : #analysis }
+Compiler >> analyzeInlinedBody: aNode in: s [
 	aNode arguments do: [:a | self declare: a first kind: #inlinedArgument in: s line: (a at: 2)].
 	aNode temporaries do: [:t | self declare: t first kind: #temporary in: s line: (t at: 2)].
 	self analyzeStatements: aNode statements in: s
@@ -170,20 +185,20 @@ Compiler >> analyzeInlined: s in: aScope [
 	sel := s selector.
 	a := s arguments.
 	(#(#whileTrue: #whileFalse: #whileTrue #whileFalse #repeat) includes: sel) ifTrue: [
-		self analyzeInlinedBlock: s receiver in: aScope.
-		a do: [:x | self analyzeInlinedBlock: x in: aScope].
+		self analyzeLoopBody: s receiver in: aScope.
+		a do: [:x | self analyzeLoopBody: x in: aScope].
 		^ self].
 	(#(#to:do: #to:by:do:) includes: sel) ifTrue: [
 		self analyze: s receiver in: aScope.
 		self analyze: a first in: aScope.
 		sel == #to:by:do: ifTrue: [self analyze: (a at: 2) in: aScope].
 		(self isIntegerLiteral: a first) ifFalse: [s hidden add: (self declare: '' kind: #hidden in: aScope line: s line)].
-		^ self analyzeInlinedBlock: a last in: aScope].
+		^ self analyzeLoopBody: a last in: aScope].
 	sel == #timesRepeat: ifTrue: [
 		self analyze: s receiver in: aScope.
 		s hidden add: (self declare: '' kind: #hidden in: aScope line: s line).
 		(self isIntegerLiteral: s receiver) ifFalse: [s hidden add: (self declare: '' kind: #hidden in: aScope line: s line)].
-		^ self analyzeInlinedBlock: a first in: aScope].
+		^ self analyzeLoopBody: a first in: aScope].
 	self analyze: s receiver in: aScope.
 	a do: [:x | self analyzeInlinedBlock: x in: aScope]
 ]
@@ -228,9 +243,9 @@ Compiler >> emit: e label: aLabel [
 Compiler >> push: v from: r on: e [
 	v real == r ifTrue: [
 		v inVector
-			ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: r vectorTemp]
+			ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: v owner vectorTemp]
 			ifFalse: [^ self emit: e op: #pushTemp a: v index]].
-	v inVector ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: (r copiedIndex: v real)].
+	v inVector ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: (r copiedIndex: v owner)].
 	self emit: e op: #pushTemp a: (r copiedIndex: v)
 ]
 
@@ -238,9 +253,9 @@ Compiler >> push: v from: r on: e [
 Compiler >> store: v from: r on: e [
 	v real == r ifTrue: [
 		v inVector
-			ifTrue: [^ self emit: e op: #storeTempVectorSlot a: v vectorSlot b: r vectorTemp]
+			ifTrue: [^ self emit: e op: #storeTempVectorSlot a: v vectorSlot b: v owner vectorTemp]
 			ifFalse: [^ self emit: e op: #storeTemp a: v index]].
-	self emit: e op: #storeTempVectorSlot a: v vectorSlot b: (r copiedIndex: v real)
+	self emit: e op: #storeTempVectorSlot a: v vectorSlot b: (r copiedIndex: v owner)
 ]
 
 { #category : #generation }
@@ -355,7 +370,7 @@ Compiler >> genClosure: aNode in: r on: e [
 	code := self assembleBlock: body scope: s.
 	s copied do: [:item |
 		(item isKindOf: CompilerScope)
-			ifTrue: [self emit: e op: #pushTemp a: (item == r ifTrue: [r vectorTemp] ifFalse: [r copiedIndex: item])]
+			ifTrue: [self emit: e op: #pushTemp a: (item real == r ifTrue: [item vectorTemp] ifFalse: [r copiedIndex: item])]
 			ifFalse: [self emit: e op: #pushTemp a: (item real == r ifTrue: [item index] ifFalse: [r copiedIndex: item])]].
 	e add: {#closure. code. s copied size}
 ]
@@ -374,6 +389,10 @@ Compiler >> assembleBlock: lines scope: s [
 
 { #category : #generation }
 Compiler >> genInlinedBody: aNode in: r on: e value: wantValue [
+	"A loop body that owns a temp vector makes a fresh one on every pass."
+	(aNode scope isLoop and: [aNode scope vectorTemp >= 0]) ifTrue: [
+		self emit: e op: #pushNewArray a: aNode scope vectorVariables size.
+		self emit: e op: #storeTemp a: aNode scope vectorTemp].
 	aNode statements isEmpty ifTrue: [wantValue ifTrue: [self emit: e op: #pushNil]. ^ self].
 	aNode statements doWithIndex: [:st :k |
 		st class == ReturnNode

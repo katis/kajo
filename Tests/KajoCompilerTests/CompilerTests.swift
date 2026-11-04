@@ -21,6 +21,51 @@ import Testing
         #expect(listing(m.blocks[0]) == ["push_tv_slot 0 1", "push_temp 0", "add", "dup", "store_tv_slot 0 1", "block_return"])
     }
 
+    /// Module 8d, Pharo's rule: a captured and assigned temp declared in an
+    /// inlined loop body lives in a vector the body makes on every pass.
+    @Test func aLoopBodysCapturedAssignedTempGetsAVectorPerIteration() throws {
+        let m = try compile("f: n | bs | bs := Array new: n. 1 to: n do: [:i | | t | t := i * 2. bs at: i put: [t := t + 1]]. ^ bs")
+        let l = listing(m)
+        #expect(l.filter { $0.hasPrefix("push_new_array") }.count == 1)
+        // The vector is made after the loop test, at the top of the body:
+        // the instruction right after the loop's jump_if_false.
+        let jf = try #require(l.firstIndex { $0.hasPrefix("jump_if_false") })
+        #expect(l[jf + 1] == "push_new_array 1")
+        #expect(l[jf + 2].hasPrefix("store_temp"))
+        // The block copies the iteration's vector.
+        #expect(m.blocks.count == 1 && m.blocks[0].copied == 1)
+        // Nested loops: each level makes its own.
+        let nested = try compile("f | bs | bs := Array new: 9. 1 to: 3 do: [:i | | a | a := i. 1 to: 3 do: [:j | | b | b := j. bs at: i - 1 * 3 + j put: [a := a + 1. b := b + 1. a + b]]]. ^ bs")
+        #expect(listing(nested).filter { $0.hasPrefix("push_new_array") }.count == 2)
+        #expect(nested.blocks[0].copied == 2)
+        // A temp of an inlined conditional inside the loop belongs to the loop body.
+        let cond = try compile("f: n | bs | bs := Array new: n. 1 to: n do: [:i | i > 0 ifTrue: [| t | t := i. bs at: i put: [t := t + 1]]]. ^ bs")
+        let cl = listing(cond)
+        #expect(cl.filter { $0.hasPrefix("push_new_array") }.count == 1)
+        #expect(cl[try #require(cl.firstIndex { $0.hasPrefix("jump_if_false") }) + 1] == "push_new_array 1")
+        // whileTrue: and timesRepeat: bodies too.
+        for src in ["f | bs k | bs := Array new: 3. k := 0. [k < 3] whileTrue: [| t | k := k + 1. t := k. bs at: k put: [t := t + 1]]. ^ bs",
+                    "f | bs k | bs := Array new: 3. k := 0. 3 timesRepeat: [| t | k := k + 1. t := k. bs at: k put: [t := t + 1]]. ^ bs"] {
+            let w = listing(try compile(src))
+            #expect(w.filter { $0.hasPrefix("push_new_array") }.count == 1, "\(src)")
+            #expect(w.first?.hasPrefix("push_new_array") == false, "\(src)")
+        }
+    }
+
+    @Test func loopsWithoutCapturedAssignedBodyTempsMakeNoVector() throws {
+        // body temps not captured
+        #expect(!listing(try compile("f: n | s | s := 0. 1 to: n do: [:i | | t | t := i * 2. s := s + t]. ^ s")).contains { $0.hasPrefix("push_new_array") })
+        // body temps captured but never assigned after declaration: copied
+        let copied = try compile("f: n | bs | bs := Array new: n. 1 to: n do: [:i | bs at: i put: [i]]. ^ bs")
+        #expect(!listing(copied).contains { $0.hasPrefix("push_new_array") })
+        // no body temps at all
+        #expect(!listing(try compile("f: n | s | s := 0. 1 to: n do: [:i | s := s + i]. ^ s")).contains { $0.hasPrefix("push_new_array") })
+        // a temp of the method captured and assigned inside a loop keeps the method's one vector, made once
+        let outer = listing(try compile("f: n | s | s := 0. 1 to: n do: [:i | [s := s + i] value]. ^ s"))
+        #expect(outer.filter { $0.hasPrefix("push_new_array") }.count == 1)
+        #expect(outer.first == "push_new_array 1")
+    }
+
     @Test func capturedButNeverAssignedVariablesAreCopied() throws {
         let m = try compile("f: a | k | k := 3. ^ [:x | x + a + k]")
         // k is assigned (before the capture): the rule puts it in a vector;

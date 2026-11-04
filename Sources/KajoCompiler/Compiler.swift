@@ -14,6 +14,17 @@ import KajoVM
 //   captured variable that is ever assigned lives in its scope's temp
 //   vector; every other captured variable is copied into the closure.
 //   Arguments are never assigned, so never in a vector.
+// - A variable's vector belongs to its *owner*: the nearest enclosing scope
+//   that is real or the body of an inlined loop (module 8d, Pharo's rule).
+//   An inlined loop body (the receiver and argument blocks of whileTrue:,
+//   whileFalse:, whileTrue, whileFalse, repeat, the block of to:do:,
+//   to:by:do: and timesRepeat:) that owns captured and assigned variables
+//   makes a fresh vector at the start of every pass (`push_new_array`,
+//   `store_temp`), so a closure made in one iteration keeps that
+//   iteration's values. The vector's temp is a local of the enclosing real
+//   scope; the loop scope takes a sequence number when it is entered, and
+//   the temp takes that place among the locals. Inlined conditionals own
+//   nothing: their variables belong to the nearest loop body or real scope.
 // - Every declaration takes a sequence number in source order; a real
 //   scope takes one when it is entered, before its arguments. A real
 //   scope's frame: its arguments; for a block its copied values (outer
@@ -76,6 +87,8 @@ final class Variable {
         self.seq = seq
     }
     var real: Scope { scope.real }
+    /// The scope whose temp vector holds the variable when `inVector`.
+    var owner: Scope { scope.owner }
     var inVector: Bool { captured && written }
 }
 
@@ -83,6 +96,8 @@ final class Variable {
 final class Scope {
     let parent: Scope?
     let isReal: Bool
+    /// An inlined loop body: it owns a temp vector of its own (module 8d).
+    let isLoop: Bool
     let seq: Int
     var declared: [Variable] = []
     // Real scopes only:
@@ -106,6 +121,11 @@ final class Scope {
         }
     }
     var copied: [Copied] = []
+    /// Real scopes: the loop bodies inlined into this scope, which may own
+    /// vectors whose temps are this scope's locals.
+    var loops: [Scope] = []
+    /// Real and loop scopes: the variables of the vector this scope owns,
+    /// and the frame temp that holds it (in the real scope's frame).
     var vectorVariables: [Variable] = []
     var vectorTemp = -1
     var argumentCount = 0
@@ -113,13 +133,15 @@ final class Scope {
     /// the other locals).
     var tempCount = 0
 
-    init(parent: Scope?, isReal: Bool, seq: Int) {
+    init(parent: Scope?, isReal: Bool, isLoop: Bool = false, seq: Int) {
         self.parent = parent
         self.isReal = isReal
+        self.isLoop = isLoop
         self.seq = seq
     }
 
     var real: Scope { isReal ? self : parent!.real }
+    var owner: Scope { isReal || isLoop ? self : parent!.owner }
 
     func copiedIndex(_ c: Copied) -> Int {
         argumentCount + copied.firstIndex(of: c)!
@@ -322,9 +344,10 @@ struct Compiler {
 
     /// An inlined block's body in a scope of its own (not real); its
     /// argument, if any, is a local written by the inlined code.
-    mutating func analyzeInlinedBlock(_ n: Node, _ scope: Scope) throws(CompileError) {
+    mutating func analyzeInlinedBlock(_ n: Node, _ scope: Scope, loop: Bool = false) throws(CompileError) {
         let b = n as! BlockNode
-        let s = Scope(parent: scope, isReal: false, seq: 0)
+        let s = Scope(parent: scope, isReal: false, isLoop: loop, seq: loop ? nextSeq() : 0)
+        if loop { scope.real.loops.append(s) }
         b.scope = s
         for (name, line) in b.arguments { _ = try declare(name, .inlinedArgument, in: s, line: line) }
         for (name, line) in b.temporaries { _ = try declare(name, .temporary, in: s, line: line) }
@@ -334,8 +357,8 @@ struct Compiler {
     mutating func analyzeInlined(_ s: SendNode, _ scope: Scope) throws(CompileError) {
         switch s.selector {
         case "whileTrue:", "whileFalse:", "whileTrue", "whileFalse", "repeat":
-            try analyzeInlinedBlock(s.receiver, scope)
-            for a in s.arguments { try analyzeInlinedBlock(a, scope) }
+            try analyzeInlinedBlock(s.receiver, scope, loop: true)
+            for a in s.arguments { try analyzeInlinedBlock(a, scope, loop: true) }
         case "to:do:", "to:by:do:":
             try analyze(s.receiver, scope)
             try analyze(s.arguments[0], scope)
@@ -343,12 +366,12 @@ struct Compiler {
             if !Compiler.isIntegerLiteral(s.arguments[0]) {
                 s.hidden = [try declare("", .hidden, in: scope, line: s.line)]
             }
-            try analyzeInlinedBlock(s.arguments.last!, scope)
+            try analyzeInlinedBlock(s.arguments.last!, scope, loop: true)
         case "timesRepeat:":
             try analyze(s.receiver, scope)
             s.hidden = [try declare("", .hidden, in: scope, line: s.line)]
             if !Compiler.isIntegerLiteral(s.receiver) { s.hidden.append(try declare("", .hidden, in: scope, line: s.line)) }
-            try analyzeInlinedBlock(s.arguments[0], scope)
+            try analyzeInlinedBlock(s.arguments[0], scope, loop: true)
         default:
             try analyze(s.receiver, scope)
             for a in s.arguments { try analyzeInlinedBlock(a, scope) }
@@ -370,21 +393,33 @@ struct Compiler {
         if r.parent != nil {
             var items: [Scope.Copied] = []
             for v in r.needed {
-                let c: Scope.Copied = v.inVector ? .vector(v.real) : .variable(v)
+                let c: Scope.Copied = v.inVector ? .vector(v.owner) : .variable(v)
                 if !items.contains(c) { items.append(c) }
             }
             r.copied = items.sorted { $0.key < $1.key }
         }
         var next = r.argumentCount + r.copied.count
         for (i, v) in locals.filter({ $0.kind == .argument }).enumerated() { v.index = i }
-        r.vectorVariables = locals.filter(\.inVector)
+        r.vectorVariables = locals.filter { $0.inVector && $0.owner === r }
         for (i, v) in r.vectorVariables.enumerated() { v.vectorSlot = i }
         if !r.vectorVariables.isEmpty {
             r.vectorTemp = next
             next += 1
         }
-        for v in locals where v.kind != .argument && !v.inVector {
-            v.index = next
+        // The other locals and the loop bodies' vector temps, in sequence
+        // order (a loop's temp at the loop's own number).
+        enum Item { case variable(Variable), loop(Scope) }
+        var items: [(Int, Item)] = locals.filter { $0.kind != .argument && !$0.inVector }.map { ($0.seq, .variable($0)) }
+        for l in r.loops {
+            l.vectorVariables = locals.filter { $0.inVector && $0.owner === l }
+            for (i, v) in l.vectorVariables.enumerated() { v.vectorSlot = i }
+            if !l.vectorVariables.isEmpty { items.append((l.seq, .loop(l))) }
+        }
+        for (_, item) in items.sorted(by: { $0.0 < $1.0 }) {
+            switch item {
+            case .variable(let v): v.index = next
+            case .loop(let l): l.vectorTemp = next
+            }
             next += 1
         }
         r.tempCount = next - r.argumentCount - r.copied.count
@@ -405,9 +440,9 @@ struct Compiler {
 
     func pushVariable(_ v: Variable, _ r: Scope, _ e: Emitter, _ line: Int) {
         if v.real === r {
-            if v.inVector { e.op(.pushTempVectorSlot, v.vectorSlot, r.vectorTemp, line) } else { e.op(.pushTemp, v.index, 0, line) }
+            if v.inVector { e.op(.pushTempVectorSlot, v.vectorSlot, v.owner.vectorTemp, line) } else { e.op(.pushTemp, v.index, 0, line) }
         } else if v.inVector {
-            e.op(.pushTempVectorSlot, v.vectorSlot, r.copiedIndex(.vector(v.real)), line)
+            e.op(.pushTempVectorSlot, v.vectorSlot, r.copiedIndex(.vector(v.owner)), line)
         } else {
             e.op(.pushTemp, r.copiedIndex(.variable(v)), 0, line)
         }
@@ -416,10 +451,10 @@ struct Compiler {
     /// Pop the top into a variable.
     func storeVariable(_ v: Variable, _ r: Scope, _ e: Emitter, _ line: Int) {
         if v.real === r {
-            if v.inVector { e.op(.storeTempVectorSlot, v.vectorSlot, r.vectorTemp, line) } else { e.op(.storeTemp, v.index, 0, line) }
+            if v.inVector { e.op(.storeTempVectorSlot, v.vectorSlot, v.owner.vectorTemp, line) } else { e.op(.storeTemp, v.index, 0, line) }
         } else {
             // only vector variables are written from inner blocks
-            e.op(.storeTempVectorSlot, v.vectorSlot, r.copiedIndex(.vector(v.real)), line)
+            e.op(.storeTempVectorSlot, v.vectorSlot, r.copiedIndex(.vector(v.owner)), line)
         }
     }
 
@@ -541,7 +576,7 @@ struct Compiler {
             case .variable(let v):
                 e.op(.pushTemp, v.real === r ? v.index : r.copiedIndex(.variable(v)), 0, b.line)
             case .vector(let owner):
-                e.op(.pushTemp, owner === r ? r.vectorTemp : r.copiedIndex(.vector(owner)), 0, b.line)
+                e.op(.pushTemp, owner.real === r ? owner.vectorTemp : r.copiedIndex(.vector(owner)), 0, b.line)
             }
         }
         e.emit(.pushClosure(name, s.copied.count), b.line)
@@ -565,6 +600,11 @@ struct Compiler {
     /// one's value is left when `value`; an empty body is nil.
     mutating func genInlinedBody(_ n: Node, _ r: Scope, _ e: Emitter, value: Bool) throws(CompileError) {
         let b = n as! BlockNode
+        // A loop body that owns a vector makes a fresh one on every pass.
+        if b.scope.isLoop && b.scope.vectorTemp >= 0 {
+            e.op(.pushNewArray, b.scope.vectorVariables.count, 0, b.line)
+            e.op(.storeTemp, b.scope.vectorTemp, 0, b.line)
+        }
         if b.statements.isEmpty {
             if value { e.op(.pushNil, 0, 0, b.line) }
             return

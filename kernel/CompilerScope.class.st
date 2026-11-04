@@ -1,15 +1,17 @@
-"A method, a real block (a closure) or an inlined block; real ones lay out their frames. A copied value is a TempVariable or a CompilerScope (its temp vector)."
+"A method, a real block (a closure) or an inlined block; real ones lay out their frames. A copied value is a TempVariable or a CompilerScope (its temp vector). An inlined loop body (isLoop) owns a temp vector of its own, made afresh on every pass (Pharo's rule; Sources/KajoCompiler/Compiler.swift)."
 Class {
 	#name : #CompilerScope,
 	#superclass : #Object,
 	#instVars : [
 		'parent',
 		'isReal',
+		'isLoop',
 		'seq',
 		'declared',
 		'locals',
 		'needed',
 		'copied',
+		'loops',
 		'vectorVariables',
 		'vectorTemp',
 		'argumentCount',
@@ -24,14 +26,54 @@ CompilerScope class >> parent: aScope real: aBoolean seq: n [
 ]
 
 { #category : #accessing }
+CompilerScope class >> loopIn: aScope seq: n [
+	^ (self new setParent: aScope real: false seq: n) beLoop
+]
+
+{ #category : #accessing }
+CompilerScope >> beLoop [
+	isLoop := true
+]
+
+{ #category : #accessing }
+CompilerScope >> isLoop [
+	^ isLoop
+]
+
+{ #category : #accessing }
+CompilerScope >> loops [
+	^ loops
+]
+
+{ #category : #accessing }
+CompilerScope >> owner [
+	"The scope whose temp vector holds a captured and assigned variable declared here: this one if it is real or a loop body, else the enclosing one's."
+	^ (isReal or: [isLoop]) ifTrue: [self] ifFalse: [parent owner]
+]
+
+{ #category : #accessing }
+CompilerScope >> vectorTemp: n [
+	vectorTemp := n
+]
+
+{ #category : #accessing }
+CompilerScope >> takeVectorFrom: sortedLocals [
+	"A loop body: its vector's variables, in sequence order."
+	vectorVariables := sortedLocals select: [:v | v inVector and: [v owner == self]].
+	vectorVariables doWithIndex: [:v :k | v vectorSlot: k - 1]
+]
+
+{ #category : #accessing }
 CompilerScope >> setParent: aScope real: aBoolean seq: n [
 	parent := aScope.
 	isReal := aBoolean.
+	isLoop := false.
 	seq := n.
 	declared := OrderedCollection new.
 	locals := OrderedCollection new.
 	needed := OrderedCollection new.
 	copied := #().
+	loops := OrderedCollection new.
 	vectorVariables := #().
 	vectorTemp := -1.
 	argumentCount := 0.
@@ -111,20 +153,28 @@ CompilerScope >> copiedIndex: anItem [
 { #category : #accessing }
 CompilerScope >> layout [
 	"Frame indices once every reference is known (the rules in Sources/KajoCompiler/Compiler.swift)."
-	| sorted items next i |
+	| sorted items next i ordered |
 	sorted := locals asArray sort: [:a :b | a seq <= b seq].
 	parent notNil ifTrue: [
 		items := OrderedCollection new.
 		needed do: [:v | | c |
-			c := v inVector ifTrue: [v real] ifFalse: [v].
+			c := v inVector ifTrue: [v owner] ifFalse: [v].
 			(items identityIncludes: c) ifFalse: [items add: c]].
 		copied := items asArray sort: [:a :b | a seq <= b seq]].
 	next := argumentCount + copied size.
 	i := 0.
 	sorted do: [:v | v kind == #argument ifTrue: [v index: i. i := i + 1]].
-	vectorVariables := sorted select: [:v | v inVector].
+	vectorVariables := sorted select: [:v | v inVector and: [v owner == self]].
 	vectorVariables doWithIndex: [:v :k | v vectorSlot: k - 1].
 	vectorVariables isEmpty ifFalse: [vectorTemp := next. next := next + 1].
-	sorted do: [:v | (v kind ~~ #argument and: [v inVector not]) ifTrue: [v index: next. next := next + 1]].
+	"The other locals and the loop bodies' vector temps, in sequence order."
+	ordered := OrderedCollection new.
+	sorted do: [:v | (v kind ~~ #argument and: [v inVector not]) ifTrue: [ordered add: v]].
+	loops do: [:l |
+		l takeVectorFrom: sorted.
+		l vectorVariables isEmpty ifFalse: [ordered add: l]].
+	(ordered asArray sort: [:a :b | a seq <= b seq]) do: [:x |
+		(x isKindOf: CompilerScope) ifTrue: [x vectorTemp: next] ifFalse: [x index: next].
+		next := next + 1].
 	tempCount := next - argumentCount - copied size
 ]

@@ -87,3 +87,32 @@ BlockClosureTest >> testThisContext [
 	self assert: ctx sender notNil.
 	self deny: ctx isDead
 ]
+
+{ #category : #tests }
+BlockClosureTest >> testLoopBodyTempsArePerIteration [
+	"Module 8d, Pharo's rule: a temp declared in an inlined loop body, captured and assigned, is a fresh variable on every pass."
+	| blocks k |
+	blocks := OrderedCollection new.
+	1 to: 3 do: [:i | | t | t := i * 10. blocks add: [t := t + 1]].
+	self assert: (blocks collect: [:b | b value]) asArray = #(11 21 31).
+	self assert: (blocks collect: [:b | b value]) asArray = #(12 22 32).
+	blocks := OrderedCollection new.
+	k := 0.
+	[k < 3] whileTrue: [| t | k := k + 1. t := k. blocks add: [t := t * 2]].
+	self assert: (blocks collect: [:b | b value]) asArray = #(2 4 6).
+	blocks := OrderedCollection new.
+	k := 0.
+	3 timesRepeat: [| t | k := k + 1. t := k. k > 0 ifTrue: [| u | u := t + 100. blocks add: [u := u + t]]].
+	self assert: (blocks collect: [:b | b value]) asArray = #(102 104 106)
+]
+
+{ #category : #tests }
+BlockClosureTest >> testLoopTempsSharedByTheBodysProcesses [
+	"Forked blocks from successive iterations each assign their own body temp and answer it."
+	| q results |
+	q := SharedQueue new.
+	1 to: 8 do: [:i | | t | t := i. [t := t * t. q nextPut: t] fork].
+	results := Set new.
+	8 timesRepeat: [results add: q next].
+	self assert: results = (#(1 4 9 16 25 36 49 64) asSet)
+]
