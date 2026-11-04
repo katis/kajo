@@ -315,6 +315,9 @@ struct ScavengeRecord: Sendable {
     /// A scavenge left old space past its soft limit: the next poll, or the
     /// next scavenge request, runs a full collection instead.
     let fullRequested: UnsafeMutablePointer<Atomic<Bool>>
+    /// The object memory's soft limit before the VM lowered it below the
+    /// promotion reserve; given back at the VM's end.
+    var softLimitBefore = 0
 
     static let rootTaskWords = 4096
     static let remTaskHolders = 256
@@ -453,14 +456,23 @@ extension NurseryShared {
         return unsafe s
     }
 
+    /// Release the nurseries at the VM's end, after its final collection
+    /// (`endYoungGeneration`): nothing is young, so every entry a stash
+    /// holds is free and goes back to module 1's pool as runs, and the
+    /// region is given back (docs/modules/vm-teardown.md).
     static func destroy(_ n: NurseryPointer) {
         let s = unsafe n.pointee
         for i in unsafe 0..<s.count {
             let a = unsafe s.alloc[i]
+            let v = unsafe s.surv[i]
+            precondition(unsafe a.pointee.stash.next == 0 && v.pointee.stash2.next == 0 && v.pointee.survLog.count == 0
+                         && v.pointee.deferred.count == 0 && a.pointee.top == a.pointee.edenStart,
+                         "nursery \(i) is not empty at the VM's end")
+            unsafe s.om.trimStash(a.pointer(to: \NurseryAlloc.stash)!, keep: 0)
+            unsafe s.om.trimStash(v.pointer(to: \NurserySurvivors.stash2)!, keep: 0)
             unsafe s.om.unregisterStash(a.pointer(to: \NurseryAlloc.stash)!)
             unsafe a.pointee.stash.free()
             unsafe unlined(a)
-            let v = unsafe s.surv[i]
             unsafe s.om.unregisterStash(v.pointer(to: \NurserySurvivors.stash2)!)
             unsafe v.pointee.stash2.free()
             unsafe v.pointee.survLog.free()
@@ -484,7 +496,7 @@ extension NurseryShared {
             unsafe UnsafeMutableRawPointer(s.buffers[i]).deallocate()
         }
         unsafe s.buffers.deallocate()
-        unsafe s.om.releaseNurseryPages(s.regionStart, Int(s.stride) * s.count)
+        unsafe s.om.releaseNurseryRegion()
         unsafe s.alloc.deallocate()
         unsafe s.scav.deallocate()
         unsafe s.surv.deallocate()

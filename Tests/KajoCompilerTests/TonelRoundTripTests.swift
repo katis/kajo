@@ -15,15 +15,10 @@ import Testing
 /// in a VM whose file primitives are opened on `dir`; its answer.
 func runSmalltalk(_ image: Image, _ selector: String, _ arguments: [String] = [], sources dir: String? = nil,
                   workers: Int = 1, strings: ((Oop) -> Void)? = nil) throws -> Oop {
-    // The image build's VM (one worker, no nursery, the stop-the-world
-    // collector): an image saved on the host afterwards must not have run
-    // under nurseries (their entries are not handed back when the VM ends).
+    // The default configuration: the host may save the image afterwards
+    // (docs/modules/vm-teardown.md: the image is whole when the VM ends).
     var vc = VMConfig()
     vc.backgroundWorkers = workers
-    vc.nursery.bytes = 0
-    vc.marking.enabled = false
-    vc.relocation.enabled = false
-    vc.young.mode = .stw
     vc.sourcesDirectory = dir
     let vm = VM(image: image, config: vc)
     vm.start()

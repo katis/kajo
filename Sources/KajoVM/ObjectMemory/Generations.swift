@@ -338,9 +338,10 @@ extension ObjectMemory {
     /// mapped memory right after the blocks (module 7: a RELOCATING young
     /// body is still read through the alias); otherwise plain anonymous
     /// memory between the heap and its alias, never aliased (module 4).
-    /// Answers the region's first offset. Once per object memory.
+    /// Answers the region's first offset. Once per VM: the region is
+    /// reserved again only after `releaseNurseryRegion`.
     func reserveNurseryRegion(bytes: Int) -> UInt64 {
-        precondition(unsafe gc.pointee.nurseryEnd == 0, "the nursery region is reserved once")
+        precondition(unsafe gc.pointee.nurseryEnd == 0, "the nursery region is reserved once per VM")
         let aliased = heap.extraBytes >= bytes
         let start = aliased ? UInt64(heap.bytes) : (UInt64(heap.bytes &+ heap.extraBytes) &+ 4095) & ~4095
         precondition(start &+ UInt64(bytes) <= VirtualMemory.aliasDistance, "nurseries do not fit below the alias")
@@ -355,10 +356,16 @@ extension ObjectMemory {
     /// Module 7: the nursery region is covered by the alias mapping.
     var nurseryRegionAliased: Bool { unsafe gc.pointee.nurseryAliased }
 
-    /// Return nursery pages to the system (the VM is being destroyed or the
-    /// region is empty). Plain anonymous memory, so `madvise` frees it.
-    func releaseNurseryPages(_ offset: UInt64, _ bytes: Int) {
-        unsafe _ = madvise(heapBase + Int(offset), bytes, MADV_FREE)
+    /// The VM that reserved the nursery region ends with nothing young left
+    /// (docs/modules/vm-teardown.md): its pages go back to the system and a
+    /// later VM over this memory may reserve a region again.
+    func releaseNurseryRegion() {
+        let start = unsafe gc.pointee.nurseryStart
+        let end = unsafe gc.pointee.nurseryEnd
+        if end > start { unsafe _ = madvise(heapBase + Int(start), Int(end &- start), MADV_FREE) }
+        unsafe gc.pointee.nurseryStart = 0
+        unsafe gc.pointee.nurseryEnd = 0
+        unsafe gc.pointee.nurseryAliased = false
     }
 
     // MARK: - class formats

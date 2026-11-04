@@ -146,7 +146,13 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
 
     /// Release the VM (after `shutdown`). Stacks of live Processes are
     /// freed; the image is the caller's. Outstanding Delays must have fired.
-    func destroy() {
+    /// First the final collection (docs/modules/vm-teardown.md): the image
+    /// the host holds afterwards is whole, nothing young, every entry the
+    /// VM took and did not use back in a free list, so `Image.saveImage`
+    /// and another VM over the same image work.
+    @discardableResult
+    func destroy() -> VMEndReport {
+        let end = unsafe host { w in unsafe endYoungGeneration(state, w) }
         let s = unsafe state.pointee
         for i in unsafe 0..<s.sched.pointee.recordHighWater {
             unsafe s.records[i].base?.deallocate()
@@ -193,6 +199,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         for unsafe c in unsafe [s.safepointCond, s.schedCond, s.doneCond] { unsafe freeCond(c) }
         unsafe state.deinitialize(count: 1)
         unsafe UnsafeMutableRawPointer(state).deallocate()
+        return end
     }
 
     // MARK: - host calls

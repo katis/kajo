@@ -224,6 +224,7 @@ extension NurseryShared {
             : Swift.min(om.config.heapBytes / BlockHeap.blockBytes, blocks - needed)
         precondition(soft >= 1, "nursery: a heap of \(blocks) blocks cannot keep a promotion reserve of \(needed); "
                      + "set ObjectMemoryConfig.reserveBytes to NurseryConfig.reserveBytes(workers:)")
+        unsafe n.pointee.softLimitBefore = om.softLimitBlocks
         om.softLimitBlocks = soft
         om.setBeforeOldSpaceOperation { extra in unsafe promoteAllForOldSpace(vm, extra) }
         om.setAfterOldSpaceSweep { unsafe dropFreedHolders(n) }
@@ -234,9 +235,54 @@ extension NurseryShared {
         unsafe vm.pointee.om.setBeforeOldSpaceOperation(nil)
         unsafe vm.pointee.om.setAfterOldSpaceSweep(nil)
         for i in unsafe 0..<vm.pointee.workerCount { unsafe vm.worker(i).pointee.interp.young = nil }
+        unsafe vm.pointee.om.softLimitBlocks = n.pointee.softLimitBefore
         unsafe NurseryShared.destroy(n)
         unsafe vm.pointee.nursery = nil
     }
+}
+
+// MARK: - the VM's end
+
+/// What the final collection at the VM's end did (`VM.destroy`).
+struct VMEndReport: Sendable {
+    /// The VM had nurseries: the final collection ran.
+    var ran = false
+    /// Young objects (and their bytes) the final collection promoted.
+    var promotedObjects: UInt64 = 0
+    var promotedBytes: UInt64 = 0
+    /// The stop: from its request to its release, and the promote-all's own
+    /// work (the hook: marking settled, the scavenge, any reclaim around
+    /// kept objects).
+    var stopNs: UInt64 = 0
+    var workNs: UInt64 = 0
+}
+
+/// The VM's end (docs/modules/vm-teardown.md): every thread has joined;
+/// one stop runs module 1's promote-all hook with the stop's roots, so a
+/// marking cycle is abandoned or its sweep finished and applied, pending
+/// blocks are freed, deferred entry frees released, and every live young
+/// object is promoted. Nothing young is left (a heap whose old space cannot
+/// take the young objects even after the hook's collection and compaction
+/// traps: the image could not be whole). `NurseryShared.destroy` then hands
+/// every stash's entries back. No-op without a nursery.
+func endYoungGeneration(_ vm: VMPointer, _ w: WorkerPointer) -> VMEndReport {
+    guard let n = unsafe vm.pointee.nursery else { return VMEndReport() }
+    var r = VMEndReport()
+    r.ran = true
+    var left = 0
+    let t0 = nanoseconds()
+    unsafe stopWorld(vm, w, retry: true) { _ in
+        let before = unsafe n.pointee.state.pointee.counters
+        let t1 = nanoseconds()
+        left = unsafe vm.pointee.om.prepareOldSpaceOperation(nil).count
+        r.workNs = nanoseconds() &- t1
+        let after = unsafe n.pointee.state.pointee.counters
+        r.promotedObjects = after.promotedObjects &- before.promotedObjects
+        r.promotedBytes = after.promotedBytes &- before.promotedBytes
+    }
+    r.stopNs = nanoseconds() &- t0
+    precondition(left == 0, "kajo: \(left) young objects found no room in old space at the VM's end; the image is not whole")
+    return r
 }
 
 /// The hook: module 1 is about to collect, compact, become, forward,
