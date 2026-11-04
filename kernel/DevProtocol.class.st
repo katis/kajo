@@ -16,7 +16,7 @@ Class {
 
 { #category : #describing }
 DevProtocol class >> argumentNamesOf: aSelector [
-	"The request's argument names: the method's own argument names (from its source)."
+	"The request's argument names: the method's own argument names (from its source), kept per method (a recompiled method is another one)."
 	| m |
 	m := DevSession lookupSelector: aSelector.
 	m isNil ifTrue: [^ #()].
@@ -74,8 +74,7 @@ DevProtocol class >> rebuildKinds [
 	d := Dictionary new.
 	(Pragma allNamed: #devProtocol) do: [:p |
 		(p method methodClass == DevSession) ifTrue: [d at: (self kindOf: p method selector) put: p method selector]].
-	kinds := d.
-	argumentNames := nil
+	kinds := d
 ]
 
 { #category : #describing }
