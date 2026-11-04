@@ -456,6 +456,44 @@ to 8b's questions:
   compiler's analysis and code generation and has no limit of its own but
   the method's 32 760 bytes of bytecode, as in the compiler in Smalltalk.
 
+## Built (8e, 2026-11-04)
+
+Module 8e (`docs/modules/live-classes.md`) made classes live, closing the
+class half of 8d's Not done:
+
+- **6** (classes): classes are defined, reshaped and removed from
+  Smalltalk through three primitives in the install stop, each re-checking
+  the image build's class rules with the build's own code
+  (`ClassRules`): **145** `Smalltalk primDefineClass:` (a class and its
+  metaclass from a specification: name, superclass, every instance and
+  class-side instance variable name, class variables, format kind, the
+  Bindings' class, the inherited counts; two new indices, pinned for
+  good), **146** `Smalltalk primRedefine:` (shapes by layout, whole new
+  method dictionaries as CompiledCode, new pools: every new method made
+  and verified against the shape to be, every instance of the class and
+  its subclasses reshaped by module 1 all or nothing, class objects
+  included for a class-side change, the replaced methods forwarded to
+  their recompiled selves and every other method of the class to a stub
+  that sends `methodRemovedByRedefinition`, so no method in the heap
+  names a slot its class lacks), **147** `Smalltalk primRemoveClass:as:`
+  (refused with subclasses, instances, a method elsewhere naming the
+  class, a frame in it; the class object stays in the table renamed
+  `AnObsolete<Name>`, its dictionaries and pool emptied). All three fail
+  in a release image.
+- **The running-frame rule**: a class is not reshaped or removed while a
+  frame of any Process runs one of its methods; the stop scans every
+  stack and the running registers, conservatively (any CompiledMethod of
+  the class on a stack refuses), and names the Process and the method.
+- **The undeclared Binding rule**: a class variable removed from its
+  class leaves its Binding in the literal frames that hold it; a read
+  answers nil, a write signals an error naming it, and adding the
+  variable again declares the same Binding (no recompile).
+- **Files**: **148** `primWriteFile:contents:` and **149**
+  `primReadFile:`, under the one directory the host opened the VM with
+  (`--sources`), refused for any path that leaves it and in a release
+  image; the Tonel writer and reader are Smalltalk, and `kernel/` is the
+  writer's canonical form byte for byte.
+
 ## Consequences
 
 - Modules 4 to 7 implement weak slots and ephemerons as they are built, and

@@ -464,8 +464,8 @@ Smalltalk (CompilerTest's comparison alone takes 11 s).
 - **The make-and-run fuzz mode runs no looping method**, and runs on a
   standalone interpreter without a VM: it cannot preempt.
 - **No Tonel writer**: 8b writes none; the round trip is the recorded
-  sources (CompilerTest).
-- **`compile:classified:` keeps no category.**
+  sources (CompilerTest). (Module 8e built one.)
+- **`compile:classified:` keeps no category.** (Module 8e keeps it.)
 
 ## Tests
 
@@ -513,10 +513,16 @@ not a hot path.
 
 ## Not done
 
-- A Tonel writer (class definitions with `#classVars` out of the image).
-- Method categories in the image; `compile:classified:` drops them.
-- Adding or removing class variables at run time (the pool is made by the
-  image build; the class objects are sealed).
+- ~~A Tonel writer (class definitions with `#classVars` out of the image).~~
+  Closed by module 8e (`docs/modules/live-classes.md`): `TonelWriter`,
+  `Smalltalk writeTonel:`, and `kernel/` in its canonical form.
+- ~~Method categories in the image; `compile:classified:` drops them.~~
+  Closed by module 8e: categories per class and side, kept by
+  `compile:classified:`, read by `categoryOf:` and `organization`.
+- ~~Adding or removing class variables at run time (the pool is made by the
+  image build; the class objects are sealed).~~ Closed by module 8e: the
+  redefine primitive replaces the pool; a removed variable's Binding
+  stays undeclared.
 - Non-class globals.
 - `Process>>terminate` running unwind blocks; a frame restart (8b's; open
   question 3).

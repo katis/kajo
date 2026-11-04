@@ -270,6 +270,42 @@ as they are understood.
   `Smalltalk isReleaseImage`. The kernel signals **InstallForbidden**.
 - **Development image**: an image without that flag.
 
+## Live classes (module 8e)
+
+- **Class definition** (in the image): a class's `ClassDefinition`, its
+  own instance and class-side instance variable names, category, format
+  kind and comment, which `Smalltalk` keeps per class; the class
+  variables are its pool.
+- **Define, redefine, remove**: primitives 145, 146 and 147, in the
+  install stop, re-checking the image build's class rules (`ClassRules`);
+  the kernel's `ClassBuilder` and the Smalltalk-80 `subclass:...`
+  protocol over them. A refusal is a String the kernel signals as a
+  **ClassDefinitionError**.
+- **Reshape**: a class's instances given a new layout (module 1), all or
+  nothing with its subclasses', every slot kept **by name**; in a
+  redefinition, every method of the classes reshaped is made again from
+  its recorded source against the new shape in the same stop, and the
+  old ones are **forwarded** (become, one way) to their new selves, or to
+  a **stub** that says the method was removed.
+- **Running-frame rule**: no reshape or removal of a class while a frame
+  of any Process runs one of its methods; the change is refused naming
+  the Process and the method.
+- **Undeclared** (Binding): the Binding of a class variable removed from
+  its class: the methods that hold it read nil and a write is an error;
+  adding the variable again declares the same Binding.
+- **Obsolete class**: a removed class, kept in the class table renamed
+  `AnObsolete<Name>`, outside the hierarchy and `Smalltalk allClasses`.
+- **Category** (of a method): the protocol a method is filed under, kept
+  per class and side by selector; `organization`.
+- **Canonical form** (Tonel): the one text the image's Tonel writer
+  writes for a class (definition keys in one order, `#type` only when not
+  inherited, methods by side, category and selector, the recorded
+  sources); `kernel/` is in it byte for byte, which a test checks by
+  building the image and writing it out.
+- **Sources directory**: the one directory the host opens a VM with
+  (`--sources`); the file primitives read and write under it and nowhere
+  else.
+
 ## Saved Processes (module 8c)
 
 - **Saved Process**: a live Process in an image: its Process object (state
