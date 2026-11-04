@@ -94,7 +94,7 @@ tool's own code fails, since the tools run on the UI's one event loop
 
 ## Consequences
 
-- `tools/` (25 classes, their SUnit tests beside them), `kajo
+- `tools/` (27 classes: 19 of the tools, `FakeDevClient` and seven SUnit test classes beside them), `kajo
   build-image --with`, `just dev-image`, `just tools`, the macOS shell's
   `mode=dev` and `mode=devsession`.
 - Primitive 164 and `ShellCallbacks.client`; `KajoDev.ClientHost`; event
