@@ -260,8 +260,9 @@ host call). Counted on the final commit, whose clean build has 0 warnings.
 
 Nothing of this follow-up is on a checked path: `destroy` runs once per
 VM, and `endYoungGeneration` reaches the scavenge through the existing
-out-of-line promote-all hook. `just arc-check` on the final code: see
-Gates. `interpret` is identical instruction for instruction to the
+out-of-line promote-all hook. `just arc-check` on the final code: 135
+functions, zero `swift_retain`/`swift_release`; `interpret` 1056
+instructions (as at the start), one jump table. `interpret` is identical instruction for instruction to the
 starting commit's in the aligned bench builds.
 
 ## Not done
@@ -293,7 +294,34 @@ starting commit's in the aligned bench builds.
 
 ## Gates
 
-Pending: the run on the final code.
+The code and this doc but for this table and the hot-path paragraph are
+1793ea2's; every gate ran on 1793ea2, Mac mini (M2 Pro), swift.org 6.4.2
+(the toolchain first on PATH), 2026-11-04 15:28 to 17:28, every output in
+a file, each step logged with the commit it ran on:
+
+| gate | result |
+|---|---|
+| `swift test` | 312 + 56 passed, 229 + 56 s |
+| under load (12 busy loops) | 312 + 56 passed, 278 + 68 s |
+| ThreadSanitizer | 312 + 56 passed, 0 reports, 651 + 1463 s |
+| ThreadSanitizer under load | 312 + 56 passed, 0 reports, 610 + 1627 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release in 135 functions, `interpret` 1056 instructions, one indirect branch and one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 312 + 56 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | passed: 1000 seeds under every configuration, no failing seed; the resumed modes saving 930 and 973 of 1000 |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.40 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 3.35 million runs, no crash |
+| `just fuzz syntax 600` | libFuzzer build ok, 1.14 million runs, no crash |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| clean build | exit 0, 0 errors, 0 warnings |
+
+(312 is `KajoVMTests`, 56 `KajoCompilerTests`.) The clean build took 10 s
+from an empty scratch path (the toolchain's compilation cache, as in 8e);
+`just ios-check` typechecks every KajoVM file with strict memory safety
+from nothing and reports no warning either. `just test-release` took 14 s:
+its release build was already up to date from the measurements.
 
 ## Commands
 
