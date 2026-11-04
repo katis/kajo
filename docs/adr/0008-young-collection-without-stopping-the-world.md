@@ -1,7 +1,7 @@
 # ADR 0008: Young collection without stopping the world
 
 Date: 2026-11-02
-Status: proposed
+Status: accepted (owner, 2026-11-04, on module 9a's Mac mini and iPhone 13 Pro measurements, `docs/modules/shells.md`)
 
 ## Context
 

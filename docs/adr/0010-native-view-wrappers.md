@@ -1,7 +1,7 @@
 # ADR 0010: Native views behind Smalltalk wrappers and one hop primitive
 
 Date: 2026-11-04
-Status: proposed
+Status: accepted (owner, 2026-11-04, on module 9a's Mac mini and iPhone 13 Pro measurements, `docs/modules/shells.md`)
 
 ## Context
 

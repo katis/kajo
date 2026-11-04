@@ -821,10 +821,12 @@ call, Strings) are built inside `shellPrimitive`, out of line.
    (2026-11-04, thermal serious): 0 missed frames in every scenario but the
    ring under the oracle (2 of 1200), young collection 2 to 16 times
    better than stop-the-world on the main thread in every scenario, share
-   included. The question is the owner's.
+   included. The question is the owner's. **Owner (2026-11-04): "if the
+   device seems good, they're fine"; ADRs 0004 to 0008 accepted.**
 2. ADR 0010 (proposed): one generic view primitive with a handle table,
    and finalization releasing views. Accept, or prefer per-widget
-   primitives or views that live until closed?
+   primitives or views that live until closed? **Owner (2026-11-04):
+   accepted.**
 3. The stop-the-world scavenge traps when its promotion reserve runs out
    (the ring at 600 MiB). Should the oracle mode fall back to a full
    collection and count it, as the concurrent modes do? **Owner

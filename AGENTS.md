@@ -693,8 +693,13 @@ primitive as ADR 0010 (proposed), the AppKit and UIKit shells under
 mini's 120 Hz display: 0 of 1200 frames missed in every scenario but the
 ring under the stop-the-world oracle, event latency p99 2 to 3 ms, a hog
 on main preempted 2414 times per 10 s with 0 frames missed; the iPhone 13
-Pro runs wait for the owner to sign Xcode in to the team, the scripts run
-them unchanged; the stop-the-world scavenge trapped when its promotion
+Pro ran the same matrix on 2026-11-04 once Xcode was signed in: 179 kernel
+tests pass on the phone, 0 of 1200 frames missed in every scenario but the
+ring under the oracle (2), young collection stops the main thread 2 to 16
+times less than stop-the-world in every scenario including share, the
+marker kept up on efficiency cores, event latency p99 3 ms, the hog
+preempted 2411 times with 0 frames missed, most rows at thermal serious;
+on that evidence the owner accepted ADRs 0004 to 0008 and 0010; the stop-the-world scavenge trapped when its promotion
 reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
 follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
 not the reserve's size, a mark-sweep that could not bring old space under

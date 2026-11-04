@@ -1,7 +1,7 @@
 # ADR 0004: Smalltalk UI code runs on the main thread, with budgeted preemption
 
 Date: 2026-11-01
-Status: proposed
+Status: accepted (owner, 2026-11-04, on module 9a's Mac mini and iPhone 13 Pro measurements, `docs/modules/shells.md`)
 
 ## Context
 
