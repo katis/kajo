@@ -32,7 +32,7 @@ ios-check:
 arc-check:
     scripts/check-hot-path-arc.sh
 
-# Fuzz a reader (kasm, snapshot or syntax) for SECONDS: libFuzzer if the toolchain has it, else replay and mutate
+# Fuzz a reader (kasm, snapshot, syntax or protocol) for SECONDS: libFuzzer if the toolchain has it, else replay and mutate
 fuzz TARGET SECONDS="60":
     scripts/fuzz.sh {{TARGET}} {{SECONDS}}
 

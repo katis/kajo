@@ -1,0 +1,1 @@
+{"v":1,"id":"a","kind":"method.compile","args":{"className":"Foo","source":"bar\n\t^ 1 + 2","category":"x","side":null}}

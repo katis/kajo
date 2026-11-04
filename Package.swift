@@ -64,6 +64,12 @@ let package = Package(
             dependencies: ["KajoVM"],
             swiftSettings: [.strictMemorySafety()]
         ),
+        // Module 9b: the development protocol's request parser and JSON.
+        .executableTarget(
+            name: "fuzz-protocol",
+            dependencies: ["KajoVM", "KajoDev"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
         // Module 8b: the Smalltalk syntax (scanner, parser, compiler, Tonel).
         .executableTarget(
             name: "fuzz-syntax",

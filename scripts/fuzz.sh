@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Fuzz one of the readers of untrusted bytes (the kasm and snapshot loaders,
-# and module 8b's Smalltalk syntax: Tonel files and method sources):
-#   scripts/fuzz.sh kasm|snapshot|syntax [seconds]
+# module 8b's Smalltalk syntax: Tonel files and method sources, and module
+# 9b's development protocol requests):
+#   scripts/fuzz.sh kasm|snapshot|syntax|protocol [seconds]
 # libFuzzer needs a toolchain with libclang_rt.fuzzer_osx.a. Xcode's has
 # none ("unsupported option '-sanitize=fuzzer' for target
 # 'arm64-apple-macos15.0'"); a swift.org toolchain does. It is selected with
@@ -15,9 +16,9 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
-target=${1:?kasm, snapshot or syntax}
+target=${1:?kasm, snapshot, syntax or protocol}
 seconds=${2:-60}
-[[ $target == kasm || $target == snapshot || $target == syntax ]] || { echo "target: kasm, snapshot or syntax"; exit 2; }
+[[ $target == kasm || $target == snapshot || $target == syntax || $target == protocol ]] || { echo "target: kasm, snapshot, syntax or protocol"; exit 2; }
 seeds=$root/Tests/KajoVMTests/Fixtures/fuzz/$target
 run=$root/.build/fuzz-run/$target
 mkdir -p $run/corpus
