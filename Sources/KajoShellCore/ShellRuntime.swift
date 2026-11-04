@@ -67,6 +67,7 @@ final class RuntimeLink: @unchecked Sendable {
         self.link = link
         self.platform = platform
         vm = try ShellVM(imageAt: imagePath, options: options, callbacks: ShellRuntime.callbacks(link))
+        Telemetry.noteImage(release: vm.isReleaseImage)
         link.runtime = self
         platform.eventHandler = { [weak self] e in self?.deliver(e) }
     }

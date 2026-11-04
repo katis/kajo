@@ -13,7 +13,8 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
                 [--snapshot-at N --snapshot-to out.img]
        kajo run <image.img> [the options above]
-       kajo build-image [-o kernel.img] [--no-init] [<dir or file.st>...]   (default: kernel/)
+       kajo build-image [-o kernel.img] [--no-init] [--release] [<dir or file.st>...]   (default: kernel/)
+       kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB]
        kajo version
 
@@ -27,7 +28,11 @@ instead: its Processes run until nothing can happen without the host, and
 the checksum is the sum of what those that ended answered.
 
 build-image: compiles Tonel class files (a directory's *.st) with the
-bootstrap compiler into a verified image.
+bootstrap compiler into a verified image. --release marks it a release
+image: Smalltalk cannot make, install or remove methods in it.
+
+seal: loads an image (every loader check), marks it a release image and
+saves it to <out.img>. Nothing clears the mark.
 
 test: runs the image's TestCases (built from kernel/ when no image is given)
 and writes the NDJSON event stream on stdout, a summary on stderr, and JUnit
@@ -132,6 +137,7 @@ case "build-image":
             guard i < args.count else { fail(usage) }
             out = args[i]
         case "--no-init": options.initialize = false
+        case "--release": options.release = true
         case "--heap":
             i += 1
             guard i < args.count, let n = Int(args[i]) else { fail(usage) }
@@ -147,9 +153,19 @@ case "build-image":
         let r = try KernelBuild.build(KernelBuild.sources(in: dirs), options: options)
         for w in r.warnings { FileHandle.standardError.write((w + "\n").data(using: .utf8)!) }
         guard FileManager.default.createFile(atPath: out, contents: Data(r.image)) else { fail("cannot write \(out)") }
-        print("\(out): \(r.classes) classes, \(r.methods) methods, \(r.image.count) bytes, \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms")
+        print("\(out): \(r.classes) classes, \(r.methods) methods, \(r.image.count) bytes, \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms\(options.release ? ", release image" : "")")
     } catch {
         fail("kajo build-image: \(error)", 1)
+    }
+case "seal":
+    guard args.count == 2 else { fail(usage) }
+    guard let data = FileManager.default.contents(atPath: args[0]) else { fail("cannot read \(args[0])") }
+    switch Headless.seal(image: [UInt8](data)) {
+    case .success(let b):
+        guard FileManager.default.createFile(atPath: args[1], contents: Data(b)) else { fail("cannot write \(args[1])") }
+        print("\(args[1]): release image, \(b.count) bytes")
+    case .failure(let f):
+        fail("kajo seal: \(f)", 1)
     }
 case "test":
     runTests(args)

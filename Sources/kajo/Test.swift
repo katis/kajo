@@ -48,6 +48,7 @@ func runTests(_ args: [String]) -> Never {
     let events = collector.events
     let report = TestReport(events)
     FileHandle.standardError.write(report.summary.data(using: .utf8)!)
+    if Headless.isReleaseImage(bytes) == true { FileHandle.standardError.write("kajo test: a release image\n".data(using: .utf8)!) }
     let failed = report.failed, errored = report.errored
     if let junit {
         guard FileManager.default.createFile(atPath: junit, contents: report.junitXML.data(using: .utf8)) else {

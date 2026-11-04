@@ -138,7 +138,37 @@ public enum Headless {
         let image: Image
         do { image = try Image.load(image: bytes, config: config) } catch { return failed(.load("\(error)")) }
         defer { image.destroy() }
-        return run(image, vc, options)
+        let o = run(image, vc, options)
+        // Module 8d: the loader's report of the image's kind.
+        return Outcome(checksum: o.checksum, milliseconds: o.milliseconds, counters: o.counters,
+                       report: o.report + [("image", image.isRelease ? "release" : "development")])
+    }
+
+    /// Module 8d: whether an image's header marks it a release image (nil
+    /// when the bytes are not an image of this version). The loader reads
+    /// the same word; nothing in Smalltalk can change it.
+    public static func isReleaseImage(_ bytes: [UInt8]) -> Bool? {
+        guard isImage(bytes), bytes.count >= 8 * ImageFile.headerWords else { return nil }
+        func word(_ i: Int) -> UInt64 { (0..<8).reduce(UInt64(0)) { $0 | UInt64(bytes[8 * i + $1]) << (8 * UInt64($1)) } }
+        guard word(1) == ImageFile.version else { return nil }
+        return word(5) & ImageFile.releaseFlag != 0
+    }
+
+    /// Module 8d: `kajo seal`. Load the image (all of the loader's checks),
+    /// mark it a release image and save it: Smalltalk can no longer make,
+    /// install or remove methods in it. Nothing clears the mark; a release
+    /// image is rebuilt from its sources, not unsealed.
+    public static func seal(image bytes: [UInt8], options: Options = Options()) -> Result<[UInt8], Failure> {
+        let config: ObjectMemoryConfig
+        switch configs(options) {
+        case .success(let c): config = c.1
+        case .failure(let f): return .failure(f)
+        }
+        let image: Image
+        do { image = try Image.load(image: bytes, config: config) } catch { return .failure(.load("\(error)")) }
+        defer { image.destroy() }
+        image.seal()
+        return .success(image.saveImage())
     }
 
     /// Module 8b: `kajo test`. Load an image, send its entry point `test:`

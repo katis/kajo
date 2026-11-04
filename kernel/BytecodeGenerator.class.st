@@ -105,7 +105,7 @@ BytecodeGenerator class >> literal: a sameAs: b [
 		^ true].
 	a isFloat ifTrue: [^ a printString = b printString].
 	(a isKindOf: CompiledCode) ifTrue: [^ a == b].
-	(a isKindOf: PragmaLiteral) ifTrue: [^ a == b].
+	(a isKindOf: Pragma) ifTrue: [^ a == b].
 	^ a = b
 ]
 

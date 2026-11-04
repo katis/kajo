@@ -72,7 +72,7 @@ func resumeScenario(_ bytes: [UInt8], id: Int64, workers: Int = 3) throws -> (an
 
 @Suite(.serialized) struct SnapshotScenarioTests {
     @Test(arguments: [("mutex", 91), ("monitor", 3), ("sharedQueue", 3825), ("delay", 7), ("unwinding", 1111),
-                      ("finalization", 3)])
+                      ("finalization", 3), ("removedMethod", 1)])
     func aScenarioResumesWithTheSameAnswer(_ selector: String, _ expected: Int64) throws {
         let run = try runScenario(scenarioImage, selector)
         #expect(run.answer == expected)

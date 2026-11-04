@@ -151,6 +151,7 @@ Behavior >> canUnderstand: aSymbol [
 Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
 	"Install a method (verified by the VM against this class) and note its pragmas."
 	| old |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	old := self compiledMethodAt: aSymbol ifAbsent: [nil].
 	self primAddSelector: aSymbol withMethod: aCompiledMethod.
 	Pragma noteRemoved: old; noteInstalled: aCompiledMethod
@@ -159,22 +160,46 @@ Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
 { #category : #methods }
 Behavior >> removeSelector: aSymbol [
 	| old |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	old := self compiledMethodAt: aSymbol ifAbsent: [^ nil].
 	self primRemoveSelector: aSymbol.
 	Pragma noteRemoved: old.
+	Smalltalk forgetSourceOf: old.
 	^ old
+]
+
+{ #category : #compiling }
+Behavior >> compile: aString [
+	"Compile a method's source with the compiler in Smalltalk, have the VM make and verify it, install it (replacing a method of that selector), record its source and keep the pragma index (module 8d). Answers the selector; a CompileError when the source or the VM refuses it, InstallForbidden in a release image."
+	| method old |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: nil; signal].
+	method := (Compiler compile: aString in: self) makeMethodIn: self.
+	old := self compiledMethodAt: method selector ifAbsent: [nil].
+	self addSelector: method selector withMethod: method.
+	Smalltalk noteSource: aString of: method.
+	old ifNotNil: [:m | Smalltalk forgetSourceOf: m].
+	^ method selector
+]
+
+{ #category : #compiling }
+Behavior >> compile: aString classified: aCategory [
+	"The category is not kept: methods have no categories in the image yet."
+	^ self compile: aString
 ]
 
 { #category : #methods }
 Behavior >> primAddSelector: aSymbol withMethod: aCompiledMethod [
+	"Fails in a release image, for a sealed class (or its class side), or for a method not made for this class and selector."
 	<primitive: 97>
-	^ self error: 'the VM refused the method ' , aSymbol printString
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
+	^ self error: 'the VM refused the method ' , aSymbol printString , ' for ' , self printString
 ]
 
 { #category : #methods }
 Behavior >> primRemoveSelector: aSymbol [
 	<primitive: 98>
-	^ self error: 'cannot remove ' , aSymbol printString
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
+	^ self error: 'cannot remove ' , aSymbol printString , ' from ' , self printString
 ]
 
 { #category : #'class variables' }

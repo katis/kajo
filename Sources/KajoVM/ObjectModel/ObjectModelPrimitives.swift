@@ -12,7 +12,8 @@
 //              family (Interpreter/Special.swift)
 //   90 to 98   respondsTo:, instVarAt:, instVarAt:put:, setReadOnly:,
 //              isReadOnly, basicSize, shallowCopy, addSelector:withMethod:,
-//              removeSelector:
+//              removeSelector: (97 and 98 refused in a release image and
+//              for a sealed class since module 8d, ObjectModel/LiveMethods.swift)
 //   100 to 116 Context and BlockClosure (Frames.swift)
 //   120 to 136 Strings, Symbols, bytes (Strings.swift)
 //
@@ -32,7 +33,7 @@ enum ObjectModelPrimitives {
         (70, "truncated", 0), (71, "fractionPart", 0), (72, "exponent", 0), (73, "timesTwoPower:", 1), (74, "sqrt", 0),
         (76, "Character value", 0), (77, "Character value: / asCharacter", 1),
         (80, "value", 0), (81, "value:", 1), (82, "value:value:", 2), (83, "value:value:value:", 3),
-        (84, "valueWithArguments:", 1), (86, "perform:", 1), (87, "perform:with:", 2), (88, "perform:with:with:", 3),
+        (84, "valueWithArguments:", 1), (85, "CompiledMethod valueWithReceiver:arguments:", 2), (86, "perform:", 1), (87, "perform:with:", 2), (88, "perform:with:with:", 3),
         (89, "perform:withArguments:", 2),
         (90, "respondsTo:", 1), (91, "instVarAt:", 1), (92, "instVarAt:put:", 2), (93, "setReadOnly:", 1),
         (94, "isReadOnly", 0), (95, "basicSize", 0), (96, "shallowCopy", 0), (97, "addSelector:withMethod:", 2),
@@ -202,11 +203,10 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 /// after the flush. Outside a VM the interpreter's own cache is flushed.
 private func primInstallMethod(_ m: Machine, _ c: PrimitiveCall, remove: Bool) -> Oop {
     let om = m.om
-    guard c.argc == (remove ? 1 : 2), om.isBehavior(c.receiver), c.arg0.isObject,
-          om.classIndex(of: c.arg0) == WellKnown.symbol else { return .none }
-    let ciOop = om.load(c.receiver, ClassLayout.classIndex)
-    guard ciOop.isSmallInteger else { return .none }
-    let ci = UInt64(ciOop.smallIntegerValue)
+    // Module 8d: never in a release image, never into a sealed class
+    // (`installTarget`).
+    guard c.argc == (remove ? 1 : 2), c.arg0.isObject, om.classIndex(of: c.arg0) == WellKnown.symbol,
+          let ci = installTarget(m, c.receiver) else { return .none }
     if !remove {
         guard c.arg1.isObject, om.classIndex(of: c.arg1) == WellKnown.method,
               om.load(c.arg1, MethodLayout.methodClass) == c.receiver, om.load(c.arg1, MethodLayout.selector) == c.arg0,

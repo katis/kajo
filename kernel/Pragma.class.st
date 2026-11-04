@@ -17,6 +17,18 @@ Pragma class >> consumesPragmas [
 	^ #(#mainThread #devProtocol)
 ]
 
+{ #category : #'instance creation' }
+Pragma class >> selector: aSymbol arguments: anArray [
+	"A pragma the compiler made (no method yet): the make-method primitive makes a read-only one for the method it makes (module 8d)."
+	^ self new setSelector: aSymbol arguments: anArray
+]
+
+{ #category : #accessing }
+Pragma >> setSelector: aSymbol arguments: anArray [
+	selector := aSymbol.
+	arguments := anArray
+]
+
 { #category : #accessing }
 Pragma class >> rebuildIndex [
 	PragmaIndex table: IdentityDictionary new.

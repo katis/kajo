@@ -13,6 +13,8 @@ public struct KernelBuild: Sendable {
     public struct Options: Sendable {
         /// Run `Smalltalk initializeKernel` in a VM before saving.
         public var initialize = true
+        /// Module 8d: mark the image a release image (`--release`).
+        public var release = false
         public var heapMiB = 512
         public init() {}
     }
@@ -67,6 +69,7 @@ public struct KernelBuild: Sendable {
                 start += chunk.count
             }
         }
+        if options.release { image.seal() }
         return Result(image: image.imageBytes(), classes: plan.classes.count, methods: plan.compiled.count, warnings: plan.warnings)
     }
 }

@@ -1,4 +1,4 @@
-"What the Smalltalk compiler makes of a method or a block: what a CompiledMethod holds, with its block methods and pragmas as CompiledCode and PragmaLiteral literals. matches: compares it with an installed CompiledMethod."
+"What the Smalltalk compiler makes of a method or a block: what a CompiledMethod holds, with its block methods as CompiledCode and its pragmas as Pragmas (without a method) in the literals. matches: compares it with an installed CompiledMethod; makeMethodIn: has the VM make a CompiledMethod of it (module 8d), verified, which addSelector:withMethod: installs or valueWithReceiver:arguments: runs once."
 Class {
 	#name : #CompiledCode,
 	#superclass : #Object,
@@ -105,10 +105,26 @@ CompiledCode >> matches: aCompiledMethod [
 	^ nil
 ]
 
+{ #category : #making }
+CompiledCode >> makeMethodIn: aBehavior [
+	"A CompiledMethod of aBehavior made by the VM from the receiver: verified by the one bytecode verifier (each block method too), its bytecodes copied, its literal frame read-only (module 8d). A refusal is a CompileError with the verifier's reason; a release image refuses with InstallForbidden."
+	| r |
+	r := self primMakeMethodIn: aBehavior.
+	r isString ifTrue: [^ CompileError new line: 0; signal: 'the VM refused the method: ' , r].
+	^ r
+]
+
+{ #category : #making }
+CompiledCode >> primMakeMethodIn: aBehavior [
+	<primitive: 143>
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: aBehavior selector: selector; signal].
+	^ self error: 'cannot make a method of ' , aBehavior printString
+]
+
 { #category : #accessing }
 CompiledCode >> literal: mine matches: other [
 	(mine isKindOf: CompiledCode) ifTrue: [^ (mine matches: other) ifNotNil: [:d | 'block: ' , d]].
-	(mine isKindOf: PragmaLiteral) ifTrue: [
+	(mine isKindOf: Pragma) ifTrue: [
 		((other isKindOf: Pragma) and: [mine selector == other selector and: [BytecodeGenerator literal: mine arguments sameAs: other arguments]])
 			ifFalse: [^ 'pragma ' , mine selector].
 		^ nil].

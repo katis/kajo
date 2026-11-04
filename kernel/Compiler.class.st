@@ -7,7 +7,8 @@ Class {
 		'instVarNames',
 		'firstSlot',
 		'seq',
-		'labelCounter'
+		'labelCounter',
+		'doit'
 	],
 	#category : #'Kernel-Compiler'
 }
@@ -15,6 +16,32 @@ Class {
 { #category : #accessing }
 Compiler class >> compile: aString in: aClass [
 	^ self new setClass: aClass; compile: aString
+]
+
+{ #category : #evaluating }
+Compiler class >> evaluate: aString [
+	"The value of the statements aString holds, run once with nil as self (a doit: compiled as a method of UndefinedObject, made and verified by the VM, run, dropped; nothing is installed)."
+	^ self evaluate: aString for: nil
+]
+
+{ #category : #evaluating }
+Compiler class >> evaluate: aString for: anObject [
+	"The value of the statements aString holds, run once with anObject as self: compiled as a method DoIt of anObject's class (its temporaries the method's, the last statement's value answered), made by the VM, run by valueWithReceiver:arguments:, never installed. A CompileError when the source or the VM refuses it, InstallForbidden in a release image."
+	| method |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: anObject class selector: nil; signal].
+	method := (self compileDoIt: aString in: anObject class) makeMethodIn: anObject class.
+	^ method valueWithReceiver: anObject arguments: #()
+]
+
+{ #category : #evaluating }
+Compiler class >> compileDoIt: aString in: aClass [
+	"The CompiledCode of a doit: the method DoIt whose body is aString, answering its last statement's value."
+	^ self new setClass: aClass; beDoIt; compile: 'DoIt ' , aString
+]
+
+{ #category : #accessing }
+Compiler >> beDoIt [
+	doit := true
 ]
 
 { #category : #accessing }
@@ -28,7 +55,8 @@ Compiler >> setClass: aClass [
 	instVarNames := (Smalltalk instanceVariableNamesOf: aClass) collect: [:s | s asString].
 	firstSlot := aClass isMeta ifTrue: [5] ifFalse: [0].
 	seq := 0.
-	labelCounter := 0
+	labelCounter := 0.
+	doit := false
 ]
 
 { #category : #accessing }
@@ -595,16 +623,20 @@ Compiler >> compile: aString [
 		p first == #primitive: ifTrue: [primitive := (p at: 2) first] ifFalse: [
 		p first == #unwind ifTrue: [flags := flags bitOr: 1] ifFalse: [
 		p first == #handler ifTrue: [flags := flags bitOr: 2] ifFalse: [
-		pragmas add: (PragmaLiteral selector: p first arguments: (p at: 2))]]]].
+		pragmas add: (Pragma selector: p first arguments: (p at: 2))]]]].
 	e := OrderedCollection new.
 	scope vectorTemp >= 0 ifTrue: [
 		self emit: e op: #pushNewArray a: scope vectorVariables size.
 		self emit: e op: #storeTemp a: scope vectorTemp].
 	returned := false.
-	tree statements do: [:st |
+	tree statements doWithIndex: [:st :k |
 		st class == ReturnNode
 			ifTrue: [self genReturn: st value in: scope on: e. returned := true]
-			ifFalse: [self gen: st in: scope on: e value: false]].
+			ifFalse: [
+				(doit and: [k = tree statements size])
+					ifTrue: [self genReturn: st in: scope on: e. returned := true]
+					ifFalse: [self gen: st in: scope on: e value: false]]].
+	(doit and: [returned not]) ifTrue: [self emit: e op: #pushNil. self emit: e op: #returnTop. returned := true].
 	returned ifFalse: [self emit: e op: #returnSelf].
 	r := (BytecodeGenerator new setLines: e) assembleWithExtraLiterals: pragmas.
 	^ CompiledCode new

@@ -195,7 +195,7 @@ package final class Image {
 
     // MARK: - allocation
 
-    private func allocate(_ cls: UInt64, slots: Int, fill: Oop? = nil, roots: [Oop] = []) throws(LoadError) -> Oop {
+    fileprivate func allocate(_ cls: UInt64, slots: Int, fill: Oop? = nil, roots: [Oop] = []) throws(LoadError) -> Oop {
         guard let o = om.allocate(context, classIndex: cls, slots: slots, fill: fill ?? nilObject, extraRoots: roots) else {
             throw LoadError(.heapFull, "the heap has no room for the image")
         }
@@ -213,7 +213,7 @@ package final class Image {
         return o
     }
 
-    private func allocateBytes(_ cls: UInt64 = WellKnown.byteArray, _ bytes: [UInt8], roots: [Oop]) throws(LoadError) -> Oop {
+    fileprivate func allocateBytes(_ cls: UInt64 = WellKnown.byteArray, _ bytes: [UInt8], roots: [Oop]) throws(LoadError) -> Oop {
         guard let o = om.allocateBytes(context, classIndex: cls, count: bytes.count, extraRoots: roots) else {
             throw LoadError(.heapFull, "the heap has no room for the image")
         }
@@ -322,122 +322,70 @@ package final class Image {
         loads += 1
     }
 
-    /// A Method (and its blocks, literals and pragmas) in the heap: pinned
-    /// for good, its literals read-only. The new objects are kept reachable
-    /// through a temporary root until the method holds them.
+    /// A Method (and its blocks, literals and pragmas) in the heap: the
+    /// objects module 8d's `makeMethodObjects` makes, as the make-method
+    /// primitive makes them. Symbols are interned here and held by a root
+    /// (the table is weak) until the method holds them; the other new
+    /// objects are kept reachable by roots the heap adds.
     private func makeMethod(_ m: AssembledMethod, selector: Oop, methodClass: Oop) throws(LoadError) -> Oop {
-        var made: [Int: Oop] = [:]
-        var handles: [RootHandle] = []
-        defer { for h in handles { om.removeRoot(h) } }
-        func keep(_ o: Oop) { handles.append(om.addRoot(o)) }
-        func build(_ a: AssembledMethod, selector: Oop) throws(LoadError) -> Oop {
-            var lits: [Oop] = []
-            for l in a.literals {
-                let v: Oop
-                switch l {
-                case .block(let k):
-                    if let b = made[k] { v = b } else {
-                        v = try build(m.blocks[k], selector: nilObject)
-                        made[k] = v
-                    }
-                case .pragma: v = nilObject  // filled once the method exists
-                default: v = try literalValue(l)
-                }
-                if v.isObject { keep(v) }
-                lits.append(v)
-            }
-            for (k, l) in a.literals.enumerated() {
-                if case .pragma(let p) = l {
-                    let pr = m.pragmas[p]
-                    let args = try allocate(WellKnown.array, slots: pr.arguments.count)
-                    keep(args)
-                    for (i, x) in pr.arguments.enumerated() {
-                        let v = try literalValue(x)
-                        om.store(args, i, v)
-                    }
-                    om.setReadOnly(args, true)
-                    let po = try allocate(WellKnown.pragma, slots: PragmaLayout.size)
-                    keep(po)
-                    om.store(po, PragmaLayout.selector, try intern(pr.selector))
-                    om.store(po, PragmaLayout.arguments, args)
-                    lits[k] = po
-                }
-            }
-            let bytes = try allocateBytes(WellKnown.byteArray, a.bytecodes, roots: [])
-            if pinsForGood { om.pinForGood(bytes) }
-            om.setReadOnly(bytes, true)
-            keep(bytes)
-            let litArray = try allocatePinned(WellKnown.array, slots: lits.count)
-            for (i, v) in lits.enumerated() { om.store(litArray, i, v) }
-            om.setReadOnly(litArray, true)
-            keep(litArray)
-            let meth = try allocatePinned(WellKnown.method, slots: MethodLayout.size)
-            om.store(meth, MethodLayout.bytecodes, bytes)
-            om.store(meth, MethodLayout.literals, litArray)
-            om.store(meth, MethodLayout.argc, Oop(smallInteger: Int64(a.argc)))
-            om.store(meth, MethodLayout.temps, Oop(smallInteger: Int64(a.temps)))
-            om.store(meth, MethodLayout.maxStack, Oop(smallInteger: Int64(a.maxStack)))
-            om.store(meth, MethodLayout.selector, selector)
-            om.store(meth, MethodLayout.primitive, Oop(smallInteger: Int64(a.primitive)))
-            om.store(meth, MethodLayout.flags, Oop(smallInteger: a.flags))
-            om.store(meth, MethodLayout.methodClass, methodClass)
-            om.store(meth, MethodLayout.copied, Oop(smallInteger: Int64(a.copied)))
-            for v in lits where v.isObject && om.classIndex(of: v) == WellKnown.pragma {
-                om.store(v, PragmaLayout.method, meth)
-                om.setReadOnly(v, true)
-            }
-            if a.isBlock { methodNames[meth] = "\(a.className)\(a.classSide ? " class" : "")>>\(m.selector)[\(a.selector)]" }
-            return meth
+        var heap = ImageMethodHeap(image: self)
+        defer { for h in heap.handles { om.removeRoot(h) } }
+        func parts(_ a: AssembledMethod) throws(LoadError) -> MethodParts {
+            var lits: [PartLiteral] = []
+            for l in a.literals { lits.append(try partLiteral(l, m, &heap)) }
+            return MethodParts(bytecodes: a.bytecodes, literals: lits, argc: a.argc, temps: a.temps, maxStack: a.maxStack,
+                               primitive: a.primitive, flags: a.flags, copied: a.copied)
         }
-        return try build(m, selector: selector)
+        var blockParts: [MethodParts] = []
+        for b in m.blocks { blockParts.append(try parts(b)) }
+        let made = try makeMethodObjects(try parts(m), blocks: blockParts, selector: selector, methodClass: methodClass, heap: &heap)
+        for (k, b) in made.blocks {
+            let a = m.blocks[k]
+            methodNames[b] = "\(a.className)\(a.classSide ? " class" : "")>>\(m.selector)[\(a.selector)]"
+        }
+        return made.method
     }
 
-    /// A literal's object: immediates as they are, the rest allocated
-    /// read-only (and pinned, so a literal never moves under a method).
-    private func literalValue(_ l: Literal) throws(LoadError) -> Oop {
+    /// A literal as `makeMethodObjects` takes it: immediates, Symbols
+    /// (interned, rooted), classes and class variables' Bindings as they
+    /// are, the rest to be made afresh.
+    private func partLiteral(_ l: Literal, _ m: AssembledMethod, _ heap: inout ImageMethodHeap) throws(LoadError) -> PartLiteral {
         switch l {
-        case .integer(let v): return Oop(smallInteger: v)
-        case .symbol(let s): return try intern(s)
-        case .classRef(let c): return om.classOop(classesByName[c]!)
+        case .integer(let v): return .object(Oop(smallInteger: v))
+        case .symbol(let s):
+            let sym = try intern(s)
+            heap.keep(sym)
+            return .object(sym)
+        case .classRef(let c): return .object(om.classOop(classesByName[c]!))
         case .binding(let owner, let name):
             guard let b = classVariableBinding(owner, name) else {
                 throw LoadError(.unknownClass, "no class variable \(name) in \(owner)")
             }
-            return b
-        case .nilObject: return nilObject
-        case .trueObject: return trueObject
-        case .falseObject: return falseObject
-        case .character(let c): return Oop(character: c)
+            return .object(b)
+        case .nilObject: return .object(nilObject)
+        case .trueObject: return .object(trueObject)
+        case .falseObject: return .object(falseObject)
+        case .character(let c): return .object(Oop(character: c))
         case .float(let bits):
-            if let f = Oop(smallFloat: Double(bitPattern: bits)) { return f }
-            return try readOnlyBytes(WellKnown.float, (0..<8).map { UInt8(truncatingIfNeeded: bits >> (8 * UInt64($0))) })
-        case .string(let b): return try readOnlyBytes(WellKnown.string, b)
+            if let f = Oop(smallFloat: Double(bitPattern: bits)) { return .object(f) }
+            return .bytes(WellKnown.float, (0..<8).map { UInt8(truncatingIfNeeded: bits >> (8 * UInt64($0))) })
+        case .string(let b): return .bytes(WellKnown.string, b)
         case .largeInteger(let negative, let mag):
-            return try readOnlyBytes(negative ? WellKnown.largeNegativeInteger : WellKnown.largePositiveInteger, mag)
-        case .byteArray(let b): return try readOnlyBytes(WellKnown.byteArray, b)
+            return .bytes(negative ? WellKnown.largeNegativeInteger : WellKnown.largePositiveInteger, mag)
+        case .byteArray(let b): return .bytes(WellKnown.byteArray, b)
         case .array(let elements):
-            // Elements first, each held by a root until the Array holds it.
-            var handles: [RootHandle] = []
-            defer { for h in handles { om.removeRoot(h) } }
-            var values: [Oop] = []
-            for e in elements {
-                let v = try literalValue(e)
-                if v.isObject { handles.append(om.addRoot(v)) }
-                values.append(v)
-            }
-            let a = try allocatePinned(WellKnown.array, slots: values.count)
-            for (i, v) in values.enumerated() { om.store(a, i, v) }
-            om.setReadOnly(a, true)
-            return a
-        case .block, .pragma: preconditionFailure("made by makeMethod")
+            var out: [PartLiteral] = []
+            for e in elements { out.append(try partLiteral(e, m, &heap)) }
+            return .array(out)
+        case .block(let k): return .block(k)
+        case .pragma(let p):
+            let pr = m.pragmas[p]
+            let sel = try intern(pr.selector)
+            heap.keep(sel)
+            var args: [PartLiteral] = []
+            for x in pr.arguments { args.append(try partLiteral(x, m, &heap)) }
+            return .pragma(sel, args)
         }
-    }
-
-    private func readOnlyBytes(_ cls: UInt64, _ b: [UInt8]) throws(LoadError) -> Oop {
-        let o = try allocateBytes(cls, b, roots: [])
-        if pinsForGood { om.pinForGood(o) }
-        om.setReadOnly(o, true)
-        return o
     }
 
     private func installMethodDictionary(_ cls: UInt64) throws(LoadError) {
@@ -884,4 +832,96 @@ extension Image {
     package func hasClass(_ name: String) -> Bool { classesByName[name] != nil }
 
     package func destroyImage() { destroy() }
+}
+
+/// The image build's `MethodHeap`: the Image's allocation context, roots
+/// for what it made (removed by the caller).
+private struct ImageMethodHeap: MethodHeap {
+    let image: Image
+    var handles: [RootHandle] = []
+    var om: ObjectMemory { image.om }
+    var nilObject: Oop { image.nilObject }
+    var pinsForGood: Bool { image.pinsForGood }
+    mutating func pointers(_ cls: UInt64, _ slots: Int) throws(LoadError) -> Oop { try image.allocate(cls, slots: slots) }
+    mutating func bytes(_ cls: UInt64, _ b: [UInt8]) throws(LoadError) -> Oop { try image.allocateBytes(cls, b, roots: []) }
+    mutating func keep(_ o: Oop) { if o.isObject { handles.append(image.om.addRoot(o)) } }
+}
+
+// MARK: - module 8d: the syntax fuzzer's make-and-run mode
+
+extension Image {
+    /// The kernel compiler's form of an assembled method, as instances of
+    /// class `codeClass` (`CompiledCodeLayout`): what the make primitive
+    /// reads. Literals become the objects the compiler in Smalltalk would
+    /// hand over (Strings, Floats, Arrays, Pragmas without a method, class
+    /// objects); a class variable or an unknown class is refused (the fuzz
+    /// image has neither). The answer is held by a root the caller removes.
+    func codeObject(_ m: AssembledMethod, codeClass: UInt64) throws(LoadError) -> (Oop, RootHandle) {
+        var handles: [RootHandle] = []
+        defer { for h in handles { om.removeRoot(h) } }
+        func keep(_ o: Oop) -> Oop {
+            if o.isObject { handles.append(om.addRoot(o)) }
+            return o
+        }
+        func bytes(_ cls: UInt64, _ b: [UInt8]) throws(LoadError) -> Oop { keep(try allocateBytes(cls, b, roots: [])) }
+        func literal(_ l: Literal) throws(LoadError) -> Oop {
+            switch l {
+            case .integer(let v): return Oop(smallInteger: v)
+            case .symbol(let s): return keep(try intern(s))
+            case .classRef(let c):
+                guard let i = classesByName[c] else { throw LoadError(.unknownClass, "no class \(c)") }
+                return om.classOop(i)
+            case .binding(_, let name): throw LoadError(.unknownClass, "no class variable \(name)")
+            case .nilObject: return nilObject
+            case .trueObject: return trueObject
+            case .falseObject: return falseObject
+            case .character(let c): return Oop(character: c)
+            case .float(let bits):
+                if let f = Oop(smallFloat: Double(bitPattern: bits)) { return f }
+                return try bytes(WellKnown.float, (0..<8).map { UInt8(truncatingIfNeeded: bits >> (8 * UInt64($0))) })
+            case .string(let b): return try bytes(WellKnown.string, b)
+            case .largeInteger(let negative, let mag):
+                return try bytes(negative ? WellKnown.largeNegativeInteger : WellKnown.largePositiveInteger, mag)
+            case .byteArray(let b): return try bytes(WellKnown.byteArray, b)
+            case .array(let xs):
+                var vs: [Oop] = []
+                for x in xs { vs.append(try literal(x)) }
+                let a = keep(try allocate(WellKnown.array, slots: vs.count))
+                for (i, v) in vs.enumerated() { om.store(a, i, v) }
+                return a
+            case .block(let k): return try code(m.blocks[k], selector: nilObject)
+            case .pragma(let p):
+                let pr = m.pragmas[p]
+                var vs: [Oop] = []
+                for x in pr.arguments { vs.append(try literal(x)) }
+                let args = keep(try allocate(WellKnown.array, slots: vs.count))
+                for (i, v) in vs.enumerated() { om.store(args, i, v) }
+                let sel = keep(try intern(pr.selector))
+                let po = keep(try allocate(WellKnown.pragma, slots: PragmaLayout.size))
+                om.store(po, PragmaLayout.selector, sel)
+                om.store(po, PragmaLayout.arguments, args)
+                return po
+            }
+        }
+        func code(_ a: AssembledMethod, selector: Oop) throws(LoadError) -> Oop {
+            var lits: [Oop] = []
+            for l in a.literals { lits.append(try literal(l)) }
+            let la = keep(try allocate(WellKnown.array, slots: lits.count))
+            for (i, v) in lits.enumerated() { om.store(la, i, v) }
+            let bc = try bytes(WellKnown.byteArray, a.bytecodes)
+            let c = keep(try allocate(codeClass, slots: CompiledCodeLayout.size))
+            om.store(c, CompiledCodeLayout.selector, selector)
+            om.store(c, CompiledCodeLayout.bytecodes, bc)
+            om.store(c, CompiledCodeLayout.literals, la)
+            om.store(c, CompiledCodeLayout.argc, Oop(smallInteger: Int64(a.argc)))
+            om.store(c, CompiledCodeLayout.temps, Oop(smallInteger: Int64(a.temps)))
+            om.store(c, CompiledCodeLayout.maxStack, Oop(smallInteger: Int64(a.maxStack)))
+            om.store(c, CompiledCodeLayout.primitive, Oop(smallInteger: Int64(a.primitive)))
+            om.store(c, CompiledCodeLayout.flags, Oop(smallInteger: a.flags))
+            om.store(c, CompiledCodeLayout.copied, Oop(smallInteger: Int64(a.copied)))
+            return c
+        }
+        let top = try code(m, selector: try intern(m.selector))
+        return (top, om.addRoot(top))
+    }
 }

@@ -419,6 +419,8 @@ public final class ShellVM: @unchecked Sendable {
 
     /// Processes the image held and the VM resumed (module 8c).
     public var resumedProcessCount: Int { vm.resumedProcesses.count }
+    /// Module 8d: the image is a release image (its header's flag).
+    public var isReleaseImage: Bool { image.isRelease }
 
     // MARK: snapshot
 

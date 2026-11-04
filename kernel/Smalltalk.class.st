@@ -71,9 +71,6 @@ Smalltalk class >> rebuildClassNames [
 { #category : #sources }
 Smalltalk class >> recordSources: anArray [
 	"The image build hands every method's source over: 'Class[ class]', the selector and the source, a line each."
-	| table |
-	sources isNil ifTrue: [sources := IdentityDictionary new].
-	table := sources.
 	anArray do: [:s | | i j spec sel cls m |
 		i := s indexOf: Character lf.
 		j := s indexOfSubstring: (String with: Character lf) startingAt: i + 1.
@@ -83,19 +80,20 @@ Smalltalk class >> recordSources: anArray [
 			ifTrue: [(self at: (spec copyFrom: 1 to: spec byteSize - 6) asSymbol) class]
 			ifFalse: [self at: spec asSymbol].
 		m := cls compiledMethodAt: sel.
-		table at: m put: (s copyFrom: j + 1 to: s byteSize)]
+		self noteSource: (s copyFrom: j + 1 to: s byteSize) of: m]
 ]
 
 { #category : #sources }
 Smalltalk class >> sourceOf: aCompiledMethod [
 	sources isNil ifTrue: [^ nil].
-	^ sources at: aCompiledMethod ifAbsent: [nil]
+	^ (sources at: aCompiledMethod methodClass ifAbsent: [^ nil]) at: aCompiledMethod ifAbsent: [nil]
 ]
 
 { #category : #sources }
 Smalltalk class >> noteSource: aString of: aCompiledMethod [
+	"Kept per class: one dictionary of every source would pass the 3071 entries an object of one block can hash (a kernel of 1536 methods filled it, module 8d)."
 	sources isNil ifTrue: [sources := IdentityDictionary new].
-	sources at: aCompiledMethod put: aString
+	(sources at: aCompiledMethod methodClass ifAbsentPut: [IdentityDictionary new]) at: aCompiledMethod put: aString
 ]
 
 { #category : #sources }
@@ -162,6 +160,19 @@ Smalltalk class >> test: arguments [
 Smalltalk class >> testFilter: aPatternOrNil tag: aTagOrNil [
 	"The shells' tests mode (module 9a): test: without an Array of arguments."
 	^ TestRunner new runFilter: aPatternOrNil tag: aTagOrNil
+]
+
+{ #category : #system }
+Smalltalk class >> isReleaseImage [
+	"A release image (its header's flag, set by kajo build-image --release or kajo seal): methods cannot be made, installed or removed from Smalltalk, and Compiler evaluate: is refused (module 8d). Nothing in Smalltalk can change it."
+	<primitive: 144>
+	^ false
+]
+
+{ #category : #sources }
+Smalltalk class >> forgetSourceOf: aCompiledMethod [
+	sources isNil ifTrue: [^ nil].
+	^ (sources at: aCompiledMethod methodClass ifAbsent: [^ nil]) removeKey: aCompiledMethod ifAbsent: [nil]
 ]
 
 { #category : #'entry points' }

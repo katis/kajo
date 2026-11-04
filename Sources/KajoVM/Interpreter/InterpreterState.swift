@@ -37,6 +37,9 @@ struct InterpreterCounters: Sendable, Equatable {
     var largeIntegersMade: UInt64 = 0
     var floatsBoxed: UInt64 = 0
     var methodsInstalled: UInt64 = 0
+    /// Module 8d: methods the make primitive made, and refused.
+    var methodsMade: UInt64 = 0
+    var methodsRefused: UInt64 = 0
     var symbolsInterned: UInt64 = 0
     /// `terminateTo:` moves.
     var terminations: UInt64 = 0

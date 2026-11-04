@@ -133,3 +133,20 @@ SnapshotScenarios class >> manyProcesses: n [
 	n timesRepeat: [done wait].
 	^ n
 ]
+
+{ #category : #scenarios }
+SnapshotScenarios class >> removedMethod [
+	"Module 8d: a Process waits inside a method compiled at run time, which is then replaced and removed; its frame keeps the old method, which no dictionary holds and which the saved image must still load and verify. The old method answers 1 after the wait."
+	| gate done result |
+	gate := Semaphore new.
+	done := Semaphore new.
+	SnapshotScenarios class compile: 'liveWaitOn: aSemaphore aSemaphore wait. ^ 1'.
+	[result := self liveWaitOn: gate. done signal] fork.
+	self settle.
+	SnapshotScenarios class compile: 'liveWaitOn: aSemaphore ^ 2'.
+	SnapshotScenarios class removeSelector: #liveWaitOn:.
+	Smalltalk snapshot: nil.
+	gate signal.
+	done wait.
+	^ result + ((SnapshotScenarios respondsTo: #liveWaitOn:) ifTrue: [10] ifFalse: [0])
+]

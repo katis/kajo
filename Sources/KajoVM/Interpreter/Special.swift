@@ -87,12 +87,14 @@ func specialFastPath(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
 
 /// Primitives that activate a frame rather than answer: 80 to 84 closure
 /// `value`, `value:`, `value:value:`, `value:value:value:`,
-/// `valueWithArguments:`; 86 to 89 `perform:`, `perform:with:`,
+/// `valueWithArguments:`; 85 (module 8d) `CompiledMethod
+/// valueWithReceiver:arguments:`; 86 to 89 `perform:`, `perform:with:`,
 /// `perform:with:with:`, `perform:withArguments:`.
 enum ActivationPrimitive {
     static let first = 80
     static let last = 89
     static let valueWithArguments = 84
+    static let valueWithReceiver = 85
     static let perform = 86
     static let performWithArguments = 89
 }
@@ -116,6 +118,20 @@ func activationPrimitive(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
             if let out = unsafe activateClosure(s, om, Regs(pc: r.pc, sp: sp + n - 1, fp: fp, hdr: hdr, code: r.code, lits: r.lits),
                                                 n, length) { return out }
             unsafe unspread(s, sp, n)
+        }
+    case ActivationPrimitive.valueWithReceiver:
+        // method receiver array  ->  receiver a1 ... an, the method activated
+        // as if a send had found it (module 8d: running a method once
+        // without installing it, `Compiler evaluate:`).
+        if argc == 2, unsafe runsOnce(s, (sp - 2).pointee, (sp - 1).pointee, sp.pointee), let k = unsafe spreadArray(s, sp, extra: 0) {
+            let meth = unsafe (sp - 2).pointee
+            unsafe (sp - 2).pointee = (sp - 1).pointee
+            var i = 0
+            while i < k {
+                unsafe (sp - 1 + i).pointee = (sp + i).pointee
+                i &+= 1
+            }
+            return unsafe activate(s, om, Regs(pc: r.pc, sp: sp + k - 2, fp: fp, hdr: hdr, code: r.code, lits: r.lits), meth, k, length)
         }
     case ActivationPrimitive.perform...(ActivationPrimitive.performWithArguments - 1):
         // receiver selector a1 ... an  ->  receiver a1 ... an, send selector
@@ -154,6 +170,32 @@ func activationPrimitive(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Un
         break
     }
     return unsafe primitiveFailure(s, pc, sp, fp, hdr, method, prim, argc, length)
+}
+
+/// Primitive 85's checks: `meth` a CompiledMethod (not a block method,
+/// no primitive: its bytecodes are what runs) taking as many arguments as
+/// the Array `arr` holds, and `rcv` an instance of its class or a
+/// subclass, so its instance variables are the ones the verifier allowed.
+/// Every CompiledMethod in the heap was verified (the loader, the image
+/// build, the make primitive; nothing else can make one).
+@inline(never)
+func runsOnce(_ s: StatePointer, _ meth: UInt64, _ rcv: UInt64, _ arr: UInt64) -> Bool {
+    let om = unsafe s.pointee.om
+    guard meth & Oop.objectTagMask == 0, meth != 0, om.headerWord(meth) & Header.classMask == WellKnown.method,
+          isArray(om, arr) else { return false }
+    let m = Oop(raw: meth)
+    guard methodFlags(om, meth) & MethodFlags.block == 0, om.load(m, MethodLayout.primitive) == Oop(smallInteger: 0),
+          om.load(m, MethodLayout.argc) == Oop(smallInteger: Int64(om.count(of: Oop(raw: arr)))) else { return false }
+    let mc = om.load(m, MethodLayout.methodClass)
+    var cls = om.classOop(classIndexOf(om, rcv))
+    var steps = om.classCount
+    let nilObject = unsafe s.pointee.nilObject
+    while cls != nilObject && steps > 0 {
+        if cls == mc { return true }
+        cls = om.load(cls, ClassLayout.superclass)
+        steps &-= 1
+    }
+    return false
 }
 
 @inline(__always)

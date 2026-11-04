@@ -112,6 +112,13 @@ CompiledMethod >> blockMethods [
 	^ self literals select: [:each | each class == CompiledMethod]
 ]
 
+{ #category : #evaluating }
+CompiledMethod >> valueWithReceiver: anObject arguments: anArray [
+	"Run the method once on anObject, as if a send had found it, without installing it (module 8d: what Compiler evaluate: does with a doit). The receiver must be an instance of the method's class or of a subclass, anArray its arguments; a method with a primitive does not run this way."
+	<primitive: 85>
+	^ self error: 'cannot run ' , self printString , ' on ' , anObject printString , ' with ' , anArray size printString , ' argument(s)'
+]
+
 { #category : #accessing }
 CompiledMethod >> printOn: aStream [
 	aStream print: self methodClass; nextPutAll: '>>'.

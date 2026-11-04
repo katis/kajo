@@ -1,5 +1,9 @@
 import Darwin
 import Foundation
+import Synchronization
+
+/// Module 8d: the kind of the image the shell opened last ("-" before one).
+private let openedImageKind = Mutex<String>("-")
 
 // Device telemetry for every result line (AGENTS.md: device numbers carry a
 // thermal state; log the QoS each thread got; energy from ri_energy_nj is
@@ -58,8 +62,13 @@ public enum Telemetry {
     /// Appended to every result line.
     public static func suffix() -> String {
         let (fp, peak) = footprint()
-        return " thermal=\(thermal()) footprint_mb=\(mb(fp)) footprint_peak_mb=\(mb(peak)) avail_mb=\(availableMB())"
+        return " thermal=\(thermal()) footprint_mb=\(mb(fp)) footprint_peak_mb=\(mb(peak)) avail_mb=\(availableMB()) image=\(imageKind)"
     }
+
+    /// Module 8d: `release` or `development`, the kind of the image the
+    /// shell opened (every result line carries it).
+    public static var imageKind: String { openedImageKind.withLock { $0 } }
+    public static func noteImage(release: Bool) { openedImageKind.withLock { $0 = release ? "release" : "development" } }
 
     public static func qosName(_ q: UInt32) -> String {
         switch q {
