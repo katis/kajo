@@ -273,8 +273,15 @@ Safety:
    remove primitives (145 to 147), which re-check the image build's class
    rules with the build's own code (`ClassRules`), make and verify every
    recompiled method against the new shape before anything changes, and
-   refuse while any frame runs a method of the class. The primitive is the
-   trust boundary, not the compiler.
+   refuse while any frame runs a method of the class. Since module 9b the
+   sealed classes take a method from Smalltalk only when the verifier finds
+   it can do nothing but send: no instance-variable access, no slot store,
+   no primitive, no become (the owner's provisional answer to "what about
+   extensions?"). The development protocol (9b, `Sources/KajoDev/`, ADR
+   0011) is a trust boundary of the same kind: every request is parsed and
+   checked in the target, a malformed request is a reply, a release image
+   does not serve, and the pairing token is never written to a file. The
+   primitive is the trust boundary, not the compiler.
  - A stress mode that preempts at every poll livelocks: a Process preempted
    at a send is resumed at that send and preempted again. Every slice must
    execute at least one instruction; the stress flag lets the first poll of
@@ -578,6 +585,21 @@ Safety:
    versions (closures follow) and a removal keeps the class object as
    `AnObsoleteFoo`; an image saved after either still loads. Read the
    loader's rules before designing a change the image must survive.
+ - A sentinel in a field is a state every reader must handle. A Process on
+   its first slice has a saved pc of -1, and the interrupt delivery that
+   stepping relies on refused it; found by 9b's gate run, not by its
+   tests, because every test stepped a Process that had already run.
+ - A hook that resets everything it finds races with everything built
+   before it. The saver's resume hook detached every view wrapper,
+   including the ones a 9a test built before the hook ran; the test only
+   failed under 9b's heavier gate load. A test that builds after a resume
+   waits for the resume to have happened (`Smalltalk resumeCount`).
+ - Keep a slow feature off the fast path by deciding it where the slow
+   path already is. Stepping is decided in `pollSlow` for the stepped
+   Process only, as an interrupt it runs when next resumed; `interpret`
+   stayed identical instruction for instruction, which `just arc-check`
+   and the disassembly diff showed, not the bench alone (fib moved 1.2%
+   from link placement).
  - When a tool writes files a person also edits, the tool's output is the
    canonical form and a test asserts byte identity. 8e's image writes
    `kernel/` out byte for byte as it was read; the rewrite to that form was
@@ -660,7 +682,7 @@ tables and the main-thread check undone, and its five open questions in
 `docs/modules/kernel-image.md` await the owner; Processes saved in the
 image built in module 8c: the stack words copied verbatim into Array
 chunks under special object 8 with the ready queues, the finalization
-Semaphore and the saver, image format version 2 (3 since 8d; 1 and 2 are
+Semaphore and the saver, image format version 2 (3 since 8d, 4 since 9b for class-table holes; 1 to 3 are
 refused, images are rebuilt from sources), `Smalltalk snapshot:`
 answering false in the saver and true on resume, a hold on the scheduler
 before the stop with its own model, a loader that checks every saved frame
@@ -699,7 +721,33 @@ ring under the oracle (2), young collection stops the main thread 2 to 16
 times less than stop-the-world in every scenario including share, the
 marker kept up on efficiency cores, event latency p99 3 ms, the hog
 preempted 2411 times with 0 frames missed, most rows at thermal serious;
-on that evidence the owner accepted ADRs 0004 to 0008 and 0010; the stop-the-world scavenge trapped when its promotion
+on that evidence the owner accepted ADRs 0004 to 0008 and 0010; the
+development protocol, the debugger and the agent interface built in module
+9b, `docs/modules/development-protocol.md`, from the owner's answers of
+2026-11-04 (Swift for the compiler and the bindings, every developer tool
+in Smalltalk; stepping and define-and-proceed in the first version):
+JSON-lines requests as `<devProtocol>` methods of `DevSession`, 28 of
+them, listed by `protocol.describe`, served by one protocol Process that
+runs each request in a Process of its own, over a Unix socket with a
+pairing token (`kajo run --protocol`, the Mac shell's `protocol=`), never
+in a release image (ADR 0011, proposed); an unhandled error stops its
+Process while the protocol serves, with no timeout, and the stopped
+Process runs the debugger's commands itself: frames with named variables
+and source ranges from a pc-to-source map both compilers record as the
+last literal (image +1.8%), evaluate in a frame, proceed, restart, retry a
+send, terminate, suspend, and stepping into, over and out decided in
+`pollSlow` for the stepped Process only, so `interpret` is unchanged
+instruction for instruction (ADR 0012, proposed; a step to its stop 1.6
+ms, compile 0.85 ms, evaluate 0.21 ms at p50); methods carry a package,
+extension files are `<Class>.extension.st`, the author is Tonel metadata,
+the client writes accepted changes to `--project` and the files rebuild
+the edited image; `kajo mcp` builds its tools from `protocol.describe`,
+the CLI gains `eval`, `compile`, `browse`, `debug`, `test --target` and
+`request`; `terminate` runs ensure blocks within about 1 s; removed
+classes are freed into class-table holes by `Smalltalk garbageCollect`
+(image version 4); the Mac shell kept 1200 of 1200 frames while its event
+loop's Process sat stopped for 10 s; a libFuzzer target for requests;
+its five open questions await the owner; the stop-the-world scavenge trapped when its promotion
 reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
 follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
 not the reserve's size, a mark-sweep that could not bring old space under
@@ -808,9 +856,16 @@ cover.
    main run loop with the frame account, the tests, golden, scenario and
    demo modes, telemetry). `Sources/kajo/` the CLI (`kajo run`, `kajo build-image`,
    `kajo test [image] [--filter] [--tag] [--junit]`); `Sources/fuzz-kasm/`,
-   `Sources/fuzz-snapshot/` and `Sources/fuzz-syntax/` the libFuzzer
-   targets (`just fuzz kasm|snapshot|syntax <seconds>`, needs a swift.org
-   toolchain; Xcode's ships no libFuzzer runtime). `scripts/`:
+   `Sources/fuzz-snapshot/`, `Sources/fuzz-syntax/` and
+   `Sources/fuzz-protocol/` the libFuzzer targets (`just fuzz
+   kasm|snapshot|syntax|protocol <seconds>`, needs a swift.org toolchain;
+   Xcode's ships no libFuzzer runtime). `Sources/KajoDev/` (module 9b,
+   `docs/modules/development-protocol.md`) the development protocol's host
+   side: bounded JSON, the Unix-socket server and token, the headless
+   `DevTarget`, the client, the MCP server and the CLI's development
+   commands; `Sources/KajoVM/Processes/Debugging.swift` the stop, step and
+   interrupt machinery; primitives 159 to 161 carry requests and replies.
+   The kernel's `DevSession` holds the requests as `<devProtocol>` methods. `scripts/`:
    `check-hot-path-arc.sh` (`just arc-check`) greps the release disassembly
    of the dispatch loop, send, primitive and allocation paths for retain and
    release and asserts the loop is one jump table; `golden.sh` (`just
@@ -864,4 +919,5 @@ cover.
  * `justfile` has the common commands: `just build`, `just test`, `just run`,
    `just bench`, `just ios-check`, `just build-image`, `just kernel-test`,
    `just fuzz <target> <seconds>`, `just apps`, `just mac-shell`, `just
-   device`, `just shell-matrix`.
+   device`, `just shell-matrix`; `kajo run --protocol <socket> --project
+   <dir>`, `kajo mcp --target <socket>`, `kajo eval|compile|browse|debug`.
