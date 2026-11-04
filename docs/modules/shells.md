@@ -679,7 +679,30 @@ call, Strings) are built inside `shellPrimitive`, out of line.
 
 ## Gates
 
-FILLGATES
+Run by one script on ad81366 (the commit before this table), Mac mini M2
+Pro, swift.org Swift 6.4.2 first on PATH, Xcode 27.2 for the apps,
+2026-11-04 05:10 to 06:26; full output in files, the commit each gate ran
+on logged. "Load" is twelve `yes` busy loops.
+
+| gate | result |
+|---|---|
+| `swift test` | pass: 310 tests (KajoVMTests) and 34 in 4 suites (KajoCompilerTests, ShellTests' 8 among them) |
+| `swift test` under load | pass: 310 and 34 |
+| `swift test --sanitize=thread` | pass: 310 and 34, 0 ThreadSanitizer reports |
+| the same under load | pass: 310 and 34, 0 reports |
+| `just ios-check` | pass (exit 0, no diagnostics; now in Swift 6 mode) |
+| `just arc-check` | pass: no retain or release on the checked paths, one jump table |
+| `just golden` | pass: 9 kasm and 3 Smalltalk kernels at their checksums |
+| `just test-release` | pass: 310 and 34 |
+| `just model-check` | pass: 15 tests in 4 suites, no violations |
+| `just soak` | pass: 1000 seeds per configuration, failing [] |
+| `just fuzz kasm 600` | pass: libFuzzer build ok, 2 539 782 runs, no crash |
+| `just fuzz snapshot 600` | pass: libFuzzer build ok, 3 963 627 runs, no crash |
+| `just fuzz syntax 600` | pass: libFuzzer build ok, 2 264 171 runs, no crash |
+| clean `swift build --scratch-path .build/clean-check` | pass: exit 0, 0 errors, 0 warnings |
+| `just apps` (both shells from clean) | pass: macOS exit 0, 0 errors, 0 warnings; iOS (generic device, unsigned) exit 0, 0 errors, 0 warnings |
+| the iPhone build (`scripts/device.sh build`) | **not run: fails before compiling**, "No Accounts" and no profile for `dev.katajamaki.kajo.shell` (What needs the owner) |
+| the kernel tests on the iPhone (`scripts/device.sh tests`) | **not run** (nothing installed); in the macOS shell: 141 of 141 |
 
 ## Commands
 
