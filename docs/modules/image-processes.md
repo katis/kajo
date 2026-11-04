@@ -491,7 +491,37 @@ New from the build:
 
 ## Gates
 
-GATES
+On the final code commit (`5fb848b`; the commit after it adds only this
+table), the whole sequence, on the Mac mini (M2 Pro) with the swift.org
+6.4.2 toolchain, every output in a file, each step logged with the commit
+it ran on:
+
+| gate | result |
+|---|---|
+| `swift test` | 310 + 26 passed, 159 + 17 s |
+| under load (12 busy loops) | 310 + 26 passed, 192 + 20 s |
+| ThreadSanitizer | 310 + 26 passed, 0 reports, 396 + 408 s |
+| ThreadSanitizer under load | 310 + 26 passed, 0 reports, 561 + 477 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release, `interpret` 1056 instructions, one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 310 + 26 passed |
+| `just model-check` | 28 + 5 + 15 passed (relocation, save hold, young collection) |
+| `just soak` | passed: 1000 seeds under every configuration, and in snapshot mode 762 to 985 of 1000 saved per mode, no failing seed |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.54 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 4.07 million runs, no crash |
+| `just fuzz syntax 600` | libFuzzer build ok, 2.16 million runs, no crash |
+| clean build | exit 0, 0 errors, 0 warnings |
+
+(310 is `KajoVMTests`, 26 `KajoCompilerTests`, whose kernel-image suite
+runs the kernel's 130 SUnit tests.) Two earlier full runs each found
+something the gates exist for: on `ab180a6`, `just fuzz syntax` crashed
+the assembler (a send of more than 255 arguments, as old as 8b) and `just
+test-release` failed `backToBackStopsDoNotLetReleasedWorkersRun`'s "stops
+>= 20", both fixed in `1a4bf66`; on `1a4bf66`, `just test-release` failed
+`sharedYoungObjectsAreClaimedOnceByParallelScavengers`' "a scavenge with
+four participants", fixed in `5fb848b` (Changes to earlier modules). Every
+other gate passed on both.
 
 ## Commands
 
