@@ -154,3 +154,35 @@ re-entrancy guard for nested run loops, and the measurement of hop latency
 and stalls on a real main thread. Still waiting for the collector
 (modules 4 to 7): pauses that fit in a frame; today a stop lands on the
 main worker as before (turns report it separately).
+
+## Device (9a) (2026-11-04)
+
+Module 9a built the native shells (docs/modules/shells.md): the main
+thread given to the VM in turns from the real run loop (a wakeup, a native
+event, every display refresh with 4 ms of the frame for the VM), the event
+queue and a Smalltalk event loop on the main thread, view wrappers behind
+a hop primitive (ADR 0010), the stuck report as a shell callback. The
+phone runs await the owner's signing (shells.md, "What needs the owner");
+these are the macOS shell on the Mac mini's display (a 120.00 Hz panel,
+M2 Pro), 10 s windows, three runs, medians with ranges, a probe view moved
+by Smalltalk every frame and module 7's main-thread load (`mainTick:work:`)
+in every frame:
+
+| scenario | frames missed of 1200 | max gap | notes |
+|---|--:|--:|---|
+| idle | 0 | 8.4 ms | |
+| 1000 events/s handled in Smalltalk | 0 | 8.4 ms | latency p50 0.057 ms, p99 3.21 (3.15 to 3.44), max 4.8: from when the event was due to the view call that showed it |
+| the same under the allocation storm, 7 workers, offload | 0 | 8.4 ms | p50 0.043, p99 2.08, max 5.0 |
+| infinite loop on main, normal priority, with 1000 events/s | 0 | 8.4 ms | 2414 preemptions, stuck report at 306 ms (304 to 308), event p99 3.0 ms |
+| infinite loop with the budget off (the control) | 1193 | 9005 ms | |
+| storm, ring, share at 7 workers under every young mode | 0, but the ring under the stop-the-world scavenge: 6 (5 to 7) | 8.4 ms (16.7) | ADR 0008's note |
+
+Against the experiment's table above (an M2 Max): event latency p50 0.06 against 0.63 ms and p99 3.2 against 5,
+the hog's frames 0 against 4 with the same 306 ms report, the storm 0
+against 5 missed frames. The thesis holds on a real run loop on the Mac.
+The p99 of 2 to 3 ms is the same idle, under the storm and with the hog,
+so it does not grow with the VM's work; whether it is the 1 ms event
+timer's lateness or the frame turns it waits behind was not separated. What still waits for the phone: everything above at 120 Hz
+ProMotion on the A15, where a single performance core does the main
+thread's work and the efficiency cores the rest. Not built: the
+re-entrancy guard (the shells run no modal loop).

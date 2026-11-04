@@ -380,3 +380,25 @@ as they are understood.
 - **Young-root scan**: the initial mark without a scavenge: every
   nursery's eden (or current half) and survivor-from bodies are walked and
   their slots greyed, since young objects are not snapshot entries.
+- **Shell** (module 9a): a native application (`apps/KajoShell-macOS`,
+  `apps/KajoShell-iOS`) that owns the run loop, the display link and the
+  views and gives the VM its main thread in turns, through the **host
+  surface** (`ShellVM`, `Sources/KajoVM/Shell/`). The shells share
+  `KajoShellCore`; a platform is a `ShellPlatform`.
+- **Event queue**: the shell's FIFO of native events (kind, the target
+  view's handle, a value, the time the event happened), filled from any
+  thread; one external signal per event wakes the **event loop**, the
+  kernel's one main-affine Process (`UIEventLoop`) that takes events and
+  dispatches them to wrappers.
+- **View wrapper** (ADR 0010): a Smalltalk object (View, Window, Label,
+  Button, TextView, Slider) holding the **handle** of a native view the
+  shell keeps in its table; every view call is primitive 150, a hop
+  primitive, answered by the shell's **view host** on the main thread. A
+  dead wrapper's handle is released through its Ephemeron.
+- **Frame account**: the share of each display frame the shell gives the
+  VM (4 ms); past it a turn runs UI-priority Processes only, for 0.5 ms.
+- **Probe view**: the plain View Smalltalk moves on every frame event, so
+  the display (ProMotion) never idles and a missed frame is visible.
+- **Stuck report**: a main-affine Process runnable for longer than the
+  shell's limit (300 ms), reported once to the shell with its id and
+  selector.

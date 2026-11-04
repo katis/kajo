@@ -310,7 +310,8 @@ final class FlippedView: NSView {
         _ = IOPMAssertionDeclareUserActivity("Kajo shell launch" as CFString, kIOPMUserActiveLocal, &activity)
         // No window restoration: after a crash AppKit would ask, in a modal
         // alert at launch, whether to reopen windows, and a scripted run
-        // would wait for it forever (in memory only; nothing is written).
+        // would wait for it forever (a registered default, in memory; AppKit then
+        // leaves saved state alone and writes new state to a temporary folder).
         UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
         let application = NSApplication.shared
         application.delegate = delegate

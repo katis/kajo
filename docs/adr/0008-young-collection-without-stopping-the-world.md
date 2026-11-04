@@ -301,3 +301,43 @@ on the phone's efficiency cores, energy, and the share case's
 acknowledgement cost on a real UI thread. Accepting them would make this
 stack the design until the shell's measurements say otherwise; keeping them
 proposed until module 9 has run on the device is the cautious reading.
+
+## Device (9a) (2026-11-04)
+
+Module 9a's shells drive module 7's scenarios from a real display link with
+the main thread's work in Smalltalk (docs/modules/shells.md). The phone
+runs await the owner's signing ("What needs the owner"); on the Mac mini's
+120 Hz display (M2 Pro, 7 background workers, the module 7 QoS policy:
+young collector user-initiated, marker utility), 10 s, three runs, medians
+with ranges; "for others" is ADR 0008's attribution (parked in stops,
+acknowledgements of other nurseries' rounds, polls that found none owed,
+waits for a pending stop), per 10 s:
+
+| main thread, ms per 10 s stopped for others | stop-the-world | local | offload |
+|---|--:|--:|--:|
+| storm | 338 (293 to 338)² | 87 (86 to 94) | 92 (89 to 99) |
+| ring | 1196 (1146 to 1212)¹ | 143 (138 to 153) | 126 (123 to 136) |
+| share | 89 (78 to 91)² | 104 (102 to 104) | 104 (103 to 105) |
+| frames missed of 1200 | storm 0, ring 6 (5 to 7)¹, share 0 | 0 | 0 |
+
+¹ at a 1024 MiB heap: at 600 MiB the parallel scavenge traps ("promotion
+found no block: the promotion reserve is exhausted") in every run.
+² re-run 25 minutes after the rest of the matrix (the first pass's lines
+were lost to a filtering mistake in the results file), thermal nominal.
+
+Acknowledgements on the real UI thread: 3 400 (storm) to 4 900 (ring) per
+10 s at a mean of 20 to 25 µs; the longest 0.25 ms. **The share case's
+answer on a real UI thread**: as headless, the one scenario worse than
+stop-the-world (104 against 89 ms per 10 s), all of it acknowledgements;
+no frame is missed under any mode, so on the Mac it costs CPU on the main
+thread, not frames. The collector thread (offload) did almost nothing in
+these scenarios (the main worker's nursery is the only offloaded one and
+the frame load allocates little): under storm with events it ran 78
+percent of its CPU on performance cores. The marker ran 61 to 84 percent
+on performance cores at utility QoS with every performance core busy.
+The headless figures of module 7 (8 workers on the M2 Max: storm 708, 134,
+129; ring 2 273, 206, 185; share 139, 195, 203) and the iPhone 17 Pro's
+(device-measurement: storm stw 108, local 25, offload 29 with 5 workers)
+bracket these. Still open for the acceptance question above: the same
+table on the iPhone 13 Pro, where four of six cores are efficiency cores,
+with thermal state over the matrix and energy per scenario.

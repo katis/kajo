@@ -213,3 +213,30 @@ are revised to:
 - Revisit C only if that measurement shows table walks in the slow regime
   dominating real UI work, or if footprint (1.33 to 1.39x) becomes the limit
   on device.
+
+## Device (9a) (2026-11-04)
+
+Module 9a built the native shells (docs/modules/shells.md) and was to
+re-measure the kernels on an iPhone 13 Pro (A15: 2 performance, 4
+efficiency cores) inside the iOS shell, at 1, 2 and 6 workers, three runs.
+**The phone runs did not happen**: the iOS shell cannot be signed on the
+Mac mini until the owner signs Xcode in to team BDN6M642M2 (shells.md,
+"What needs the owner"); `scripts/shell-matrix.sh device` runs them
+unchanged once it can. The same kernels ran in the macOS shell (Mac mini,
+M2 Pro, release, through the app's own `Headless`), every checksum the
+published one at one worker and identical across runs at two and six:
+
+| kernel (ms, median of 3) | 1 worker | 2 | 6 |
+|---|--:|--:|--:|
+| walk | 3620 | 1766 | 373 |
+| sends | 2584 | 1312 | 444 |
+| ivars | 1983 | 1002 | 339 |
+| alloc | 2956 | 1527 | 550 |
+| fib | 1697 | 860 | 292 |
+| Smalltalk sends | 2307 | 1160 | 388 |
+
+These are the M2 Pro's numbers in an app, within 1.5 percent of `kajo run`
+on the same machine (module 8c's table); they say the shell adds nothing
+to a kernel, not what the table costs on the A15. The decision above
+(accepted, variant B) stands on the iPhone 17 Pro measurements; the 13 Pro's
+two P cores and older cache hierarchy are the open check.
