@@ -138,11 +138,14 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
     }
 
     @Test func theFilePrimitivesStayInTheirDirectory() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-live-\(getpid())")
-        try? FileManager.default.removeItem(at: dir)
+        let top = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-live-\(getpid())")
+        try? FileManager.default.removeItem(at: top)
+        defer { try? FileManager.default.removeItem(at: top) }
+        let dir = top.appendingPathComponent("root"), outside = top.appendingPathComponent("outside")
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: dir) }
-        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("out"), withDestinationURL: URL(fileURLWithPath: "/tmp"))
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        // a link inside the directory that leads out of it
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("out"), withDestinationURL: outside)
         let files = miniKernel + [tonel("F", "Object", """
         F class >> write: p contents: s [
             <primitive: 148>
@@ -177,7 +180,7 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         defer { image.destroy() }
         #expect(try answerOf(image, "F", "run", sources: dir.path) == 1)
         #expect(try String(contentsOf: dir.appendingPathComponent("sub/a.txt"), encoding: .utf8) == "again")
-        #expect(!FileManager.default.fileExists(atPath: "/tmp/kajo-escape"))
+        #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("kajo-escape").path))
         #expect(try answerOf(image, "F", "withoutDirectory") == 1)
         // a release image refuses them whatever the directory
         image.seal()
