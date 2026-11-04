@@ -1,5 +1,6 @@
 import Dispatch
 import Foundation
+import KajoDev
 import KajoVM
 import Synchronization
 
@@ -31,7 +32,25 @@ final class RuntimeLink: @unchecked Sendable {
     weak var runtime: ShellRuntime?
     let wakePending = Atomic<Bool>(false)
     let events: @Sendable ([UInt8]) -> Void
+    /// Module 9b: the development protocol's transport, when it serves.
+    let server = Mutex<ProtocolServer?>(nil)
     init(events: @escaping @Sendable ([UInt8]) -> Void) { self.events = events }
+
+    /// Every kernel line: the mode's sink, the transport (replies to their
+    /// connection, events to every session), and a stopped Process shown
+    /// in the window's status line so it cannot hide.
+    func emit(_ e: [UInt8]) {
+        events(e)
+        if let s = server.withLock({ $0 }) {
+            s.deliver(e)
+            let stopped = Array("\"kind\":\"process.stopped\"".utf8)
+            if e.count > 40, e[0..<min(e.count, 60)].firstRange(of: stopped) != nil,
+               case .success(let v) = parseJSON(e) {
+                let line = "Process \(v["process"].map { String(decoding: writeJSON($0), as: UTF8.self) } ?? "?") stopped (\(v["reason"]?.string ?? "?")): \(v["error"]?.string ?? "")"
+                DispatchQueue.main.async { MainActor.assumeIsolated { self.runtime?.platform.showStatus(line) } }
+            }
+        }
+    }
 }
 
 /// A ShellVM driven by the main run loop: turns when a main-affine Process
@@ -85,11 +104,50 @@ final class RuntimeLink: @unchecked Sendable {
         c.views = { call in MainActor.assumeIsolated { link.runtime?.view(call) } }
         c.release = { h in DispatchQueue.main.async { MainActor.assumeIsolated { link.runtime?.platform.releaseView(h) } } }
         c.stuck = { r in MainActor.assumeIsolated { link.runtime?.onStuck?(r) } }
-        c.events = { e in link.events(e) }
+        c.events = { e in link.emit(e) }
         return c
     }
 
     public func start() { vm.start() }
+
+    // MARK: module 9b: the development protocol
+
+    /// Serve the development protocol on a Unix socket at `path` (the
+    /// shell shows the path and the token): the transport, the inbox, the
+    /// kernel's protocol Process (`DevProtocol start`), which from now on
+    /// also stops a Process at an unhandled error. Nil in a release image.
+    public func serveProtocol(socket path: String) throws -> ProtocolServer? {
+        if vm.isReleaseImage { return nil }
+        let shell = vm
+        let server = try ProtocolServer(path: path) { conn, json in shell.postRequest(connection: conn, json: json) }
+        link.server.withLock { $0 = server }
+        vm.openProtocol()
+        guard let p = vm.spawn("start", receiver: "DevProtocol") else {
+            server.stop()
+            return nil
+        }
+        let end = ShellVM.now() + 10_000_000_000
+        while vm.state(of: p) != .terminated && ShellVM.now() < end { _ = vm.runTurn(budgetNs: 2_000_000) }
+        let started = vm.result(of: p) == .bool(true)
+        vm.release(p)
+        guard started else {
+            server.stop()
+            link.server.withLock { $0 = nil }
+            return nil
+        }
+        server.start()
+        return server
+    }
+
+    /// Stop serving (the socket file goes).
+    public func stopProtocol() {
+        let s = link.server.withLock { s in
+            let old = s
+            s = nil
+            return old
+        }
+        s?.stop()
+    }
 
     func view(_ call: ViewCall) -> ShellValue? {
         onView?(call)

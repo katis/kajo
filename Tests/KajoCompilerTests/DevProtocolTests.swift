@@ -418,3 +418,68 @@ final class RawConnection {
         }
     }
 }
+
+/// Module 9b's measurements (`KAJO_MEASURE=1`, release build): the round
+/// trips of protocol.describe, a compile and a step, and what stepping over
+/// a send costs the stepped Process. Printed, not asserted on (AGENTS.md:
+/// no wall-clock assertion).
+@Suite(.serialized) struct ProtocolMeasureTests {
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["KAJO_MEASURE"] != nil))
+    func protocolLatencies() throws {
+        let t = try RunningTarget()
+        defer { t.close() }
+        let s = try t.session()
+        func p(_ xs: [Double], _ q: Double) -> Double { let v = xs.sorted(); return v[min(v.count - 1, Int(Double(v.count) * q))] }
+        func timed(_ n: Int, _ body: () throws -> Void) rethrows -> [Double] {
+            var out: [Double] = []
+            for _ in 0..<n {
+                let t0 = ShellVM.now()
+                try body()
+                out.append(Double(ShellVM.now() - t0) / 1e6)
+            }
+            return out
+        }
+        _ = try timed(20) { _ = try s.request("protocol.describe") }
+        let describe = try timed(200) { _ = try s.request("protocol.describe") }
+        var k = 0
+        let compile = try timed(100) {
+            k += 1
+            _ = try s.request("method.compile", [("className", .string("SampleCounter")), ("source", .string("m\(k % 10)\n\t^ \(k) + count"))])
+        }
+        let evaluate = try timed(200) { _ = try s.eval("3 + 4") }
+        let (pid, _) = try s.stopIn("SampleDebug result: (SampleDebug new stepped: 1)")
+        _ = try s.request("process.step", [("process", pid), ("mode", .string("over")), ("frame", .int(2))])
+        _ = try s.stopped(since: 0, process: pid)
+        var steps: [Double] = []
+        for _ in 0..<40 {
+            let mark = s.eventMark
+            let t0 = ShellVM.now()
+            _ = try s.request("process.step", [("process", pid), ("mode", .string("into")), ("frame", .int(1))])
+            let e = try s.stopped(since: mark, process: pid)
+            steps.append(Double(ShellVM.now() - t0) / 1e6)
+            if e["frames"]?.array?.first?["method"]?.string?.contains("DoIt") == true { break }
+        }
+        _ = try s.request("process.terminate", [("process", pid)])
+        // Stepping over a send of n sends against running it unstepped.
+        let n = 200_000
+        let plain = try timed(3) { _ = try s.eval("SampleDebug new spin: \(n)") }
+        var over: [Double] = []
+        for _ in 0..<3 {
+            let (q, _) = try s.stopIn("SampleDebug new spun: \(n)")
+            let frames = try s.request("process.frames", [("process", q)]).array ?? []
+            let f = (frames.firstIndex { $0["method"] == .string("SampleDebug>>spun:") } ?? 1) + 1
+            let mark = s.eventMark
+            let t0 = ShellVM.now()
+            _ = try s.request("process.step", [("process", q), ("mode", .string("over")), ("frame", .int(Int64(f)))])
+            _ = try s.stopped(since: mark, process: q)
+            let mark2 = s.eventMark
+            _ = try s.request("process.step", [("process", q), ("mode", .string("over")), ("frame", .int(1))])
+            _ = try s.stopped(since: mark2, process: q)
+            over.append(Double(ShellVM.now() - t0) / 1e6)
+            _ = try s.request("process.terminate", [("process", q)])
+        }
+        let r = "describe_p50_ms=\(p(describe, 0.5)) describe_p99_ms=\(p(describe, 0.99)) compile_p50_ms=\(p(compile, 0.5)) compile_p99_ms=\(p(compile, 0.99)) evaluate_p50_ms=\(p(evaluate, 0.5)) evaluate_p99_ms=\(p(evaluate, 0.99)) step_n=\(steps.count) step_p50_ms=\(p(steps, 0.5)) step_p99_ms=\(p(steps, 0.99)) spin_sends=\(2 * n) plain_ms=\(plain.sorted()[1]) step_over_ms=\(over.sorted()[1])"
+        print("PROTOCOL-MEASURE " + r)
+        if let f = ProcessInfo.processInfo.environment["KAJO_MEASURE_OUT"] { try? (r + "\n").write(toFile: f, atomically: true, encoding: .utf8) }
+    }
+}

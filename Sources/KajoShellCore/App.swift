@@ -35,6 +35,13 @@ import KajoVM
             rt.vm.release(p)
             pending.target = { [weak self] line in self?.post(line) }
             pending.flush()
+            // Module 9b: `protocol=<socket>` serves the development protocol;
+            // the status line shows where and the token.
+            if let path = options["protocol"], let server = try rt.serveProtocol(socket: path) {
+                platform.showStatus("demo: protocol \(server.path) token \(server.token)")
+                Output.shared.emit("protocol=\(server.path)")
+                return
+            }
             platform.showStatus("demo")
             Output.shared.emit(resultLine("demo", options, "opened=1 transcript_view=\(transcriptView)"))
         } catch {

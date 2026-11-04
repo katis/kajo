@@ -29,6 +29,20 @@ SampleDebug >> second: n [
 ]
 
 { #category : #samples }
+SampleDebug >> spin: n [
+	| s |
+	s := 0.
+	1 to: n do: [:i | s := s + (self helper: i)].
+	^ s
+]
+
+{ #category : #samples }
+SampleDebug >> spun: n [
+	self notYetDefined.
+	^ self spin: n
+]
+
+{ #category : #samples }
 SampleDebug >> stepped: n [
 	| a |
 	self notYetDefined.

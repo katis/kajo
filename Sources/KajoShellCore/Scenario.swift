@@ -1,6 +1,7 @@
 import Darwin
 import Dispatch
 import Foundation
+import KajoDev
 import KajoVM
 
 /// `mode=scenario scenario=storm|ring|share|idle gc=cm|stw young=stw|local|offload
@@ -11,6 +12,13 @@ import KajoVM
 /// main-thread load (`mainTick:work:`), synthetic events set a label in
 /// Smalltalk and their latency is taken at the view call, a hog loops on
 /// main. One result line at the end, then the app exits.
+///
+/// Module 9b: `debugstop=1` (with `protocol=<socket>`, default in the
+/// temporary directory) serves the development protocol, and a client on a
+/// thread of its own stops the event loop's Process (main-affine) for the
+/// debugger for the whole window, asking the target to evaluate `3 + 4`
+/// every 50 ms meanwhile; then lets it go on and checks it handles the
+/// events that queued. The frames are the window's, the event loop stopped.
 @MainActor public final class ScenarioMode {
     let options: LaunchOptions
     let platform: ShellPlatform
@@ -23,6 +31,9 @@ import KajoVM
     let eventRate: Int
     let hog: Bool
     let budgetOff: Bool
+    let debugStop: Bool
+    var protocolServer: ProtocolServer?
+    let debugResult = DebugStopBox()
 
     // frames (seconds, uptime clock)
     var frameTimes: [Double] = []
@@ -73,6 +84,7 @@ import KajoVM
         eventRate = options.int("events", 0)
         hog = options.int("hog", 0) == 1
         budgetOff = options.string("budget", "on") == "off"
+        debugStop = options.int("debugstop", 0) == 1
     }
 
     /// After the first frame (iOS kills an app that blocks its main thread
@@ -95,6 +107,13 @@ import KajoVM
             finish(2)
         }
         runtime.start()
+        if debugStop {
+            let path = options.string("protocol", FileManager.default.temporaryDirectory.appendingPathComponent("kajo-shell-\(getpid()).sock").path)
+            do { protocolServer = try runtime.serveProtocol(socket: path) } catch {
+                Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=protocol_\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
+                finish(2)
+            }
+        }
         runtime.onTurn = { [unowned self] t, k in self.noteTurn(t, k) }
         runtime.onView = { [unowned self] c in self.noteView(c) }
         runtime.onStuck = { [unowned self] r in self.noteStuck(r) }
@@ -124,8 +143,8 @@ import KajoVM
         platform.startDisplayLink { [unowned self] ts, target in self.tick(ts, target) }
         if eventRate > 0 { startEvents() }
         DispatchQueue.main.asyncAfter(deadline: .now() + warmup) { MainActor.assumeIsolated { self.begin() } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + warmup + seconds + 0.05) { MainActor.assumeIsolated { self.end() } }
-        platform.showStatus("scenario \(name) \(options.summary)")
+        DispatchQueue.main.asyncAfter(deadline: .now() + warmup + seconds + (debugStop ? 2.5 : 0.05)) { MainActor.assumeIsolated { self.end() } }
+        platform.showStatus("scenario \(name) \(options.summary)" + (protocolServer.map { " protocol \($0.path) token \($0.token)" } ?? ""))
     }
 
     nonisolated func transcriptSink() -> @Sendable ([UInt8]) -> Void {
@@ -220,6 +239,9 @@ import KajoVM
             hogStartNs = ShellVM.now()
             hogProcess = vm.spawn("hog", receiver: "ShellBench", main: true, priority: 1)
         }
+        if let server = protocolServer {
+            startDebugClient(path: server.path, token: server.token, until: UInt64(measureEnd * 1e9), result: debugResult)
+        }
     }
 
     func end() {
@@ -264,6 +286,13 @@ import KajoVM
         if hog {
             line += " stuck_ms=\(stuckMs.map(f1) ?? "-") stuck_method=\(stuckMethod)"
         }
+        if debugStop {
+            let r = debugResult.withLock { $0 }
+            line += " debug_stopped=\(r.stopped ? 1 : 0) debug_reason=\(r.reason) debug_process=\(r.process) debug_stopped_s=\(f3(r.stoppedSeconds))"
+            line += " protocol_replies=\(r.rtts.count) protocol_errors=\(r.errors) protocol_rtt_p50_ms=\(f3(percentile(r.rtts, 0.5))) protocol_rtt_p99_ms=\(f3(percentile(r.rtts, 0.99))) protocol_rtt_max_ms=\(f3(r.rtts.max() ?? 0))"
+            line += " debug_resumed=\(r.resumed ? 1 : 0) handled_while_stopped=\(r.handledWhileStopped) handled_after_resume=\(r.handledAfterResume) debug_error=\(r.error.isEmpty ? "-" : r.error.replacingOccurrences(of: " ", with: "_"))"
+            runtime.stopProtocol()
+        }
         line += " preemptions=\(d("preemptions")) hops=\(d("hops")) view_calls=\(d("viewCalls")) shell_events=\(d("shellEvents")) stuck_reports=\(d("stuckReports"))"
         line += " stops=\(vm.pauses.count - pauseBase)"
         if let e0 = energyBase, let e1 = Telemetry.energyNj() {
@@ -296,5 +325,83 @@ import KajoVM
         let end = ShellVM.now() + 2_000_000_000
         while vm.state(of: p) != .terminated && ShellVM.now() < end { usleep(1000) }
         return vm.result(of: p).map { "\($0)" } ?? "-"
+    }
+}
+
+final class DebugStopBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = DebugStopResult()
+    func withLock<T>(_ f: (inout DebugStopResult) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return f(&value)
+    }
+}
+
+/// What the debug-stop client saw (module 9b).
+struct DebugStopResult: Sendable {
+    var stopped = false
+    var reason = "-"
+    var process: Int64 = 0
+    var stoppedSeconds = 0.0
+    var rtts: [Double] = []
+    var errors = 0
+    var resumed = false
+    var handledWhileStopped: Int64 = -1
+    var handledAfterResume: Int64 = -1
+    var error = ""
+}
+
+/// The client of `debugstop=1`, on a thread of its own: stop the event
+/// loop's Process, keep asking the target until `until` (uptime ns), let
+/// the Process go on, see it handle the events that queued.
+nonisolated func startDebugClient(path: String, token: String, until: UInt64, result: DebugStopBox) {
+    onBackgroundThread {
+        do {
+            let c = try ProtocolClient(path: path)
+            defer { c.close() }
+            try c.open(token: token, client: "agent:debugstop", timeout: 10)
+            func eval(_ s: String) throws -> Int64 {
+                Int64(try c.request("evaluate", [("source", .string(s))], timeout: 10)["value"]?.string ?? "") ?? -1
+            }
+            let pid = try eval("UIEventLoop process id")
+            let mark = c.eventMark
+            _ = try c.request("process.suspend", [("process", .int(pid))], timeout: 10)
+            guard let e = c.waitForEvent(since: mark, timeout: 10, { $0["kind"]?.string == "process.stopped" && $0["process"] == .int(pid) }) else {
+                result.withLock { $0.error = "the event loop did not stop" }
+                return
+            }
+            let stoppedAt = ShellVM.now()
+            let handled0 = try eval("UIEventLoop handledCount")
+            result.withLock {
+                $0.stopped = true
+                $0.reason = e["reason"]?.string ?? "-"
+                $0.process = pid
+            }
+            while ShellVM.now() < until {
+                let t0 = ShellVM.now()
+                do {
+                    _ = try c.request("evaluate", [("source", .string("3 + 4"))], timeout: 10)
+                    let rtt = Double(ShellVM.now() - t0) / 1e6
+                    result.withLock { $0.rtts.append(rtt) }
+                } catch {
+                    result.withLock { $0.errors += 1 }
+                }
+                usleep(50_000)
+            }
+            let handled1 = try eval("UIEventLoop handledCount")
+            _ = try c.request("process.proceed", [("process", .int(pid))], timeout: 10)
+            let stoppedS = Double(ShellVM.now() - stoppedAt) / 1e9
+            usleep(500_000)
+            let handled2 = try eval("UIEventLoop handledCount")
+            result.withLock {
+                $0.stoppedSeconds = stoppedS
+                $0.handledWhileStopped = handled1 - handled0
+                $0.handledAfterResume = handled2 - handled1
+                $0.resumed = handled2 > handled1
+            }
+        } catch {
+            result.withLock { $0.error = "\(error)" }
+        }
     }
 }

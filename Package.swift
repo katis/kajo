@@ -34,7 +34,7 @@ let package = Package(
         // UIKit: the platform's views and display link are behind a protocol.
         .target(
             name: "KajoShellCore",
-            dependencies: ["KajoVM", "KajoCompiler"],
+            dependencies: ["KajoVM", "KajoCompiler", "KajoDev"],
             swiftSettings: [.strictMemorySafety()]
         ),
         // Module 9b: the development protocol outside the VM: its JSON and
