@@ -6,11 +6,11 @@ Class {
 }
 
 { #category : #accessing }
-IdentitySet >> hashFor: anObject [
-	^ anObject identityHash
+IdentitySet >> equal: a to: b [
+	^ a == b
 ]
 
 { #category : #accessing }
-IdentitySet >> equal: a to: b [
-	^ a == b
+IdentitySet >> hashFor: anObject [
+	^ anObject identityHash
 ]

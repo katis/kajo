@@ -13,6 +13,21 @@ Class {
 }
 
 { #category : #accessing }
+MethodNode >> arguments [
+	^ arguments
+]
+
+{ #category : #accessing }
+MethodNode >> pragmas [
+	^ pragmas
+]
+
+{ #category : #accessing }
+MethodNode >> selector [
+	^ selector
+]
+
+{ #category : #accessing }
 MethodNode >> setSelector: s arguments: a temporaries: t pragmas: p statements: st [
 	selector := s.
 	arguments := a.
@@ -22,26 +37,11 @@ MethodNode >> setSelector: s arguments: a temporaries: t pragmas: p statements: 
 ]
 
 { #category : #accessing }
-MethodNode >> selector [
-	^ selector
-]
-
-{ #category : #accessing }
-MethodNode >> arguments [
-	^ arguments
+MethodNode >> statements [
+	^ statements
 ]
 
 { #category : #accessing }
 MethodNode >> temporaries [
 	^ temporaries
-]
-
-{ #category : #accessing }
-MethodNode >> pragmas [
-	^ pragmas
-]
-
-{ #category : #accessing }
-MethodNode >> statements [
-	^ statements
 ]

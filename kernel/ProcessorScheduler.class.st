@@ -12,9 +12,29 @@ ProcessorScheduler class >> activeProcess [
 ]
 
 { #category : #accessing }
-ProcessorScheduler class >> yield [
-	<primitive: 21>
+ProcessorScheduler class >> detachFromMain [
+	<primitive: 32>
 	^ nil
+]
+
+{ #category : #accessing }
+ProcessorScheduler class >> terminateActive [
+	self activeProcess terminate
+]
+
+{ #category : #accessing }
+ProcessorScheduler class >> userBackgroundPriority [
+	^ 0
+]
+
+{ #category : #accessing }
+ProcessorScheduler class >> userInterruptPriority [
+	^ 2
+]
+
+{ #category : #accessing }
+ProcessorScheduler class >> userSchedulingPriority [
+	^ 1
 ]
 
 { #category : #accessing }
@@ -24,27 +44,7 @@ ProcessorScheduler class >> workerId [
 ]
 
 { #category : #accessing }
-ProcessorScheduler class >> terminateActive [
-	self activeProcess terminate
-]
-
-{ #category : #accessing }
-ProcessorScheduler class >> detachFromMain [
-	<primitive: 32>
+ProcessorScheduler class >> yield [
+	<primitive: 21>
 	^ nil
-]
-
-{ #category : #accessing }
-ProcessorScheduler class >> userBackgroundPriority [
-	^ 0
-]
-
-{ #category : #accessing }
-ProcessorScheduler class >> userSchedulingPriority [
-	^ 1
-]
-
-{ #category : #accessing }
-ProcessorScheduler class >> userInterruptPriority [
-	^ 2
 ]

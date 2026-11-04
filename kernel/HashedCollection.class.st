@@ -10,37 +10,8 @@ Class {
 }
 
 { #category : #accessing }
-HashedCollection class >> new [
-	^ self new: 8
-]
-
-{ #category : #accessing }
-HashedCollection class >> new: n [
-	^ self basicNew setCapacity: n
-]
-
-{ #category : #accessing }
-HashedCollection >> setCapacity: n [
-	| c |
-	c := 8.
-	[c * 3 < (n * 4)] whileTrue: [c := c * 2].
-	array := Array new: c.
-	tally := 0
-]
-
-{ #category : #accessing }
-HashedCollection >> size [
-	^ tally
-]
-
-{ #category : #accessing }
 HashedCollection >> capacity [
 	^ array size
-]
-
-{ #category : #accessing }
-HashedCollection >> hashFor: anObject [
-	^ anObject hash
 ]
 
 { #category : #accessing }
@@ -49,8 +20,13 @@ HashedCollection >> equal: a to: b [
 ]
 
 { #category : #accessing }
-HashedCollection >> keyOf: entry [
-	^ entry
+HashedCollection >> growIfNeeded [
+	tally * 4 >= (array size * 3) ifTrue: [self rehashTo: array size * 2]
+]
+
+{ #category : #accessing }
+HashedCollection >> hashFor: anObject [
+	^ anObject hash
 ]
 
 { #category : #accessing }
@@ -65,8 +41,13 @@ HashedCollection >> indexFor: key [
 ]
 
 { #category : #accessing }
-HashedCollection >> growIfNeeded [
-	tally * 4 >= (array size * 3) ifTrue: [self rehashTo: array size * 2]
+HashedCollection >> keyOf: entry [
+	^ entry
+]
+
+{ #category : #accessing }
+HashedCollection >> postCopy [
+	array := array copy
 ]
 
 { #category : #accessing }
@@ -75,6 +56,11 @@ HashedCollection >> rehashTo: newSize [
 	old := array.
 	array := Array new: newSize.
 	old do: [:e | e == nil ifFalse: [array at: (self indexFor: (self keyOf: e)) put: e]]
+]
+
+{ #category : #accessing }
+HashedCollection >> removeAll [
+	self setCapacity: 8
 ]
 
 { #category : #accessing }
@@ -92,11 +78,25 @@ HashedCollection >> removeAt: index [
 ]
 
 { #category : #accessing }
-HashedCollection >> postCopy [
-	array := array copy
+HashedCollection >> setCapacity: n [
+	| c |
+	c := 8.
+	[c * 3 < (n * 4)] whileTrue: [c := c * 2].
+	array := Array new: c.
+	tally := 0
 ]
 
 { #category : #accessing }
-HashedCollection >> removeAll [
-	self setCapacity: 8
+HashedCollection >> size [
+	^ tally
+]
+
+{ #category : #accessing }
+HashedCollection class >> new [
+	^ self new: 8
+]
+
+{ #category : #accessing }
+HashedCollection class >> new: n [
+	^ self basicNew setCapacity: n
 ]

@@ -10,29 +10,13 @@ Class {
 }
 
 { #category : #accessing }
-TestSuite class >> named: aString [
-	^ self basicNew setName: aString
-]
-
-{ #category : #accessing }
-TestSuite >> setName: aString [
-	name := aString.
-	tests := OrderedCollection new
+TestSuite >> addTest: aTest [
+	tests add: aTest
 ]
 
 { #category : #accessing }
 TestSuite >> name [
 	^ name
-]
-
-{ #category : #accessing }
-TestSuite >> tests [
-	^ tests
-]
-
-{ #category : #accessing }
-TestSuite >> addTest: aTest [
-	tests add: aTest
 ]
 
 { #category : #accessing }
@@ -46,4 +30,20 @@ TestSuite >> run [
 { #category : #accessing }
 TestSuite >> run: aResult [
 	tests do: [:t | aResult runCase: t]
+]
+
+{ #category : #accessing }
+TestSuite >> setName: aString [
+	name := aString.
+	tests := OrderedCollection new
+]
+
+{ #category : #accessing }
+TestSuite >> tests [
+	^ tests
+]
+
+{ #category : #accessing }
+TestSuite class >> named: aString [
+	^ self basicNew setName: aString
 ]

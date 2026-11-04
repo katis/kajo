@@ -6,15 +6,98 @@ Class {
 }
 
 { #category : #running }
+LiveClassTest >> defineSample [
+	^ Object subclass: #LiveClassSample instanceVariableNames: 'a b' classVariableNames: 'Count' category: 'Kernel-Tests-Live'
+]
+
+{ #category : #running }
 LiveClassTest >> tearDown [
 	Smalltalk isReleaseImage ifTrue: [^ self].
 	#(#LiveClassSampleSub #LiveClassSample #LiveClassSampleB) do: [:n |
 		(Smalltalk at: n ifAbsent: [nil]) ifNotNil: [:c | Smalltalk removeClass: c]]
 ]
 
-{ #category : #running }
-LiveClassTest >> defineSample [
-	^ Object subclass: #LiveClassSample instanceVariableNames: 'a b' classVariableNames: 'Count' category: 'Kernel-Tests-Live'
+{ #category : #tests }
+LiveClassTest >> testARemovalThatBreaksAMethodChangesNothing [
+	| c x |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	c := self defineSample.
+	c compile: 'a ^ a'. c compile: 'a: v a := v'. c compile: 'twiceA ^ a * 2'.
+	x := c new a: 4; yourself.
+	[c removeInstVarName: 'a'. self assert: false]
+		on: ClassDefinitionError do: [:e |
+			self assert: (e messageText includesSubstring: 'twiceA').
+			self assert: (e messageText includesSubstring: 'LiveClassSample>>a:')].
+	self assert: c instVarNames = #(#a #b).
+	self assert: x twiceA = 8.
+	c removeSelector: #twiceA; removeSelector: #a; removeSelector: #a:.
+	c removeInstVarName: 'a'.
+	self assert: c instVarNames = #(#b).
+	self assert: x basicSize = 0 & (c instSize = 1)
+]
+
+{ #category : #tests }
+LiveClassTest >> testARunningMethodRefusesTheReshape [
+	| c go started p result |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	c := self defineSample.
+	c compile: 'a: v a := v'.
+	c compile: 'waitOn: s then: t t signal. s wait. ^ a'.
+	go := Semaphore new.
+	started := Semaphore new.
+	p := [result := (c new a: 3; yourself) waitOn: go then: started] fork.
+	started wait.
+	[c addInstVarName: 'z'. self assert: false]
+		on: ClassDefinitionError do: [:e |
+			self assert: (e messageText includesSubstring: 'runs').
+			self assert: (e messageText includesSubstring: 'waitOn:then:')].
+	self assert: c instVarNames = #(#a #b).
+	go signal.
+	[result isNil] whileTrue: [ProcessorScheduler yield].
+	self assert: result = 3.
+	c addInstVarName: 'z'.
+	self assert: c instVarNames = #(#a #b #z)
+]
+
+{ #category : #tests }
+LiveClassTest >> testClassSideInstanceVariables [
+	| c |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	c := self defineSample.
+	c class instanceVariableNames: 'made'.
+	c class compile: 'made ^ made ifNil: [0]'.
+	c class compile: 'note made := self made + 1'.
+	c note; note.
+	self assert: c made = 2.
+	c class instanceVariableNames: 'first made'.
+	self assert: c made = 2.
+	self assert: c class instVarNames = #(#first #made).
+	self assert: (Smalltalk instanceVariableNamesOf: c class) = #(#first #made)
+]
+
+{ #category : #tests }
+LiveClassTest >> testClassVariablesComeAndGoUndeclared [
+	| c b |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	c := self defineSample.
+	c addClassVarNamed: 'Total'.
+	self assert: c classVarNames = #(#Count #Total).
+	c compile: 'total ^ Total'.
+	c compile: 'total: v Total := v'.
+	c new total: 5.
+	self assert: c new total = 5.
+	b := c bindingOf: 'Total'.
+	c removeClassVarNamed: 'Total'.
+	self assert: c classVarNames = #(#Count).
+	self assert: b isUndeclared.
+	self assert: c new total isNil.
+	self should: [c new total: 6] raise: Error.
+	self should: [c compile: 'other ^ Total'] raise: CompileError.
+	c addClassVarNamed: 'Total'.
+	self assert: (c bindingOf: 'Total') == b.
+	self deny: b isUndeclared.
+	c new total: 7.
+	self assert: c new total = 7
 ]
 
 { #category : #tests }
@@ -82,6 +165,27 @@ LiveClassTest >> testDefinitionsTheVMRefuses [
 ]
 
 { #category : #tests }
+LiveClassTest >> testOldClosuresFollowTheirMethod [
+	| c x blk orphan |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	c := self defineSample.
+	c compile: 'a: v a := v'.
+	c compile: 'reader ^ [a]'.
+	c compile: 'orphan ^ [a]'.
+	x := c new a: 9; yourself.
+	blk := x reader.
+	orphan := x orphan.
+	c removeSelector: #orphan.
+	c instanceVariableNames: 'z a'.
+	"the block of the replaced method reads the new slot of a"
+	self assert: blk value = 9.
+	"the block of the removed method was compiled for the old slots: it says so instead of reading them"
+	self should: [orphan value] raise: Error.
+	c instanceVariableNames: 'a'.
+	self assert: blk value = 9
+]
+
+{ #category : #tests }
 LiveClassTest >> testReshapeKeepsValuesByNameAndRecompiles [
 	| c sub x y |
 	Smalltalk isReleaseImage ifTrue: [^ self].
@@ -109,110 +213,6 @@ LiveClassTest >> testReshapeKeepsValuesByNameAndRecompiles [
 	self assert: x w isNil.
 	"new instances have the new shape"
 	self assert: (c new a: 5 b: 6; yourself) sum = 11
-]
-
-{ #category : #tests }
-LiveClassTest >> testARemovalThatBreaksAMethodChangesNothing [
-	| c x |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	c := self defineSample.
-	c compile: 'a ^ a'. c compile: 'a: v a := v'. c compile: 'twiceA ^ a * 2'.
-	x := c new a: 4; yourself.
-	[c removeInstVarName: 'a'. self assert: false]
-		on: ClassDefinitionError do: [:e |
-			self assert: (e messageText includesSubstring: 'twiceA').
-			self assert: (e messageText includesSubstring: 'LiveClassSample>>a:')].
-	self assert: c instVarNames = #(#a #b).
-	self assert: x twiceA = 8.
-	c removeSelector: #twiceA; removeSelector: #a; removeSelector: #a:.
-	c removeInstVarName: 'a'.
-	self assert: c instVarNames = #(#b).
-	self assert: x basicSize = 0 & (c instSize = 1)
-]
-
-{ #category : #tests }
-LiveClassTest >> testClassSideInstanceVariables [
-	| c |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	c := self defineSample.
-	c class instanceVariableNames: 'made'.
-	c class compile: 'made ^ made ifNil: [0]'.
-	c class compile: 'note made := self made + 1'.
-	c note; note.
-	self assert: c made = 2.
-	c class instanceVariableNames: 'first made'.
-	self assert: c made = 2.
-	self assert: c class instVarNames = #(#first #made).
-	self assert: (Smalltalk instanceVariableNamesOf: c class) = #(#first #made)
-]
-
-{ #category : #tests }
-LiveClassTest >> testClassVariablesComeAndGoUndeclared [
-	| c b |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	c := self defineSample.
-	c addClassVarNamed: 'Total'.
-	self assert: c classVarNames = #(#Count #Total).
-	c compile: 'total ^ Total'.
-	c compile: 'total: v Total := v'.
-	c new total: 5.
-	self assert: c new total = 5.
-	b := c bindingOf: 'Total'.
-	c removeClassVarNamed: 'Total'.
-	self assert: c classVarNames = #(#Count).
-	self assert: b isUndeclared.
-	self assert: c new total isNil.
-	self should: [c new total: 6] raise: Error.
-	self should: [c compile: 'other ^ Total'] raise: CompileError.
-	c addClassVarNamed: 'Total'.
-	self assert: (c bindingOf: 'Total') == b.
-	self deny: b isUndeclared.
-	c new total: 7.
-	self assert: c new total = 7
-]
-
-{ #category : #tests }
-LiveClassTest >> testARunningMethodRefusesTheReshape [
-	| c go started p result |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	c := self defineSample.
-	c compile: 'a: v a := v'.
-	c compile: 'waitOn: s then: t t signal. s wait. ^ a'.
-	go := Semaphore new.
-	started := Semaphore new.
-	p := [result := (c new a: 3; yourself) waitOn: go then: started] fork.
-	started wait.
-	[c addInstVarName: 'z'. self assert: false]
-		on: ClassDefinitionError do: [:e |
-			self assert: (e messageText includesSubstring: 'runs').
-			self assert: (e messageText includesSubstring: 'waitOn:then:')].
-	self assert: c instVarNames = #(#a #b).
-	go signal.
-	[result isNil] whileTrue: [ProcessorScheduler yield].
-	self assert: result = 3.
-	c addInstVarName: 'z'.
-	self assert: c instVarNames = #(#a #b #z)
-]
-
-{ #category : #tests }
-LiveClassTest >> testOldClosuresFollowTheirMethod [
-	| c x blk orphan |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	c := self defineSample.
-	c compile: 'a: v a := v'.
-	c compile: 'reader ^ [a]'.
-	c compile: 'orphan ^ [a]'.
-	x := c new a: 9; yourself.
-	blk := x reader.
-	orphan := x orphan.
-	c removeSelector: #orphan.
-	c instanceVariableNames: 'z a'.
-	"the block of the replaced method reads the new slot of a"
-	self assert: blk value = 9.
-	"the block of the removed method was compiled for the old slots: it says so instead of reading them"
-	self should: [orphan value] raise: Error.
-	c instanceVariableNames: 'a'.
-	self assert: blk value = 9
 ]
 
 { #category : #tests }

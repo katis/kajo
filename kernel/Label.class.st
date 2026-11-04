@@ -5,9 +5,9 @@ Class {
 	#category : #'Kernel-UI'
 }
 
-{ #category : #registry }
-Label class >> kind [
-	^ 'label'
+{ #category : #accessing }
+Label >> text [
+	^ self get: 'text'
 ]
 
 { #category : #accessing }
@@ -15,7 +15,7 @@ Label >> text: aString [
 	self set: 'text' to: aString
 ]
 
-{ #category : #accessing }
-Label >> text [
-	^ self get: 'text'
+{ #category : #registry }
+Label class >> kind [
+	^ 'label'
 ]

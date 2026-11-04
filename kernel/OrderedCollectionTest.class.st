@@ -26,16 +26,6 @@ OrderedCollectionTest >> testAddingAndRemoving [
 ]
 
 { #category : #accessing }
-OrderedCollectionTest >> testGrowingAtTheFront [
-	| c |
-	c := OrderedCollection new.
-	1 to: 50 do: [:i | c addFirst: i].
-	self assert: c first = 50.
-	self assert: c last = 1.
-	self assert: c asArray = (50 to: 1 by: -1) asArray
-]
-
-{ #category : #accessing }
 OrderedCollectionTest >> testEnumeration [
 	| c |
 	c := OrderedCollection withAll: #(1 2 3 4).
@@ -45,6 +35,16 @@ OrderedCollectionTest >> testEnumeration [
 	self assert: c reversed asArray = #(4 3 2 1).
 	self assert: (c copyFrom: 2 to: 3) asArray = #(2 3).
 	self assert: (c , #(5)) asArray = #(1 2 3 4 5)
+]
+
+{ #category : #accessing }
+OrderedCollectionTest >> testGrowingAtTheFront [
+	| c |
+	c := OrderedCollection new.
+	1 to: 50 do: [:i | c addFirst: i].
+	self assert: c first = 50.
+	self assert: c last = 1.
+	self assert: c asArray = (50 to: 1 by: -1) asArray
 ]
 
 { #category : #accessing }

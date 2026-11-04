@@ -11,16 +11,47 @@ Class {
 }
 
 { #category : #accessing }
-Pragma class >> consumesPragmas [
-	<consumesPragmas: #(#mainThread #devProtocol)>
-	"Main-thread affinity (ADR 0004) and the development protocol: declared here so the compiler does not warn; nothing reads them in 8b."
-	^ #(#mainThread #devProtocol)
+Pragma >> argumentAt: i [
+	^ arguments at: i
 ]
 
-{ #category : #'instance creation' }
-Pragma class >> selector: aSymbol arguments: anArray [
-	"A pragma the compiler made (no method yet): the make-method primitive makes a read-only one for the method it makes (module 8d)."
-	^ self new setSelector: aSymbol arguments: anArray
+{ #category : #accessing }
+Pragma >> arguments [
+	^ arguments
+]
+
+{ #category : #accessing }
+Pragma >> keyword [
+	^ selector
+]
+
+{ #category : #accessing }
+Pragma >> method [
+	^ method
+]
+
+{ #category : #accessing }
+Pragma >> methodClass [
+	^ method methodClass
+]
+
+{ #category : #accessing }
+Pragma >> numArgs [
+	^ arguments size
+]
+
+{ #category : #accessing }
+Pragma >> printOn: aStream [
+	aStream nextPut: $<.
+	arguments isEmpty
+		ifTrue: [aStream nextPutAll: selector]
+		ifFalse: [selector keywords with: arguments do: [:k :a | aStream nextPutAll: k; space; print: a; space]].
+	aStream nextPut: $>
+]
+
+{ #category : #accessing }
+Pragma >> selector [
+	^ selector
 ]
 
 { #category : #accessing }
@@ -30,9 +61,23 @@ Pragma >> setSelector: aSymbol arguments: anArray [
 ]
 
 { #category : #accessing }
-Pragma class >> rebuildIndex [
-	PragmaIndex table: IdentityDictionary new.
-	Smalltalk allBehaviors do: [:c | c methodsDo: [:m | self noteInstalled: m]]
+Pragma class >> allNamed: aSymbol [
+	^ (self index at: aSymbol ifAbsent: [#()]) asArray
+]
+
+{ #category : #accessing }
+Pragma class >> allNamed: aSymbol in: aClass [
+	| out |
+	out := OrderedCollection new.
+	aClass methodsDo: [:m | m pragmas do: [:p | p selector == aSymbol ifTrue: [out add: p]]].
+	^ out asArray
+]
+
+{ #category : #accessing }
+Pragma class >> consumesPragmas [
+	<consumesPragmas: #(#mainThread #devProtocol)>
+	"Main-thread affinity (ADR 0004) and the development protocol: declared here so the compiler does not warn; nothing reads them in 8b."
+	^ #(#mainThread #devProtocol)
 ]
 
 { #category : #accessing }
@@ -55,58 +100,13 @@ Pragma class >> noteRemoved: aMethod [
 ]
 
 { #category : #accessing }
-Pragma class >> allNamed: aSymbol [
-	^ (self index at: aSymbol ifAbsent: [#()]) asArray
+Pragma class >> rebuildIndex [
+	PragmaIndex table: IdentityDictionary new.
+	Smalltalk allBehaviors do: [:c | c methodsDo: [:m | self noteInstalled: m]]
 ]
 
-{ #category : #accessing }
-Pragma class >> allNamed: aSymbol in: aClass [
-	| out |
-	out := OrderedCollection new.
-	aClass methodsDo: [:m | m pragmas do: [:p | p selector == aSymbol ifTrue: [out add: p]]].
-	^ out asArray
-]
-
-{ #category : #accessing }
-Pragma >> selector [
-	^ selector
-]
-
-{ #category : #accessing }
-Pragma >> keyword [
-	^ selector
-]
-
-{ #category : #accessing }
-Pragma >> arguments [
-	^ arguments
-]
-
-{ #category : #accessing }
-Pragma >> method [
-	^ method
-]
-
-{ #category : #accessing }
-Pragma >> numArgs [
-	^ arguments size
-]
-
-{ #category : #accessing }
-Pragma >> argumentAt: i [
-	^ arguments at: i
-]
-
-{ #category : #accessing }
-Pragma >> methodClass [
-	^ method methodClass
-]
-
-{ #category : #accessing }
-Pragma >> printOn: aStream [
-	aStream nextPut: $<.
-	arguments isEmpty
-		ifTrue: [aStream nextPutAll: selector]
-		ifFalse: [selector keywords with: arguments do: [:k :a | aStream nextPutAll: k; space; print: a; space]].
-	aStream nextPut: $>
+{ #category : #'instance creation' }
+Pragma class >> selector: aSymbol arguments: anArray [
+	"A pragma the compiler made (no method yet): the make-method primitive makes a read-only one for the method it makes (module 8d)."
+	^ self new setSelector: aSymbol arguments: anArray
 ]

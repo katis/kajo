@@ -7,6 +7,12 @@ Class {
 }
 
 { #category : #arithmetic }
+LargePositiveInteger >> * aNumber [
+	<primitive: 42>
+	^ self retry: #* coercing: aNumber
+]
+
+{ #category : #arithmetic }
 LargePositiveInteger >> + aNumber [
 	<primitive: 40>
 	^ self retry: #+ coercing: aNumber
@@ -16,12 +22,6 @@ LargePositiveInteger >> + aNumber [
 LargePositiveInteger >> - aNumber [
 	<primitive: 41>
 	^ self retry: #- coercing: aNumber
-]
-
-{ #category : #arithmetic }
-LargePositiveInteger >> * aNumber [
-	<primitive: 42>
-	^ self retry: #* coercing: aNumber
 ]
 
 { #category : #arithmetic }
@@ -45,6 +45,12 @@ LargePositiveInteger >> \\ aNumber [
 ]
 
 { #category : #arithmetic }
+LargePositiveInteger >> negated [
+	<primitive: 58>
+	^ 0 - self
+]
+
+{ #category : #arithmetic }
 LargePositiveInteger >> quo: aNumber [
 	<primitive: 46>
 	^ super quo: aNumber
@@ -54,53 +60,6 @@ LargePositiveInteger >> quo: aNumber [
 LargePositiveInteger >> rem: aNumber [
 	<primitive: 47>
 	^ super rem: aNumber
-]
-
-{ #category : #arithmetic }
-LargePositiveInteger >> negated [
-	<primitive: 58>
-	^ 0 - self
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> < aNumber [
-	<primitive: 48>
-	^ self retry: #< coercing: aNumber
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> > aNumber [
-	<primitive: 49>
-	^ self retry: #> coercing: aNumber
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> <= aNumber [
-	<primitive: 50>
-	^ self retry: #<= coercing: aNumber
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> >= aNumber [
-	<primitive: 51>
-	^ self retry: #>= coercing: aNumber
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> = aNumber [
-	<primitive: 52>
-	^ self retry: #= coercing: aNumber
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> ~= aNumber [
-	<primitive: 53>
-	^ self retry: #~= coercing: aNumber
-]
-
-{ #category : #comparing }
-LargePositiveInteger >> hash [
-	^ (self bitAnd: 16r3FFFFFFF) bitXor: (self bitShift: -30) hash
 ]
 
 { #category : #bits }
@@ -116,25 +75,15 @@ LargePositiveInteger >> bitOr: n [
 ]
 
 { #category : #bits }
-LargePositiveInteger >> bitXor: n [
-	<primitive: 56>
-	^ self primitiveFailed
-]
-
-{ #category : #bits }
 LargePositiveInteger >> bitShift: n [
 	<primitive: 57>
 	^ self primitiveFailed
 ]
 
-{ #category : #coercion }
-LargePositiveInteger >> generality [
-	^ 20
-]
-
-{ #category : #coercion }
-LargePositiveInteger >> coerce: aNumber [
-	^ aNumber truncated
+{ #category : #bits }
+LargePositiveInteger >> bitXor: n [
+	<primitive: 56>
+	^ self primitiveFailed
 ]
 
 { #category : #coercion }
@@ -150,6 +99,57 @@ LargePositiveInteger >> byteSize [
 ]
 
 { #category : #coercion }
+LargePositiveInteger >> coerce: aNumber [
+	^ aNumber truncated
+]
+
+{ #category : #coercion }
+LargePositiveInteger >> generality [
+	^ 20
+]
+
+{ #category : #coercion }
 LargePositiveInteger >> negative [
 	^ false
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> < aNumber [
+	<primitive: 48>
+	^ self retry: #< coercing: aNumber
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> <= aNumber [
+	<primitive: 50>
+	^ self retry: #<= coercing: aNumber
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> = aNumber [
+	<primitive: 52>
+	^ self retry: #= coercing: aNumber
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> > aNumber [
+	<primitive: 49>
+	^ self retry: #> coercing: aNumber
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> >= aNumber [
+	<primitive: 51>
+	^ self retry: #>= coercing: aNumber
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> hash [
+	^ (self bitAnd: 16r3FFFFFFF) bitXor: (self bitShift: -30) hash
+]
+
+{ #category : #comparing }
+LargePositiveInteger >> ~= aNumber [
+	<primitive: 53>
+	^ self retry: #~= coercing: aNumber
 ]

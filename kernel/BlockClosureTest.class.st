@@ -6,16 +6,22 @@ Class {
 }
 
 { #category : #accessing }
-BlockClosureTest >> testValues [
-	self assert: [3] value = 3.
-	self assert: ([:x | x + 1] value: 3) = 4.
-	self assert: ([:x :y | x * y] value: 3 value: 4) = 12.
-	self assert: ([:a :b :c | a + b + c] value: 1 value: 2 value: 3) = 6.
-	self assert: ([:a :b | a - b] valueWithArguments: #(5 3)) = 2.
-	self assert: [:a :b | a] numArgs = 2.
-	self assert: ([:x | x] cull: 7) = 7.
-	self assert: ([7] cull: 3) = 7.
-	self should: [[:x | x] value] raise: Error
+BlockClosureTest >> findFirstEven: aCollection [
+	aCollection do: [:x | x even ifTrue: [^ x]].
+	^ nil
+]
+
+{ #category : #accessing }
+BlockClosureTest >> makeEscapingBlock [
+	^ [^ 99]
+]
+
+{ #category : #accessing }
+BlockClosureTest >> testCannotReturn [
+	| b r |
+	b := self makeEscapingBlock.
+	r := [b value] on: BlockCannotReturn do: [:e | e result].
+	self assert: r = 99
 ]
 
 { #category : #accessing }
@@ -50,22 +56,26 @@ BlockClosureTest >> testNonLocalReturn [
 ]
 
 { #category : #accessing }
-BlockClosureTest >> findFirstEven: aCollection [
-	aCollection do: [:x | x even ifTrue: [^ x]].
-	^ nil
+BlockClosureTest >> testThisContext [
+	| ctx |
+	ctx := thisContext.
+	self assert: ctx method selector == #testThisContext.
+	self assert: ctx receiver == self.
+	self assert: ctx sender notNil.
+	self deny: ctx isDead
 ]
 
 { #category : #accessing }
-BlockClosureTest >> testCannotReturn [
-	| b r |
-	b := self makeEscapingBlock.
-	r := [b value] on: BlockCannotReturn do: [:e | e result].
-	self assert: r = 99
-]
-
-{ #category : #accessing }
-BlockClosureTest >> makeEscapingBlock [
-	^ [^ 99]
+BlockClosureTest >> testValues [
+	self assert: [3] value = 3.
+	self assert: ([:x | x + 1] value: 3) = 4.
+	self assert: ([:x :y | x * y] value: 3 value: 4) = 12.
+	self assert: ([:a :b :c | a + b + c] value: 1 value: 2 value: 3) = 6.
+	self assert: ([:a :b | a - b] valueWithArguments: #(5 3)) = 2.
+	self assert: [:a :b | a] numArgs = 2.
+	self assert: ([:x | x] cull: 7) = 7.
+	self assert: ([7] cull: 3) = 7.
+	self should: [[:x | x] value] raise: Error
 ]
 
 { #category : #accessing }
@@ -76,16 +86,6 @@ BlockClosureTest >> testWhileLoopsWithNonLiteralBlocks [
 	body := [i := i + 1].
 	cond whileTrue: body.
 	self assert: i = 5
-]
-
-{ #category : #accessing }
-BlockClosureTest >> testThisContext [
-	| ctx |
-	ctx := thisContext.
-	self assert: ctx method selector == #testThisContext.
-	self assert: ctx receiver == self.
-	self assert: ctx sender notNil.
-	self deny: ctx isDead
 ]
 
 { #category : #tests }

@@ -6,30 +6,23 @@ Class {
 }
 
 { #category : #accessing }
-Symbol class >> new: n [
-	^ self shouldNotImplement
-]
-
-{ #category : #accessing }
-Symbol class >> new [
-	^ self shouldNotImplement
-]
-
-{ #category : #accessing }
-Symbol class >> lookup: aString [
-	"The Symbol with these bytes, nil if none was interned."
-	<primitive: 135>
-	^ nil
-]
-
-{ #category : #accessing }
-Symbol class >> intern: aString [
-	^ aString asSymbol
-]
-
-{ #category : #accessing }
 Symbol >> = anObject [
 	^ self == anObject
+]
+
+{ #category : #accessing }
+Symbol >> asString [
+	^ '' , self
+]
+
+{ #category : #accessing }
+Symbol >> asSymbol [
+	^ self
+]
+
+{ #category : #accessing }
+Symbol >> displayString [
+	^ self asString
 ]
 
 { #category : #accessing }
@@ -39,29 +32,13 @@ Symbol >> hash [
 ]
 
 { #category : #accessing }
-Symbol >> asSymbol [
-	^ self
-]
-
-{ #category : #accessing }
-Symbol >> asString [
-	^ '' , self
+Symbol >> isBinary [
+	^ self notEmpty and: [(self first isLetter or: [self first = $_]) not]
 ]
 
 { #category : #accessing }
 Symbol >> isSymbol [
 	^ true
-]
-
-{ #category : #accessing }
-Symbol >> numArgs [
-	| first n |
-	self isEmpty ifTrue: [^ 0].
-	first := self first.
-	(first isLetter or: [first = $_]) ifFalse: [^ 1].
-	n := 0.
-	self do: [:c | c = $: ifTrue: [n := n + 1]].
-	^ n
 ]
 
 { #category : #accessing }
@@ -77,23 +54,14 @@ Symbol >> keywords [
 ]
 
 { #category : #accessing }
-Symbol >> isBinary [
-	^ self notEmpty and: [(self first isLetter or: [self first = $_]) not]
-]
-
-{ #category : #accessing }
-Symbol >> value: anObject [
-	^ anObject perform: self
-]
-
-{ #category : #accessing }
-Symbol >> value: anObject value: anArgument [
-	^ anObject perform: self with: anArgument
-]
-
-{ #category : #accessing }
-Symbol >> species [
-	^ String
+Symbol >> numArgs [
+	| first n |
+	self isEmpty ifTrue: [^ 0].
+	first := self first.
+	(first isLetter or: [first = $_]) ifFalse: [^ 1].
+	n := 0.
+	self do: [:c | c = $: ifTrue: [n := n + 1]].
+	^ n
 ]
 
 { #category : #accessing }
@@ -108,11 +76,43 @@ Symbol >> printOn: aStream [
 ]
 
 { #category : #accessing }
-Symbol >> displayString [
-	^ self asString
+Symbol >> shallowCopy [
+	^ self
 ]
 
 { #category : #accessing }
-Symbol >> shallowCopy [
-	^ self
+Symbol >> species [
+	^ String
+]
+
+{ #category : #accessing }
+Symbol >> value: anObject [
+	^ anObject perform: self
+]
+
+{ #category : #accessing }
+Symbol >> value: anObject value: anArgument [
+	^ anObject perform: self with: anArgument
+]
+
+{ #category : #accessing }
+Symbol class >> intern: aString [
+	^ aString asSymbol
+]
+
+{ #category : #accessing }
+Symbol class >> lookup: aString [
+	"The Symbol with these bytes, nil if none was interned."
+	<primitive: 135>
+	^ nil
+]
+
+{ #category : #accessing }
+Symbol class >> new [
+	^ self shouldNotImplement
+]
+
+{ #category : #accessing }
+Symbol class >> new: n [
+	^ self shouldNotImplement
 ]

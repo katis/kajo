@@ -10,16 +10,6 @@ Class {
 }
 
 { #category : #accessing }
-Mutex class >> new [
-	^ self basicNew setSemaphore
-]
-
-{ #category : #accessing }
-Mutex >> setSemaphore [
-	semaphore := Semaphore forMutualExclusion
-]
-
-{ #category : #accessing }
 Mutex >> critical: aBlock [
 	| me |
 	me := ProcessorScheduler activeProcess.
@@ -32,4 +22,14 @@ Mutex >> critical: aBlock [
 { #category : #accessing }
 Mutex >> isOwned [
 	^ owner notNil
+]
+
+{ #category : #accessing }
+Mutex >> setSemaphore [
+	semaphore := Semaphore forMutualExclusion
+]
+
+{ #category : #accessing }
+Mutex class >> new [
+	^ self basicNew setSemaphore
 ]

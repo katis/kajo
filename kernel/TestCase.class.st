@@ -9,72 +9,6 @@ Class {
 }
 
 { #category : #accessing }
-TestCase class >> consumesPragmas [
-	<consumesPragmas: #(#slow #device #expectedFailure)>
-	^ #(#slow #device #expectedFailure)
-]
-
-{ #category : #accessing }
-TestCase class >> selector: aSymbol [
-	^ self new setTestSelector: aSymbol
-]
-
-{ #category : #accessing }
-TestCase class >> isAbstract [
-	^ self == TestCase
-]
-
-{ #category : #accessing }
-TestCase class >> testSelectors [
-	"The test selectors of the class and its superclasses below TestCase, sorted."
-	| out c |
-	out := Set new.
-	c := self.
-	[c notNil and: [c ~~ TestCase]] whileTrue: [
-		c selectors do: [:s | ((s beginsWith: 'test') and: [s numArgs = 0]) ifTrue: [out add: s]].
-		c := c superclass].
-	^ out asArray sort: [:a :b | a <= b]
-]
-
-{ #category : #accessing }
-TestCase class >> suite [
-	| suite |
-	suite := TestSuite named: self name.
-	self testSelectors do: [:s | suite addTest: (self selector: s)].
-	^ suite
-]
-
-{ #category : #accessing }
-TestCase class >> allTestClasses [
-	^ (TestCase allSubclasses reject: [:c | c isAbstract]) asArray sort: [:a :b | a name <= b name]
-]
-
-{ #category : #accessing }
-TestCase >> setTestSelector: aSymbol [
-	testSelector := aSymbol
-]
-
-{ #category : #accessing }
-TestCase >> selector [
-	^ testSelector
-]
-
-{ #category : #accessing }
-TestCase >> name [
-	^ self class name , '>>' , testSelector
-]
-
-{ #category : #accessing }
-TestCase >> method [
-	^ self class lookupSelector: testSelector
-]
-
-{ #category : #accessing }
-TestCase >> tags [
-	^ (self method pragmas collect: [:p | p selector]) asArray
-]
-
-{ #category : #accessing }
 TestCase >> hasTag: aString [
 	^ self tags anySatisfy: [:t | t = aString asSymbol]
 ]
@@ -85,11 +19,21 @@ TestCase >> isExpectedFailure [
 ]
 
 { #category : #accessing }
-TestCase >> setUp [
+TestCase >> method [
+	^ self class lookupSelector: testSelector
 ]
 
 { #category : #accessing }
-TestCase >> tearDown [
+TestCase >> name [
+	^ self class name , '>>' , testSelector
+]
+
+{ #category : #accessing }
+TestCase >> run [
+	| r |
+	r := TestResult new.
+	r runCase: self.
+	^ r
 ]
 
 { #category : #accessing }
@@ -99,11 +43,26 @@ TestCase >> runCase [
 ]
 
 { #category : #accessing }
-TestCase >> run [
-	| r |
-	r := TestResult new.
-	r runCase: self.
-	^ r
+TestCase >> selector [
+	^ testSelector
+]
+
+{ #category : #accessing }
+TestCase >> setTestSelector: aSymbol [
+	testSelector := aSymbol
+]
+
+{ #category : #accessing }
+TestCase >> setUp [
+]
+
+{ #category : #accessing }
+TestCase >> tags [
+	^ (self method pragmas collect: [:p | p selector]) asArray
+]
+
+{ #category : #accessing }
+TestCase >> tearDown [
 ]
 
 { #category : #assertions }
@@ -117,6 +76,18 @@ TestCase >> assert: aBoolean description: aString [
 ]
 
 { #category : #assertions }
+TestCase >> assert: actual equals: expected [
+	actual = expected ifFalse: [
+		self signalFailure: 'Expected ' , expected printString , ' but was ' , actual printString]
+]
+
+{ #category : #assertions }
+TestCase >> assert: actual identicalTo: expected [
+	actual == expected ifFalse: [
+		self signalFailure: 'Expected the identical ' , expected printString , ' but was ' , actual printString]
+]
+
+{ #category : #assertions }
 TestCase >> deny: aBoolean [
 	aBoolean ifTrue: [self signalFailure: 'Denial failed']
 ]
@@ -127,20 +98,23 @@ TestCase >> deny: aBoolean description: aString [
 ]
 
 { #category : #assertions }
-TestCase >> assert: actual equals: expected [
-	actual = expected ifFalse: [
-		self signalFailure: 'Expected ' , expected printString , ' but was ' , actual printString]
-]
-
-{ #category : #assertions }
 TestCase >> deny: actual equals: expected [
 	actual = expected ifTrue: [self signalFailure: 'Did not expect ' , expected printString]
 ]
 
 { #category : #assertions }
-TestCase >> assert: actual identicalTo: expected [
-	actual == expected ifFalse: [
-		self signalFailure: 'Expected the identical ' , expected printString , ' but was ' , actual printString]
+TestCase >> fail [
+	self signalFailure: 'Test failed'
+]
+
+{ #category : #assertions }
+TestCase >> fail: aString [
+	self signalFailure: aString
+]
+
+{ #category : #assertions }
+TestCase >> printOn: aStream [
+	aStream nextPutAll: self name
 ]
 
 { #category : #assertions }
@@ -158,21 +132,47 @@ TestCase >> shouldnt: aBlock raise: anExceptionClass [
 ]
 
 { #category : #assertions }
-TestCase >> fail [
-	self signalFailure: 'Test failed'
-]
-
-{ #category : #assertions }
-TestCase >> fail: aString [
-	self signalFailure: aString
-]
-
-{ #category : #assertions }
 TestCase >> signalFailure: aString [
 	TestFailure new signal: aString
 ]
 
-{ #category : #assertions }
-TestCase >> printOn: aStream [
-	aStream nextPutAll: self name
+{ #category : #accessing }
+TestCase class >> allTestClasses [
+	^ (TestCase allSubclasses reject: [:c | c isAbstract]) asArray sort: [:a :b | a name <= b name]
+]
+
+{ #category : #accessing }
+TestCase class >> consumesPragmas [
+	<consumesPragmas: #(#slow #device #expectedFailure)>
+	^ #(#slow #device #expectedFailure)
+]
+
+{ #category : #accessing }
+TestCase class >> isAbstract [
+	^ self == TestCase
+]
+
+{ #category : #accessing }
+TestCase class >> selector: aSymbol [
+	^ self new setTestSelector: aSymbol
+]
+
+{ #category : #accessing }
+TestCase class >> suite [
+	| suite |
+	suite := TestSuite named: self name.
+	self testSelectors do: [:s | suite addTest: (self selector: s)].
+	^ suite
+]
+
+{ #category : #accessing }
+TestCase class >> testSelectors [
+	"The test selectors of the class and its superclasses below TestCase, sorted."
+	| out c |
+	out := Set new.
+	c := self.
+	[c notNil and: [c ~~ TestCase]] whileTrue: [
+		c selectors do: [:s | ((s beginsWith: 'test') and: [s numArgs = 0]) ifTrue: [out add: s]].
+		c := c superclass].
+	^ out asArray sort: [:a :b | a <= b]
 ]

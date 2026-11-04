@@ -12,19 +12,6 @@ Class {
 }
 
 { #category : #accessing }
-TestResult class >> new [
-	^ self basicNew setUp
-]
-
-{ #category : #accessing }
-TestResult >> setUp [
-	passed := OrderedCollection new.
-	failures := OrderedCollection new.
-	errors := OrderedCollection new.
-	emitting := false
-]
-
-{ #category : #accessing }
 TestResult >> beEmitting [
 	emitting := true
 ]
@@ -35,8 +22,8 @@ TestResult >> emit: kind fields: anArray [
 ]
 
 { #category : #accessing }
-TestResult >> passed [
-	^ passed
+TestResult >> errors [
+	^ errors
 ]
 
 { #category : #accessing }
@@ -45,18 +32,24 @@ TestResult >> failures [
 ]
 
 { #category : #accessing }
-TestResult >> errors [
-	^ errors
-]
-
-{ #category : #accessing }
-TestResult >> runCount [
-	^ passed size + failures size + errors size
+TestResult >> fieldsFor: aTestCase [
+	^ {'test'. aTestCase name. 'class'. aTestCase class name. 'selector'. aTestCase selector. 'tags'. aTestCase tags}
 ]
 
 { #category : #accessing }
 TestResult >> hasPassed [
 	^ failures isEmpty and: [errors isEmpty]
+]
+
+{ #category : #accessing }
+TestResult >> passed [
+	^ passed
+]
+
+{ #category : #accessing }
+TestResult >> printOn: aStream [
+	aStream print: self runCount; nextPutAll: ' run, '; print: passed size; nextPutAll: ' passed, ';
+		print: failures size; nextPutAll: ' failed, '; print: errors size; nextPutAll: ' errors'
 ]
 
 { #category : #accessing }
@@ -87,12 +80,19 @@ TestResult >> runCase: aTestCase [
 ]
 
 { #category : #accessing }
-TestResult >> fieldsFor: aTestCase [
-	^ {'test'. aTestCase name. 'class'. aTestCase class name. 'selector'. aTestCase selector. 'tags'. aTestCase tags}
+TestResult >> runCount [
+	^ passed size + failures size + errors size
 ]
 
 { #category : #accessing }
-TestResult >> printOn: aStream [
-	aStream print: self runCount; nextPutAll: ' run, '; print: passed size; nextPutAll: ' passed, ';
-		print: failures size; nextPutAll: ' failed, '; print: errors size; nextPutAll: ' errors'
+TestResult >> setUp [
+	passed := OrderedCollection new.
+	failures := OrderedCollection new.
+	errors := OrderedCollection new.
+	emitting := false
+]
+
+{ #category : #accessing }
+TestResult class >> new [
+	^ self basicNew setUp
 ]

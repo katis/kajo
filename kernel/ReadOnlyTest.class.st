@@ -6,20 +6,8 @@ Class {
 }
 
 { #category : #accessing }
-ReadOnlyTest >> testStoresIntoReadOnlyObjectsSignal [
-	| a e |
-	a := Array new: 2.
-	a beReadOnly.
-	self assert: a isReadOnly.
-	e := [a at: 1 put: 3. #stored] on: ModificationForbidden do: [:ex | ex].
-	self assert: e class == ModificationForbidden.
-	self assert: e object == a.
-	self assert: e index = 1.
-	self assert: e value = 3.
-	self assert: (a at: 1) isNil.
-	a beWritable.
-	a at: 1 put: 3.
-	self assert: (a at: 1) = 3
+ReadOnlyTest >> literalArray [
+	^ #(1 2 3)
 ]
 
 { #category : #accessing }
@@ -44,6 +32,18 @@ ReadOnlyTest >> testMethodLiteralsAreReadOnly [
 ]
 
 { #category : #accessing }
-ReadOnlyTest >> literalArray [
-	^ #(1 2 3)
+ReadOnlyTest >> testStoresIntoReadOnlyObjectsSignal [
+	| a e |
+	a := Array new: 2.
+	a beReadOnly.
+	self assert: a isReadOnly.
+	e := [a at: 1 put: 3. #stored] on: ModificationForbidden do: [:ex | ex].
+	self assert: e class == ModificationForbidden.
+	self assert: e object == a.
+	self assert: e index = 1.
+	self assert: e value = 3.
+	self assert: (a at: 1) isNil.
+	a beWritable.
+	a at: 1 put: 3.
+	self assert: (a at: 1) = 3
 ]

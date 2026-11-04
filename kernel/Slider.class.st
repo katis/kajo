@@ -8,29 +8,9 @@ Class {
 	#category : #'Kernel-UI'
 }
 
-{ #category : #registry }
-Slider class >> kind [
-	^ 'slider'
-]
-
 { #category : #accessing }
-Slider >> value: aNumber [
-	self set: 'value' to: aNumber asFloat
-]
-
-{ #category : #accessing }
-Slider >> value [
-	^ self get: 'value'
-]
-
-{ #category : #accessing }
-Slider >> minimum: low maximum: high [
-	self set: 'minimum' to: low asFloat; set: 'maximum' to: high asFloat
-]
-
-{ #category : #accessing }
-Slider >> minimum [
-	^ self get: 'minimum'
+Slider >> action: aBlock [
+	action := aBlock
 ]
 
 { #category : #accessing }
@@ -39,8 +19,28 @@ Slider >> maximum [
 ]
 
 { #category : #accessing }
-Slider >> action: aBlock [
-	action := aBlock
+Slider >> minimum [
+	^ self get: 'minimum'
+]
+
+{ #category : #accessing }
+Slider >> minimum: low maximum: high [
+	self set: 'minimum' to: low asFloat; set: 'maximum' to: high asFloat
+]
+
+{ #category : #accessing }
+Slider >> value [
+	^ self get: 'value'
+]
+
+{ #category : #accessing }
+Slider >> value: aNumber [
+	self set: 'value' to: aNumber asFloat
+]
+
+{ #category : #events }
+Slider >> handleEvent: anEvent [
+	anEvent kind == #valueChanged ifTrue: [self valueChanged: anEvent value]
 ]
 
 { #category : #events }
@@ -48,7 +48,7 @@ Slider >> valueChanged: aNumber [
 	action ifNotNil: [:b | b cull: aNumber cull: self]
 ]
 
-{ #category : #events }
-Slider >> handleEvent: anEvent [
-	anEvent kind == #valueChanged ifTrue: [self valueChanged: anEvent value]
+{ #category : #registry }
+Slider class >> kind [
+	^ 'slider'
 ]

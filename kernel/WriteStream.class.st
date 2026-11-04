@@ -6,13 +6,60 @@ Class {
 }
 
 { #category : #accessing }
-WriteStream >> setOn: aCollection [
-	isText := aCollection isString.
-	isText
-		ifTrue: [collection := ByteArray new: 32]
-		ifFalse: [collection := aCollection].
-	position := 0.
-	readLimit := 0
+WriteStream >> << anObject [
+	anObject isString ifTrue: [self nextPutAll: anObject] ifFalse: [anObject displayOn: self]
+]
+
+{ #category : #accessing }
+WriteStream >> atEnd [
+	^ position >= readLimit
+]
+
+{ #category : #accessing }
+WriteStream >> contents [
+	| out |
+	isText ifFalse: [^ collection copyFrom: 1 to: position].
+	out := ByteArray new: position.
+	1 to: position do: [:i | out at: i put: (collection at: i)].
+	^ out asStringValidating
+]
+
+{ #category : #accessing }
+WriteStream >> cr [
+	self nextPut: Character cr
+]
+
+{ #category : #accessing }
+WriteStream >> display: anObject [
+	anObject displayOn: self
+]
+
+{ #category : #accessing }
+WriteStream >> grow [
+	| bigger |
+	bigger := collection species new: (collection size * 2 max: 16).
+	1 to: collection size do: [:i | bigger at: i put: (collection at: i)].
+	collection := bigger
+]
+
+{ #category : #accessing }
+WriteStream >> isEmpty [
+	^ position = 0
+]
+
+{ #category : #accessing }
+WriteStream >> lf [
+	self nextPut: Character lf
+]
+
+{ #category : #accessing }
+WriteStream >> newLine [
+	self nextPut: Character lf
+]
+
+{ #category : #accessing }
+WriteStream >> next: n put: anObject [
+	n timesRepeat: [self nextPut: anObject]
 ]
 
 { #category : #accessing }
@@ -45,25 +92,14 @@ WriteStream >> nextPutAll: aCollection [
 ]
 
 { #category : #accessing }
-WriteStream >> grow [
-	| bigger |
-	bigger := collection species new: (collection size * 2 max: 16).
-	1 to: collection size do: [:i | bigger at: i put: (collection at: i)].
-	collection := bigger
+WriteStream >> position: anInteger [
+	(anInteger between: 0 and: readLimit) ifFalse: [^ self error: 'position out of range'].
+	position := anInteger
 ]
 
 { #category : #accessing }
-WriteStream >> contents [
-	| out |
-	isText ifFalse: [^ collection copyFrom: 1 to: position].
-	out := ByteArray new: position.
-	1 to: position do: [:i | out at: i put: (collection at: i)].
-	^ out asStringValidating
-]
-
-{ #category : #accessing }
-WriteStream >> atEnd [
-	^ position >= readLimit
+WriteStream >> print: anObject [
+	anObject printOn: self
 ]
 
 { #category : #accessing }
@@ -78,28 +114,13 @@ WriteStream >> resetContents [
 ]
 
 { #category : #accessing }
-WriteStream >> isEmpty [
-	^ position = 0
-]
-
-{ #category : #accessing }
-WriteStream >> cr [
-	self nextPut: Character cr
-]
-
-{ #category : #accessing }
-WriteStream >> lf [
-	self nextPut: Character lf
-]
-
-{ #category : #accessing }
-WriteStream >> newLine [
-	self nextPut: Character lf
-]
-
-{ #category : #accessing }
-WriteStream >> tab [
-	self nextPut: Character tab
+WriteStream >> setOn: aCollection [
+	isText := aCollection isString.
+	isText
+		ifTrue: [collection := ByteArray new: 32]
+		ifFalse: [collection := aCollection].
+	position := 0.
+	readLimit := 0
 ]
 
 { #category : #accessing }
@@ -108,27 +129,6 @@ WriteStream >> space [
 ]
 
 { #category : #accessing }
-WriteStream >> print: anObject [
-	anObject printOn: self
-]
-
-{ #category : #accessing }
-WriteStream >> display: anObject [
-	anObject displayOn: self
-]
-
-{ #category : #accessing }
-WriteStream >> << anObject [
-	anObject isString ifTrue: [self nextPutAll: anObject] ifFalse: [anObject displayOn: self]
-]
-
-{ #category : #accessing }
-WriteStream >> next: n put: anObject [
-	n timesRepeat: [self nextPut: anObject]
-]
-
-{ #category : #accessing }
-WriteStream >> position: anInteger [
-	(anInteger between: 0 and: readLimit) ifFalse: [^ self error: 'position out of range'].
-	position := anInteger
+WriteStream >> tab [
+	self nextPut: Character tab
 ]

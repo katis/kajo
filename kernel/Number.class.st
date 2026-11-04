@@ -6,17 +6,17 @@ Class {
 }
 
 { #category : #arithmetic }
+Number >> * aNumber [
+	^ self subclassResponsibility
+]
+
+{ #category : #arithmetic }
 Number >> + aNumber [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
 Number >> - aNumber [
-	^ self subclassResponsibility
-]
-
-{ #category : #arithmetic }
-Number >> * aNumber [
 	^ self subclassResponsibility
 ]
 
@@ -36,16 +36,6 @@ Number >> \\ aNumber [
 ]
 
 { #category : #arithmetic }
-Number >> quo: aNumber [
-	^ (self / aNumber) truncated
-]
-
-{ #category : #arithmetic }
-Number >> rem: aNumber [
-	^ self - ((self quo: aNumber) * aNumber)
-]
-
-{ #category : #arithmetic }
 Number >> abs [
 	^ self negative ifTrue: [self negated] ifFalse: [self]
 ]
@@ -56,13 +46,8 @@ Number >> negated [
 ]
 
 { #category : #arithmetic }
-Number >> reciprocal [
-	^ 1 / self
-]
-
-{ #category : #arithmetic }
-Number >> squared [
-	^ self * self
+Number >> quo: aNumber [
+	^ (self / aNumber) truncated
 ]
 
 { #category : #arithmetic }
@@ -79,25 +64,19 @@ Number >> raisedTo: anInteger [
 	^ result
 ]
 
-{ #category : #coercion }
-Number >> generality [
-	^ self subclassResponsibility
+{ #category : #arithmetic }
+Number >> reciprocal [
+	^ 1 / self
 ]
 
-{ #category : #coercion }
-Number >> coerce: aNumber [
-	^ self subclassResponsibility
+{ #category : #arithmetic }
+Number >> rem: aNumber [
+	^ self - ((self quo: aNumber) * aNumber)
 ]
 
-{ #category : #coercion }
-Number >> retry: aSelector coercing: aNumber [
-	aNumber isNumber ifFalse: [
-		aSelector == #= ifTrue: [^ false].
-		aSelector == #~= ifTrue: [^ true].
-		^ self error: aNumber printString , ' is not a number'].
-	self generality < aNumber generality ifTrue: [^ (aNumber coerce: self) perform: aSelector with: aNumber].
-	self generality > aNumber generality ifTrue: [^ self perform: aSelector with: (self coerce: aNumber)].
-	^ self error: 'cannot ' , aSelector , ' ' , self printString , ' and ' , aNumber printString
+{ #category : #arithmetic }
+Number >> squared [
+	^ self * self
 ]
 
 { #category : #coercion }
@@ -115,28 +94,77 @@ Number >> asNumber [
 	^ self
 ]
 
-{ #category : #truncation }
-Number >> truncated [
+{ #category : #coercion }
+Number >> coerce: aNumber [
 	^ self subclassResponsibility
 ]
 
-{ #category : #truncation }
-Number >> rounded [
-	^ (self + (self sign / 2)) truncated
+{ #category : #coercion }
+Number >> generality [
+	^ self subclassResponsibility
 ]
 
-{ #category : #truncation }
-Number >> floor [
-	| t |
-	t := self truncated.
-	^ (self < 0 and: [t ~= self]) ifTrue: [t - 1] ifFalse: [t]
+{ #category : #coercion }
+Number >> retry: aSelector coercing: aNumber [
+	aNumber isNumber ifFalse: [
+		aSelector == #= ifTrue: [^ false].
+		aSelector == #~= ifTrue: [^ true].
+		^ self error: aNumber printString , ' is not a number'].
+	self generality < aNumber generality ifTrue: [^ (aNumber coerce: self) perform: aSelector with: aNumber].
+	self generality > aNumber generality ifTrue: [^ self perform: aSelector with: (self coerce: aNumber)].
+	^ self error: 'cannot ' , aSelector , ' ' , self printString , ' and ' , aNumber printString
 ]
 
-{ #category : #truncation }
-Number >> ceiling [
-	| t |
-	t := self truncated.
-	^ (self > 0 and: [t ~= self]) ifTrue: [t + 1] ifFalse: [t]
+{ #category : #intervals }
+Number >> to: stop [
+	^ Interval from: self to: stop
+]
+
+{ #category : #intervals }
+Number >> to: stop by: step [
+	^ Interval from: self to: stop by: step
+]
+
+{ #category : #intervals }
+Number >> to: stop by: step do: aBlock [
+	| i |
+	step = 0 ifTrue: [^ self error: 'step must not be zero'].
+	i := self.
+	step > 0
+		ifTrue: [[i <= stop] whileTrue: [aBlock value: i. i := i + step]]
+		ifFalse: [[i >= stop] whileTrue: [aBlock value: i. i := i + step]]
+]
+
+{ #category : #intervals }
+Number >> to: stop do: aBlock [
+	| i |
+	i := self.
+	[i <= stop] whileTrue: [aBlock value: i. i := i + 1]
+]
+
+{ #category : #printing }
+Number >> displayString [
+	^ self printString
+]
+
+{ #category : #printing }
+Number >> printOn: aStream [
+	aStream nextPutAll: self printString
+]
+
+{ #category : #printing }
+Number >> shallowCopy [
+	^ self
+]
+
+{ #category : #testing }
+Number >> even [
+	^ self \\ 2 = 0
+]
+
+{ #category : #testing }
+Number >> isLiteral [
+	^ true
 ]
 
 { #category : #testing }
@@ -155,13 +183,13 @@ Number >> negative [
 ]
 
 { #category : #testing }
-Number >> positive [
-	^ self >= 0
+Number >> odd [
+	^ self even not
 ]
 
 { #category : #testing }
-Number >> strictlyPositive [
-	^ self > 0
+Number >> positive [
+	^ self >= 0
 ]
 
 { #category : #testing }
@@ -172,58 +200,30 @@ Number >> sign [
 ]
 
 { #category : #testing }
-Number >> even [
-	^ self \\ 2 = 0
+Number >> strictlyPositive [
+	^ self > 0
 ]
 
-{ #category : #testing }
-Number >> odd [
-	^ self even not
+{ #category : #truncation }
+Number >> ceiling [
+	| t |
+	t := self truncated.
+	^ (self > 0 and: [t ~= self]) ifTrue: [t + 1] ifFalse: [t]
 ]
 
-{ #category : #testing }
-Number >> isLiteral [
-	^ true
+{ #category : #truncation }
+Number >> floor [
+	| t |
+	t := self truncated.
+	^ (self < 0 and: [t ~= self]) ifTrue: [t - 1] ifFalse: [t]
 ]
 
-{ #category : #intervals }
-Number >> to: stop [
-	^ Interval from: self to: stop
+{ #category : #truncation }
+Number >> rounded [
+	^ (self + (self sign / 2)) truncated
 ]
 
-{ #category : #intervals }
-Number >> to: stop by: step [
-	^ Interval from: self to: stop by: step
-]
-
-{ #category : #intervals }
-Number >> to: stop do: aBlock [
-	| i |
-	i := self.
-	[i <= stop] whileTrue: [aBlock value: i. i := i + 1]
-]
-
-{ #category : #intervals }
-Number >> to: stop by: step do: aBlock [
-	| i |
-	step = 0 ifTrue: [^ self error: 'step must not be zero'].
-	i := self.
-	step > 0
-		ifTrue: [[i <= stop] whileTrue: [aBlock value: i. i := i + step]]
-		ifFalse: [[i >= stop] whileTrue: [aBlock value: i. i := i + step]]
-]
-
-{ #category : #printing }
-Number >> printOn: aStream [
-	aStream nextPutAll: self printString
-]
-
-{ #category : #printing }
-Number >> displayString [
-	^ self printString
-]
-
-{ #category : #printing }
-Number >> shallowCopy [
-	^ self
+{ #category : #truncation }
+Number >> truncated [
+	^ self subclassResponsibility
 ]

@@ -5,19 +5,77 @@ Class {
 	#category : #'Kernel-Tests'
 }
 
+{ #category : #helpers }
+ViewTest >> makeAndDropAView [
+	^ View new handle
+]
+
 { #category : #running }
 ViewTest >> tearDown [
 	ProcessorScheduler detachFromMain
 ]
 
 { #category : #tests }
-ViewTest >> testSetThenGetInTheSameTurn [
-	| l |
-	l := Label new.
-	l text: 'hello'.
-	self assert: l text equals: 'hello'.
-	l text: 'again'.
-	self assert: l text equals: 'again'
+ViewTest >> testADeadWrapperReleasesItsHandle [
+	| before h tries |
+	before := View diedCount.
+	h := self makeAndDropAView.
+	Smalltalk garbageCollect.
+	tries := 0.
+	[(View includesHandle: h) and: [tries < 500]] whileTrue: [
+		(Delay forMilliseconds: 10) wait.
+		tries := tries + 1].
+	self deny: (View includesHandle: h).
+	self assert: View diedCount > before
+]
+
+{ #category : #tests }
+ViewTest >> testAWindowHoldsItsViews [
+	| w l closedWith |
+	w := Window new.
+	w title: 'Kajo'.
+	l := w add: Label new.
+	self assert: (w subviews includes: l).
+	self assert: l superview == w.
+	self assert: w title equals: 'Kajo'.
+	w onClose: [:win | closedWith := win].
+	UIEventLoop dispatch: (UIEvent kind: #close target: w handle value: nil time: 0).
+	self assert: closedWith == w.
+	self assert: w isClosed
+]
+
+{ #category : #tests }
+ViewTest >> testAnErrorInAHandlerIsCaught [
+	| b errors |
+	b := Button new.
+	b action: [1 / 0].
+	errors := UIEventLoop errorCount.
+	UIEventLoop dispatch: (UIEvent kind: #click target: b handle value: nil time: 0).
+	self assert: UIEventLoop errorCount equals: errors + 1
+]
+
+{ #category : #tests }
+ViewTest >> testAnEventFromTheShellsArray [
+	| e |
+	e := UIEvent fromArray: #(2 7 0.5 1000).
+	self assert: e kind equals: #valueChanged.
+	self assert: e target equals: 7.
+	self assert: e value equals: 0.5.
+	self assert: e time equals: 1000.
+	self assert: (UIEvent fromArray: #(99 0 nil 0)) kind equals: #unknown
+]
+
+{ #category : #tests }
+ViewTest >> testButtonActionRunsOnAClickEvent [
+	| b count |
+	count := 0.
+	b := Button new.
+	b title: 'Press'.
+	b action: [count := count + 1].
+	UIEventLoop dispatch: (UIEvent kind: #click target: b handle value: nil time: 0).
+	UIEventLoop dispatch: (UIEvent kind: #click target: b handle value: nil time: 0).
+	self assert: count equals: 2.
+	self assert: b title equals: 'Press'
 ]
 
 { #category : #tests }
@@ -36,16 +94,21 @@ ViewTest >> testFrameAndMove [
 ]
 
 { #category : #tests }
-ViewTest >> testButtonActionRunsOnAClickEvent [
-	| b count |
-	count := 0.
-	b := Button new.
-	b title: 'Press'.
-	b action: [count := count + 1].
-	UIEventLoop dispatch: (UIEvent kind: #click target: b handle value: nil time: 0).
-	UIEventLoop dispatch: (UIEvent kind: #click target: b handle value: nil time: 0).
-	self assert: count equals: 2.
-	self assert: b title equals: 'Press'
+ViewTest >> testHeadlessThereIsNoEventLoop [
+	View hasShell ifTrue: [^ self].
+	self deny: UIEventLoop start.
+	self assert: UIEventLoop nextEvent isNil.
+	self assert: View new handle < 0
+]
+
+{ #category : #tests }
+ViewTest >> testSetThenGetInTheSameTurn [
+	| l |
+	l := Label new.
+	l text: 'hello'.
+	self assert: l text equals: 'hello'.
+	l text: 'again'.
+	self assert: l text equals: 'again'
 ]
 
 { #category : #tests }
@@ -73,72 +136,9 @@ ViewTest >> testTextViewAppendsLines [
 ]
 
 { #category : #tests }
-ViewTest >> testAWindowHoldsItsViews [
-	| w l closedWith |
-	w := Window new.
-	w title: 'Kajo'.
-	l := w add: Label new.
-	self assert: (w subviews includes: l).
-	self assert: l superview == w.
-	self assert: w title equals: 'Kajo'.
-	w onClose: [:win | closedWith := win].
-	UIEventLoop dispatch: (UIEvent kind: #close target: w handle value: nil time: 0).
-	self assert: closedWith == w.
-	self assert: w isClosed
-]
-
-{ #category : #tests }
 ViewTest >> testTheRegistryFindsAWrapperByItsHandle [
 	| v |
 	v := View new.
 	self assert: (View at: v handle) == v.
 	self assert: (View at: 123456789) isNil
-]
-
-{ #category : #tests }
-ViewTest >> testADeadWrapperReleasesItsHandle [
-	| before h tries |
-	before := View diedCount.
-	h := self makeAndDropAView.
-	Smalltalk garbageCollect.
-	tries := 0.
-	[(View includesHandle: h) and: [tries < 500]] whileTrue: [
-		(Delay forMilliseconds: 10) wait.
-		tries := tries + 1].
-	self deny: (View includesHandle: h).
-	self assert: View diedCount > before
-]
-
-{ #category : #helpers }
-ViewTest >> makeAndDropAView [
-	^ View new handle
-]
-
-{ #category : #tests }
-ViewTest >> testAnErrorInAHandlerIsCaught [
-	| b errors |
-	b := Button new.
-	b action: [1 / 0].
-	errors := UIEventLoop errorCount.
-	UIEventLoop dispatch: (UIEvent kind: #click target: b handle value: nil time: 0).
-	self assert: UIEventLoop errorCount equals: errors + 1
-]
-
-{ #category : #tests }
-ViewTest >> testAnEventFromTheShellsArray [
-	| e |
-	e := UIEvent fromArray: #(2 7 0.5 1000).
-	self assert: e kind equals: #valueChanged.
-	self assert: e target equals: 7.
-	self assert: e value equals: 0.5.
-	self assert: e time equals: 1000.
-	self assert: (UIEvent fromArray: #(99 0 nil 0)) kind equals: #unknown
-]
-
-{ #category : #tests }
-ViewTest >> testHeadlessThereIsNoEventLoop [
-	View hasShell ifTrue: [^ self].
-	self deny: UIEventLoop start.
-	self assert: UIEventLoop nextEvent isNil.
-	self assert: View new handle < 0
 ]

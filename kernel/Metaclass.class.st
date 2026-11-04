@@ -10,8 +10,13 @@ Class {
 }
 
 { #category : #accessing }
-Metaclass >> thisClass [
-	^ self slotAt: 6
+Metaclass >> isMeta [
+	^ true
+]
+
+{ #category : #accessing }
+Metaclass >> name [
+	^ self thisClass name , ' class'
 ]
 
 { #category : #accessing }
@@ -25,11 +30,6 @@ Metaclass >> theNonMetaClass [
 ]
 
 { #category : #accessing }
-Metaclass >> name [
-	^ self thisClass name , ' class'
-]
-
-{ #category : #accessing }
-Metaclass >> isMeta [
-	^ true
+Metaclass >> thisClass [
+	^ self slotAt: 6
 ]

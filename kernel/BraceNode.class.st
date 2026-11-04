@@ -8,8 +8,8 @@ Class {
 }
 
 { #category : #accessing }
-BraceNode class >> elements: anArray line: n [
-	^ self new setElements: anArray; line: n; yourself
+BraceNode >> elements [
+	^ elements
 ]
 
 { #category : #accessing }
@@ -18,6 +18,6 @@ BraceNode >> setElements: anArray [
 ]
 
 { #category : #accessing }
-BraceNode >> elements [
-	^ elements
+BraceNode class >> elements: anArray line: n [
+	^ self new setElements: anArray; line: n; yourself
 ]

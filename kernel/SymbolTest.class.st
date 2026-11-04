@@ -15,6 +15,14 @@ SymbolTest >> testInterning [
 ]
 
 { #category : #accessing }
+SymbolTest >> testPrinting [
+	self assert: #foo printString = '#foo'.
+	self assert: #at:put: printString = '#at:put:'.
+	self assert: #+ printString = '#+'.
+	self assert: #'hello world' printString = '#''hello world'''
+]
+
+{ #category : #accessing }
 SymbolTest >> testSelectors [
 	self assert: #foo numArgs = 0.
 	self assert: #+ numArgs = 1.
@@ -22,12 +30,4 @@ SymbolTest >> testSelectors [
 	self assert: #at:put: keywords = #('at:' 'put:').
 	self assert: (#abs value: -3) = 3.
 	self assert: (#+ value: 3 value: 4) = 7
-]
-
-{ #category : #accessing }
-SymbolTest >> testPrinting [
-	self assert: #foo printString = '#foo'.
-	self assert: #at:put: printString = '#at:put:'.
-	self assert: #+ printString = '#+'.
-	self assert: #'hello world' printString = '#''hello world'''
 ]

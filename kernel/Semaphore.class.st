@@ -11,20 +11,14 @@ Class {
 }
 
 { #category : #accessing }
-Semaphore class >> new [
-	<primitive: 26>
-	^ self primitiveFailed
+Semaphore >> critical: aBlock [
+	self wait.
+	^ aBlock ensure: [self signal]
 ]
 
 { #category : #accessing }
-Semaphore class >> forMutualExclusion [
-	^ self new signal; yourself
-]
-
-{ #category : #accessing }
-Semaphore >> wait [
-	<primitive: 22>
-	^ self primitiveFailed
+Semaphore >> excessSignals [
+	^ self slotAt: 1
 ]
 
 { #category : #accessing }
@@ -34,12 +28,18 @@ Semaphore >> signal [
 ]
 
 { #category : #accessing }
-Semaphore >> excessSignals [
-	^ self slotAt: 1
+Semaphore >> wait [
+	<primitive: 22>
+	^ self primitiveFailed
 ]
 
 { #category : #accessing }
-Semaphore >> critical: aBlock [
-	self wait.
-	^ aBlock ensure: [self signal]
+Semaphore class >> forMutualExclusion [
+	^ self new signal; yourself
+]
+
+{ #category : #accessing }
+Semaphore class >> new [
+	<primitive: 26>
+	^ self primitiveFailed
 ]

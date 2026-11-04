@@ -9,11 +9,6 @@ Class {
 }
 
 { #category : #accessing }
-SUnitSample class >> isAbstract [
-	^ true
-]
-
-{ #category : #accessing }
 SUnitSample >> log [
 	^ log
 ]
@@ -29,17 +24,6 @@ SUnitSample >> tearDown [
 ]
 
 { #category : #accessing }
-SUnitSample >> testPass [
-	log add: #testPass.
-	self assert: true
-]
-
-{ #category : #accessing }
-SUnitSample >> testFail [
-	self assert: false
-]
-
-{ #category : #accessing }
 SUnitSample >> testError [
 	^ 1 / 0
 ]
@@ -51,12 +35,28 @@ SUnitSample >> testExpectedFailure [
 ]
 
 { #category : #accessing }
-SUnitSample >> testUnexpectedPass [
-	<expectedFailure>
+SUnitSample >> testFail [
+	self assert: false
+]
+
+{ #category : #accessing }
+SUnitSample >> testPass [
+	log add: #testPass.
 	self assert: true
 ]
 
 { #category : #accessing }
 SUnitSample >> testShouldFails [
 	self should: [1 + 1] raise: ZeroDivide
+]
+
+{ #category : #accessing }
+SUnitSample >> testUnexpectedPass [
+	<expectedFailure>
+	self assert: true
+]
+
+{ #category : #accessing }
+SUnitSample class >> isAbstract [
+	^ true
 ]

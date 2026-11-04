@@ -5,13 +5,14 @@ Class {
 	#category : #'Kernel-System'
 }
 
-{ #category : #writing }
-TonelWriter class >> sourceOf: aClass [
-	"aClass's Tonel file, a String."
-	| out |
-	out := self headerOf: aClass.
-	(self methodsOf: aClass) do: [:m | out := out , m].
-	^ out
+{ #category : #files }
+TonelWriter class >> write: aClass into: aDirectory [
+	"Write aClass's file, <Name>.class.st, into aDirectory (a path under the directory the VM was opened with; '' for that directory itself)."
+	| path |
+	path := aDirectory isEmpty ifTrue: [aClass name , '.class.st'] ifFalse: [aDirectory , '/' , aClass name , '.class.st'].
+	(Smalltalk primWriteFile: path contents: (self sourceOf: aClass)) == true
+		ifFalse: [^ self error: 'cannot write ' , path].
+	^ path
 ]
 
 { #category : #writing }
@@ -49,18 +50,6 @@ TonelWriter class >> list: aKey of: names [
 ]
 
 { #category : #writing }
-TonelWriter class >> methodsOf: aClass [
-	"Each method's text (a line break, its category, its definition), instance side first, by category, by selector."
-	| out |
-	out := OrderedCollection new.
-	(Array with: aClass with: aClass class) do: [:b | | org |
-		org := b organization.
-		(org keys asArray sort: [:x :y | x <= y]) do: [:cat |
-			(org at: cat) do: [:sel | out add: (self method: sel in: b category: cat)]]].
-	^ out
-]
-
-{ #category : #writing }
 TonelWriter class >> method: aSelector in: aBehavior category: aCategory [
 	| lf src end pattern body |
 	lf := String lf.
@@ -79,11 +68,24 @@ TonelWriter class >> method: aSelector in: aBehavior category: aCategory [
 ]
 
 { #category : #writing }
-TonelWriter class >> withoutLeadingBlanks: aString [
-	| i |
-	i := 1.
-	[i <= aString byteSize and: [(aString scalarAt: i) isSeparator]] whileTrue: [i := i + (aString scalarSizeAt: i)].
-	^ aString copyFrom: i to: aString byteSize
+TonelWriter class >> methodsOf: aClass [
+	"Each method's text (a line break, its category, its definition), instance side first, by category, by selector."
+	| out |
+	out := OrderedCollection new.
+	(Array with: aClass with: aClass class) do: [:b | | org |
+		org := b organization.
+		(org keys asArray sort: [:x :y | x <= y]) do: [:cat |
+			(org at: cat) do: [:sel | out add: (self method: sel in: b category: cat)]]].
+	^ out
+]
+
+{ #category : #writing }
+TonelWriter class >> sourceOf: aClass [
+	"aClass's Tonel file, a String."
+	| out |
+	out := self headerOf: aClass.
+	(self methodsOf: aClass) do: [:m | out := out , m].
+	^ out
 ]
 
 { #category : #writing }
@@ -107,12 +109,10 @@ TonelWriter class >> typeOf: aClass [
 		yourself) at: kind
 ]
 
-{ #category : #files }
-TonelWriter class >> write: aClass into: aDirectory [
-	"Write aClass's file, <Name>.class.st, into aDirectory (a path under the directory the VM was opened with; '' for that directory itself)."
-	| path |
-	path := aDirectory isEmpty ifTrue: [aClass name , '.class.st'] ifFalse: [aDirectory , '/' , aClass name , '.class.st'].
-	(Smalltalk primWriteFile: path contents: (self sourceOf: aClass)) == true
-		ifFalse: [^ self error: 'cannot write ' , path].
-	^ path
+{ #category : #writing }
+TonelWriter class >> withoutLeadingBlanks: aString [
+	| i |
+	i := 1.
+	[i <= aString byteSize and: [(aString scalarAt: i) isSeparator]] whileTrue: [i := i + (aString scalarSizeAt: i)].
+	^ aString copyFrom: i to: aString byteSize
 ]

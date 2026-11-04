@@ -7,6 +7,11 @@ Class {
 }
 
 { #category : #accessing }
+Array >> asArray [
+	^ self
+]
+
+{ #category : #accessing }
 Array >> isArray [
 	^ true
 ]
@@ -17,12 +22,6 @@ Array >> isLiteral [
 ]
 
 { #category : #accessing }
-Array >> replaceFrom: start to: stop with: aCollection startingAt: from [
-	<primitive: 38>
-	^ super replaceFrom: start to: stop with: aCollection startingAt: from
-]
-
-{ #category : #accessing }
 Array >> printOn: aStream [
 	aStream nextPutAll: '#('.
 	self do: [:e | aStream print: e] separatedBy: [aStream space].
@@ -30,6 +29,7 @@ Array >> printOn: aStream [
 ]
 
 { #category : #accessing }
-Array >> asArray [
-	^ self
+Array >> replaceFrom: start to: stop with: aCollection startingAt: from [
+	<primitive: 38>
+	^ super replaceFrom: start to: stop with: aCollection startingAt: from
 ]

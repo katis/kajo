@@ -8,11 +8,6 @@ Class {
 }
 
 { #category : #accessing }
-ReturnNode class >> value: aNode line: n [
-	^ self new setValue: aNode; line: n; yourself
-]
-
-{ #category : #accessing }
 ReturnNode >> setValue: aNode [
 	value := aNode
 ]
@@ -20,4 +15,9 @@ ReturnNode >> setValue: aNode [
 { #category : #accessing }
 ReturnNode >> value [
 	^ value
+]
+
+{ #category : #accessing }
+ReturnNode class >> value: aNode line: n [
+	^ self new setValue: aNode; line: n; yourself
 ]

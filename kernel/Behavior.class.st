@@ -12,36 +12,9 @@ Class {
 	#category : #'Kernel-Classes'
 }
 
-{ #category : #'instance creation' }
-Behavior >> new [
-	^ self basicNew initialize
-]
-
-{ #category : #'instance creation' }
-Behavior >> new: size [
-	^ (self basicNew: size) initialize
-]
-
-{ #category : #'instance creation' }
-Behavior >> basicNew [
-	<primitive: 4>
-	^ self error: 'cannot make an instance of ' , self name
-]
-
-{ #category : #'instance creation' }
-Behavior >> basicNew: size [
-	<primitive: 3>
-	^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots'
-]
-
 { #category : #accessing }
-Behavior >> superclass [
-	^ self slotAt: 1
-]
-
-{ #category : #accessing }
-Behavior >> methodDictionary [
-	^ self slotAt: 2
+Behavior >> classIndex [
+	^ self slotAt: 5
 ]
 
 { #category : #accessing }
@@ -50,8 +23,8 @@ Behavior >> instSize [
 ]
 
 { #category : #accessing }
-Behavior >> classIndex [
-	^ self slotAt: 5
+Behavior >> methodDictionary [
+	^ self slotAt: 2
 ]
 
 { #category : #accessing }
@@ -60,113 +33,66 @@ Behavior >> name [
 ]
 
 { #category : #accessing }
+Behavior >> superclass [
+	^ self slotAt: 1
+]
+
+{ #category : #accessing }
 Behavior >> theNonMetaClass [
 	^ self
 ]
 
-{ #category : #testing }
-Behavior >> isBehavior [
-	^ true
+{ #category : #'class variables' }
+Behavior >> bindingOf: aString [
+	"The Binding a method of this class reaches through the name aString: a class variable's, or nil (classes are not bound; Smalltalk at: answers them)."
+	^ self classVariableNamed: aString
 ]
 
-{ #category : #testing }
-Behavior >> isMeta [
-	^ false
-]
-
-{ #category : #testing }
-Behavior >> inheritsFrom: aClass [
-	| c |
-	c := self superclass.
-	[c == nil] whileFalse: [
-		c == aClass ifTrue: [^ true].
-		c := c superclass].
-	^ false
-]
-
-{ #category : #testing }
-Behavior >> includesBehavior: aClass [
-	^ self == aClass or: [self inheritsFrom: aClass]
-]
-
-{ #category : #methods }
-Behavior >> selectors [
-	"The selectors of the receiver's own methods, an Array."
-	| d out |
-	d := self methodDictionary.
-	d == nil ifTrue: [^ #()].
-	out := OrderedCollection new.
-	1 to: d basicSize by: 2 do: [:i | | k | k := d slotAt: i. k == nil ifFalse: [out add: k]].
-	^ out asArray
-]
-
-{ #category : #methods }
-Behavior >> includesSelector: aSymbol [
-	^ (self compiledMethodAt: aSymbol ifAbsent: [nil]) notNil
-]
-
-{ #category : #methods }
-Behavior >> compiledMethodAt: aSymbol [
-	^ self compiledMethodAt: aSymbol ifAbsent: [self error: self name , ' has no method ' , aSymbol]
-]
-
-{ #category : #methods }
-Behavior >> compiledMethodAt: aSymbol ifAbsent: aBlock [
+{ #category : #'class variables' }
+Behavior >> classPool [
+	"This class's own class variables: a new IdentityDictionary from each name to its Binding."
 	| d |
-	d := self methodDictionary.
-	d == nil ifTrue: [^ aBlock value].
-	1 to: d basicSize by: 2 do: [:i | (d slotAt: i) == aSymbol ifTrue: [^ d slotAt: i + 1]].
-	^ aBlock value
+	d := IdentityDictionary new.
+	self classPoolBindings do: [:b | d at: b key put: b].
+	^ d
 ]
 
-{ #category : #methods }
-Behavior >> >> aSymbol [
-	^ self compiledMethodAt: aSymbol
+{ #category : #'class variables' }
+Behavior >> classPoolBindings [
+	"The Bindings of the class variables this class declares (its metaclass's pool, module 8d), an Array."
+	^ (self theNonMetaClass class slotAt: 7) ifNil: [#()]
 ]
 
-{ #category : #methods }
-Behavior >> methodsDo: aBlock [
-	| d |
-	d := self methodDictionary.
-	d == nil ifTrue: [^ self].
-	1 to: d basicSize by: 2 do: [:i | (d slotAt: i) == nil ifFalse: [aBlock value: (d slotAt: i + 1)]]
+{ #category : #'class variables' }
+Behavior >> classVarNames [
+	"The names of the class variables this class declares, Symbols."
+	^ self classPoolBindings collect: [:b | b key]
 ]
 
-{ #category : #methods }
-Behavior >> lookupSelector: aSymbol [
-	| c |
-	c := self.
+{ #category : #'class variables' }
+Behavior >> classVariableNamed: aString [
+	"The Binding of the class variable aString names that this class sees (its own, then its superclasses'), or nil. The class side sees the same."
+	| sym c |
+	sym := Symbol lookup: aString.
+	sym isNil ifTrue: [^ nil].
+	c := self theNonMetaClass.
 	[c == nil] whileFalse: [
-		(c compiledMethodAt: aSymbol ifAbsent: [nil]) ifNotNil: [:m | ^ m].
+		c classPoolBindings do: [:b | b key == sym ifTrue: [^ b]].
 		c := c superclass].
 	^ nil
 ]
 
-{ #category : #methods }
-Behavior >> canUnderstand: aSymbol [
-	^ (self lookupSelector: aSymbol) notNil
-]
-
-{ #category : #methods }
-Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
-	"Install a method (verified by the VM against this class) and note its pragmas."
-	| old |
-	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
-	old := self compiledMethodAt: aSymbol ifAbsent: [nil].
-	self primAddSelector: aSymbol withMethod: aCompiledMethod.
-	Pragma noteRemoved: old; noteInstalled: aCompiledMethod
-]
-
-{ #category : #methods }
-Behavior >> removeSelector: aSymbol [
-	| old |
-	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
-	old := self compiledMethodAt: aSymbol ifAbsent: [^ nil].
-	self primRemoveSelector: aSymbol.
-	Pragma noteRemoved: old.
-	Smalltalk forgetSourceOf: old.
-	Smalltalk forgetCategoryOf: aSymbol in: self.
-	^ old
+{ #category : #'class variables' }
+Behavior >> classVariableOwnerOf: aString [
+	"The class that declares the class variable aString names, as this class sees it, or nil."
+	| sym c |
+	sym := Symbol lookup: aString.
+	sym isNil ifTrue: [^ nil].
+	c := self theNonMetaClass.
+	[c == nil] whileFalse: [
+		(c classPoolBindings anySatisfy: [:b | b key == sym]) ifTrue: [^ c].
+		c := c superclass].
+	^ nil
 ]
 
 { #category : #compiling }
@@ -192,9 +118,165 @@ Behavior >> compile: aString classified: aCategoryOrNil [
 	^ method selector
 ]
 
-{ #category : #compiling }
-Behavior class >> defaultCategory [
-	^ #'as yet unclassified'
+{ #category : #hierarchy }
+Behavior >> allInstVarNames [
+	^ Smalltalk instanceVariableNamesOf: self
+]
+
+{ #category : #hierarchy }
+Behavior >> allSubclasses [
+	| out |
+	out := OrderedCollection new.
+	Smalltalk allClasses do: [:c | (c inheritsFrom: self) ifTrue: [out add: c]].
+	^ out
+]
+
+{ #category : #hierarchy }
+Behavior >> allSuperclasses [
+	| out c |
+	out := OrderedCollection new.
+	c := self superclass.
+	[c == nil] whileFalse: [out add: c. c := c superclass].
+	^ out
+]
+
+{ #category : #hierarchy }
+Behavior >> subclasses [
+	^ (Smalltalk allClasses select: [:c | c superclass == self]) asArray
+]
+
+{ #category : #hierarchy }
+Behavior >> withAllSubclasses [
+	"The receiver, then every class that inherits from it, each after its superclass."
+	^ (OrderedCollection with: self) addAll: (self allSubclasses asArray sort: [:a :b | a allSuperclasses size <= b allSuperclasses size]); yourself
+]
+
+{ #category : #hierarchy }
+Behavior >> withAllSuperclasses [
+	^ (OrderedCollection with: self) addAll: self allSuperclasses; yourself
+]
+
+{ #category : #'instance creation' }
+Behavior >> basicNew [
+	<primitive: 4>
+	^ self error: 'cannot make an instance of ' , self name
+]
+
+{ #category : #'instance creation' }
+Behavior >> basicNew: size [
+	<primitive: 3>
+	^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots'
+]
+
+{ #category : #'instance creation' }
+Behavior >> new [
+	^ self basicNew initialize
+]
+
+{ #category : #'instance creation' }
+Behavior >> new: size [
+	^ (self basicNew: size) initialize
+]
+
+{ #category : #methods }
+Behavior >> >> aSymbol [
+	^ self compiledMethodAt: aSymbol
+]
+
+{ #category : #methods }
+Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
+	"Install a method (verified by the VM against this class) and note its pragmas."
+	| old |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
+	old := self compiledMethodAt: aSymbol ifAbsent: [nil].
+	self primAddSelector: aSymbol withMethod: aCompiledMethod.
+	Pragma noteRemoved: old; noteInstalled: aCompiledMethod
+]
+
+{ #category : #methods }
+Behavior >> canUnderstand: aSymbol [
+	^ (self lookupSelector: aSymbol) notNil
+]
+
+{ #category : #methods }
+Behavior >> compiledMethodAt: aSymbol [
+	^ self compiledMethodAt: aSymbol ifAbsent: [self error: self name , ' has no method ' , aSymbol]
+]
+
+{ #category : #methods }
+Behavior >> compiledMethodAt: aSymbol ifAbsent: aBlock [
+	| d |
+	d := self methodDictionary.
+	d == nil ifTrue: [^ aBlock value].
+	1 to: d basicSize by: 2 do: [:i | (d slotAt: i) == aSymbol ifTrue: [^ d slotAt: i + 1]].
+	^ aBlock value
+]
+
+{ #category : #methods }
+Behavior >> includesSelector: aSymbol [
+	^ (self compiledMethodAt: aSymbol ifAbsent: [nil]) notNil
+]
+
+{ #category : #methods }
+Behavior >> lookupSelector: aSymbol [
+	| c |
+	c := self.
+	[c == nil] whileFalse: [
+		(c compiledMethodAt: aSymbol ifAbsent: [nil]) ifNotNil: [:m | ^ m].
+		c := c superclass].
+	^ nil
+]
+
+{ #category : #methods }
+Behavior >> methodsDo: aBlock [
+	| d |
+	d := self methodDictionary.
+	d == nil ifTrue: [^ self].
+	1 to: d basicSize by: 2 do: [:i | (d slotAt: i) == nil ifFalse: [aBlock value: (d slotAt: i + 1)]]
+]
+
+{ #category : #methods }
+Behavior >> primAddSelector: aSymbol withMethod: aCompiledMethod [
+	"Fails in a release image, for a sealed class (or its class side), or for a method not made for this class and selector."
+	<primitive: 97>
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
+	^ self error: 'the VM refused the method ' , aSymbol printString , ' for ' , self printString
+]
+
+{ #category : #methods }
+Behavior >> primRemoveSelector: aSymbol [
+	<primitive: 98>
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
+	^ self error: 'cannot remove ' , aSymbol printString , ' from ' , self printString
+]
+
+{ #category : #methods }
+Behavior >> removeSelector: aSymbol [
+	| old |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
+	old := self compiledMethodAt: aSymbol ifAbsent: [^ nil].
+	self primRemoveSelector: aSymbol.
+	Pragma noteRemoved: old.
+	Smalltalk forgetSourceOf: old.
+	Smalltalk forgetCategoryOf: aSymbol in: self.
+	^ old
+]
+
+{ #category : #methods }
+Behavior >> selectors [
+	"The selectors of the receiver's own methods, an Array."
+	| d out |
+	d := self methodDictionary.
+	d == nil ifTrue: [^ #()].
+	out := OrderedCollection new.
+	1 to: d basicSize by: 2 do: [:i | | k | k := d slotAt: i. k == nil ifFalse: [out add: k]].
+	^ out asArray
+]
+
+{ #category : #organization }
+Behavior >> categories [
+	"The categories of this class's methods, sorted."
+	^ self organization keys asArray sort: [:a :b | a <= b]
 ]
 
 { #category : #organization }
@@ -214,116 +296,39 @@ Behavior >> organization [
 ]
 
 { #category : #organization }
-Behavior >> categories [
-	"The categories of this class's methods, sorted."
-	^ self organization keys asArray sort: [:a :b | a <= b]
-]
-
-{ #category : #organization }
 Behavior >> selectorsInCategory: aCategory [
 	"The selectors filed under aCategory (a String or Symbol), sorted."
 	^ self organization at: aCategory asSymbol ifAbsent: [#()]
 ]
 
-{ #category : #methods }
-Behavior >> primAddSelector: aSymbol withMethod: aCompiledMethod [
-	"Fails in a release image, for a sealed class (or its class side), or for a method not made for this class and selector."
-	<primitive: 97>
-	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
-	^ self error: 'the VM refused the method ' , aSymbol printString , ' for ' , self printString
+{ #category : #printing }
+Behavior >> printOn: aStream [
+	aStream nextPutAll: self name
 ]
 
-{ #category : #methods }
-Behavior >> primRemoveSelector: aSymbol [
-	<primitive: 98>
-	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
-	^ self error: 'cannot remove ' , aSymbol printString , ' from ' , self printString
+{ #category : #testing }
+Behavior >> includesBehavior: aClass [
+	^ self == aClass or: [self inheritsFrom: aClass]
 ]
 
-{ #category : #'class variables' }
-Behavior >> classPoolBindings [
-	"The Bindings of the class variables this class declares (its metaclass's pool, module 8d), an Array."
-	^ (self theNonMetaClass class slotAt: 7) ifNil: [#()]
-]
-
-{ #category : #'class variables' }
-Behavior >> classVarNames [
-	"The names of the class variables this class declares, Symbols."
-	^ self classPoolBindings collect: [:b | b key]
-]
-
-{ #category : #'class variables' }
-Behavior >> classPool [
-	"This class's own class variables: a new IdentityDictionary from each name to its Binding."
-	| d |
-	d := IdentityDictionary new.
-	self classPoolBindings do: [:b | d at: b key put: b].
-	^ d
-]
-
-{ #category : #'class variables' }
-Behavior >> classVariableNamed: aString [
-	"The Binding of the class variable aString names that this class sees (its own, then its superclasses'), or nil. The class side sees the same."
-	| sym c |
-	sym := Symbol lookup: aString.
-	sym isNil ifTrue: [^ nil].
-	c := self theNonMetaClass.
-	[c == nil] whileFalse: [
-		c classPoolBindings do: [:b | b key == sym ifTrue: [^ b]].
-		c := c superclass].
-	^ nil
-]
-
-{ #category : #'class variables' }
-Behavior >> bindingOf: aString [
-	"The Binding a method of this class reaches through the name aString: a class variable's, or nil (classes are not bound; Smalltalk at: answers them)."
-	^ self classVariableNamed: aString
-]
-
-{ #category : #'class variables' }
-Behavior >> classVariableOwnerOf: aString [
-	"The class that declares the class variable aString names, as this class sees it, or nil."
-	| sym c |
-	sym := Symbol lookup: aString.
-	sym isNil ifTrue: [^ nil].
-	c := self theNonMetaClass.
-	[c == nil] whileFalse: [
-		(c classPoolBindings anySatisfy: [:b | b key == sym]) ifTrue: [^ c].
-		c := c superclass].
-	^ nil
-]
-
-{ #category : #hierarchy }
-Behavior >> allSuperclasses [
-	| out c |
-	out := OrderedCollection new.
+{ #category : #testing }
+Behavior >> inheritsFrom: aClass [
+	| c |
 	c := self superclass.
-	[c == nil] whileFalse: [out add: c. c := c superclass].
-	^ out
+	[c == nil] whileFalse: [
+		c == aClass ifTrue: [^ true].
+		c := c superclass].
+	^ false
 ]
 
-{ #category : #hierarchy }
-Behavior >> withAllSuperclasses [
-	^ (OrderedCollection with: self) addAll: self allSuperclasses; yourself
+{ #category : #testing }
+Behavior >> isBehavior [
+	^ true
 ]
 
-{ #category : #hierarchy }
-Behavior >> subclasses [
-	^ (Smalltalk allClasses select: [:c | c superclass == self]) asArray
-]
-
-{ #category : #hierarchy }
-Behavior >> allSubclasses [
-	| out |
-	out := OrderedCollection new.
-	Smalltalk allClasses do: [:c | (c inheritsFrom: self) ifTrue: [out add: c]].
-	^ out
-]
-
-{ #category : #hierarchy }
-Behavior >> withAllSubclasses [
-	"The receiver, then every class that inherits from it, each after its superclass."
-	^ (OrderedCollection with: self) addAll: (self allSubclasses asArray sort: [:a :b | a allSuperclasses size <= b allSuperclasses size]); yourself
+{ #category : #testing }
+Behavior >> isMeta [
+	^ false
 ]
 
 { #category : #testing }
@@ -332,12 +337,7 @@ Behavior >> isObsolete [
 	^ self isMeta not and: [self name beginsWith: 'AnObsolete']
 ]
 
-{ #category : #hierarchy }
-Behavior >> allInstVarNames [
-	^ Smalltalk instanceVariableNamesOf: self
-]
-
-{ #category : #printing }
-Behavior >> printOn: aStream [
-	aStream nextPutAll: self name
+{ #category : #compiling }
+Behavior class >> defaultCategory [
+	^ #'as yet unclassified'
 ]

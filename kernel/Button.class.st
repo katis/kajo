@@ -8,14 +8,9 @@ Class {
 	#category : #'Kernel-UI'
 }
 
-{ #category : #registry }
-Button class >> kind [
-	^ 'button'
-]
-
 { #category : #accessing }
-Button >> title: aString [
-	self set: 'title' to: aString
+Button >> action: aBlock [
+	action := aBlock
 ]
 
 { #category : #accessing }
@@ -24,8 +19,8 @@ Button >> title [
 ]
 
 { #category : #accessing }
-Button >> action: aBlock [
-	action := aBlock
+Button >> title: aString [
+	self set: 'title' to: aString
 ]
 
 { #category : #events }
@@ -37,4 +32,9 @@ Button >> click [
 { #category : #events }
 Button >> handleEvent: anEvent [
 	anEvent kind == #click ifTrue: [self click]
+]
+
+{ #category : #registry }
+Button class >> kind [
+	^ 'button'
 ]

@@ -11,6 +11,24 @@ ClassVariableTest >> tearDown [
 ]
 
 { #category : #tests }
+ClassVariableTest >> testABecomeOfTheValue [
+	| a b |
+	a := Array with: 1.
+	b := Array with: 2 with: 3.
+	ClassVariableSample count: a.
+	a become: b.
+	self assert: ClassVariableSample count size = 2.
+	self assert: (ClassVariableSample bindingOf: #Count) value == a
+]
+
+{ #category : #tests }
+ClassVariableTest >> testAnUnrelatedClassDoesNotSeeIt [
+	self should: [Compiler compile: 'f ^ Count' in: Object] raise: CompileError.
+	self should: [Compiler compile: 'f ^ Count' in: Object class] raise: CompileError.
+	self assert: (Compiler compile: 'f ^ Count' in: ClassVariableSampleChild class) notNil
+]
+
+{ #category : #tests }
 ClassVariableTest >> testBothSidesAndSubclassesShareIt [
 	ClassVariableSample reset.
 	ClassVariableSample new bump.
@@ -20,13 +38,6 @@ ClassVariableTest >> testBothSidesAndSubclassesShareIt [
 	self assert: ClassVariableSample new count = 3.
 	ClassVariableSample count: 10.
 	self assert: ClassVariableSampleChild new count = 10
-]
-
-{ #category : #tests }
-ClassVariableTest >> testAnUnrelatedClassDoesNotSeeIt [
-	self should: [Compiler compile: 'f ^ Count' in: Object] raise: CompileError.
-	self should: [Compiler compile: 'f ^ Count' in: Object class] raise: CompileError.
-	self assert: (Compiler compile: 'f ^ Count' in: ClassVariableSampleChild class) notNil
 ]
 
 { #category : #tests }
@@ -64,15 +75,4 @@ ClassVariableTest >> testTheLiteralIsTheBinding [
 	self assert: code literals first == b.
 	code := Compiler compile: (Smalltalk sourceOf: ClassVariableSample >> #bump) in: ClassVariableSample.
 	self assert: (code matches: ClassVariableSample >> #bump) isNil
-]
-
-{ #category : #tests }
-ClassVariableTest >> testABecomeOfTheValue [
-	| a b |
-	a := Array with: 1.
-	b := Array with: 2 with: 3.
-	ClassVariableSample count: a.
-	a become: b.
-	self assert: ClassVariableSample count size = 2.
-	self assert: (ClassVariableSample bindingOf: #Count) value == a
 ]

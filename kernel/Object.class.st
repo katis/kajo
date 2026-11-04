@@ -5,196 +5,9 @@ Class {
 	#category : #'Kernel-Objects'
 }
 
-{ #category : #comparing }
-Object >> == anObject [
-	"Identity. The VM answers it inline; this method serves perform:."
-	<primitive: 18>
-	^ self primitiveFailed
-]
-
-{ #category : #comparing }
-Object >> ~~ anObject [
-	^ (self == anObject) not
-]
-
-{ #category : #comparing }
-Object >> = anObject [
-	^ self == anObject
-]
-
-{ #category : #comparing }
-Object >> ~= anObject [
-	^ (self = anObject) not
-]
-
-{ #category : #comparing }
-Object >> hash [
-	^ self identityHash
-]
-
-{ #category : #comparing }
-Object >> identityHash [
-	<primitive: 19>
-	^ self primitiveFailed
-]
-
-{ #category : #'class membership' }
-Object >> class [
-	<primitive: 5>
-	^ self primitiveFailed
-]
-
-{ #category : #'class membership' }
-Object >> isKindOf: aClass [
-	| c |
-	c := self class.
-	[c == nil] whileFalse: [
-		c == aClass ifTrue: [^ true].
-		c := c superclass].
-	^ false
-]
-
-{ #category : #'class membership' }
-Object >> isMemberOf: aClass [
-	^ self class == aClass
-]
-
-{ #category : #'class membership' }
-Object >> respondsTo: aSymbol [
-	<primitive: 90>
-	^ false
-]
-
-{ #category : #testing }
-Object >> isNil [
-	^ false
-]
-
-{ #category : #testing }
-Object >> notNil [
-	^ true
-]
-
-{ #category : #testing }
-Object >> isString [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isSymbol [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isNumber [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isInteger [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isFloat [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isFraction [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isCharacter [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isArray [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isCollection [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isBlock [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isBehavior [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isClass [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isContext [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isCompiledMethod [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isBoolean [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isLiteral [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isEmptyOrNil [
-	^ false
-]
-
-{ #category : #testing }
-Object >> isReadOnly [
-	"Immediates are read-only; method literals are."
-	<primitive: 94>
-	^ self primitiveFailed
-]
-
-{ #category : #'nil handling' }
-Object >> ifNil: nilBlock [
-	^ self
-]
-
-{ #category : #'nil handling' }
-Object >> ifNotNil: aBlock [
-	^ aBlock cull: self
-]
-
-{ #category : #'nil handling' }
-Object >> ifNil: nilBlock ifNotNil: aBlock [
-	^ aBlock cull: self
-]
-
-{ #category : #'nil handling' }
-Object >> ifNotNil: aBlock ifNil: nilBlock [
-	^ aBlock cull: self
-]
-
 { #category : #accessing }
-Object >> yourself [
-	^ self
-]
-
-{ #category : #accessing }
-Object >> value [
-	^ self
+Object >> -> anObject [
+	^ Association key: self value: anObject
 ]
 
 { #category : #accessing }
@@ -228,9 +41,8 @@ Object >> basicSize [
 ]
 
 { #category : #accessing }
-Object >> size [
-	<primitive: 95>
-	^ 0
+Object >> in: aBlock [
+	^ aBlock value: self
 ]
 
 { #category : #accessing }
@@ -246,42 +58,79 @@ Object >> instVarAt: index put: anObject [
 ]
 
 { #category : #accessing }
-Object >> in: aBlock [
-	^ aBlock value: self
+Object >> size [
+	<primitive: 95>
+	^ 0
 ]
 
 { #category : #accessing }
-Object >> -> anObject [
-	^ Association key: self value: anObject
+Object >> value [
+	^ self
 ]
 
-{ #category : #'read-only' }
-Object >> setReadOnly: aBoolean [
-	"Answer whether the receiver was read-only."
-	<primitive: 93>
-	^ self error: 'this object cannot change its read-only state'
+{ #category : #accessing }
+Object >> yourself [
+	^ self
 ]
 
-{ #category : #'read-only' }
-Object >> beReadOnly [
-	self setReadOnly: true
-]
-
-{ #category : #'read-only' }
-Object >> beWritable [
-	self setReadOnly: false
-]
-
-{ #category : #'read-only' }
-Object >> modificationForbiddenAt: index value: aValue [
-	"The VM sends this to a read-only object when a store into it is refused (index 1-based)."
-	^ ModificationForbidden new object: self index: index value: aValue; signal
-]
-
-{ #category : #copying }
-Object >> shallowCopy [
-	<primitive: 96>
+{ #category : #'class membership' }
+Object >> class [
+	<primitive: 5>
 	^ self primitiveFailed
+]
+
+{ #category : #'class membership' }
+Object >> isKindOf: aClass [
+	| c |
+	c := self class.
+	[c == nil] whileFalse: [
+		c == aClass ifTrue: [^ true].
+		c := c superclass].
+	^ false
+]
+
+{ #category : #'class membership' }
+Object >> isMemberOf: aClass [
+	^ self class == aClass
+]
+
+{ #category : #'class membership' }
+Object >> respondsTo: aSymbol [
+	<primitive: 90>
+	^ false
+]
+
+{ #category : #comparing }
+Object >> = anObject [
+	^ self == anObject
+]
+
+{ #category : #comparing }
+Object >> == anObject [
+	"Identity. The VM answers it inline; this method serves perform:."
+	<primitive: 18>
+	^ self primitiveFailed
+]
+
+{ #category : #comparing }
+Object >> hash [
+	^ self identityHash
+]
+
+{ #category : #comparing }
+Object >> identityHash [
+	<primitive: 19>
+	^ self primitiveFailed
+]
+
+{ #category : #comparing }
+Object >> ~= anObject [
+	^ (self = anObject) not
+]
+
+{ #category : #comparing }
+Object >> ~~ anObject [
+	^ (self == anObject) not
 ]
 
 { #category : #copying }
@@ -292,6 +141,70 @@ Object >> copy [
 { #category : #copying }
 Object >> postCopy [
 	^ self
+]
+
+{ #category : #copying }
+Object >> shallowCopy [
+	<primitive: 96>
+	^ self primitiveFailed
+]
+
+{ #category : #'error handling' }
+Object >> assert: aBlockOrBoolean [
+	aBlockOrBoolean value ifFalse: [^ AssertionFailure new signal: 'assertion failed']
+]
+
+{ #category : #'error handling' }
+Object >> error: aString [
+	^ Error new signal: aString
+]
+
+{ #category : #'error handling' }
+Object >> halt [
+	^ Halt new signal
+]
+
+{ #category : #'error handling' }
+Object >> indexError: index [
+	index isInteger ifFalse: [^ self error: 'index ' , index printString , ' is not an integer'].
+	^ SubscriptOutOfBounds signalFor: index in: self
+]
+
+{ #category : #'error handling' }
+Object >> methodRemovedByRedefinition [
+	"Sent by a method that ran after a redefinition of its class replaced it by nothing (an old closure's block, a removed method): its class's shape changed under it (module 8e)."
+	^ self error: 'a method of ' , self class name , ' that a class redefinition removed ran'
+]
+
+{ #category : #'error handling' }
+Object >> primitiveFailed [
+	^ PrimitiveFailed new signal: 'a primitive failed in ' , thisContext sender method printString
+]
+
+{ #category : #'error handling' }
+Object >> shouldNotImplement [
+	^ self error: thisContext sender method printString , ' is not part of this class''s protocol'
+]
+
+{ #category : #'error handling' }
+Object >> subclassResponsibility [
+	^ self error: 'a subclass should have implemented ' , thisContext sender method printString
+]
+
+{ #category : #initialization }
+Object >> initialize [
+	^ self
+]
+
+{ #category : #'message handling' }
+Object >> become: anObject [
+	<primitive: 8>
+	^ self error: 'become: refused'
+]
+
+{ #category : #'message handling' }
+Object >> doesNotUnderstand: aMessage [
+	^ MessageNotUnderstood new message: aMessage receiver: self; signal
 ]
 
 { #category : #'message handling' }
@@ -320,51 +233,49 @@ Object >> perform: aSymbol withArguments: anArray [
 	^ self doesNotUnderstand: (Message selector: aSymbol arguments: anArray)
 ]
 
-{ #category : #'message handling' }
-Object >> doesNotUnderstand: aMessage [
-	^ MessageNotUnderstood new message: aMessage receiver: self; signal
+{ #category : #'nil handling' }
+Object >> ifNil: nilBlock [
+	^ self
 ]
 
-{ #category : #'message handling' }
-Object >> become: anObject [
-	<primitive: 8>
-	^ self error: 'become: refused'
+{ #category : #'nil handling' }
+Object >> ifNil: nilBlock ifNotNil: aBlock [
+	^ aBlock cull: self
 ]
 
-{ #category : #'error handling' }
-Object >> error: aString [
-	^ Error new signal: aString
+{ #category : #'nil handling' }
+Object >> ifNotNil: aBlock [
+	^ aBlock cull: self
 ]
 
-{ #category : #'error handling' }
-Object >> primitiveFailed [
-	^ PrimitiveFailed new signal: 'a primitive failed in ' , thisContext sender method printString
+{ #category : #'nil handling' }
+Object >> ifNotNil: aBlock ifNil: nilBlock [
+	^ aBlock cull: self
 ]
 
-{ #category : #'error handling' }
-Object >> subclassResponsibility [
-	^ self error: 'a subclass should have implemented ' , thisContext sender method printString
+{ #category : #printing }
+Object >> asString [
+	^ self printString
 ]
 
-{ #category : #'error handling' }
-Object >> shouldNotImplement [
-	^ self error: thisContext sender method printString , ' is not part of this class''s protocol'
+{ #category : #printing }
+Object >> displayNl [
+	Transcript show: self displayString; cr
 ]
 
-{ #category : #'error handling' }
-Object >> indexError: index [
-	index isInteger ifFalse: [^ self error: 'index ' , index printString , ' is not an integer'].
-	^ SubscriptOutOfBounds signalFor: index in: self
+{ #category : #printing }
+Object >> displayOn: aStream [
+	aStream nextPutAll: self displayString
 ]
 
-{ #category : #'error handling' }
-Object >> assert: aBlockOrBoolean [
-	aBlockOrBoolean value ifFalse: [^ AssertionFailure new signal: 'assertion failed']
+{ #category : #printing }
+Object >> displayString [
+	^ self printString
 ]
 
-{ #category : #'error handling' }
-Object >> halt [
-	^ Halt new signal
+{ #category : #printing }
+Object >> printNl [
+	Transcript show: self printString; cr
 ]
 
 { #category : #printing }
@@ -382,38 +293,6 @@ Object >> printString [
 	^ s contents
 ]
 
-{ #category : #printing }
-Object >> displayString [
-	^ self printString
-]
-
-{ #category : #printing }
-Object >> displayOn: aStream [
-	aStream nextPutAll: self displayString
-]
-
-{ #category : #printing }
-Object >> asString [
-	^ self printString
-]
-
-{ #category : #printing }
-Object >> displayNl [
-	Transcript show: self displayString; cr
-]
-
-{ #category : #printing }
-Object >> printNl [
-	Transcript show: self printString; cr
-]
-
-{ #category : #processes }
-Object >> fork: aSelector with: anArgument priority: aPriority main: aBoolean exit: aSemaphoreOrNil [
-	"A new Process sending aSelector (no primitive, at most one argument) to the receiver."
-	<primitive: 20>
-	^ self error: 'cannot fork ' , aSelector printString
-]
-
 { #category : #processes }
 Object >> delay: milliseconds signal: aSemaphore [
 	<primitive: 25>
@@ -428,19 +307,140 @@ Object >> emitEvent: kind fields: anArray [
 ]
 
 { #category : #processes }
+Object >> fork: aSelector with: anArgument priority: aPriority main: aBoolean exit: aSemaphoreOrNil [
+	"A new Process sending aSelector (no primitive, at most one argument) to the receiver."
+	<primitive: 20>
+	^ self error: 'cannot fork ' , aSelector printString
+]
+
+{ #category : #processes }
 Object >> slotAt: index [
 	"Read a pointer slot of any object, sealed ones included (classes, methods, Processes)."
 	<primitive: 117>
 	^ self indexError: index
 ]
 
-{ #category : #initialization }
-Object >> initialize [
-	^ self
+{ #category : #'read-only' }
+Object >> beReadOnly [
+	self setReadOnly: true
 ]
 
-{ #category : #'error handling' }
-Object >> methodRemovedByRedefinition [
-	"Sent by a method that ran after a redefinition of its class replaced it by nothing (an old closure's block, a removed method): its class's shape changed under it (module 8e)."
-	^ self error: 'a method of ' , self class name , ' that a class redefinition removed ran'
+{ #category : #'read-only' }
+Object >> beWritable [
+	self setReadOnly: false
+]
+
+{ #category : #'read-only' }
+Object >> modificationForbiddenAt: index value: aValue [
+	"The VM sends this to a read-only object when a store into it is refused (index 1-based)."
+	^ ModificationForbidden new object: self index: index value: aValue; signal
+]
+
+{ #category : #'read-only' }
+Object >> setReadOnly: aBoolean [
+	"Answer whether the receiver was read-only."
+	<primitive: 93>
+	^ self error: 'this object cannot change its read-only state'
+]
+
+{ #category : #testing }
+Object >> isArray [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isBehavior [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isBlock [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isBoolean [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isCharacter [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isClass [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isCollection [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isCompiledMethod [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isContext [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isEmptyOrNil [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isFloat [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isFraction [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isInteger [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isLiteral [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isNil [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isNumber [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isReadOnly [
+	"Immediates are read-only; method literals are."
+	<primitive: 94>
+	^ self primitiveFailed
+]
+
+{ #category : #testing }
+Object >> isString [
+	^ false
+]
+
+{ #category : #testing }
+Object >> isSymbol [
+	^ false
+]
+
+{ #category : #testing }
+Object >> notNil [
+	^ true
 ]

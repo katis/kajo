@@ -6,6 +6,16 @@ Class {
 }
 
 { #category : #accessing }
+SUnitTest >> testFilterPatterns [
+	| runner |
+	runner := TestRunner new.
+	self assert: (runner name: 'FooTest>>testBar' matches: 'Bar').
+	self assert: (runner name: 'FooTest>>testBar' matches: 'Foo*Bar').
+	self deny: (runner name: 'FooTest>>testBar' matches: 'Foo*Baz').
+	self assert: (runner name: 'FooTest>>testBar' matches: '*')
+]
+
+{ #category : #accessing }
 SUnitTest >> testOutcomes [
 	| r |
 	r := (SUnitSample selector: #testPass) run.
@@ -41,14 +51,4 @@ SUnitTest >> testSuite [
 	r := SUnitSample suite run.
 	self assert: r runCount = SUnitSample testSelectors size.
 	self assert: r printString notEmpty
-]
-
-{ #category : #accessing }
-SUnitTest >> testFilterPatterns [
-	| runner |
-	runner := TestRunner new.
-	self assert: (runner name: 'FooTest>>testBar' matches: 'Bar').
-	self assert: (runner name: 'FooTest>>testBar' matches: 'Foo*Bar').
-	self deny: (runner name: 'FooTest>>testBar' matches: 'Foo*Baz').
-	self assert: (runner name: 'FooTest>>testBar' matches: '*')
 ]

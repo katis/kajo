@@ -30,18 +30,6 @@ LiveCompileTest >> testCompileCallReplaceRemove [
 ]
 
 { #category : #tests }
-LiveCompileTest >> testInstanceVariablesBlocksAndTheClassSide [
-	| s |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	LiveSample compile: 'liveValue: x value := x'.
-	LiveSample compile: 'liveValue ^ [:k | value + k] value: 1'.
-	LiveSample class compile: 'liveMade ^ self new liveValue: 9; yourself'.
-	s := LiveSample liveMade.
-	self assert: s liveValue = 10.
-	self assert: (LiveSample class >> #liveMade) methodClass == LiveSample class
-]
-
-{ #category : #tests }
 LiveCompileTest >> testCompileKeepsThePragmaIndex [
 	| m |
 	Smalltalk isReleaseImage ifTrue: [^ self].
@@ -69,6 +57,39 @@ LiveCompileTest >> testEvaluate [
 	self deny: (Array includesSelector: #DoIt).
 	self should: [Compiler evaluate: '3 +'] raise: CompileError.
 	self should: [Compiler evaluate: 'undeclaredThing'] raise: CompileError
+]
+
+{ #category : #tests }
+LiveCompileTest >> testEveryMethodMakesAsInstalled [
+	"The stronger form of CompilerTest's comparison: every method of the image compiled by the compiler in Smalltalk, made by the VM (verified, not installed) and equal to the installed one."
+	<slow>
+	| checked failures |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	checked := 0.
+	failures := OrderedCollection new.
+	Smalltalk allBehaviors do: [:c |
+		c methodsDo: [:m | | code d |
+			code := Compiler compile: (Smalltalk sourceOf: m) in: c.
+			d := [| made |
+				made := code makeMethodIn: c.
+				(code matches: made) ifNil: [(made bytecodes = m bytecodes and: [made literals size = m literals size]) ifFalse: ['made differs']]]
+				on: Error do: [:e | 'error: ' , e messageText].
+			d ifNotNil: [:x | failures add: m printString , ': ' , x].
+			checked := checked + 1]].
+	self assert: checked > 1000.
+	self assert: failures isEmpty description: (failures isEmpty ifTrue: [''] ifFalse: [failures size printString , ' differ, the first: ' , failures first])
+]
+
+{ #category : #tests }
+LiveCompileTest >> testInstanceVariablesBlocksAndTheClassSide [
+	| s |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	LiveSample compile: 'liveValue: x value := x'.
+	LiveSample compile: 'liveValue ^ [:k | value + k] value: 1'.
+	LiveSample class compile: 'liveMade ^ self new liveValue: 9; yourself'.
+	s := LiveSample liveMade.
+	self assert: s liveValue = 10.
+	self assert: (LiveSample class >> #liveMade) methodClass == LiveSample class
 ]
 
 { #category : #tests }
@@ -133,25 +154,4 @@ LiveCompileTest >> testTheReleaseFlag [
 	self should: [Object addSelector: #printOn: withMethod: Object >> #printOn:] raise: InstallForbidden.
 	[LiveSample compile: 'liveAnswer ^ 1'] on: InstallForbidden do: [:e | self assert: (e messageText includesSubstring: 'release')].
 	self deny: (LiveSample includesSelector: #liveAnswer)
-]
-
-{ #category : #tests }
-LiveCompileTest >> testEveryMethodMakesAsInstalled [
-	"The stronger form of CompilerTest's comparison: every method of the image compiled by the compiler in Smalltalk, made by the VM (verified, not installed) and equal to the installed one."
-	<slow>
-	| checked failures |
-	Smalltalk isReleaseImage ifTrue: [^ self].
-	checked := 0.
-	failures := OrderedCollection new.
-	Smalltalk allBehaviors do: [:c |
-		c methodsDo: [:m | | code d |
-			code := Compiler compile: (Smalltalk sourceOf: m) in: c.
-			d := [| made |
-				made := code makeMethodIn: c.
-				(code matches: made) ifNil: [(made bytecodes = m bytecodes and: [made literals size = m literals size]) ifFalse: ['made differs']]]
-				on: Error do: [:e | 'error: ' , e messageText].
-			d ifNotNil: [:x | failures add: m printString , ': ' , x].
-			checked := checked + 1]].
-	self assert: checked > 1000.
-	self assert: failures isEmpty description: (failures isEmpty ifTrue: [''] ifFalse: [failures size printString , ' differ, the first: ' , failures first])
 ]

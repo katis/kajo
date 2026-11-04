@@ -10,45 +10,8 @@ Class {
 }
 
 { #category : #accessing }
-Transcript class >> initialize [
-	stream := WriteStream on: String new.
-	lock := Semaphore forMutualExclusion
-]
-
-{ #category : #accessing }
-Transcript class >> show: anObject [
-	lock critical: [stream nextPutAll: (anObject isString ifTrue: [anObject] ifFalse: [anObject displayString])]
-]
-
-{ #category : #accessing }
-Transcript class >> nextPutAll: aString [
-	self show: aString
-]
-
-{ #category : #accessing }
-Transcript class >> display: anObject [
-	self show: anObject displayString
-]
-
-{ #category : #accessing }
-Transcript class >> print: anObject [
-	self show: anObject printString
-]
-
-{ #category : #accessing }
-Transcript class >> nextPut: aCharacter [
-	aCharacter value = 10 | (aCharacter value = 13) ifTrue: [^ self cr].
-	self show: aCharacter asString
-]
-
-{ #category : #accessing }
-Transcript class >> space [
-	self show: ' '
-]
-
-{ #category : #accessing }
-Transcript class >> tab [
-	self show: (String with: Character tab)
+Transcript class >> contents [
+	^ lock critical: [stream contents]
 ]
 
 { #category : #accessing }
@@ -65,6 +28,11 @@ Transcript class >> crShow: anObject [
 ]
 
 { #category : #accessing }
+Transcript class >> display: anObject [
+	self show: anObject displayString
+]
+
+{ #category : #accessing }
 Transcript class >> flush [
 	| line |
 	lock critical: [line := stream contents. stream resetContents].
@@ -72,6 +40,38 @@ Transcript class >> flush [
 ]
 
 { #category : #accessing }
-Transcript class >> contents [
-	^ lock critical: [stream contents]
+Transcript class >> initialize [
+	stream := WriteStream on: String new.
+	lock := Semaphore forMutualExclusion
+]
+
+{ #category : #accessing }
+Transcript class >> nextPut: aCharacter [
+	aCharacter value = 10 | (aCharacter value = 13) ifTrue: [^ self cr].
+	self show: aCharacter asString
+]
+
+{ #category : #accessing }
+Transcript class >> nextPutAll: aString [
+	self show: aString
+]
+
+{ #category : #accessing }
+Transcript class >> print: anObject [
+	self show: anObject printString
+]
+
+{ #category : #accessing }
+Transcript class >> show: anObject [
+	lock critical: [stream nextPutAll: (anObject isString ifTrue: [anObject] ifFalse: [anObject displayString])]
+]
+
+{ #category : #accessing }
+Transcript class >> space [
+	self show: ' '
+]
+
+{ #category : #accessing }
+Transcript class >> tab [
+	self show: (String with: Character tab)
 ]

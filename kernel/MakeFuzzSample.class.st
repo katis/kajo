@@ -10,12 +10,8 @@ Class {
 }
 
 { #category : #samples }
-MakeFuzzSample >> sum: n [
-	| s |
-	s := 0.
-	1 to: n do: [:i | s := s + (i * 2)].
-	a := s.
-	^ s
+MakeFuzzSample >> classVariable [
+	^ ClassVariableSample count
 ]
 
 { #category : #samples }
@@ -39,15 +35,19 @@ MakeFuzzSample >> literals [
 ]
 
 { #category : #samples }
-MakeFuzzSample >> classVariable [
-	^ ClassVariableSample count
-]
-
-{ #category : #samples }
 MakeFuzzSample >> loops: x [
 	| k out |
 	k := 0.
 	out := OrderedCollection new.
 	[k < x] whileTrue: [| u | k := k + 1. u := k. out add: [u := u * 2]].
 	^ (out collect: [:blk | blk value]) inject: 0 into: [:p :q | p + q]
+]
+
+{ #category : #samples }
+MakeFuzzSample >> sum: n [
+	| s |
+	s := 0.
+	1 to: n do: [:i | s := s + (i * 2)].
+	a := s.
+	^ s
 ]

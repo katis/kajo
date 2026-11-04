@@ -12,14 +12,42 @@ Class {
 }
 
 { #category : #accessing }
-UIEvent class >> kinds [
-	"By the shell's number (ShellEventKind)."
-	^ #(#click #valueChanged #close #frame #synthetic #text)
+UIEvent >> age [
+	"Microseconds since the event happened."
+	^ Smalltalk microsecondClock - time
 ]
 
 { #category : #accessing }
-UIEvent class >> kind: aSymbol target: aHandle value: anObject time: microseconds [
-	^ self basicNew setKind: aSymbol target: aHandle value: anObject time: microseconds
+UIEvent >> kind [
+	^ kind
+]
+
+{ #category : #accessing }
+UIEvent >> setKind: aSymbol target: aHandle value: anObject time: microseconds [
+	kind := aSymbol.
+	target := aHandle.
+	value := anObject.
+	time := microseconds
+]
+
+{ #category : #accessing }
+UIEvent >> target [
+	^ target
+]
+
+{ #category : #accessing }
+UIEvent >> time [
+	^ time
+]
+
+{ #category : #accessing }
+UIEvent >> value [
+	^ value
+]
+
+{ #category : #printing }
+UIEvent >> printOn: aStream [
+	aStream nextPutAll: 'a UIEvent('; print: kind; space; print: target; space; print: value; nextPut: $)
 ]
 
 { #category : #accessing }
@@ -35,40 +63,12 @@ UIEvent class >> fromArray: anArray [
 ]
 
 { #category : #accessing }
-UIEvent >> setKind: aSymbol target: aHandle value: anObject time: microseconds [
-	kind := aSymbol.
-	target := aHandle.
-	value := anObject.
-	time := microseconds
+UIEvent class >> kind: aSymbol target: aHandle value: anObject time: microseconds [
+	^ self basicNew setKind: aSymbol target: aHandle value: anObject time: microseconds
 ]
 
 { #category : #accessing }
-UIEvent >> kind [
-	^ kind
-]
-
-{ #category : #accessing }
-UIEvent >> target [
-	^ target
-]
-
-{ #category : #accessing }
-UIEvent >> value [
-	^ value
-]
-
-{ #category : #accessing }
-UIEvent >> time [
-	^ time
-]
-
-{ #category : #accessing }
-UIEvent >> age [
-	"Microseconds since the event happened."
-	^ Smalltalk microsecondClock - time
-]
-
-{ #category : #printing }
-UIEvent >> printOn: aStream [
-	aStream nextPutAll: 'a UIEvent('; print: kind; space; print: target; space; print: value; nextPut: $)
+UIEvent class >> kinds [
+	"By the shell's number (ShellEventKind)."
+	^ #(#click #valueChanged #close #frame #synthetic #text)
 ]

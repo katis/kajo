@@ -10,9 +10,8 @@ Class {
 }
 
 { #category : #accessing }
-MessageNotUnderstood >> message: aMessage receiver: anObject [
-	message := aMessage.
-	receiver := anObject
+MessageNotUnderstood >> isResumable [
+	^ true
 ]
 
 { #category : #accessing }
@@ -21,16 +20,17 @@ MessageNotUnderstood >> message [
 ]
 
 { #category : #accessing }
-MessageNotUnderstood >> receiver [
-	^ receiver
-]
-
-{ #category : #accessing }
-MessageNotUnderstood >> isResumable [
-	^ true
+MessageNotUnderstood >> message: aMessage receiver: anObject [
+	message := aMessage.
+	receiver := anObject
 ]
 
 { #category : #accessing }
 MessageNotUnderstood >> messageText [
 	^ receiver printString , ' does not understand #' , message selector
+]
+
+{ #category : #accessing }
+MessageNotUnderstood >> receiver [
+	^ receiver
 ]

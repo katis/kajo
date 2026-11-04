@@ -5,7 +5,12 @@ Class {
 }
 
 { #category : #accessing }
-True >> ifTrue: aBlock [
+True >> & aBoolean [
+	^ aBoolean
+]
+
+{ #category : #accessing }
+True >> and: aBlock [
 	^ aBlock value
 ]
 
@@ -15,28 +20,13 @@ True >> ifFalse: aBlock [
 ]
 
 { #category : #accessing }
-True >> ifTrue: trueBlock ifFalse: falseBlock [
-	^ trueBlock value
-]
-
-{ #category : #accessing }
-True >> and: aBlock [
+True >> ifTrue: aBlock [
 	^ aBlock value
 ]
 
 { #category : #accessing }
-True >> or: aBlock [
-	^ true
-]
-
-{ #category : #accessing }
-True >> & aBoolean [
-	^ aBoolean
-]
-
-{ #category : #accessing }
-True >> | aBoolean [
-	^ true
+True >> ifTrue: trueBlock ifFalse: falseBlock [
+	^ trueBlock value
 ]
 
 { #category : #accessing }
@@ -45,6 +35,16 @@ True >> not [
 ]
 
 { #category : #accessing }
+True >> or: aBlock [
+	^ true
+]
+
+{ #category : #accessing }
 True >> printOn: aStream [
 	aStream nextPutAll: 'true'
+]
+
+{ #category : #accessing }
+True >> | aBoolean [
+	^ true
 ]

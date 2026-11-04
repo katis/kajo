@@ -16,6 +16,11 @@ Binding >> key [
 ]
 
 { #category : #accessing }
+Binding >> key: aSymbol [
+	key := aSymbol
+]
+
+{ #category : #accessing }
 Binding >> value [
 	^ value
 ]
@@ -28,14 +33,14 @@ Binding >> value: anObject [
 	^ anObject
 ]
 
-{ #category : #accessing }
-Binding >> key: aSymbol [
-	key := aSymbol
+{ #category : #printing }
+Binding >> printOn: aStream [
+	aStream nextPutAll: key; nextPutAll: ' -> '; print: value
 ]
 
 { #category : #undeclared }
-Binding >> isUndeclared [
-	^ undeclared == true
+Binding >> beDeclared [
+	undeclared := nil
 ]
 
 { #category : #undeclared }
@@ -46,11 +51,6 @@ Binding >> beUndeclared [
 ]
 
 { #category : #undeclared }
-Binding >> beDeclared [
-	undeclared := nil
-]
-
-{ #category : #printing }
-Binding >> printOn: aStream [
-	aStream nextPutAll: key; nextPutAll: ' -> '; print: value
+Binding >> isUndeclared [
+	^ undeclared == true
 ]

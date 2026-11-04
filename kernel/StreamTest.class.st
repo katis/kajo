@@ -35,6 +35,22 @@ StreamTest >> testReadStreamOnString [
 ]
 
 { #category : #accessing }
+StreamTest >> testReadWriteStream [
+	| rw |
+	rw := ReadWriteStream on: String new.
+	rw nextPutAll: 'héllo'.
+	rw reset.
+	self assert: rw next == $h.
+	self assert: rw next value = 16rE9.
+	self assert: rw contents = 'héllo'.
+	rw := ReadWriteStream on: (Array new: 0).
+	rw nextPut: 1; nextPut: 2.
+	rw reset.
+	self assert: rw next = 1.
+	self assert: rw contents = #(1 2)
+]
+
+{ #category : #accessing }
 StreamTest >> testWriteStreamOnArray [
 	| w |
 	w := WriteStream on: (Array new: 0).
@@ -53,20 +69,4 @@ StreamTest >> testWriteStreamOnString [
 	w := WriteStream on: String new.
 	w << 'x = ' << 42.
 	self assert: w contents = 'x = 42'
-]
-
-{ #category : #accessing }
-StreamTest >> testReadWriteStream [
-	| rw |
-	rw := ReadWriteStream on: String new.
-	rw nextPutAll: 'héllo'.
-	rw reset.
-	self assert: rw next == $h.
-	self assert: rw next value = 16rE9.
-	self assert: rw contents = 'héllo'.
-	rw := ReadWriteStream on: (Array new: 0).
-	rw nextPut: 1; nextPut: 2.
-	rw reset.
-	self assert: rw next = 1.
-	self assert: rw contents = #(1 2)
 ]

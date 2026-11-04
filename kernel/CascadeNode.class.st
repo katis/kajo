@@ -10,8 +10,13 @@ Class {
 }
 
 { #category : #accessing }
-CascadeNode class >> receiver: r messages: m line: n [
-	^ self new setReceiver: r messages: m; line: n; yourself
+CascadeNode >> messages [
+	^ messages
+]
+
+{ #category : #accessing }
+CascadeNode >> receiver [
+	^ receiver
 ]
 
 { #category : #accessing }
@@ -21,11 +26,6 @@ CascadeNode >> setReceiver: r messages: m [
 ]
 
 { #category : #accessing }
-CascadeNode >> receiver [
-	^ receiver
-]
-
-{ #category : #accessing }
-CascadeNode >> messages [
-	^ messages
+CascadeNode class >> receiver: r messages: m line: n [
+	^ self new setReceiver: r messages: m; line: n; yourself
 ]

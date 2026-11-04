@@ -6,17 +6,6 @@ Class {
 }
 
 { #category : #accessing }
-WeakTest >> testWeakArrayLosesItsReferent [
-	| w |
-	w := WeakArray new: 2.
-	w at: 1 put: Object new.
-	w at: 2 put: self.
-	Smalltalk garbageCollect.
-	self assert: (w at: 1) isNil.
-	self assert: (w at: 2) == self
-]
-
-{ #category : #accessing }
 WeakTest >> testEphemeronIsMourned [
 	| done log |
 	done := Semaphore new.
@@ -35,4 +24,15 @@ WeakTest >> testEphemeronWithALiveKeyStays [
 	Smalltalk garbageCollect.
 	self assert: e key == key.
 	self assert: e value = 3
+]
+
+{ #category : #accessing }
+WeakTest >> testWeakArrayLosesItsReferent [
+	| w |
+	w := WeakArray new: 2.
+	w at: 1 put: Object new.
+	w at: 2 put: self.
+	Smalltalk garbageCollect.
+	self assert: (w at: 1) isNil.
+	self assert: (w at: 2) == self
 ]

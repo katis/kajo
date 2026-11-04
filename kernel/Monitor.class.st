@@ -10,8 +10,9 @@ Class {
 }
 
 { #category : #accessing }
-Monitor class >> new [
-	^ self basicNew setUp
+Monitor >> critical: aBlock [
+	mutex wait.
+	^ aBlock ensure: [mutex signal]
 ]
 
 { #category : #accessing }
@@ -21,9 +22,14 @@ Monitor >> setUp [
 ]
 
 { #category : #accessing }
-Monitor >> critical: aBlock [
-	mutex wait.
-	^ aBlock ensure: [mutex signal]
+Monitor >> signal [
+	"Inside critical: wake one waiter."
+	waiting isEmpty ifFalse: [waiting removeFirst signal]
+]
+
+{ #category : #accessing }
+Monitor >> signalAll [
+	[waiting isEmpty] whileFalse: [waiting removeFirst signal]
 ]
 
 { #category : #accessing }
@@ -38,12 +44,6 @@ Monitor >> wait [
 ]
 
 { #category : #accessing }
-Monitor >> signal [
-	"Inside critical: wake one waiter."
-	waiting isEmpty ifFalse: [waiting removeFirst signal]
-]
-
-{ #category : #accessing }
-Monitor >> signalAll [
-	[waiting isEmpty] whileFalse: [waiting removeFirst signal]
+Monitor class >> new [
+	^ self basicNew setUp
 ]

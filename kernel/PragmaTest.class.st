@@ -6,6 +6,22 @@ Class {
 }
 
 { #category : #accessing }
+PragmaTest >> testExpectedFailureTag [
+	<expectedFailure>
+	self assert: false
+]
+
+{ #category : #accessing }
+PragmaTest >> testIndex [
+	| all |
+	all := Pragma allNamed: #consumesPragmas:.
+	self assert: all size >= 2.
+	self assert: (all anySatisfy: [:p | p methodClass == TestCase class]).
+	self assert: ((Pragma allNamed: #consumesPragmas: in: TestCase class) size = 1).
+	self assert: (Pragma allNamed: #expectedFailure) notEmpty
+]
+
+{ #category : #accessing }
 PragmaTest >> testPragmasOfAMethod [
 	| m |
 	m := TestCase class >> #consumesPragmas.
@@ -21,22 +37,6 @@ PragmaTest >> testPragmasOfAMethod [
 PragmaTest >> testPrimitiveIsNotAPragmaLiteral [
 	self assert: (SmallInteger >> #+) pragmas isEmpty.
 	self assert: (SmallInteger >> #+) primitive = 40
-]
-
-{ #category : #accessing }
-PragmaTest >> testIndex [
-	| all |
-	all := Pragma allNamed: #consumesPragmas:.
-	self assert: all size >= 2.
-	self assert: (all anySatisfy: [:p | p methodClass == TestCase class]).
-	self assert: ((Pragma allNamed: #consumesPragmas: in: TestCase class) size = 1).
-	self assert: (Pragma allNamed: #expectedFailure) notEmpty
-]
-
-{ #category : #accessing }
-PragmaTest >> testExpectedFailureTag [
-	<expectedFailure>
-	self assert: false
 ]
 
 { #category : #accessing }

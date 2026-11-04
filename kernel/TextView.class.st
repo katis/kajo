@@ -5,11 +5,6 @@ Class {
 	#category : #'Kernel-UI'
 }
 
-{ #category : #registry }
-TextView class >> kind [
-	^ 'textView'
-]
-
 { #category : #accessing }
 TextView >> appendLine: aString [
 	self call: 'appendLine' with: {aString}
@@ -18,16 +13,6 @@ TextView >> appendLine: aString [
 { #category : #accessing }
 TextView >> clear [
 	self call: 'clear' with: #()
-]
-
-{ #category : #accessing }
-TextView >> text [
-	^ self get: 'text'
-]
-
-{ #category : #accessing }
-TextView >> text: aString [
-	self set: 'text' to: aString
 ]
 
 { #category : #accessing }
@@ -40,8 +25,23 @@ TextView >> headlessCall: aName with: anArray [
 	^ nil
 ]
 
+{ #category : #accessing }
+TextView >> text [
+	^ self get: 'text'
+]
+
+{ #category : #accessing }
+TextView >> text: aString [
+	self set: 'text' to: aString
+]
+
 { #category : #events }
 TextView >> handleEvent: anEvent [
 	"A text event (the shell's Transcript lines in the demo) appends its value as a line."
 	anEvent kind == #text ifTrue: [self appendLine: anEvent value displayString]
+]
+
+{ #category : #registry }
+TextView class >> kind [
+	^ 'textView'
 ]

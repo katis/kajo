@@ -12,30 +12,13 @@ Class {
 }
 
 { #category : #accessing }
-BlockNode class >> arguments: a temporaries: t statements: s line: n [
-	^ self new setArguments: a temporaries: t statements: s; line: n; yourself
-]
-
-{ #category : #accessing }
-BlockNode >> setArguments: a temporaries: t statements: s [
-	arguments := a.
-	temporaries := t.
-	statements := s
-]
-
-{ #category : #accessing }
 BlockNode >> arguments [
 	^ arguments
 ]
 
 { #category : #accessing }
-BlockNode >> temporaries [
-	^ temporaries
-]
-
-{ #category : #accessing }
-BlockNode >> statements [
-	^ statements
+BlockNode >> numArgs [
+	^ arguments size
 ]
 
 { #category : #accessing }
@@ -49,6 +32,23 @@ BlockNode >> scope: aScope [
 ]
 
 { #category : #accessing }
-BlockNode >> numArgs [
-	^ arguments size
+BlockNode >> setArguments: a temporaries: t statements: s [
+	arguments := a.
+	temporaries := t.
+	statements := s
+]
+
+{ #category : #accessing }
+BlockNode >> statements [
+	^ statements
+]
+
+{ #category : #accessing }
+BlockNode >> temporaries [
+	^ temporaries
+]
+
+{ #category : #accessing }
+BlockNode class >> arguments: a temporaries: t statements: s line: n [
+	^ self new setArguments: a temporaries: t statements: s; line: n; yourself
 ]

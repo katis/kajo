@@ -11,13 +11,13 @@ Magnitude >> < aMagnitude [
 ]
 
 { #category : #accessing }
-Magnitude >> > aMagnitude [
-	^ aMagnitude < self
+Magnitude >> <= aMagnitude [
+	^ (aMagnitude < self) not
 ]
 
 { #category : #accessing }
-Magnitude >> <= aMagnitude [
-	^ (aMagnitude < self) not
+Magnitude >> > aMagnitude [
+	^ aMagnitude < self
 ]
 
 { #category : #accessing }

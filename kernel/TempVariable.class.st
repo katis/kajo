@@ -16,59 +16,6 @@ Class {
 }
 
 { #category : #accessing }
-TempVariable class >> name: aString kind: aSymbol scope: aScope seq: n [
-	^ self new setName: aString kind: aSymbol scope: aScope seq: n
-]
-
-{ #category : #accessing }
-TempVariable >> setName: aString kind: aSymbol scope: aScope seq: n [
-	name := aString.
-	kind := aSymbol.
-	scope := aScope.
-	seq := n.
-	captured := false.
-	written := false.
-	index := -1.
-	vectorSlot := -1
-]
-
-{ #category : #accessing }
-TempVariable >> name [
-	^ name
-]
-
-{ #category : #accessing }
-TempVariable >> kind [
-	^ kind
-]
-
-{ #category : #accessing }
-TempVariable >> scope [
-	^ scope
-]
-
-{ #category : #accessing }
-TempVariable >> seq [
-	^ seq
-]
-
-{ #category : #accessing }
-TempVariable >> real [
-	^ scope real
-]
-
-{ #category : #accessing }
-TempVariable >> owner [
-	"The scope whose temp vector holds the variable when it is in one."
-	^ scope owner
-]
-
-{ #category : #accessing }
-TempVariable >> isCaptured [
-	^ captured
-]
-
-{ #category : #accessing }
 TempVariable >> beCaptured [
 	captured := true
 ]
@@ -94,6 +41,54 @@ TempVariable >> index: n [
 ]
 
 { #category : #accessing }
+TempVariable >> isCaptured [
+	^ captured
+]
+
+{ #category : #accessing }
+TempVariable >> kind [
+	^ kind
+]
+
+{ #category : #accessing }
+TempVariable >> name [
+	^ name
+]
+
+{ #category : #accessing }
+TempVariable >> owner [
+	"The scope whose temp vector holds the variable when it is in one."
+	^ scope owner
+]
+
+{ #category : #accessing }
+TempVariable >> real [
+	^ scope real
+]
+
+{ #category : #accessing }
+TempVariable >> scope [
+	^ scope
+]
+
+{ #category : #accessing }
+TempVariable >> seq [
+	^ seq
+]
+
+{ #category : #accessing }
+TempVariable >> setName: aString kind: aSymbol scope: aScope seq: n [
+	name := aString.
+	kind := aSymbol.
+	scope := aScope.
+	seq := n.
+	captured := false.
+	written := false.
+	index := -1.
+	vectorSlot := -1
+]
+
+{ #category : #accessing }
 TempVariable >> vectorSlot [
 	^ vectorSlot
 ]
@@ -101,4 +96,9 @@ TempVariable >> vectorSlot [
 { #category : #accessing }
 TempVariable >> vectorSlot: n [
 	vectorSlot := n
+]
+
+{ #category : #accessing }
+TempVariable class >> name: aString kind: aSymbol scope: aScope seq: n [
+	^ self new setName: aString kind: aSymbol scope: aScope seq: n
 ]

@@ -17,51 +17,8 @@ Class {
 }
 
 { #category : #accessing }
-CompiledCode >> setSelector: s bytecodes: b literals: l numArgs: a numTemps: t maxStack: m primitive: p flags: f numCopied: c [
-	selector := s.
-	bytecodes := b.
-	literals := l.
-	numArgs := a.
-	numTemps := t.
-	maxStack := m.
-	primitive := p.
-	flags := f.
-	numCopied := c
-]
-
-{ #category : #accessing }
-CompiledCode >> selector [
-	^ selector
-]
-
-{ #category : #accessing }
 CompiledCode >> bytecodes [
 	^ bytecodes
-]
-
-{ #category : #accessing }
-CompiledCode >> literals [
-	^ literals
-]
-
-{ #category : #accessing }
-CompiledCode >> numArgs [
-	^ numArgs
-]
-
-{ #category : #accessing }
-CompiledCode >> numTemps [
-	^ numTemps
-]
-
-{ #category : #accessing }
-CompiledCode >> maxStack [
-	^ maxStack
-]
-
-{ #category : #accessing }
-CompiledCode >> primitive [
-	^ primitive
 ]
 
 { #category : #accessing }
@@ -70,18 +27,24 @@ CompiledCode >> flags [
 ]
 
 { #category : #accessing }
-CompiledCode >> numCopied [
-	^ numCopied
-]
-
-{ #category : #accessing }
 CompiledCode >> isBlock [
 	^ (flags bitAnd: 4) ~= 0
 ]
 
 { #category : #accessing }
-CompiledCode >> needsHome [
-	^ (flags bitAnd: 8) ~= 0
+CompiledCode >> literal: mine matches: other [
+	(mine isKindOf: CompiledCode) ifTrue: [^ (mine matches: other) ifNotNil: [:d | 'block: ' , d]].
+	(mine isKindOf: Pragma) ifTrue: [
+		((other isKindOf: Pragma) and: [mine selector == other selector and: [BytecodeGenerator literal: mine arguments sameAs: other arguments]])
+			ifFalse: [^ 'pragma ' , mine selector].
+		^ nil].
+	(BytecodeGenerator literal: mine sameAs: other) ifFalse: [^ mine printString , ' against ' , other printString].
+	^ nil
+]
+
+{ #category : #accessing }
+CompiledCode >> literals [
+	^ literals
 ]
 
 { #category : #accessing }
@@ -105,6 +68,54 @@ CompiledCode >> matches: aCompiledMethod [
 	^ nil
 ]
 
+{ #category : #accessing }
+CompiledCode >> maxStack [
+	^ maxStack
+]
+
+{ #category : #accessing }
+CompiledCode >> needsHome [
+	^ (flags bitAnd: 8) ~= 0
+]
+
+{ #category : #accessing }
+CompiledCode >> numArgs [
+	^ numArgs
+]
+
+{ #category : #accessing }
+CompiledCode >> numCopied [
+	^ numCopied
+]
+
+{ #category : #accessing }
+CompiledCode >> numTemps [
+	^ numTemps
+]
+
+{ #category : #accessing }
+CompiledCode >> primitive [
+	^ primitive
+]
+
+{ #category : #accessing }
+CompiledCode >> selector [
+	^ selector
+]
+
+{ #category : #accessing }
+CompiledCode >> setSelector: s bytecodes: b literals: l numArgs: a numTemps: t maxStack: m primitive: p flags: f numCopied: c [
+	selector := s.
+	bytecodes := b.
+	literals := l.
+	numArgs := a.
+	numTemps := t.
+	maxStack := m.
+	primitive := p.
+	flags := f.
+	numCopied := c
+]
+
 { #category : #making }
 CompiledCode >> makeMethodIn: aBehavior [
 	"A CompiledMethod of aBehavior made by the VM from the receiver: verified by the one bytecode verifier (each block method too), its bytecodes copied, its literal frame read-only (module 8d). A refusal is a CompileError with the verifier's reason; a release image refuses with InstallForbidden."
@@ -119,15 +130,4 @@ CompiledCode >> primMakeMethodIn: aBehavior [
 	<primitive: 143>
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: aBehavior selector: selector; signal].
 	^ self error: 'cannot make a method of ' , aBehavior printString
-]
-
-{ #category : #accessing }
-CompiledCode >> literal: mine matches: other [
-	(mine isKindOf: CompiledCode) ifTrue: [^ (mine matches: other) ifNotNil: [:d | 'block: ' , d]].
-	(mine isKindOf: Pragma) ifTrue: [
-		((other isKindOf: Pragma) and: [mine selector == other selector and: [BytecodeGenerator literal: mine arguments sameAs: other arguments]])
-			ifFalse: [^ 'pragma ' , mine selector].
-		^ nil].
-	(BytecodeGenerator literal: mine sameAs: other) ifFalse: [^ mine printString , ' against ' , other printString].
-	^ nil
 ]

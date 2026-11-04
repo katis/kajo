@@ -9,6 +9,13 @@ Class {
 }
 
 { #category : #accessing }
+UnhandledError >> defaultAction [
+	Transcript show: 'Unhandled ' , exception printString; cr.
+	exception frames do: [:f | Transcript show: '	' , f; cr].
+	ProcessorScheduler terminateActive
+]
+
+{ #category : #accessing }
 UnhandledError >> exception [
 	^ exception
 ]
@@ -21,11 +28,4 @@ UnhandledError >> exception: anError [
 { #category : #accessing }
 UnhandledError >> isResumable [
 	^ false
-]
-
-{ #category : #accessing }
-UnhandledError >> defaultAction [
-	Transcript show: 'Unhandled ' , exception printString; cr.
-	exception frames do: [:f | Transcript show: '	' , f; cr].
-	ProcessorScheduler terminateActive
 ]

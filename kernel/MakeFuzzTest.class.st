@@ -5,21 +5,6 @@ Class {
 	#category : #'Kernel-Tests'
 }
 
-{ #category : #random }
-MakeFuzzTest >> next: seed [
-	^ seed * 1103515245 + 12345 \\ 2147483648
-]
-
-{ #category : #mutating }
-MakeFuzzTest >> copyOf: code [
-	"A deep copy: the bytecodes, the literals and the block methods are the copy's own."
-	| c |
-	c := code shallowCopy.
-	c instVarAt: 2 put: code bytecodes copy.
-	c instVarAt: 3 put: (code literals collect: [:l | (l isKindOf: CompiledCode) ifTrue: [self copyOf: l] ifFalse: [l]]).
-	^ c
-]
-
 { #category : #mutating }
 MakeFuzzTest >> codesIn: code [
 	"The method and its block methods, depth first."
@@ -30,9 +15,13 @@ MakeFuzzTest >> codesIn: code [
 ]
 
 { #category : #mutating }
-MakeFuzzTest >> strangers [
-	"Literals of the wrong class for wherever they land."
-	^ {42. -1. 'text'. nil. true. 3.5. $c. #foo:bar:. #+. Object. MakeFuzzSample class. ClassVariableSample bindingOf: #Count. Array new: 3. 1.0e300. 2 raisedTo: 70. MakeFuzzSample new. Semaphore new. ProcessorScheduler activeProcess. thisContext. [:x | x]. Object >> #printOn:. #(1 2) asOrderedCollection. ByteArray new: 2. Pragma selector: #foo: arguments: #(1 2)}
+MakeFuzzTest >> copyOf: code [
+	"A deep copy: the bytecodes, the literals and the block methods are the copy's own."
+	| c |
+	c := code shallowCopy.
+	c instVarAt: 2 put: code bytecodes copy.
+	c instVarAt: 3 put: (code literals collect: [:l | (l isKindOf: CompiledCode) ifTrue: [self copyOf: l] ifFalse: [l]]).
+	^ c
 ]
 
 { #category : #mutating }
@@ -76,6 +65,17 @@ MakeFuzzTest >> mutate: code seed: s0 [
 	^ c
 ]
 
+{ #category : #mutating }
+MakeFuzzTest >> strangers [
+	"Literals of the wrong class for wherever they land."
+	^ {42. -1. 'text'. nil. true. 3.5. $c. #foo:bar:. #+. Object. MakeFuzzSample class. ClassVariableSample bindingOf: #Count. Array new: 3. 1.0e300. 2 raisedTo: 70. MakeFuzzSample new. Semaphore new. ProcessorScheduler activeProcess. thisContext. [:x | x]. Object >> #printOn:. #(1 2) asOrderedCollection. ByteArray new: 2. Pragma selector: #foo: arguments: #(1 2)}
+]
+
+{ #category : #random }
+MakeFuzzTest >> next: seed [
+	^ seed * 1103515245 + 12345 \\ 2147483648
+]
+
 { #category : #running }
 MakeFuzzTest >> runOnce: aMethod [
 	"Run a made method once in a Process of its own, errors caught; one that loops is terminated after a while. True when it ended by itself."
@@ -85,15 +85,6 @@ MakeFuzzTest >> runOnce: aMethod [
 	200 timesRepeat: [p isTerminated ifTrue: [^ true]. ProcessorScheduler yield].
 	p terminate.
 	^ false
-]
-
-{ #category : #tests }
-MakeFuzzTest >> testTheSamplesMakeAndRun [
-	MakeFuzzSample selectors do: [:sel | | m |
-		m := (Compiler compile: (Smalltalk sourceOf: MakeFuzzSample >> sel) in: MakeFuzzSample) makeMethodIn: MakeFuzzSample.
-		self assert: ((Compiler compile: (Smalltalk sourceOf: MakeFuzzSample >> sel) in: MakeFuzzSample) matches: m) isNil.
-		self assert: (self runOnce: m)].
-	self assert: ((MakeFuzzSample >> #sum:) valueWithReceiver: MakeFuzzSample new arguments: #(3)) = 12
 ]
 
 { #category : #tests }
@@ -122,4 +113,13 @@ MakeFuzzTest >> testSeededMutationsAreRefusedOrRun [
 	self assert: made + refused = 1500.
 	self assert: refused > 500.
 	self assert: made > 50
+]
+
+{ #category : #tests }
+MakeFuzzTest >> testTheSamplesMakeAndRun [
+	MakeFuzzSample selectors do: [:sel | | m |
+		m := (Compiler compile: (Smalltalk sourceOf: MakeFuzzSample >> sel) in: MakeFuzzSample) makeMethodIn: MakeFuzzSample.
+		self assert: ((Compiler compile: (Smalltalk sourceOf: MakeFuzzSample >> sel) in: MakeFuzzSample) matches: m) isNil.
+		self assert: (self runOnce: m)].
+	self assert: ((MakeFuzzSample >> #sum:) valueWithReceiver: MakeFuzzSample new arguments: #(3)) = 12
 ]

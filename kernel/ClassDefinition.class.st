@@ -12,11 +12,6 @@ Class {
 	#category : #'Kernel-Classes'
 }
 
-{ #category : #'instance creation' }
-ClassDefinition class >> instVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString [
-	^ self new setInstVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString
-]
-
 { #category : #accessing }
 ClassDefinition >> category [
 	^ category
@@ -69,4 +64,9 @@ ClassDefinition >> setInstVarNames: ivars classInstVarNames: civars category: aC
 	category := aCategory.
 	kind := aKind.
 	comment := aString
+]
+
+{ #category : #'instance creation' }
+ClassDefinition class >> instVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString [
+	^ self new setInstVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString
 ]

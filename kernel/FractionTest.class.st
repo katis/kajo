@@ -6,15 +6,6 @@ Class {
 }
 
 { #category : #accessing }
-FractionTest >> testCreation [
-	self assert: (1 / 2) class == Fraction.
-	self assert: (2 / 4) = (1 / 2).
-	self assert: (4 / 2) class == SmallInteger.
-	self assert: (1 / -2) numerator = -1.
-	self assert: (1 / -2) denominator = 2
-]
-
-{ #category : #accessing }
 FractionTest >> testArithmetic [
 	self assert: (1 / 2) + (1 / 3) = (5 / 6).
 	self assert: (1 / 2) - (1 / 3) = (1 / 6).
@@ -27,6 +18,15 @@ FractionTest >> testArithmetic [
 	self assert: (3 / 2) > 1.
 	self assert: (7 / 2) truncated = 3.
 	self assert: (-7 / 2) floor = -4
+]
+
+{ #category : #accessing }
+FractionTest >> testCreation [
+	self assert: (1 / 2) class == Fraction.
+	self assert: (2 / 4) = (1 / 2).
+	self assert: (4 / 2) class == SmallInteger.
+	self assert: (1 / -2) numerator = -1.
+	self assert: (1 / -2) denominator = 2
 ]
 
 { #category : #accessing }

@@ -96,6 +96,26 @@ ClassBuilder class >> redefine: aClass instanceVariableNames: ivars classVariabl
 ]
 
 { #category : #private }
+ClassBuilder class >> checkWritable: aName [
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: nil selector: aName asSymbol; signal]
+]
+
+{ #category : #private }
+ClassBuilder class >> inheritedKindFrom: aClass [
+	"The kind a subclass of aClass takes when none is named: Tonel's rule (and the image build's)."
+	| k |
+	k := self kindOf: aClass.
+	(#(#variable #bytes #words16 #words32 #words64) includes: k) ifTrue: [^ k].
+	k == #weak ifTrue: [^ #variable].
+	^ #fixed
+]
+
+{ #category : #private }
+ClassBuilder class >> kindOf: aClass [
+	^ (Smalltalk definitionOf: aClass) ifNil: [#fixed] ifNotNil: [:d | d kind]
+]
+
+{ #category : #private }
 ClassBuilder class >> reshape: aBehavior own: ownNames meta: isMeta into: shapes methods: methods sources: sources pending: pending failures: failures [
 	"Add the shape and the recompiled methods of aBehavior and of every subclass (their class sides for a class-side change), each layout by name from the old slots."
 	| newNames |
@@ -139,24 +159,4 @@ ClassBuilder class >> remove: aClass [
 	methods do: [:m | Pragma noteRemoved: m].
 	Smalltalk forgetClass: aClass.
 	^ aClass
-]
-
-{ #category : #private }
-ClassBuilder class >> checkWritable: aName [
-	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: nil selector: aName asSymbol; signal]
-]
-
-{ #category : #private }
-ClassBuilder class >> kindOf: aClass [
-	^ (Smalltalk definitionOf: aClass) ifNil: [#fixed] ifNotNil: [:d | d kind]
-]
-
-{ #category : #private }
-ClassBuilder class >> inheritedKindFrom: aClass [
-	"The kind a subclass of aClass takes when none is named: Tonel's rule (and the image build's)."
-	| k |
-	k := self kindOf: aClass.
-	(#(#variable #bytes #words16 #words32 #words64) includes: k) ifTrue: [^ k].
-	k == #weak ifTrue: [^ #variable].
-	^ #fixed
 ]

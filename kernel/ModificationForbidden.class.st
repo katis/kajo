@@ -11,25 +11,8 @@ Class {
 }
 
 { #category : #accessing }
-ModificationForbidden >> object: anObject index: anIndex value: aValue [
-	object := anObject.
-	index := anIndex.
-	value := aValue
-]
-
-{ #category : #accessing }
-ModificationForbidden >> object [
-	^ object
-]
-
-{ #category : #accessing }
 ModificationForbidden >> index [
 	^ index
-]
-
-{ #category : #accessing }
-ModificationForbidden >> value [
-	^ value
 ]
 
 { #category : #accessing }
@@ -40,4 +23,21 @@ ModificationForbidden >> isResumable [
 { #category : #accessing }
 ModificationForbidden >> messageText [
 	^ 'cannot store into the read-only ' , object printString
+]
+
+{ #category : #accessing }
+ModificationForbidden >> object [
+	^ object
+]
+
+{ #category : #accessing }
+ModificationForbidden >> object: anObject index: anIndex value: aValue [
+	object := anObject.
+	index := anIndex.
+	value := aValue
+]
+
+{ #category : #accessing }
+ModificationForbidden >> value [
+	^ value
 ]

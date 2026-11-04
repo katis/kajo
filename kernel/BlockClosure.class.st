@@ -11,6 +11,79 @@ Class {
 	#type : #variable
 }
 
+{ #category : #control }
+BlockClosure >> repeat [
+	[self value] repeat
+]
+
+{ #category : #control }
+BlockClosure >> whileFalse [
+	[self value] whileFalse.
+	^ nil
+]
+
+{ #category : #control }
+BlockClosure >> whileFalse: aBlock [
+	[self value] whileFalse: [aBlock value].
+	^ nil
+]
+
+{ #category : #control }
+BlockClosure >> whileTrue [
+	[self value] whileTrue.
+	^ nil
+]
+
+{ #category : #control }
+BlockClosure >> whileTrue: aBlock [
+	[self value] whileTrue: [aBlock value].
+	^ nil
+]
+
+{ #category : #evaluating }
+BlockClosure >> cull: a [
+	^ self numArgs = 0 ifTrue: [self value] ifFalse: [self value: a]
+]
+
+{ #category : #evaluating }
+BlockClosure >> cull: a cull: b [
+	^ self numArgs < 2 ifTrue: [self cull: a] ifFalse: [self value: a value: b]
+]
+
+{ #category : #evaluating }
+BlockClosure >> home [
+	<primitive: 115>
+	^ self primitiveFailed
+]
+
+{ #category : #evaluating }
+BlockClosure >> isBlock [
+	^ true
+]
+
+{ #category : #evaluating }
+BlockClosure >> method [
+	<primitive: 114>
+	^ self primitiveFailed
+]
+
+{ #category : #evaluating }
+BlockClosure >> numArgs [
+	<primitive: 112>
+	^ self primitiveFailed
+]
+
+{ #category : #evaluating }
+BlockClosure >> numArgsError: n [
+	^ self error: 'a block of ' , self numArgs printString , ' arguments called with ' , n printString
+]
+
+{ #category : #evaluating }
+BlockClosure >> receiver [
+	<primitive: 113>
+	^ self primitiveFailed
+]
+
 { #category : #evaluating }
 BlockClosure >> value [
 	<primitive: 80>
@@ -41,77 +114,10 @@ BlockClosure >> valueWithArguments: anArray [
 	^ self numArgsError: anArray size
 ]
 
-{ #category : #evaluating }
-BlockClosure >> cull: a [
-	^ self numArgs = 0 ifTrue: [self value] ifFalse: [self value: a]
-]
-
-{ #category : #evaluating }
-BlockClosure >> cull: a cull: b [
-	^ self numArgs < 2 ifTrue: [self cull: a] ifFalse: [self value: a value: b]
-]
-
-{ #category : #evaluating }
-BlockClosure >> numArgsError: n [
-	^ self error: 'a block of ' , self numArgs printString , ' arguments called with ' , n printString
-]
-
-{ #category : #evaluating }
-BlockClosure >> numArgs [
-	<primitive: 112>
-	^ self primitiveFailed
-]
-
-{ #category : #evaluating }
-BlockClosure >> receiver [
-	<primitive: 113>
-	^ self primitiveFailed
-]
-
-{ #category : #evaluating }
-BlockClosure >> method [
-	<primitive: 114>
-	^ self primitiveFailed
-]
-
-{ #category : #evaluating }
-BlockClosure >> home [
-	<primitive: 115>
-	^ self primitiveFailed
-]
-
-{ #category : #evaluating }
-BlockClosure >> isBlock [
-	^ true
-]
-
-{ #category : #control }
-BlockClosure >> whileTrue: aBlock [
-	[self value] whileTrue: [aBlock value].
-	^ nil
-]
-
-{ #category : #control }
-BlockClosure >> whileFalse: aBlock [
-	[self value] whileFalse: [aBlock value].
-	^ nil
-]
-
-{ #category : #control }
-BlockClosure >> whileTrue [
-	[self value] whileTrue.
-	^ nil
-]
-
-{ #category : #control }
-BlockClosure >> whileFalse [
-	[self value] whileFalse.
-	^ nil
-]
-
-{ #category : #control }
-BlockClosure >> repeat [
-	[self value] repeat
+{ #category : #exceptions }
+BlockClosure >> cannotReturn: aValue [
+	"The VM sends this when a non-local return's home has already returned."
+	^ BlockCannotReturn new result: aValue; signal: 'the block''s home method has returned'
 ]
 
 { #category : #exceptions }
@@ -137,6 +143,11 @@ BlockClosure >> ifCurtailed: aBlock [
 ]
 
 { #category : #exceptions }
+BlockClosure >> ifError: aBlock [
+	^ self on: Error do: [:e | aBlock cull: e messageText cull: e receiver]
+]
+
+{ #category : #exceptions }
 BlockClosure >> on: exceptionClass do: handlerBlock [
 	| result |
 	[(result := self privateOn: exceptionClass do: handlerBlock) == Exception retryMarker] whileTrue.
@@ -151,15 +162,9 @@ BlockClosure >> privateOn: exceptionClass do: handlerBlock [
 	^ self value
 ]
 
-{ #category : #exceptions }
-BlockClosure >> ifError: aBlock [
-	^ self on: Error do: [:e | aBlock cull: e messageText cull: e receiver]
-]
-
-{ #category : #exceptions }
-BlockClosure >> cannotReturn: aValue [
-	"The VM sends this when a non-local return's home has already returned."
-	^ BlockCannotReturn new result: aValue; signal: 'the block''s home method has returned'
+{ #category : #printing }
+BlockClosure >> printOn: aStream [
+	aStream nextPutAll: '[] in '; print: self method methodClass
 ]
 
 { #category : #processes }
@@ -176,9 +181,4 @@ BlockClosure >> forkAt: aPriority [
 { #category : #processes }
 BlockClosure >> forkedValue [
 	^ self value
-]
-
-{ #category : #printing }
-BlockClosure >> printOn: aStream [
-	aStream nextPutAll: '[] in '; print: self method methodClass
 ]

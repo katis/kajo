@@ -12,43 +12,8 @@ Class {
 }
 
 { #category : #accessing }
-PositionableStream class >> on: aCollection [
-	^ self basicNew setOn: aCollection
-]
-
-{ #category : #accessing }
-PositionableStream >> setOn: aCollection [
-	collection := aCollection.
-	isText := aCollection isString.
-	position := 0.
-	readLimit := isText ifTrue: [aCollection byteSize] ifFalse: [aCollection size]
-]
-
-{ #category : #accessing }
-PositionableStream >> position [
-	^ position
-]
-
-{ #category : #accessing }
-PositionableStream >> position: anInteger [
-	(anInteger between: 0 and: readLimit) ifFalse: [^ self error: 'position out of range'].
-	(isText and: [(collection isBoundary: anInteger + 1) not]) ifTrue: [^ self error: 'position inside a scalar'].
-	position := anInteger
-]
-
-{ #category : #accessing }
-PositionableStream >> reset [
-	position := 0
-]
-
-{ #category : #accessing }
 PositionableStream >> atEnd [
 	^ position >= readLimit
-]
-
-{ #category : #accessing }
-PositionableStream >> isEmpty [
-	^ readLimit = 0
 ]
 
 { #category : #accessing }
@@ -60,6 +25,16 @@ PositionableStream >> collection [
 PositionableStream >> contents [
 	isText ifTrue: [^ collection copyFrom: 1 to: readLimit].
 	^ collection copyFrom: 1 to: readLimit
+]
+
+{ #category : #accessing }
+PositionableStream >> do: aBlock [
+	[self atEnd] whileFalse: [aBlock value: self next]
+]
+
+{ #category : #accessing }
+PositionableStream >> isEmpty [
+	^ readLimit = 0
 ]
 
 { #category : #accessing }
@@ -99,6 +74,31 @@ PositionableStream >> peekFor: anObject [
 ]
 
 { #category : #accessing }
+PositionableStream >> position [
+	^ position
+]
+
+{ #category : #accessing }
+PositionableStream >> position: anInteger [
+	(anInteger between: 0 and: readLimit) ifFalse: [^ self error: 'position out of range'].
+	(isText and: [(collection isBoundary: anInteger + 1) not]) ifTrue: [^ self error: 'position inside a scalar'].
+	position := anInteger
+]
+
+{ #category : #accessing }
+PositionableStream >> reset [
+	position := 0
+]
+
+{ #category : #accessing }
+PositionableStream >> setOn: aCollection [
+	collection := aCollection.
+	isText := aCollection isString.
+	position := 0.
+	readLimit := isText ifTrue: [aCollection byteSize] ifFalse: [aCollection size]
+]
+
+{ #category : #accessing }
 PositionableStream >> skip: n [
 	isText ifTrue: [n timesRepeat: [self next]. ^ self].
 	position := (position + n) max: 0 min: readLimit
@@ -126,6 +126,6 @@ PositionableStream >> upToEnd [
 ]
 
 { #category : #accessing }
-PositionableStream >> do: aBlock [
-	[self atEnd] whileFalse: [aBlock value: self next]
+PositionableStream class >> on: aCollection [
+	^ self basicNew setOn: aCollection
 ]

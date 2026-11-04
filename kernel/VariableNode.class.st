@@ -11,18 +11,9 @@ Class {
 }
 
 { #category : #accessing }
-VariableNode class >> named: aString line: n [
-	^ self new setName: aString; line: n; yourself
-]
-
-{ #category : #accessing }
-VariableNode >> setName: aString [
-	name := aString
-]
-
-{ #category : #accessing }
-VariableNode >> name [
-	^ name
+VariableNode >> bind: aSymbol to: anObject [
+	binding := aSymbol.
+	target := anObject
 ]
 
 { #category : #accessing }
@@ -31,12 +22,21 @@ VariableNode >> binding [
 ]
 
 { #category : #accessing }
+VariableNode >> name [
+	^ name
+]
+
+{ #category : #accessing }
+VariableNode >> setName: aString [
+	name := aString
+]
+
+{ #category : #accessing }
 VariableNode >> target [
 	^ target
 ]
 
 { #category : #accessing }
-VariableNode >> bind: aSymbol to: anObject [
-	binding := aSymbol.
-	target := anObject
+VariableNode class >> named: aString line: n [
+	^ self new setName: aString; line: n; yourself
 ]

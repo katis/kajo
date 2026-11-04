@@ -9,8 +9,8 @@ Class {
 }
 
 { #category : #accessing }
-SubscriptOutOfBounds class >> signalFor: anIndex in: aCollection [
-	^ self new setIndex: anIndex collection: aCollection; signal: 'index ' , anIndex printString , ' out of bounds'
+SubscriptOutOfBounds >> index [
+	^ index
 ]
 
 { #category : #accessing }
@@ -20,6 +20,6 @@ SubscriptOutOfBounds >> setIndex: anIndex collection: aCollection [
 ]
 
 { #category : #accessing }
-SubscriptOutOfBounds >> index [
-	^ index
+SubscriptOutOfBounds class >> signalFor: anIndex in: aCollection [
+	^ self new setIndex: anIndex collection: aCollection; signal: 'index ' , anIndex printString , ' out of bounds'
 ]

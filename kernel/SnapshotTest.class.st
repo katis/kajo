@@ -6,12 +6,6 @@ Class {
 }
 
 { #category : #accessing }
-SnapshotTest >> testSnapshotAnswersFalseInTheSaver [
-	"nil: the image goes to the VM's host, not to a file."
-	self deny: (Smalltalk snapshot: nil)
-]
-
-{ #category : #accessing }
 SnapshotTest >> testADelayIsPendingOnlyWhileWaitedOn [
 	| d |
 	d := Delay forMilliseconds: 1.
@@ -33,6 +27,12 @@ SnapshotTest >> testPrepareSnapshotTakesTheTimeLeft [
 	Delay unregister: d.
 	self assert: d remainingMicroseconds <= 5000000.
 	self assert: d remainingMicroseconds > 0
+]
+
+{ #category : #accessing }
+SnapshotTest >> testSnapshotAnswersFalseInTheSaver [
+	"nil: the image goes to the VM's host, not to a file."
+	self deny: (Smalltalk snapshot: nil)
 ]
 
 { #category : #accessing }

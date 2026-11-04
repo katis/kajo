@@ -10,20 +10,8 @@ Class {
 }
 
 { #category : #accessing }
-SharedQueue class >> new [
-	^ self basicNew setUp
-]
-
-{ #category : #accessing }
-SharedQueue >> setUp [
-	monitor := Monitor new.
-	items := OrderedCollection new
-]
-
-{ #category : #accessing }
-SharedQueue >> nextPut: anObject [
-	monitor critical: [items addLast: anObject. monitor signal].
-	^ anObject
+SharedQueue >> isEmpty [
+	^ monitor critical: [items isEmpty]
 ]
 
 { #category : #accessing }
@@ -39,11 +27,23 @@ SharedQueue >> nextOrNil [
 ]
 
 { #category : #accessing }
-SharedQueue >> isEmpty [
-	^ monitor critical: [items isEmpty]
+SharedQueue >> nextPut: anObject [
+	monitor critical: [items addLast: anObject. monitor signal].
+	^ anObject
+]
+
+{ #category : #accessing }
+SharedQueue >> setUp [
+	monitor := Monitor new.
+	items := OrderedCollection new
 ]
 
 { #category : #accessing }
 SharedQueue >> size [
 	^ monitor critical: [items size]
+]
+
+{ #category : #accessing }
+SharedQueue class >> new [
+	^ self basicNew setUp
 ]

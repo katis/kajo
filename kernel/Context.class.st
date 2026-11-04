@@ -16,62 +16,14 @@ Class {
 }
 
 { #category : #accessing }
-Context >> sender [
-	<primitive: 100>
-	^ self primitiveFailed
-]
-
-{ #category : #accessing }
-Context >> tempAt: index [
-	<primitive: 101>
-	^ self indexError: index
-]
-
-{ #category : #accessing }
-Context >> tempAt: index put: anObject [
-	<primitive: 102>
-	^ self indexError: index
-]
-
-{ #category : #accessing }
-Context >> pc [
-	<primitive: 103>
-	^ self primitiveFailed
-]
-
-{ #category : #accessing }
-Context >> method [
-	<primitive: 104>
-	^ self primitiveFailed
-]
-
-{ #category : #accessing }
-Context >> receiver [
-	<primitive: 105>
-	^ self primitiveFailed
+Context >> aboutToReturn: value through: firstUnwindContext [
+	"The VM sends this to the home Context of a non-local return that crosses an unwind mark."
+	^ self sender resume: value through: firstUnwindContext
 ]
 
 { #category : #accessing }
 Context >> closure [
 	<primitive: 106>
-	^ self primitiveFailed
-]
-
-{ #category : #accessing }
-Context >> isDead [
-	<primitive: 107>
-	^ self primitiveFailed
-]
-
-{ #category : #accessing }
-Context >> terminateTo: aContext [
-	<primitive: 108>
-	^ self error: 'cannot cut the stack to ' , aContext printString
-]
-
-{ #category : #accessing }
-Context >> findNextUnwindContextUpTo: aContext [
-	<primitive: 109>
 	^ self primitiveFailed
 ]
 
@@ -82,14 +34,43 @@ Context >> findNextHandlerContextStarting [
 ]
 
 { #category : #accessing }
-Context >> size [
-	<primitive: 111>
-	^ 0
+Context >> findNextUnwindContextUpTo: aContext [
+	<primitive: 109>
+	^ self primitiveFailed
 ]
 
 { #category : #accessing }
 Context >> isContext [
 	^ true
+]
+
+{ #category : #accessing }
+Context >> isDead [
+	<primitive: 107>
+	^ self primitiveFailed
+]
+
+{ #category : #accessing }
+Context >> method [
+	<primitive: 104>
+	^ self primitiveFailed
+]
+
+{ #category : #accessing }
+Context >> pc [
+	<primitive: 103>
+	^ self primitiveFailed
+]
+
+{ #category : #accessing }
+Context >> printOn: aStream [
+	aStream print: self method
+]
+
+{ #category : #accessing }
+Context >> receiver [
+	<primitive: 105>
+	^ self primitiveFailed
 ]
 
 { #category : #accessing }
@@ -115,9 +96,15 @@ Context >> return: value [
 ]
 
 { #category : #accessing }
-Context >> aboutToReturn: value through: firstUnwindContext [
-	"The VM sends this to the home Context of a non-local return that crosses an unwind mark."
-	^ self sender resume: value through: firstUnwindContext
+Context >> sender [
+	<primitive: 100>
+	^ self primitiveFailed
+]
+
+{ #category : #accessing }
+Context >> size [
+	<primitive: 111>
+	^ 0
 ]
 
 { #category : #accessing }
@@ -130,6 +117,19 @@ Context >> stack [
 ]
 
 { #category : #accessing }
-Context >> printOn: aStream [
-	aStream print: self method
+Context >> tempAt: index [
+	<primitive: 101>
+	^ self indexError: index
+]
+
+{ #category : #accessing }
+Context >> tempAt: index put: anObject [
+	<primitive: 102>
+	^ self indexError: index
+]
+
+{ #category : #accessing }
+Context >> terminateTo: aContext [
+	<primitive: 108>
+	^ self error: 'cannot cut the stack to ' , aContext printString
 ]

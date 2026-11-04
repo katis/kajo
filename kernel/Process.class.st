@@ -21,6 +21,21 @@ Class {
 }
 
 { #category : #accessing }
+Process >> id [
+	^ self slotAt: 13
+]
+
+{ #category : #accessing }
+Process >> isTerminated [
+	^ (self slotAt: 2) = 3
+]
+
+{ #category : #accessing }
+Process >> printOn: aStream [
+	aStream nextPutAll: 'a Process('; print: self id; nextPutAll: ' '; print: self state; nextPut: $)
+]
+
+{ #category : #accessing }
 Process >> priority [
 	^ self slotAt: 1
 ]
@@ -31,23 +46,8 @@ Process >> state [
 ]
 
 { #category : #accessing }
-Process >> isTerminated [
-	^ (self slotAt: 2) = 3
-]
-
-{ #category : #accessing }
-Process >> id [
-	^ self slotAt: 13
-]
-
-{ #category : #accessing }
 Process >> terminate [
 	"Ends the Process (now if it is this one, at its next check if it runs elsewhere). Its ensure: blocks do not run."
 	<primitive: 24>
 	^ self primitiveFailed
-]
-
-{ #category : #accessing }
-Process >> printOn: aStream [
-	aStream nextPutAll: 'a Process('; print: self id; nextPutAll: ' '; print: self state; nextPut: $)
 ]

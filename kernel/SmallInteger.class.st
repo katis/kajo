@@ -2,9 +2,14 @@
 Class {
 	#name : #SmallInteger,
 	#superclass : #Integer,
-	#category : #'Kernel-Numbers',
-	#type : #normal
+	#category : #'Kernel-Numbers'
 }
+
+{ #category : #arithmetic }
+SmallInteger >> * aNumber [
+	<primitive: 42>
+	^ self retry: #* coercing: aNumber
+]
 
 { #category : #arithmetic }
 SmallInteger >> + aNumber [
@@ -16,12 +21,6 @@ SmallInteger >> + aNumber [
 SmallInteger >> - aNumber [
 	<primitive: 41>
 	^ self retry: #- coercing: aNumber
-]
-
-{ #category : #arithmetic }
-SmallInteger >> * aNumber [
-	<primitive: 42>
-	^ self retry: #* coercing: aNumber
 ]
 
 { #category : #arithmetic }
@@ -45,6 +44,12 @@ SmallInteger >> \\ aNumber [
 ]
 
 { #category : #arithmetic }
+SmallInteger >> negated [
+	<primitive: 58>
+	^ 0 - self
+]
+
+{ #category : #arithmetic }
 SmallInteger >> quo: aNumber [
 	<primitive: 46>
 	aNumber = 0 ifTrue: [^ ZeroDivide new dividend: self; signal: 'division by zero'].
@@ -56,58 +61,6 @@ SmallInteger >> rem: aNumber [
 	<primitive: 47>
 	aNumber = 0 ifTrue: [^ ZeroDivide new dividend: self; signal: 'division by zero'].
 	^ super rem: aNumber
-]
-
-{ #category : #arithmetic }
-SmallInteger >> negated [
-	<primitive: 58>
-	^ 0 - self
-]
-
-{ #category : #comparing }
-SmallInteger >> < aNumber [
-	<primitive: 48>
-	^ self retry: #< coercing: aNumber
-]
-
-{ #category : #comparing }
-SmallInteger >> > aNumber [
-	<primitive: 49>
-	^ self retry: #> coercing: aNumber
-]
-
-{ #category : #comparing }
-SmallInteger >> <= aNumber [
-	<primitive: 50>
-	^ self retry: #<= coercing: aNumber
-]
-
-{ #category : #comparing }
-SmallInteger >> >= aNumber [
-	<primitive: 51>
-	^ self retry: #>= coercing: aNumber
-]
-
-{ #category : #comparing }
-SmallInteger >> = aNumber [
-	<primitive: 52>
-	^ self retry: #= coercing: aNumber
-]
-
-{ #category : #comparing }
-SmallInteger >> ~= aNumber [
-	<primitive: 53>
-	^ self retry: #~= coercing: aNumber
-]
-
-{ #category : #comparing }
-SmallInteger >> hash [
-	^ self
-]
-
-{ #category : #comparing }
-SmallInteger >> identityHash [
-	^ self
 ]
 
 { #category : #bits }
@@ -123,20 +76,21 @@ SmallInteger >> bitOr: n [
 ]
 
 { #category : #bits }
-SmallInteger >> bitXor: n [
-	<primitive: 56>
-	^ self primitiveFailed
-]
-
-{ #category : #bits }
 SmallInteger >> bitShift: n [
 	<primitive: 57>
 	^ self primitiveFailed
 ]
 
+{ #category : #bits }
+SmallInteger >> bitXor: n [
+	<primitive: 56>
+	^ self primitiveFailed
+]
+
 { #category : #coercion }
-SmallInteger >> generality [
-	^ 10
+SmallInteger >> asFloat [
+	<primitive: 59>
+	^ self primitiveFailed
 ]
 
 { #category : #coercion }
@@ -145,7 +99,52 @@ SmallInteger >> coerce: aNumber [
 ]
 
 { #category : #coercion }
-SmallInteger >> asFloat [
-	<primitive: 59>
-	^ self primitiveFailed
+SmallInteger >> generality [
+	^ 10
+]
+
+{ #category : #comparing }
+SmallInteger >> < aNumber [
+	<primitive: 48>
+	^ self retry: #< coercing: aNumber
+]
+
+{ #category : #comparing }
+SmallInteger >> <= aNumber [
+	<primitive: 50>
+	^ self retry: #<= coercing: aNumber
+]
+
+{ #category : #comparing }
+SmallInteger >> = aNumber [
+	<primitive: 52>
+	^ self retry: #= coercing: aNumber
+]
+
+{ #category : #comparing }
+SmallInteger >> > aNumber [
+	<primitive: 49>
+	^ self retry: #> coercing: aNumber
+]
+
+{ #category : #comparing }
+SmallInteger >> >= aNumber [
+	<primitive: 51>
+	^ self retry: #>= coercing: aNumber
+]
+
+{ #category : #comparing }
+SmallInteger >> hash [
+	^ self
+]
+
+{ #category : #comparing }
+SmallInteger >> identityHash [
+	^ self
+]
+
+{ #category : #comparing }
+SmallInteger >> ~= aNumber [
+	<primitive: 53>
+	^ self retry: #~= coercing: aNumber
 ]

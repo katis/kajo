@@ -11,6 +11,11 @@ ClassDescription >> category [
 ]
 
 { #category : #accessing }
+ClassDescription >> category: aStringOrSymbol [
+	(Smalltalk definitionOf: self theNonMetaClass) ifNotNil: [:d | d category: aStringOrSymbol asSymbol]
+]
+
+{ #category : #accessing }
 ClassDescription >> comment [
 	"The class comment, a String ('' when none; module 8e)."
 	^ (Smalltalk definitionOf: self theNonMetaClass) ifNil: [''] ifNotNil: [:d | d comment ifNil: ['']]
@@ -21,9 +26,10 @@ ClassDescription >> comment: aString [
 	(Smalltalk definitionOf: self theNonMetaClass) ifNotNil: [:d | d comment: aString]
 ]
 
-{ #category : #accessing }
-ClassDescription >> category: aStringOrSymbol [
-	(Smalltalk definitionOf: self theNonMetaClass) ifNotNil: [:d | d category: aStringOrSymbol asSymbol]
+{ #category : #'instance variables' }
+ClassDescription >> addInstVarName: aString [
+	(self instVarNames includes: aString asSymbol) ifTrue: [^ self].
+	^ self setInstVarNames: (self instVarNames asArray copyWith: aString asSymbol)
 ]
 
 { #category : #'instance variables' }
@@ -42,22 +48,16 @@ ClassDescription >> instanceVariableNames: aString [
 ]
 
 { #category : #'instance variables' }
+ClassDescription >> removeInstVarName: aString [
+	(self instVarNames includes: aString asSymbol) ifFalse: [^ ClassDefinitionError new signal: self name , ' has no instance variable ' , aString].
+	^ self setInstVarNames: (self instVarNames asArray reject: [:n | n = aString asSymbol])
+]
+
+{ #category : #'instance variables' }
 ClassDescription >> setInstVarNames: anArray [
 	| c |
 	c := self theNonMetaClass.
 	^ self isMeta
 		ifTrue: [ClassBuilder redefine: c instanceVariableNames: c instVarNames classVariableNames: c classVarNames classInstanceVariableNames: anArray]
 		ifFalse: [ClassBuilder redefine: c instanceVariableNames: anArray classVariableNames: c classVarNames classInstanceVariableNames: c class instVarNames]
-]
-
-{ #category : #'instance variables' }
-ClassDescription >> addInstVarName: aString [
-	(self instVarNames includes: aString asSymbol) ifTrue: [^ self].
-	^ self setInstVarNames: (self instVarNames asArray copyWith: aString asSymbol)
-]
-
-{ #category : #'instance variables' }
-ClassDescription >> removeInstVarName: aString [
-	(self instVarNames includes: aString asSymbol) ifFalse: [^ ClassDefinitionError new signal: self name , ' has no instance variable ' , aString].
-	^ self setInstVarNames: (self instVarNames asArray reject: [:n | n = aString asSymbol])
 ]

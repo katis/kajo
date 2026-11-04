@@ -6,11 +6,11 @@ Class {
 }
 
 { #category : #accessing }
-Error >> isResumable [
-	^ false
+Error >> defaultAction [
+	^ UnhandledError new exception: self; signal
 ]
 
 { #category : #accessing }
-Error >> defaultAction [
-	^ UnhandledError new exception: self; signal
+Error >> isResumable [
+	^ false
 ]

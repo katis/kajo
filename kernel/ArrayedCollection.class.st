@@ -6,6 +6,17 @@ Class {
 }
 
 { #category : #accessing }
+ArrayedCollection >> add: anObject [
+	^ self shouldNotImplement
+]
+
+{ #category : #accessing }
+ArrayedCollection >> size [
+	<primitive: 95>
+	^ 0
+]
+
+{ #category : #accessing }
 ArrayedCollection class >> new [
 	^ self new: 0
 ]
@@ -13,6 +24,14 @@ ArrayedCollection class >> new [
 { #category : #accessing }
 ArrayedCollection class >> new: n withAll: anObject [
 	^ (self new: n) atAllPut: anObject; yourself
+]
+
+{ #category : #accessing }
+ArrayedCollection class >> streamContents: aBlock [
+	| s |
+	s := WriteStream on: (self new: 0).
+	aBlock value: s.
+	^ s contents
 ]
 
 { #category : #accessing }
@@ -42,23 +61,4 @@ ArrayedCollection class >> withAll: aCollection [
 	i := 0.
 	aCollection do: [:e | out at: (i := i + 1) put: e].
 	^ out
-]
-
-{ #category : #accessing }
-ArrayedCollection class >> streamContents: aBlock [
-	| s |
-	s := WriteStream on: (self new: 0).
-	aBlock value: s.
-	^ s contents
-]
-
-{ #category : #accessing }
-ArrayedCollection >> size [
-	<primitive: 95>
-	^ 0
-]
-
-{ #category : #accessing }
-ArrayedCollection >> add: anObject [
-	^ self shouldNotImplement
 ]

@@ -9,8 +9,13 @@ Class {
 }
 
 { #category : #accessing }
-ExceptionSet class >> with: a with: b [
-	^ self basicNew setExceptions: (OrderedCollection with: a with: b)
+ExceptionSet >> , anExceptionClass [
+	exceptions add: anExceptionClass
+]
+
+{ #category : #accessing }
+ExceptionSet >> handles: anException [
+	^ exceptions anySatisfy: [:e | e handles: anException]
 ]
 
 { #category : #accessing }
@@ -19,11 +24,6 @@ ExceptionSet >> setExceptions: aCollection [
 ]
 
 { #category : #accessing }
-ExceptionSet >> , anExceptionClass [
-	exceptions add: anExceptionClass
-]
-
-{ #category : #accessing }
-ExceptionSet >> handles: anException [
-	^ exceptions anySatisfy: [:e | e handles: anException]
+ExceptionSet class >> with: a with: b [
+	^ self basicNew setExceptions: (OrderedCollection with: a with: b)
 ]

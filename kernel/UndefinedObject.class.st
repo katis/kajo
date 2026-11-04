@@ -6,22 +6,12 @@ Class {
 }
 
 { #category : #accessing }
-UndefinedObject >> isNil [
-	^ true
-]
-
-{ #category : #accessing }
-UndefinedObject >> notNil [
-	^ false
-]
-
-{ #category : #accessing }
-UndefinedObject >> isEmptyOrNil [
-	^ true
-]
-
-{ #category : #accessing }
 UndefinedObject >> ifNil: nilBlock [
+	^ nilBlock value
+]
+
+{ #category : #accessing }
+UndefinedObject >> ifNil: nilBlock ifNotNil: aBlock [
 	^ nilBlock value
 ]
 
@@ -31,18 +21,28 @@ UndefinedObject >> ifNotNil: aBlock [
 ]
 
 { #category : #accessing }
-UndefinedObject >> ifNil: nilBlock ifNotNil: aBlock [
-	^ nilBlock value
-]
-
-{ #category : #accessing }
 UndefinedObject >> ifNotNil: aBlock ifNil: nilBlock [
 	^ nilBlock value
 ]
 
 { #category : #accessing }
+UndefinedObject >> isEmptyOrNil [
+	^ true
+]
+
+{ #category : #accessing }
 UndefinedObject >> isLiteral [
 	^ true
+]
+
+{ #category : #accessing }
+UndefinedObject >> isNil [
+	^ true
+]
+
+{ #category : #accessing }
+UndefinedObject >> notNil [
+	^ false
 ]
 
 { #category : #accessing }

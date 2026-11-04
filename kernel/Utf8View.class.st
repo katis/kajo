@@ -9,8 +9,13 @@ Class {
 }
 
 { #category : #accessing }
-Utf8View class >> on: aString [
-	^ self basicNew setString: aString
+Utf8View >> at: index [
+	^ string byteAt: index
+]
+
+{ #category : #accessing }
+Utf8View >> at: index put: aByte [
+	^ self error: 'a String''s bytes are read-only'
 ]
 
 { #category : #accessing }
@@ -24,16 +29,11 @@ Utf8View >> size [
 ]
 
 { #category : #accessing }
-Utf8View >> at: index [
-	^ string byteAt: index
-]
-
-{ #category : #accessing }
-Utf8View >> at: index put: aByte [
-	^ self error: 'a String''s bytes are read-only'
-]
-
-{ #category : #accessing }
 Utf8View >> species [
 	^ ByteArray
+]
+
+{ #category : #accessing }
+Utf8View class >> on: aString [
+	^ self basicNew setString: aString
 ]

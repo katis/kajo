@@ -10,22 +10,22 @@ Class {
 }
 
 { #category : #accessing }
+InstallForbidden >> behavior [
+	^ behavior
+]
+
+{ #category : #accessing }
 InstallForbidden >> behavior: aBehavior selector: aSymbol [
 	behavior := aBehavior.
 	selector := aSymbol
 ]
 
 { #category : #accessing }
-InstallForbidden >> behavior [
-	^ behavior
+InstallForbidden >> messageText [
+	^ 'a release image: cannot change ' , behavior printString , '>>' , (selector ifNil: ['(doit)'] ifNotNil: [:s | s])
 ]
 
 { #category : #accessing }
 InstallForbidden >> selector [
 	^ selector
-]
-
-{ #category : #accessing }
-InstallForbidden >> messageText [
-	^ 'a release image: cannot change ' , behavior printString , '>>' , (selector ifNil: ['(doit)'] ifNotNil: [:s | s])
 ]

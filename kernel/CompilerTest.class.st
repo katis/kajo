@@ -12,6 +12,25 @@ CompilerTest >> knownDifferences [
 ]
 
 { #category : #accessing }
+CompilerTest >> testBlocksAndCaptures [
+	| code block |
+	code := Compiler compile: 'f: a | t | t := 0. a do: [:e | t := t + e]. ^ [t]' in: Object.
+	block := code literals detect: [:l | l isKindOf: CompiledCode].
+	self assert: block isBlock.
+	self assert: block numCopied = 1.
+	self assert: (code bytecodes first: 2) = (ByteArray with: (BytecodeGenerator number: #pushNewArray) with: 1)
+]
+
+{ #category : #accessing }
+CompilerTest >> testCompiledCodeRunsTheSame [
+	| code |
+	code := Compiler compile: 'sum: n | s | s := 0. 1 to: n do: [:i | s := s + i]. ^ s' in: Object.
+	self assert: code numArgs = 1.
+	self assert: code literals isEmpty.
+	self assert: code bytecodes first = (BytecodeGenerator number: #pushInt)
+]
+
+{ #category : #accessing }
 CompilerTest >> testEveryMethodCompilesAsTheBootstrapDid [
 	<slow>
 	| checked failures |
@@ -30,6 +49,12 @@ CompilerTest >> testEveryMethodCompilesAsTheBootstrapDid [
 ]
 
 { #category : #accessing }
+CompilerTest >> testParserErrors [
+	#('f ^' 'f [' 'f x := 1' 'f: a a := 1' 'f | a a |' 'f ^ 1. 2' 'f #(' 'f ''abc' 'f "x' 'f ^ 16r' 'f ^ (1' 'f ^ [:x 1]' 'f ^ #[256]' 'f ^ a ; b') do: [:src |
+		self should: [Compiler compile: src in: Object] raise: CompileError]
+]
+
+{ #category : #accessing }
 CompilerTest >> testScannerTokens [
 	| s kinds |
 	s := Scanner on: 'foo: x ^ #(1 $a) , 16r1F + 2.5e3 - -3 := ''it''''s'' #at:put: [:y | y]'.
@@ -39,29 +64,4 @@ CompilerTest >> testScannerTokens [
 	self assert: (kinds at: 9) value = 31.
 	self assert: (kinds at: 11) value = 2500.0.
 	self assert: (kinds at: 16) value = 'it''s'
-]
-
-{ #category : #accessing }
-CompilerTest >> testParserErrors [
-	#('f ^' 'f [' 'f x := 1' 'f: a a := 1' 'f | a a |' 'f ^ 1. 2' 'f #(' 'f ''abc' 'f "x' 'f ^ 16r' 'f ^ (1' 'f ^ [:x 1]' 'f ^ #[256]' 'f ^ a ; b') do: [:src |
-		self should: [Compiler compile: src in: Object] raise: CompileError]
-]
-
-{ #category : #accessing }
-CompilerTest >> testCompiledCodeRunsTheSame [
-	| code |
-	code := Compiler compile: 'sum: n | s | s := 0. 1 to: n do: [:i | s := s + i]. ^ s' in: Object.
-	self assert: code numArgs = 1.
-	self assert: code literals isEmpty.
-	self assert: code bytecodes first = (BytecodeGenerator number: #pushInt)
-]
-
-{ #category : #accessing }
-CompilerTest >> testBlocksAndCaptures [
-	| code block |
-	code := Compiler compile: 'f: a | t | t := 0. a do: [:e | t := t + e]. ^ [t]' in: Object.
-	block := code literals detect: [:l | l isKindOf: CompiledCode].
-	self assert: block isBlock.
-	self assert: block numCopied = 1.
-	self assert: (code bytecodes first: 2) = (ByteArray with: (BytecodeGenerator number: #pushNewArray) with: 1)
 ]

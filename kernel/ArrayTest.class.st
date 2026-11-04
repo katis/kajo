@@ -20,6 +20,28 @@ ArrayTest >> testBasics [
 ]
 
 { #category : #accessing }
+ArrayTest >> testByteArray [
+	| b |
+	b := ByteArray new: 3.
+	b at: 1 put: 255.
+	self assert: (b at: 1) = 255.
+	self should: [b at: 1 put: 256] raise: Error.
+	self assert: #[1 2 3] size = 3.
+	self assert: #[1 2 3] printString = '#[1 2 3]'
+]
+
+{ #category : #accessing }
+ArrayTest >> testCopying [
+	self assert: (#(1 2 3 4) copyFrom: 2 to: 3) = #(2 3).
+	self assert: #(1 2) , #(3) = #(1 2 3).
+	self assert: #(1 2 3) reversed = #(3 2 1).
+	self assert: (#(1 2) copyWith: 3) = #(1 2 3).
+	self assert: #(1 2 3) allButFirst = #(2 3).
+	self assert: (#(1 2 3) indexOf: 3) = 3.
+	self assert: (#(1 2 3) indexOf: 4) = 0
+]
+
+{ #category : #accessing }
 ArrayTest >> testEnumeration [
 	self assert: (#(1 2 3) collect: [:x | x * x]) = #(1 4 9).
 	self assert: (#(1 2 3 4) select: [:x | x even]) = #(2 4).
@@ -36,24 +58,6 @@ ArrayTest >> testEnumeration [
 ]
 
 { #category : #accessing }
-ArrayTest >> testCopying [
-	self assert: (#(1 2 3 4) copyFrom: 2 to: 3) = #(2 3).
-	self assert: #(1 2) , #(3) = #(1 2 3).
-	self assert: #(1 2 3) reversed = #(3 2 1).
-	self assert: (#(1 2) copyWith: 3) = #(1 2 3).
-	self assert: #(1 2 3) allButFirst = #(2 3).
-	self assert: (#(1 2 3) indexOf: 3) = 3.
-	self assert: (#(1 2 3) indexOf: 4) = 0
-]
-
-{ #category : #accessing }
-ArrayTest >> testSorting [
-	self assert: #(3 1 2) sorted = #(1 2 3).
-	self assert: (#(3 1 2) sorted: [:a :b | a >= b]) = #(3 2 1).
-	self assert: (#('pear' 'apple' 'fig') sorted: [:a :b | a <= b]) = #('apple' 'fig' 'pear')
-]
-
-{ #category : #accessing }
 ArrayTest >> testEquality [
 	self assert: #(1 2) = #(1 2).
 	self deny: #(1 2) = #(1 3).
@@ -62,12 +66,8 @@ ArrayTest >> testEquality [
 ]
 
 { #category : #accessing }
-ArrayTest >> testByteArray [
-	| b |
-	b := ByteArray new: 3.
-	b at: 1 put: 255.
-	self assert: (b at: 1) = 255.
-	self should: [b at: 1 put: 256] raise: Error.
-	self assert: #[1 2 3] size = 3.
-	self assert: #[1 2 3] printString = '#[1 2 3]'
+ArrayTest >> testSorting [
+	self assert: #(3 1 2) sorted = #(1 2 3).
+	self assert: (#(3 1 2) sorted: [:a :b | a >= b]) = #(3 2 1).
+	self assert: (#('pear' 'apple' 'fig') sorted: [:a :b | a <= b]) = #('apple' 'fig' 'pear')
 ]

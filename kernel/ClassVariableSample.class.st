@@ -9,8 +9,13 @@ Class {
 }
 
 { #category : #accessing }
-ClassVariableSample class >> reset [
-	Count := 0
+ClassVariableSample >> bump [
+	^ Count := Count + 1
+]
+
+{ #category : #accessing }
+ClassVariableSample >> count [
+	^ Count
 ]
 
 { #category : #accessing }
@@ -24,11 +29,6 @@ ClassVariableSample class >> count: anObject [
 ]
 
 { #category : #accessing }
-ClassVariableSample >> count [
-	^ Count
-]
-
-{ #category : #accessing }
-ClassVariableSample >> bump [
-	^ Count := Count + 1
+ClassVariableSample class >> reset [
+	Count := 0
 ]

@@ -15,45 +15,8 @@ Class {
 }
 
 { #category : #accessing }
-Compiler class >> compile: aString in: aClass [
-	^ self new setClass: aClass; compile: aString
-]
-
-{ #category : #evaluating }
-Compiler class >> evaluate: aString [
-	"The value of the statements aString holds, run once with nil as self (a doit: compiled as a method of UndefinedObject, made and verified by the VM, run, dropped; nothing is installed)."
-	^ self evaluate: aString for: nil
-]
-
-{ #category : #evaluating }
-Compiler class >> evaluate: aString for: anObject [
-	"The value of the statements aString holds, run once with anObject as self: compiled as a method DoIt of anObject's class (its temporaries the method's, the last statement's value answered), made by the VM, run by valueWithReceiver:arguments:, never installed. A CompileError when the source or the VM refuses it, InstallForbidden in a release image."
-	| method |
-	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: anObject class selector: nil; signal].
-	method := (self compileDoIt: aString in: anObject class) makeMethodIn: anObject class.
-	^ method valueWithReceiver: anObject arguments: #()
-]
-
-{ #category : #evaluating }
-Compiler class >> compileDoIt: aString in: aClass [
-	"The CompiledCode of a doit: the method DoIt whose body is aString, answering its last statement's value."
-	^ self new setClass: aClass; beDoIt; compile: 'DoIt ' , aString
-]
-
-{ #category : #accessing }
-Compiler class >> compile: aString in: aClass instanceVariableNames: anArray bindings: aDictionaryOrNil [
-	"Compile against the shape a class will have (module 8e): its instance variable names (all of them, inherited first) and the class variables it is about to have (a Dictionary from name to Binding, consulted before the class's own)."
-	^ self new setClass: aClass; instanceVariableNames: anArray; pendingBindings: aDictionaryOrNil; compile: aString
-]
-
-{ #category : #accessing }
-Compiler >> instanceVariableNames: anArray [
-	instVarNames := anArray collect: [:s | s asString]
-]
-
-{ #category : #accessing }
-Compiler >> pendingBindings: aDictionaryOrNil [
-	pendingBindings := aDictionaryOrNil
+Compiler >> beDoIt [
+	doit := true
 ]
 
 { #category : #accessing }
@@ -64,13 +27,24 @@ Compiler >> bindingOf: aName [
 ]
 
 { #category : #accessing }
-Compiler >> beDoIt [
-	doit := true
+Compiler >> fail: aString line: n [
+	^ CompileError new line: n; signal: aString
 ]
 
 { #category : #accessing }
-Compiler class >> inlinedSelectors [
-	^ #(#ifTrue: #ifFalse: #and: #or: #ifNil: #timesRepeat: #ifTrue:ifFalse: #ifFalse:ifTrue: #ifNotNil: #ifNil:ifNotNil: #ifNotNil:ifNil: #whileTrue: #whileFalse: #whileTrue #whileFalse #repeat #to:do: #to:by:do:)
+Compiler >> instanceVariableNames: anArray [
+	instVarNames := anArray collect: [:s | s asString]
+]
+
+{ #category : #accessing }
+Compiler >> nextSeq [
+	seq := seq + 1.
+	^ seq
+]
+
+{ #category : #accessing }
+Compiler >> pendingBindings: aDictionaryOrNil [
+	pendingBindings := aDictionaryOrNil
 ]
 
 { #category : #accessing }
@@ -81,99 +55,6 @@ Compiler >> setClass: aClass [
 	seq := 0.
 	labelCounter := 0.
 	doit := false
-]
-
-{ #category : #accessing }
-Compiler >> fail: aString line: n [
-	^ CompileError new line: n; signal: aString
-]
-
-{ #category : #accessing }
-Compiler >> nextSeq [
-	seq := seq + 1.
-	^ seq
-]
-
-{ #category : #analysis }
-Compiler >> declare: aName kind: aKind in: aScope line: n [
-	| v |
-	aKind == #hidden ifFalse: [
-		(#('self' 'super' 'thisContext' 'nil' 'true' 'false') includes: aName) ifTrue: [^ self fail: '''' , aName , ''' cannot be a variable name' line: n].
-		(aScope declared anySatisfy: [:x | x name = aName]) ifTrue: [^ self fail: '''' , aName , ''' declared twice' line: n].
-		(theClass classVariableOwnerOf: aName) ifNotNil: [:owner |
-			^ self fail: '''' , aName , ''' shadows ' , owner name , '''s class variable' line: n].
-		(pendingBindings notNil and: [pendingBindings includesKey: aName]) ifTrue: [
-			^ self fail: '''' , aName , ''' shadows a class variable' line: n]].
-	v := TempVariable name: aName kind: aKind scope: aScope seq: self nextSeq.
-	aScope declared add: v.
-	aScope real locals add: v.
-	^ v
-]
-
-{ #category : #analysis }
-Compiler >> lookup: aName in: aScope [
-	| s |
-	s := aScope.
-	[s notNil] whileTrue: [
-		s declared reverseDo: [:v | (v name = aName and: [v kind ~~ #hidden]) ifTrue: [^ v]].
-		s := s parent].
-	^ nil
-]
-
-{ #category : #analysis }
-Compiler >> reference: v from: aScope [
-	| r |
-	r := aScope real.
-	r == v real ifTrue: [^ self].
-	v beCaptured.
-	[r == v real] whileFalse: [
-		(r needed identityIncludes: v) ifFalse: [r needed add: v].
-		r := r parent real]
-]
-
-{ #category : #analysis }
-Compiler >> resolve: aNode in: aScope [
-	| n v i |
-	n := aNode name.
-	n = 'self' ifTrue: [^ aNode bind: #self to: nil].
-	n = 'super' ifTrue: [^ aNode bind: #super to: nil].
-	n = 'thisContext' ifTrue: [^ aNode bind: #thisContext to: nil].
-	v := self lookup: n in: aScope.
-	v ifNotNil: [:x | self reference: x from: aScope. ^ aNode bind: #local to: x].
-	i := instVarNames indexOf: n.
-	i > 0 ifTrue: [^ aNode bind: #instance to: firstSlot + i - 1].
-	(self bindingOf: n) ifNotNil: [:b | ^ aNode bind: #classVariable to: b].
-	(Smalltalk classNamed: n) ifNotNil: [:c | ^ aNode bind: #global to: c].
-	^ self fail: 'undeclared variable ''' , n , '''' line: aNode line
-]
-
-{ #category : #analysis }
-Compiler >> isBlock: aNode args: n [
-	^ aNode class == BlockNode and: [aNode numArgs = n]
-]
-
-{ #category : #analysis }
-Compiler >> inlinable: s [
-	| a sel |
-	s isSuper ifTrue: [^ false].
-	a := s arguments.
-	sel := s selector.
-	(#(#ifTrue: #ifFalse: #and: #or: #ifNil: #timesRepeat:) includes: sel) ifTrue: [^ self isBlock: a first args: 0].
-	(#(#ifTrue:ifFalse: #ifFalse:ifTrue:) includes: sel) ifTrue: [^ (self isBlock: a first args: 0) and: [self isBlock: a last args: 0]].
-	sel == #ifNotNil: ifTrue: [^ (self isBlock: a first args: 0) or: [self isBlock: a first args: 1]].
-	sel == #ifNil:ifNotNil: ifTrue: [^ (self isBlock: a first args: 0) and: [(self isBlock: a last args: 0) or: [self isBlock: a last args: 1]]].
-	sel == #ifNotNil:ifNil: ifTrue: [^ ((self isBlock: a first args: 0) or: [self isBlock: a first args: 1]) and: [self isBlock: a last args: 0]].
-	(#(#whileTrue: #whileFalse:) includes: sel) ifTrue: [^ (self isBlock: s receiver args: 0) and: [self isBlock: a first args: 0]].
-	(#(#whileTrue #whileFalse #repeat) includes: sel) ifTrue: [^ self isBlock: s receiver args: 0].
-	sel == #to:do: ifTrue: [^ self isBlock: a last args: 1].
-	sel == #to:by:do: ifTrue: [
-		^ (self isBlock: a last args: 1) and: [(a at: 2) class == LiteralNode and: [(a at: 2) value isInteger and: [(a at: 2) value ~= 0]]]].
-	^ false
-]
-
-{ #category : #analysis }
-Compiler >> isIntegerLiteral: aNode [
-	^ aNode class == LiteralNode and: [aNode value isInteger]
 ]
 
 { #category : #analysis }
@@ -213,31 +94,6 @@ Compiler >> analyze: aNode in: aScope [
 ]
 
 { #category : #analysis }
-Compiler >> analyzeInlinedBlock: aNode in: aScope [
-	| s |
-	s := CompilerScope parent: aScope real: false seq: 0.
-	aNode scope: s.
-	self analyzeInlinedBody: aNode in: s
-]
-
-{ #category : #analysis }
-Compiler >> analyzeLoopBody: aNode in: aScope [
-	"An inlined loop's block: it owns a temp vector, made on every pass, for its captured and assigned variables."
-	| s |
-	s := CompilerScope loopIn: aScope seq: self nextSeq.
-	aScope real loops add: s.
-	aNode scope: s.
-	self analyzeInlinedBody: aNode in: s
-]
-
-{ #category : #analysis }
-Compiler >> analyzeInlinedBody: aNode in: s [
-	aNode arguments do: [:a | self declare: a first kind: #inlinedArgument in: s line: (a at: 2)].
-	aNode temporaries do: [:t | self declare: t first kind: #temporary in: s line: (t at: 2)].
-	self analyzeStatements: aNode statements in: s
-]
-
-{ #category : #analysis }
 Compiler >> analyzeInlined: s in: aScope [
 	| sel a |
 	sel := s selector.
@@ -262,14 +118,187 @@ Compiler >> analyzeInlined: s in: aScope [
 ]
 
 { #category : #analysis }
+Compiler >> analyzeInlinedBlock: aNode in: aScope [
+	| s |
+	s := CompilerScope parent: aScope real: false seq: 0.
+	aNode scope: s.
+	self analyzeInlinedBody: aNode in: s
+]
+
+{ #category : #analysis }
+Compiler >> analyzeInlinedBody: aNode in: s [
+	aNode arguments do: [:a | self declare: a first kind: #inlinedArgument in: s line: (a at: 2)].
+	aNode temporaries do: [:t | self declare: t first kind: #temporary in: s line: (t at: 2)].
+	self analyzeStatements: aNode statements in: s
+]
+
+{ #category : #analysis }
+Compiler >> analyzeLoopBody: aNode in: aScope [
+	"An inlined loop's block: it owns a temp vector, made on every pass, for its captured and assigned variables."
+	| s |
+	s := CompilerScope loopIn: aScope seq: self nextSeq.
+	aScope real loops add: s.
+	aNode scope: s.
+	self analyzeInlinedBody: aNode in: s
+]
+
+{ #category : #analysis }
 Compiler >> analyzeStatements: aCollection in: aScope [
 	aCollection do: [:st | self analyze: st in: aScope]
 ]
 
+{ #category : #analysis }
+Compiler >> declare: aName kind: aKind in: aScope line: n [
+	| v |
+	aKind == #hidden ifFalse: [
+		(#('self' 'super' 'thisContext' 'nil' 'true' 'false') includes: aName) ifTrue: [^ self fail: '''' , aName , ''' cannot be a variable name' line: n].
+		(aScope declared anySatisfy: [:x | x name = aName]) ifTrue: [^ self fail: '''' , aName , ''' declared twice' line: n].
+		(theClass classVariableOwnerOf: aName) ifNotNil: [:owner |
+			^ self fail: '''' , aName , ''' shadows ' , owner name , '''s class variable' line: n].
+		(pendingBindings notNil and: [pendingBindings includesKey: aName]) ifTrue: [
+			^ self fail: '''' , aName , ''' shadows a class variable' line: n]].
+	v := TempVariable name: aName kind: aKind scope: aScope seq: self nextSeq.
+	aScope declared add: v.
+	aScope real locals add: v.
+	^ v
+]
+
+{ #category : #analysis }
+Compiler >> inlinable: s [
+	| a sel |
+	s isSuper ifTrue: [^ false].
+	a := s arguments.
+	sel := s selector.
+	(#(#ifTrue: #ifFalse: #and: #or: #ifNil: #timesRepeat:) includes: sel) ifTrue: [^ self isBlock: a first args: 0].
+	(#(#ifTrue:ifFalse: #ifFalse:ifTrue:) includes: sel) ifTrue: [^ (self isBlock: a first args: 0) and: [self isBlock: a last args: 0]].
+	sel == #ifNotNil: ifTrue: [^ (self isBlock: a first args: 0) or: [self isBlock: a first args: 1]].
+	sel == #ifNil:ifNotNil: ifTrue: [^ (self isBlock: a first args: 0) and: [(self isBlock: a last args: 0) or: [self isBlock: a last args: 1]]].
+	sel == #ifNotNil:ifNil: ifTrue: [^ ((self isBlock: a first args: 0) or: [self isBlock: a first args: 1]) and: [self isBlock: a last args: 0]].
+	(#(#whileTrue: #whileFalse:) includes: sel) ifTrue: [^ (self isBlock: s receiver args: 0) and: [self isBlock: a first args: 0]].
+	(#(#whileTrue #whileFalse #repeat) includes: sel) ifTrue: [^ self isBlock: s receiver args: 0].
+	sel == #to:do: ifTrue: [^ self isBlock: a last args: 1].
+	sel == #to:by:do: ifTrue: [
+		^ (self isBlock: a last args: 1) and: [(a at: 2) class == LiteralNode and: [(a at: 2) value isInteger and: [(a at: 2) value ~= 0]]]].
+	^ false
+]
+
+{ #category : #analysis }
+Compiler >> isBlock: aNode args: n [
+	^ aNode class == BlockNode and: [aNode numArgs = n]
+]
+
+{ #category : #analysis }
+Compiler >> isIntegerLiteral: aNode [
+	^ aNode class == LiteralNode and: [aNode value isInteger]
+]
+
+{ #category : #analysis }
+Compiler >> lookup: aName in: aScope [
+	| s |
+	s := aScope.
+	[s notNil] whileTrue: [
+		s declared reverseDo: [:v | (v name = aName and: [v kind ~~ #hidden]) ifTrue: [^ v]].
+		s := s parent].
+	^ nil
+]
+
+{ #category : #analysis }
+Compiler >> reference: v from: aScope [
+	| r |
+	r := aScope real.
+	r == v real ifTrue: [^ self].
+	v beCaptured.
+	[r == v real] whileFalse: [
+		(r needed identityIncludes: v) ifFalse: [r needed add: v].
+		r := r parent real]
+]
+
+{ #category : #analysis }
+Compiler >> resolve: aNode in: aScope [
+	| n v i |
+	n := aNode name.
+	n = 'self' ifTrue: [^ aNode bind: #self to: nil].
+	n = 'super' ifTrue: [^ aNode bind: #super to: nil].
+	n = 'thisContext' ifTrue: [^ aNode bind: #thisContext to: nil].
+	v := self lookup: n in: aScope.
+	v ifNotNil: [:x | self reference: x from: aScope. ^ aNode bind: #local to: x].
+	i := instVarNames indexOf: n.
+	i > 0 ifTrue: [^ aNode bind: #instance to: firstSlot + i - 1].
+	(self bindingOf: n) ifNotNil: [:b | ^ aNode bind: #classVariable to: b].
+	(Smalltalk classNamed: n) ifNotNil: [:c | ^ aNode bind: #global to: c].
+	^ self fail: 'undeclared variable ''' , n , '''' line: aNode line
+]
+
+{ #category : #compiling }
+Compiler >> compile: aString [
+	"The CompiledCode of a method's source in theClass."
+	| tree scope primitive flags pragmas e returned r |
+	tree := Parser parse: aString.
+	scope := CompilerScope parent: nil real: true seq: self nextSeq.
+	tree arguments do: [:a |
+		(instVarNames includes: a first) ifTrue: [^ self fail: 'argument ''' , a first , ''' shadows an instance variable' line: (a at: 2)].
+		self declare: a first kind: #argument in: scope line: (a at: 2)].
+	scope argumentCount: tree arguments size.
+	tree temporaries do: [:t |
+		(instVarNames includes: t first) ifTrue: [^ self fail: 'temporary ''' , t first , ''' shadows an instance variable' line: (t at: 2)].
+		self declare: t first kind: #temporary in: scope line: (t at: 2)].
+	self analyzeStatements: tree statements in: scope.
+	scope layout.
+	primitive := 0.
+	flags := 0.
+	pragmas := OrderedCollection new.
+	tree pragmas do: [:p |
+		p first == #primitive: ifTrue: [primitive := (p at: 2) first] ifFalse: [
+		p first == #unwind ifTrue: [flags := flags bitOr: 1] ifFalse: [
+		p first == #handler ifTrue: [flags := flags bitOr: 2] ifFalse: [
+		pragmas add: (Pragma selector: p first arguments: (p at: 2))]]]].
+	e := OrderedCollection new.
+	scope vectorTemp >= 0 ifTrue: [
+		self emit: e op: #pushNewArray a: scope vectorVariables size.
+		self emit: e op: #storeTemp a: scope vectorTemp].
+	returned := false.
+	tree statements doWithIndex: [:st :k |
+		st class == ReturnNode
+			ifTrue: [self genReturn: st value in: scope on: e. returned := true]
+			ifFalse: [
+				(doit and: [k = tree statements size])
+					ifTrue: [self genReturn: st in: scope on: e. returned := true]
+					ifFalse: [self gen: st in: scope on: e value: false]]].
+	(doit and: [returned not]) ifTrue: [self emit: e op: #pushNil. self emit: e op: #returnTop. returned := true].
+	returned ifFalse: [self emit: e op: #returnSelf].
+	r := (BytecodeGenerator new setLines: e) assembleWithExtraLiterals: pragmas.
+	^ CompiledCode new
+		setSelector: tree selector bytecodes: r first literals: (r at: 2) numArgs: tree arguments size
+		numTemps: scope tempCount maxStack: (r at: 3) primitive: primitive flags: flags numCopied: 0
+]
+
 { #category : #generation }
-Compiler >> label [
-	labelCounter := labelCounter + 1.
-	^ 'L' , labelCounter printString
+Compiler >> assembleBlock: lines scope: s [
+	| r home |
+	r := (BytecodeGenerator new setLines: lines) assembleWithExtraLiterals: #().
+	home := (lines anySatisfy: [:l | l first == #op and: [(l at: 2) == #nonlocalReturn]])
+		or: [lines anySatisfy: [:l | l first == #closure and: [(l at: 2) needsHome]]].
+	^ CompiledCode new
+		setSelector: nil bytecodes: r first literals: (r at: 2) numArgs: s argumentCount
+		numTemps: s copied size + s tempCount + 1 maxStack: (r at: 3) primitive: 0
+		flags: (home ifTrue: [12] ifFalse: [4]) numCopied: s copied size
+]
+
+{ #category : #generation }
+Compiler >> bindInlinedArgument: aNode in: r on: e [
+	aNode numArgs = 1
+		ifTrue: [self store: aNode scope declared first from: r on: e]
+		ifFalse: [self emit: e op: #pop]
+]
+
+{ #category : #generation }
+Compiler >> emit: e jump: op to: aLabel [
+	e add: {#jump. op. aLabel}
+]
+
+{ #category : #generation }
+Compiler >> emit: e label: aLabel [
+	e add: {#label. aLabel}
 ]
 
 { #category : #generation }
@@ -285,51 +314,6 @@ Compiler >> emit: e op: op a: a [
 { #category : #generation }
 Compiler >> emit: e op: op a: a b: b [
 	e add: {#op. op. a. b}
-]
-
-{ #category : #generation }
-Compiler >> emit: e jump: op to: aLabel [
-	e add: {#jump. op. aLabel}
-]
-
-{ #category : #generation }
-Compiler >> emit: e label: aLabel [
-	e add: {#label. aLabel}
-]
-
-{ #category : #generation }
-Compiler >> push: v from: r on: e [
-	v real == r ifTrue: [
-		v inVector
-			ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: v owner vectorTemp]
-			ifFalse: [^ self emit: e op: #pushTemp a: v index]].
-	v inVector ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: (r copiedIndex: v owner)].
-	self emit: e op: #pushTemp a: (r copiedIndex: v)
-]
-
-{ #category : #generation }
-Compiler >> store: v from: r on: e [
-	v real == r ifTrue: [
-		v inVector
-			ifTrue: [^ self emit: e op: #storeTempVectorSlot a: v vectorSlot b: v owner vectorTemp]
-			ifFalse: [^ self emit: e op: #storeTemp a: v index]].
-	self emit: e op: #storeTempVectorSlot a: v vectorSlot b: (r copiedIndex: v owner)
-]
-
-{ #category : #generation }
-Compiler >> pushLiteral: anObject on: e [
-	(anObject isInteger and: [anObject between: -128 and: 127]) ifTrue: [^ self emit: e op: #pushInt a: anObject].
-	anObject isNil ifTrue: [^ self emit: e op: #pushNil].
-	anObject == true ifTrue: [^ self emit: e op: #pushTrue].
-	anObject == false ifTrue: [^ self emit: e op: #pushFalse].
-	e add: {#literal. anObject}
-]
-
-{ #category : #generation }
-Compiler >> send: aSelector arguments: n on: e [
-	(BytecodeGenerator special: aSelector arguments: n)
-		ifNil: [e add: {#send. #send. aSelector. n}]
-		ifNotNil: [:op | self emit: e op: op]
 ]
 
 { #category : #generation }
@@ -408,16 +392,6 @@ Compiler >> genCascade: aNode in: r on: e value: wantValue [
 ]
 
 { #category : #generation }
-Compiler >> genReturn: aNode in: r on: e [
-	r parent isNil ifTrue: [
-		(aNode class == VariableNode and: [aNode binding == #self]) ifTrue: [^ self emit: e op: #returnSelf].
-		self gen: aNode in: r on: e value: true.
-		^ self emit: e op: #returnTop].
-	self gen: aNode in: r on: e value: true.
-	self emit: e op: #nonlocalReturn
-]
-
-{ #category : #generation }
 Compiler >> genClosure: aNode in: r on: e [
 	| s body code |
 	s := aNode scope.
@@ -442,38 +416,6 @@ Compiler >> genClosure: aNode in: r on: e [
 			ifTrue: [self emit: e op: #pushTemp a: (item real == r ifTrue: [item vectorTemp] ifFalse: [r copiedIndex: item])]
 			ifFalse: [self emit: e op: #pushTemp a: (item real == r ifTrue: [item index] ifFalse: [r copiedIndex: item])]].
 	e add: {#closure. code. s copied size}
-]
-
-{ #category : #generation }
-Compiler >> assembleBlock: lines scope: s [
-	| r home |
-	r := (BytecodeGenerator new setLines: lines) assembleWithExtraLiterals: #().
-	home := (lines anySatisfy: [:l | l first == #op and: [(l at: 2) == #nonlocalReturn]])
-		or: [lines anySatisfy: [:l | l first == #closure and: [(l at: 2) needsHome]]].
-	^ CompiledCode new
-		setSelector: nil bytecodes: r first literals: (r at: 2) numArgs: s argumentCount
-		numTemps: s copied size + s tempCount + 1 maxStack: (r at: 3) primitive: 0
-		flags: (home ifTrue: [12] ifFalse: [4]) numCopied: s copied size
-]
-
-{ #category : #generation }
-Compiler >> genInlinedBody: aNode in: r on: e value: wantValue [
-	"A loop body that owns a temp vector makes a fresh one on every pass."
-	(aNode scope isLoop and: [aNode scope vectorTemp >= 0]) ifTrue: [
-		self emit: e op: #pushNewArray a: aNode scope vectorVariables size.
-		self emit: e op: #storeTemp a: aNode scope vectorTemp].
-	aNode statements isEmpty ifTrue: [wantValue ifTrue: [self emit: e op: #pushNil]. ^ self].
-	aNode statements doWithIndex: [:st :k |
-		st class == ReturnNode
-			ifTrue: [self genReturn: st value in: r on: e]
-			ifFalse: [self gen: st in: r on: e value: (k = aNode statements size and: [wantValue])]]
-]
-
-{ #category : #generation }
-Compiler >> bindInlinedArgument: aNode in: r on: e [
-	aNode numArgs = 1
-		ifTrue: [self store: aNode scope declared first from: r on: e]
-		ifFalse: [self emit: e op: #pop]
 ]
 
 { #category : #generation }
@@ -627,45 +569,103 @@ Compiler >> genInlined: s in: r on: e value: wantValue [
 	^ self fail: 'not inlinable: ' , sel line: s line
 ]
 
-{ #category : #compiling }
-Compiler >> compile: aString [
-	"The CompiledCode of a method's source in theClass."
-	| tree scope primitive flags pragmas e returned r |
-	tree := Parser parse: aString.
-	scope := CompilerScope parent: nil real: true seq: self nextSeq.
-	tree arguments do: [:a |
-		(instVarNames includes: a first) ifTrue: [^ self fail: 'argument ''' , a first , ''' shadows an instance variable' line: (a at: 2)].
-		self declare: a first kind: #argument in: scope line: (a at: 2)].
-	scope argumentCount: tree arguments size.
-	tree temporaries do: [:t |
-		(instVarNames includes: t first) ifTrue: [^ self fail: 'temporary ''' , t first , ''' shadows an instance variable' line: (t at: 2)].
-		self declare: t first kind: #temporary in: scope line: (t at: 2)].
-	self analyzeStatements: tree statements in: scope.
-	scope layout.
-	primitive := 0.
-	flags := 0.
-	pragmas := OrderedCollection new.
-	tree pragmas do: [:p |
-		p first == #primitive: ifTrue: [primitive := (p at: 2) first] ifFalse: [
-		p first == #unwind ifTrue: [flags := flags bitOr: 1] ifFalse: [
-		p first == #handler ifTrue: [flags := flags bitOr: 2] ifFalse: [
-		pragmas add: (Pragma selector: p first arguments: (p at: 2))]]]].
-	e := OrderedCollection new.
-	scope vectorTemp >= 0 ifTrue: [
-		self emit: e op: #pushNewArray a: scope vectorVariables size.
-		self emit: e op: #storeTemp a: scope vectorTemp].
-	returned := false.
-	tree statements doWithIndex: [:st :k |
+{ #category : #generation }
+Compiler >> genInlinedBody: aNode in: r on: e value: wantValue [
+	"A loop body that owns a temp vector makes a fresh one on every pass."
+	(aNode scope isLoop and: [aNode scope vectorTemp >= 0]) ifTrue: [
+		self emit: e op: #pushNewArray a: aNode scope vectorVariables size.
+		self emit: e op: #storeTemp a: aNode scope vectorTemp].
+	aNode statements isEmpty ifTrue: [wantValue ifTrue: [self emit: e op: #pushNil]. ^ self].
+	aNode statements doWithIndex: [:st :k |
 		st class == ReturnNode
-			ifTrue: [self genReturn: st value in: scope on: e. returned := true]
-			ifFalse: [
-				(doit and: [k = tree statements size])
-					ifTrue: [self genReturn: st in: scope on: e. returned := true]
-					ifFalse: [self gen: st in: scope on: e value: false]]].
-	(doit and: [returned not]) ifTrue: [self emit: e op: #pushNil. self emit: e op: #returnTop. returned := true].
-	returned ifFalse: [self emit: e op: #returnSelf].
-	r := (BytecodeGenerator new setLines: e) assembleWithExtraLiterals: pragmas.
-	^ CompiledCode new
-		setSelector: tree selector bytecodes: r first literals: (r at: 2) numArgs: tree arguments size
-		numTemps: scope tempCount maxStack: (r at: 3) primitive: primitive flags: flags numCopied: 0
+			ifTrue: [self genReturn: st value in: r on: e]
+			ifFalse: [self gen: st in: r on: e value: (k = aNode statements size and: [wantValue])]]
+]
+
+{ #category : #generation }
+Compiler >> genReturn: aNode in: r on: e [
+	r parent isNil ifTrue: [
+		(aNode class == VariableNode and: [aNode binding == #self]) ifTrue: [^ self emit: e op: #returnSelf].
+		self gen: aNode in: r on: e value: true.
+		^ self emit: e op: #returnTop].
+	self gen: aNode in: r on: e value: true.
+	self emit: e op: #nonlocalReturn
+]
+
+{ #category : #generation }
+Compiler >> label [
+	labelCounter := labelCounter + 1.
+	^ 'L' , labelCounter printString
+]
+
+{ #category : #generation }
+Compiler >> push: v from: r on: e [
+	v real == r ifTrue: [
+		v inVector
+			ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: v owner vectorTemp]
+			ifFalse: [^ self emit: e op: #pushTemp a: v index]].
+	v inVector ifTrue: [^ self emit: e op: #pushTempVectorSlot a: v vectorSlot b: (r copiedIndex: v owner)].
+	self emit: e op: #pushTemp a: (r copiedIndex: v)
+]
+
+{ #category : #generation }
+Compiler >> pushLiteral: anObject on: e [
+	(anObject isInteger and: [anObject between: -128 and: 127]) ifTrue: [^ self emit: e op: #pushInt a: anObject].
+	anObject isNil ifTrue: [^ self emit: e op: #pushNil].
+	anObject == true ifTrue: [^ self emit: e op: #pushTrue].
+	anObject == false ifTrue: [^ self emit: e op: #pushFalse].
+	e add: {#literal. anObject}
+]
+
+{ #category : #generation }
+Compiler >> send: aSelector arguments: n on: e [
+	(BytecodeGenerator special: aSelector arguments: n)
+		ifNil: [e add: {#send. #send. aSelector. n}]
+		ifNotNil: [:op | self emit: e op: op]
+]
+
+{ #category : #generation }
+Compiler >> store: v from: r on: e [
+	v real == r ifTrue: [
+		v inVector
+			ifTrue: [^ self emit: e op: #storeTempVectorSlot a: v vectorSlot b: v owner vectorTemp]
+			ifFalse: [^ self emit: e op: #storeTemp a: v index]].
+	self emit: e op: #storeTempVectorSlot a: v vectorSlot b: (r copiedIndex: v owner)
+]
+
+{ #category : #accessing }
+Compiler class >> compile: aString in: aClass [
+	^ self new setClass: aClass; compile: aString
+]
+
+{ #category : #accessing }
+Compiler class >> compile: aString in: aClass instanceVariableNames: anArray bindings: aDictionaryOrNil [
+	"Compile against the shape a class will have (module 8e): its instance variable names (all of them, inherited first) and the class variables it is about to have (a Dictionary from name to Binding, consulted before the class's own)."
+	^ self new setClass: aClass; instanceVariableNames: anArray; pendingBindings: aDictionaryOrNil; compile: aString
+]
+
+{ #category : #accessing }
+Compiler class >> inlinedSelectors [
+	^ #(#ifTrue: #ifFalse: #and: #or: #ifNil: #timesRepeat: #ifTrue:ifFalse: #ifFalse:ifTrue: #ifNotNil: #ifNil:ifNotNil: #ifNotNil:ifNil: #whileTrue: #whileFalse: #whileTrue #whileFalse #repeat #to:do: #to:by:do:)
+]
+
+{ #category : #evaluating }
+Compiler class >> compileDoIt: aString in: aClass [
+	"The CompiledCode of a doit: the method DoIt whose body is aString, answering its last statement's value."
+	^ self new setClass: aClass; beDoIt; compile: 'DoIt ' , aString
+]
+
+{ #category : #evaluating }
+Compiler class >> evaluate: aString [
+	"The value of the statements aString holds, run once with nil as self (a doit: compiled as a method of UndefinedObject, made and verified by the VM, run, dropped; nothing is installed)."
+	^ self evaluate: aString for: nil
+]
+
+{ #category : #evaluating }
+Compiler class >> evaluate: aString for: anObject [
+	"The value of the statements aString holds, run once with anObject as self: compiled as a method DoIt of anObject's class (its temporaries the method's, the last statement's value answered), made by the VM, run by valueWithReceiver:arguments:, never installed. A CompileError when the source or the VM refuses it, InstallForbidden in a release image."
+	| method |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: anObject class selector: nil; signal].
+	method := (self compileDoIt: aString in: anObject class) makeMethodIn: anObject class.
+	^ method valueWithReceiver: anObject arguments: #()
 ]

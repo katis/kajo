@@ -10,37 +10,6 @@ Class {
 }
 
 { #category : #accessing }
-Association class >> key: k value: v [
-	^ self basicNew key: k value: v
-]
-
-{ #category : #accessing }
-Association >> key: k value: v [
-	key := k.
-	value := v
-]
-
-{ #category : #accessing }
-Association >> key [
-	^ key
-]
-
-{ #category : #accessing }
-Association >> key: k [
-	key := k
-]
-
-{ #category : #accessing }
-Association >> value [
-	^ value
-]
-
-{ #category : #accessing }
-Association >> value: v [
-	value := v
-]
-
-{ #category : #accessing }
 Association >> < anAssociation [
 	^ key < anAssociation key
 ]
@@ -56,6 +25,37 @@ Association >> hash [
 ]
 
 { #category : #accessing }
+Association >> key [
+	^ key
+]
+
+{ #category : #accessing }
+Association >> key: k [
+	key := k
+]
+
+{ #category : #accessing }
+Association >> key: k value: v [
+	key := k.
+	value := v
+]
+
+{ #category : #accessing }
 Association >> printOn: aStream [
 	aStream print: key; nextPutAll: '->'; print: value
+]
+
+{ #category : #accessing }
+Association >> value [
+	^ value
+]
+
+{ #category : #accessing }
+Association >> value: v [
+	value := v
+]
+
+{ #category : #accessing }
+Association class >> key: k value: v [
+	^ self basicNew key: k value: v
 ]

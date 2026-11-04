@@ -9,25 +9,6 @@ Class {
 }
 
 { #category : #accessing }
-TestRunner >> runFilter: filter tag: tag [
-	| cases t0 |
-	cases := OrderedCollection new.
-	TestCase allTestClasses do: [:c |
-		c testSelectors do: [:s | | t |
-			t := c selector: s.
-			((filter isNil or: [self name: t name matches: filter])
-				and: [tag isNil or: [t hasTag: tag]]) ifTrue: [cases add: t]]].
-	result := TestResult new beEmitting; yourself.
-	self emitEvent: 'run.started' fields: {'total'. cases size. 'filter'. filter. 'tag'. tag}.
-	t0 := Smalltalk microsecondClock.
-	cases do: [:t | result runCase: t].
-	Transcript flush.
-	self emitEvent: 'run.finished' fields: {'total'. cases size. 'passed'. result passed size. 'failed'. result failures size.
-		'errored'. result errors size. 'us'. Smalltalk microsecondClock - t0}.
-	^ result failures size + result errors size
-]
-
-{ #category : #accessing }
 TestRunner >> name: aString matches: pattern [
 	"A pattern with * wildcards matches the whole name; without, any part of it."
 	| pieces i |
@@ -46,4 +27,23 @@ TestRunner >> name: aString matches: pattern [
 { #category : #accessing }
 TestRunner >> result [
 	^ result
+]
+
+{ #category : #accessing }
+TestRunner >> runFilter: filter tag: tag [
+	| cases t0 |
+	cases := OrderedCollection new.
+	TestCase allTestClasses do: [:c |
+		c testSelectors do: [:s | | t |
+			t := c selector: s.
+			((filter isNil or: [self name: t name matches: filter])
+				and: [tag isNil or: [t hasTag: tag]]) ifTrue: [cases add: t]]].
+	result := TestResult new beEmitting; yourself.
+	self emitEvent: 'run.started' fields: {'total'. cases size. 'filter'. filter. 'tag'. tag}.
+	t0 := Smalltalk microsecondClock.
+	cases do: [:t | result runCase: t].
+	Transcript flush.
+	self emitEvent: 'run.finished' fields: {'total'. cases size. 'passed'. result passed size. 'failed'. result failures size.
+		'errored'. result errors size. 'us'. Smalltalk microsecondClock - t0}.
+	^ result failures size + result errors size
 ]

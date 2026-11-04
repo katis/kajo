@@ -6,6 +6,23 @@ Class {
 }
 
 { #category : #accessing }
+ProcessTest >> testActiveProcess [
+	| p |
+	p := ProcessorScheduler activeProcess.
+	self assert: p class == Process.
+	self assert: p state == #running.
+	self deny: p isTerminated
+]
+
+{ #category : #accessing }
+ProcessTest >> testDelay [
+	| t0 |
+	t0 := Smalltalk microsecondClock.
+	(Delay forMilliseconds: 20) wait.
+	self assert: Smalltalk microsecondClock - t0 >= 15000
+]
+
+{ #category : #accessing }
 ProcessTest >> testForkAndSemaphore [
 	| s result |
 	s := Semaphore new.
@@ -25,25 +42,6 @@ ProcessTest >> testManyProcessesWithASharedQueue [
 ]
 
 { #category : #accessing }
-ProcessTest >> testMutexProtectsACounter [
-	| m counter done |
-	m := Mutex new.
-	counter := 0.
-	done := Semaphore new.
-	1 to: 4 do: [:k | [1 to: 200 do: [:i | m critical: [counter := counter + 1]]. done signal] fork].
-	4 timesRepeat: [done wait].
-	self assert: counter = 800
-]
-
-{ #category : #accessing }
-ProcessTest >> testMutexIsReentrant [
-	| m r |
-	m := Mutex new.
-	r := m critical: [m critical: [5]].
-	self assert: r = 5
-]
-
-{ #category : #accessing }
 ProcessTest >> testMonitorWaitAndSignal [
 	| mon ready value done |
 	mon := Monitor new.
@@ -57,20 +55,22 @@ ProcessTest >> testMonitorWaitAndSignal [
 ]
 
 { #category : #accessing }
-ProcessTest >> testDelay [
-	| t0 |
-	t0 := Smalltalk microsecondClock.
-	(Delay forMilliseconds: 20) wait.
-	self assert: Smalltalk microsecondClock - t0 >= 15000
+ProcessTest >> testMutexIsReentrant [
+	| m r |
+	m := Mutex new.
+	r := m critical: [m critical: [5]].
+	self assert: r = 5
 ]
 
 { #category : #accessing }
-ProcessTest >> testActiveProcess [
-	| p |
-	p := ProcessorScheduler activeProcess.
-	self assert: p class == Process.
-	self assert: p state == #running.
-	self deny: p isTerminated
+ProcessTest >> testMutexProtectsACounter [
+	| m counter done |
+	m := Mutex new.
+	counter := 0.
+	done := Semaphore new.
+	1 to: 4 do: [:k | [1 to: 200 do: [:i | m critical: [counter := counter + 1]]. done signal] fork].
+	4 timesRepeat: [done wait].
+	self assert: counter = 800
 ]
 
 { #category : #accessing }

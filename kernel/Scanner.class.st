@@ -17,67 +17,18 @@ Class {
 }
 
 { #category : #accessing }
-Scanner class >> on: aString [
-	^ self basicNew setSource: aString
+Scanner >> byteAt: i [
+	^ i < limit ifTrue: [source byteAt: i] ifFalse: [0]
 ]
 
 { #category : #accessing }
-Scanner >> setSource: aString [
-	source := aString.
-	position := 1.
-	limit := aString byteSize + 1.
-	line := 1
-]
-
-{ #category : #accessing }
-Scanner >> kind [
-	^ kind
-]
-
-{ #category : #accessing }
-Scanner >> value [
-	^ value
-]
-
-{ #category : #accessing }
-Scanner >> start [
-	^ start
-]
-
-{ #category : #accessing }
-Scanner >> stop [
-	^ stop
-]
-
-{ #category : #accessing }
-Scanner >> tokenLine [
-	^ tokenLine
-]
-
-{ #category : #accessing }
-Scanner >> position [
-	^ position
-]
-
-{ #category : #accessing }
-Scanner >> source [
-	^ source
-]
-
-{ #category : #accessing }
-Scanner >> state [
-	^ {position. line. kind. value. start. stop. tokenLine}
-]
-
-{ #category : #accessing }
-Scanner >> restore: anArray [
-	position := anArray at: 1.
-	line := anArray at: 2.
-	kind := anArray at: 3.
-	value := anArray at: 4.
-	start := anArray at: 5.
-	stop := anArray at: 6.
-	tokenLine := anArray at: 7
+Scanner >> digits: radix [
+	| out b d |
+	out := OrderedCollection new.
+	[b := self byteAt: position.
+	 d := (b between: 48 and: 57) ifTrue: [b - 48] ifFalse: [(b between: 65 and: 90) ifTrue: [b - 55] ifFalse: [99]].
+	 d < radix] whileTrue: [out add: d. position := position + 1].
+	^ out
 ]
 
 { #category : #accessing }
@@ -91,8 +42,17 @@ Scanner >> fail: aString line: anInteger [
 ]
 
 { #category : #accessing }
-Scanner >> byteAt: i [
-	^ i < limit ifTrue: [source byteAt: i] ifFalse: [0]
+Scanner >> identifierRun [
+	| s |
+	s := position.
+	[(self isLetterAt: position) or: [self isDigitByte: (self byteAt: position)]] whileTrue: [
+		position := position + (source scalarSizeAt: position)].
+	^ source copyFrom: s to: position - 1
+]
+
+{ #category : #accessing }
+Scanner >> isBinaryByte: b [
+	^ b > 0 and: [b < 128 and: ['+-*/\<>=~&|@%,?!' includes: (Character value: b)]]
 ]
 
 { #category : #accessing }
@@ -110,46 +70,8 @@ Scanner >> isLetterAt: i [
 ]
 
 { #category : #accessing }
-Scanner >> isBinaryByte: b [
-	^ b > 0 and: [b < 128 and: ['+-*/\<>=~&|@%,?!' includes: (Character value: b)]]
-]
-
-{ #category : #accessing }
-Scanner >> skipSpace [
-	| b startLine |
-	[position < limit] whileTrue: [
-		b := source byteAt: position.
-		b = 10
-			ifTrue: [line := line + 1. position := position + 1]
-			ifFalse: [
-				(b = 32 or: [b = 9 or: [b = 13 or: [b = 12]]])
-					ifTrue: [position := position + 1]
-					ifFalse: [
-						b = 34 ifFalse: [^ self].
-						startLine := line.
-						position := position + 1.
-						[position < limit and: [(source byteAt: position) ~= 34]] whileTrue: [
-							(source byteAt: position) = 10 ifTrue: [line := line + 1].
-							position := position + 1].
-						position >= limit ifTrue: [^ self fail: 'unterminated comment' line: startLine].
-						position := position + 1]]]
-]
-
-{ #category : #accessing }
-Scanner >> identifierRun [
-	| s |
-	s := position.
-	[(self isLetterAt: position) or: [self isDigitByte: (self byteAt: position)]] whileTrue: [
-		position := position + (source scalarSizeAt: position)].
-	^ source copyFrom: s to: position - 1
-]
-
-{ #category : #accessing }
-Scanner >> token: aKind value: anObject [
-	kind := aKind.
-	value := anObject.
-	stop := position.
-	^ aKind
+Scanner >> kind [
+	^ kind
 ]
 
 { #category : #accessing }
@@ -201,28 +123,8 @@ Scanner >> next [
 ]
 
 { #category : #accessing }
-Scanner >> scanHash [
-	| b s name |
-	position := position + 1.
-	position >= limit ifTrue: [^ self fail: 'a lone #'].
-	b := source byteAt: position.
-	b = 40 ifTrue: [position := position + 1. ^ self token: #literalArrayStart value: nil].
-	b = 91 ifTrue: [position := position + 1. ^ self token: #byteArrayStart value: nil].
-	b = 39 ifTrue: [position := position + 1. ^ self token: #symbol value: self quoted].
-	(self isBinaryByte: b) ifTrue: [
-		s := position.
-		[self isBinaryByte: (self byteAt: position)] whileTrue: [position := position + 1].
-		^ self token: #symbol value: (source copyFrom: s to: position - 1)].
-	(self isLetterAt: position) ifTrue: [
-		name := self identifierRun.
-		[(self byteAt: position) = 58] whileTrue: [
-			position := position + 1.
-			name := name , ':'.
-			(self isLetterAt: position)
-				ifTrue: [name := name , self identifierRun]
-				ifFalse: [^ self token: #symbol value: name]].
-		^ self token: #symbol value: name].
-	^ self fail: 'bad symbol literal'
+Scanner >> position [
+	^ position
 ]
 
 { #category : #accessing }
@@ -246,13 +148,39 @@ Scanner >> quoted [
 ]
 
 { #category : #accessing }
-Scanner >> digits: radix [
-	| out b d |
-	out := OrderedCollection new.
-	[b := self byteAt: position.
-	 d := (b between: 48 and: 57) ifTrue: [b - 48] ifFalse: [(b between: 65 and: 90) ifTrue: [b - 55] ifFalse: [99]].
-	 d < radix] whileTrue: [out add: d. position := position + 1].
-	^ out
+Scanner >> restore: anArray [
+	position := anArray at: 1.
+	line := anArray at: 2.
+	kind := anArray at: 3.
+	value := anArray at: 4.
+	start := anArray at: 5.
+	stop := anArray at: 6.
+	tokenLine := anArray at: 7
+]
+
+{ #category : #accessing }
+Scanner >> scanHash [
+	| b s name |
+	position := position + 1.
+	position >= limit ifTrue: [^ self fail: 'a lone #'].
+	b := source byteAt: position.
+	b = 40 ifTrue: [position := position + 1. ^ self token: #literalArrayStart value: nil].
+	b = 91 ifTrue: [position := position + 1. ^ self token: #byteArrayStart value: nil].
+	b = 39 ifTrue: [position := position + 1. ^ self token: #symbol value: self quoted].
+	(self isBinaryByte: b) ifTrue: [
+		s := position.
+		[self isBinaryByte: (self byteAt: position)] whileTrue: [position := position + 1].
+		^ self token: #symbol value: (source copyFrom: s to: position - 1)].
+	(self isLetterAt: position) ifTrue: [
+		name := self identifierRun.
+		[(self byteAt: position) = 58] whileTrue: [
+			position := position + 1.
+			name := name , ':'.
+			(self isLetterAt: position)
+				ifTrue: [name := name , self identifierRun]
+				ifFalse: [^ self token: #symbol value: name]].
+		^ self token: #symbol value: name].
+	^ self fail: 'bad symbol literal'
 ]
 
 { #category : #accessing }
@@ -292,6 +220,78 @@ Scanner >> scanNumber [
 	f := text contents asFloat.
 	f isFinite ifFalse: [^ self fail: 'float literal out of range'].
 	^ self token: #float value: f
+]
+
+{ #category : #accessing }
+Scanner >> setSource: aString [
+	source := aString.
+	position := 1.
+	limit := aString byteSize + 1.
+	line := 1
+]
+
+{ #category : #accessing }
+Scanner >> skipSpace [
+	| b startLine |
+	[position < limit] whileTrue: [
+		b := source byteAt: position.
+		b = 10
+			ifTrue: [line := line + 1. position := position + 1]
+			ifFalse: [
+				(b = 32 or: [b = 9 or: [b = 13 or: [b = 12]]])
+					ifTrue: [position := position + 1]
+					ifFalse: [
+						b = 34 ifFalse: [^ self].
+						startLine := line.
+						position := position + 1.
+						[position < limit and: [(source byteAt: position) ~= 34]] whileTrue: [
+							(source byteAt: position) = 10 ifTrue: [line := line + 1].
+							position := position + 1].
+						position >= limit ifTrue: [^ self fail: 'unterminated comment' line: startLine].
+						position := position + 1]]]
+]
+
+{ #category : #accessing }
+Scanner >> source [
+	^ source
+]
+
+{ #category : #accessing }
+Scanner >> start [
+	^ start
+]
+
+{ #category : #accessing }
+Scanner >> state [
+	^ {position. line. kind. value. start. stop. tokenLine}
+]
+
+{ #category : #accessing }
+Scanner >> stop [
+	^ stop
+]
+
+{ #category : #accessing }
+Scanner >> token: aKind value: anObject [
+	kind := aKind.
+	value := anObject.
+	stop := position.
+	^ aKind
+]
+
+{ #category : #accessing }
+Scanner >> tokenLine [
+	^ tokenLine
+]
+
+{ #category : #accessing }
+Scanner >> value [
+	^ value
+]
+
+{ #category : #accessing }
+Scanner class >> on: aString [
+	^ self basicNew setSource: aString
 ]
 
 { #category : #accessing }
