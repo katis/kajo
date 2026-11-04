@@ -159,6 +159,12 @@ Smalltalk class >> test: arguments [
 ]
 
 { #category : #'entry points' }
+Smalltalk class >> testFilter: aPatternOrNil tag: aTagOrNil [
+	"The shells' tests mode (module 9a): test: without an Array of arguments."
+	^ TestRunner new runFilter: aPatternOrNil tag: aTagOrNil
+]
+
+{ #category : #'entry points' }
 Smalltalk class >> microsecondClock [
 	<primitive: 141>
 	^ 0

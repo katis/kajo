@@ -7,6 +7,7 @@ let package = Package(
     products: [
         .library(name: "KajoVM", targets: ["KajoVM"]),
         .library(name: "KajoCompiler", targets: ["KajoCompiler"]),
+        .library(name: "KajoShellCore", targets: ["KajoShellCore"]),
         .executable(name: "kajo", targets: ["kajo"]),
     ],
     targets: [
@@ -24,6 +25,15 @@ let package = Package(
         .target(
             name: "KajoCompiler",
             dependencies: ["KajoVM"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
+        // Module 9a: the Swift both native shells share (apps/): launch
+        // options, output, device telemetry, the frame account, the modes
+        // (tests, golden, scenario, demo) over the host surface. No AppKit or
+        // UIKit: the platform's views and display link are behind a protocol.
+        .target(
+            name: "KajoShellCore",
+            dependencies: ["KajoVM", "KajoCompiler"],
             swiftSettings: [.strictMemorySafety()]
         ),
         // Headless command line: boot an image, run tests, serve the
@@ -57,7 +67,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KajoCompilerTests",
-            dependencies: ["KajoVM", "KajoCompiler"],
+            dependencies: ["KajoVM", "KajoCompiler", "KajoShellCore"],
             exclude: ["Fixtures"]
         ),
     ]

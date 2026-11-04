@@ -160,6 +160,19 @@ public struct MainThreadCounters: Sendable {
     public var edenWaits: UInt64 = 0, edenWaitNs: UInt64 = 0
     public var stopWaitNs: UInt64 = 0, drainWaitNs: UInt64 = 0
 
+    public init() {}
+
+    init(acksOwn: UInt64, acksOwnNs: UInt64, acksOther: UInt64, acksOtherNs: UInt64, ackMaxNs: UInt64, serviceNs: UInt64,
+         ownCollections: UInt64, ownNs: UInt64, ownMaxNs: UInt64, flips: UInt64, flipNs: UInt64, flipMaxNs: UInt64,
+         collectorWaits: UInt64, collectorWaitNs: UInt64, edenWaits: UInt64, edenWaitNs: UInt64, stopWaitNs: UInt64,
+         drainWaitNs: UInt64) {
+        self.acksOwn = acksOwn; self.acksOwnNs = acksOwnNs; self.acksOther = acksOther; self.acksOtherNs = acksOtherNs
+        self.ackMaxNs = ackMaxNs; self.serviceNs = serviceNs; self.ownCollections = ownCollections; self.ownNs = ownNs
+        self.ownMaxNs = ownMaxNs; self.flips = flips; self.flipNs = flipNs; self.flipMaxNs = flipMaxNs
+        self.collectorWaits = collectorWaits; self.collectorWaitNs = collectorWaitNs; self.edenWaits = edenWaits
+        self.edenWaitNs = edenWaitNs; self.stopWaitNs = stopWaitNs; self.drainWaitNs = drainWaitNs
+    }
+
     /// Stopped because another worker allocated (rounds of other nurseries'
     /// collections, polls that found none owed, waits for a pending stop and
     /// for collections before a stop); add the turns' `parkNs`.

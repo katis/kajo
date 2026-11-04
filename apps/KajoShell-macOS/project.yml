@@ -1,0 +1,51 @@
+# xcodegen spec for the macOS shell (module 9a). `xcodegen generate` in this
+# directory writes KajoShell-macOS.xcodeproj (committed with the spec).
+name: KajoShell-macOS
+options:
+  bundleIdPrefix: dev.katajamaki.kajo
+  deploymentTarget:
+    macOS: "15.0"
+packages:
+  kajo:
+    path: ../..
+settings:
+  base:
+    DEVELOPMENT_TEAM: BDN6M642M2
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "6.0"
+targets:
+  KajoShell:
+    type: application
+    platform: macOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Kajo
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        LSMinimumSystemVersion: "15.0"
+        NSPrincipalClass: NSApplication
+        NSHighResolutionCapable: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.shell-macos
+        PRODUCT_NAME: KajoShell
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        ENABLE_HARDENED_RUNTIME: NO
+        SWIFT_OPTIMIZATION_LEVEL: -O
+        SWIFT_COMPILATION_MODE: wholemodule
+        GENERATE_INFOPLIST_FILE: NO
+        CODE_SIGN_IDENTITY: "-"
+    dependencies:
+      - package: kajo
+        product: KajoShellCore
+      - package: kajo
+        product: KajoVM
+    postBuildScripts:
+      - name: Bundle images
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          "$SRCROOT/../Shared/build-images.sh" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
