@@ -469,7 +469,18 @@ Smalltalk (CompilerTest's comparison alone takes 11 s).
 
 ## Tests
 
-[TESTS]
+Swift: 310 `KajoVMTests` (as at the start; three new image corruptions
+are cases of the parameterized `theImageLoaderRejects`: `aVersion2Image`,
+`unknownFlags`, the bad version now 4) and 46 `KajoCompilerTests` (Swift
+Testing's count, parameterized tests once; 41 at the start): new
+`ClassVariableTests` (5), `LiveInstallTests` (3), in `CompilerTests` the
+two temp-vector tests, `compiledMethodsAreMadeAndRunThroughThePrimitive`
+and `aMessageChainPastTheNestingLimitIsRefused`, in `SnapshotScenarioTests`
+the `removedMethod` case.
+
+Smalltalk: 160 kernel tests (`kajo test`; 130 in 8c's count, 9a's view
+tests between): new `ClassVariableTest` (6), `LiveCompileTest` (9),
+`MakeFuzzTest` (2), `BlockClosureTest` (2).
 
 ## Broken variants run by hand
 
@@ -532,7 +543,34 @@ not a hot path.
 
 ## Gates
 
-[GATES]
+The code is c657344's; the gates ran on 9f0bda4 (this doc) and, from the
+second ThreadSanitizer run on, on 62f85ed, which adds only the main
+session's two notes in `docs/modules/shells.md`. Mac mini (M2 Pro),
+swift.org 6.4.2, 2026-11-04 07:20 to 08:56, every output in a file, each
+step logged with the commit it ran on:
+
+| gate | result |
+|---|---|
+| `swift test` | 310 + 46 passed, 157 + 34 s |
+| under load (12 busy loops) | 310 + 46 passed, 195 + 41 s |
+| ThreadSanitizer | 310 + 46 passed, 0 reports, 552 + 909 s |
+| ThreadSanitizer under load | 310 + 46 passed, 0 reports, 562 + 1070 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release, `interpret` 1056 instructions, one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 310 + 46 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | passed: 1000 seeds under every configuration, the snapshot modes saving 929 to 979 of 1000, no failing seed |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.53 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 3.44 million runs, no crash |
+| `just fuzz syntax 600` | libFuzzer build ok, 1.70 million runs (the make-and-run mode in each that compiled), no crash |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| clean build | exit 0, 0 errors, 0 warnings |
+
+(310 is `KajoVMTests`, 46 `KajoCompilerTests`, whose kernel-image suite
+runs the kernel's 160 SUnit tests.) Before the gates, a 60 s `just fuzz
+syntax` on ef9eb47 found the message-chain stack overflow (Changes to
+earlier modules), fixed in c657344, after which a 120 s run was clean.
 
 ## Commands
 
