@@ -115,26 +115,39 @@ end
 """
 
 @Test func oneReadyProcessRoundTrips() throws {
-    let rt = try Runtime(oneReadySrc, background: 1)
-    let counter = rt.spawn("count:", [int(2000)])
-    let saver = rt.spawn("saver")
-    rt.waitAllTerminated()
-    #expect(rt.result(saver) == 1)
-    #expect(rt.result(counter) == 2001000)
-    let images = rt.vm.takeSavedImages()
-    #expect(images.count == 1)
-    #expect(rt.vm.counters[.snapshots] == 1)
-    let saverId = processId(rt, saver), counterId = processId(rt, counter)
-    rt.stop()
-    guard let bytes = images.first else { return }
-    let r = try Resumed(bytes, background: 1)
-    #expect(r.vm.resumedSaver != nil)
-    r.waitAllTerminated()
-    if let s = r.process(id: saverId) { #expect(r.result(s) == 100) } else { Issue.record("the saver was not resumed") }
-    // The counter yields 2000 times on one worker: it was ready at the save.
-    if let c = r.process(id: counterId) { #expect(r.result(c) == 2001000) } else { Issue.record("the counter was not resumed") }
-    #expect(r.vm.counters[.processesResumed] == 2)
-    r.stop()
+    // The counter must still be ready when the saver saves; on a loaded
+    // machine (the full suite took 109 and 164 s for this test) the saver's
+    // thread can be descheduled while the counter yields to its end, and the
+    // image then holds the saver alone. Repeat the round (at most five
+    // times) until the save caught the counter, never accepting less.
+    for attempt in 1...5 {
+        let rt = try Runtime(oneReadySrc, background: 1)
+        let counter = rt.spawn("count:", [int(2000)])
+        let saver = rt.spawn("saver")
+        rt.waitAllTerminated()
+        #expect(rt.result(saver) == 1)
+        #expect(rt.result(counter) == 2001000)
+        let images = rt.vm.takeSavedImages()
+        #expect(images.count == 1)
+        #expect(rt.vm.counters[.snapshots] == 1)
+        let saverId = processId(rt, saver), counterId = processId(rt, counter)
+        rt.stop()
+        guard let bytes = images.first else { return }
+        let r = try Resumed(bytes, background: 1)
+        #expect(r.vm.resumedSaver != nil)
+        r.waitAllTerminated()
+        if let s = r.process(id: saverId) { #expect(r.result(s) == 100) } else { Issue.record("the saver was not resumed") }
+        guard let c = r.process(id: counterId) else {
+            r.stop()
+            if attempt == 5 { Issue.record("the counter had ended before the save in five rounds") }
+            continue
+        }
+        // The counter yields 2000 times on one worker: it was ready at the save.
+        #expect(r.result(c) == 2001000)
+        #expect(r.vm.counters[.processesResumed] == 2)
+        r.stop()
+        return
+    }
 }
 
 /// Saved stacks with return markers (a read-only store's discard frame, a
