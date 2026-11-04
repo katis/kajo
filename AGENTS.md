@@ -263,7 +263,13 @@ Safety:
    writes, creation or become; no ivar access in their methods) or a
    verified method's bytecodes could be rewritten at run time. Slot reads
    through `slotAt:` (primitive 117) are allowed since module 8b: the
-   kernel's reflection needs them and a read rewrites nothing.
+   kernel's reflection needs them and a read rewrites nothing. Since
+   module 8d a method enters a class from Smalltalk only through the make
+   primitive (143), which runs the one bytecode verifier on what the
+   compiler handed over and makes it read-only and pinned before any other
+   Process sees it, and the install primitives (97, 98), which refuse the
+   sealed classes and release images. The primitive is the trust boundary,
+   not the compiler.
  - A stress mode that preempts at every poll livelocks: a Process preempted
    at a send is resumed at that send and preempted again. Every slice must
    execute at least one instruction; the stress flag lets the first poll of
@@ -530,6 +536,23 @@ Safety:
    it. Module 4's precondition says a provisioning failure is counted and
    reported; the stop-the-world oracle's promotion reserve runs out on the
    ring scenario at 600 MiB and the VM traps instead (open, module 9a).
+ - No object is larger than one block, so a table that is one object has
+   a hard capacity. 8b's sources table was one IdentityDictionary whose
+   Array could not pass 4095 slots; at 1550 methods it died in an
+   unhandled error and the build went on with 14 sources missing, because
+   the build read only VM errors. Tables that grow with the kernel are
+   split (per class), and a Process that ends without an answer fails the
+   step that ran it.
+ - Recursion over untrusted input is bounded against the smallest stack it
+   runs on. A binary chain of thousands of sends overflowed the Swift
+   stack in code generation (ASan, `just fuzz syntax`); the parser holds
+   chains to the nesting limit. The limit is still deep enough to
+   overflow a 512 KB thread in a debug build at about 100 (open, 8d).
+ - A refusal is a value, not a trap, at a boundary that takes Smalltalk's
+   input: the make primitive answers the verifier's reason as a String
+   the kernel turns into a CompileError. Skipping the verifier there made
+   a mutated method run and trap in the object memory; the seeded
+   mutation test and the make-and-run fuzz mode exist to catch that.
 
 ## Verification
 
@@ -593,7 +616,8 @@ tables and the main-thread check undone, and its five open questions in
 `docs/modules/kernel-image.md` await the owner; Processes saved in the
 image built in module 8c: the stack words copied verbatim into Array
 chunks under special object 8 with the ready queues, the finalization
-Semaphore and the saver, image format version 2, `Smalltalk snapshot:`
+Semaphore and the saver, image format version 2 (3 since 8d; 1 and 2 are
+refused, images are rebuilt from sources), `Smalltalk snapshot:`
 answering false in the saver and true on resume, a hold on the scheduler
 before the stop with its own model, a loader that checks every saved frame
 against its method and the bytecode verifier's depth at its pc, `kajo run`
@@ -602,8 +626,21 @@ mid-run agreeing with their model, the kernels within noise, a save's stop
 at 0.45 to 0.56 ms; 8c's six open questions in
 `docs/modules/image-processes.md`; the owner answered 8b's and 8c's
 questions on 2026-11-04: per-iteration temp vectors as Pharo, class
-variables, installing from Smalltalk behind a release flag, module 8d's
-brief `docs/modules/kernel-live.md`, the rest as built); the native shells
+variables, installing from Smalltalk behind a release flag, the rest as
+built; built in module 8d, `docs/modules/kernel-live.md`: an inlined loop
+body owns the temp vector of its captured and assigned temps and makes a
+new one per pass, in both compilers, 10.8 ns per such iteration; class
+variables as Binding objects in a read-only pool the metaclass holds, no
+new bytecode; the make primitive 143 over the image build's own
+`MethodBuilding`, primitive 85 running a made method once, 97 and 98
+refusing sealed classes and release images, the release flag in the image
+header set by `kajo build-image --release` or `kajo seal` and never
+cleared, `Behavior>>compile:` keeping sources and the pragma index,
+`Compiler evaluate:`; 1500 seeded mutations through the make primitive and
+a make-and-run fuzz mode; two 8b bugs fixed: the sources table could not
+pass one block and a build step dying in an unhandled error went on, and
+a message chain of thousands overflowed the parser's stack; its four open
+questions await the owner); the native shells
 built in module 9a (`docs/modules/shells.md`: the public host surface
 `Sources/KajoVM/Shell/` over which no oop crosses, the event queue on
 module 3's external-signal queue, the first view wrappers behind one hop
@@ -703,9 +740,12 @@ cover.
    `docs/modules/kernel-image.md`, with its SUnit tests beside the classes;
    `just build-image`, `just kernel-test`). The image is never committed.
    Its compiler in Smalltalk compiles every method and is compared with the
-   bootstrap compiler's output by `CompilerTest`; it does not install yet
-   (module 8d, briefed in `docs/modules/kernel-live.md`, adds the install
-   primitives, class variables and Pharo's per-iteration temp vectors).
+   bootstrap compiler's output by `CompilerTest`, and since module 8d
+   (`docs/modules/kernel-live.md`) installs: `Behavior>>compile:`,
+   `Compiler evaluate:`, class variables, Pharo's per-iteration temp
+   vectors, the release flag. `Sources/KajoVM/ObjectModel/LiveMethods.swift`
+   (primitives 143, 85, 144) and `Loader/MethodBuilding.swift` (what the
+   image build and the make primitive share) are 8d's.
    Module 9a added the view wrappers (View, Window, Label, Button, TextView,
    Slider, UIEvent, UIEventLoop; ADR 0010).
  * `apps/` the shells (module 9a, built): `KajoShell-macOS` (AppKit) and
