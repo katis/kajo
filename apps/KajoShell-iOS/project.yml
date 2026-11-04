@@ -1,0 +1,59 @@
+# xcodegen spec for the iOS shell (module 9a). `xcodegen generate` in this
+# directory writes KajoShell-iOS.xcodeproj (committed with the spec).
+name: KajoShell-iOS
+options:
+  bundleIdPrefix: dev.katajamaki.kajo
+  deploymentTarget:
+    iOS: "18.0"
+packages:
+  kajo:
+    path: ../..
+settings:
+  base:
+    DEVELOPMENT_TEAM: BDN6M642M2
+    CODE_SIGN_STYLE: Automatic
+    SWIFT_VERSION: "6.0"
+targets:
+  KajoShell:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Kajo
+        CFBundleShortVersionString: "0.1"
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        CADisableMinimumFrameDurationOnPhone: true
+        UIRequiresFullScreen: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+          UISceneConfigurations:
+            UIWindowSceneSessionRoleApplication:
+              - UISceneConfigurationName: Default
+                UISceneDelegateClassName: $(PRODUCT_MODULE_NAME).SceneDelegate
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.shell
+        PRODUCT_NAME: KajoShell
+        TARGETED_DEVICE_FAMILY: "1"
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
+        SWIFT_OPTIMIZATION_LEVEL: -O
+        SWIFT_COMPILATION_MODE: wholemodule
+        GENERATE_INFOPLIST_FILE: NO
+    dependencies:
+      - package: kajo
+        product: KajoShellCore
+      - package: kajo
+        product: KajoVM
+    postBuildScripts:
+      - name: Bundle images
+        basedOnDependencyAnalysis: false
+        script: |
+          set -e
+          "$SRCROOT/../Shared/build-images.sh" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"

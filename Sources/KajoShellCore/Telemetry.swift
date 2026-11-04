@@ -34,15 +34,8 @@ public enum Telemetry {
         return kr == KERN_SUCCESS ? (info.phys_footprint, UInt64(max(0, info.ledger_phys_footprint_peak))) : (0, 0)
     }
 
-    /// `mach_task_self_` needs `unsafe` on macOS and warns on iOS (AGENTS.md):
-    /// one accessor.
-    private static func selfTask() -> mach_port_t {
-        #if os(iOS)
-        mach_task_self_
-        #else
-        unsafe mach_task_self_
-        #endif
-    }
+    /// `mach_task_self_` is a mutable global in both SDKs (see VirtualMemory).
+    private static func selfTask() -> mach_port_t { unsafe mach_task_self_ }
 
     /// Memory the process may still use before jetsam (iOS), MB; -1 elsewhere.
     public static func availableMB() -> Int {

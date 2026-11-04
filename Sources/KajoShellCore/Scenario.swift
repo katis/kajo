@@ -137,13 +137,17 @@ import KajoVM
     }
 
     var ticksTotal = 0
+    var beginLateMs = 0.0
+    var beginNs: UInt64 = 0
     var lastTickTs = 0.0
 
     func tick(_ ts: Double, _ target: Double) {
         ticksTotal += 1
         lastTickTs = ts
         let now = Double(ShellVM.now()) / 1e9
-        if measuring && ts >= measureStart && ts <= measureEnd {
+        // By timestamp, not by `measuring`: the window's frames are those
+        // the display delivered in it, however late begin() ran.
+        if !finished && ts >= measureStart && ts <= measureEnd {
             frameTimes.append(ts)
             callbackLate.append((now - ts) * 1000)
         }
@@ -210,6 +214,8 @@ import KajoVM
         mainThreadBase = ThreadCounts.of(mainTid)
         pauseBase = vm.pauses.count
         latencies = []
+        beginNs = ShellVM.now()
+        beginLateMs = (Double(beginNs) / 1e9 - measureStart) * 1000
         if hog {
             hogStartNs = ShellVM.now()
             hogProcess = vm.spawn("hog", receiver: "ShellBench", main: true, priority: 1)
@@ -226,14 +232,16 @@ import KajoVM
         let fa = FrameAccount(timestamps: frameTimes, start: measureStart, end: measureEnd, nominalHz: nominal)
         let fa120 = FrameAccount(timestamps: frameTimes, start: measureStart, end: measureEnd, nominalHz: 120)
         func ms(_ ns: UInt64) -> String { f3(Double(ns) / 1e6) }
-        func per10(_ ns: UInt64) -> String { f3(Double(ns) / 1e6 * 10 / seconds) }
+        // Turn and counter sums run from begin() to here: per 10 s of that.
+        let counted = max(0.001, Double(ShellVM.now() - beginNs) / 1e9)
+        func per10(_ ns: UInt64) -> String { f3(Double(ns) / 1e6 * 10 / counted) }
         let m = vm.mainThreadCounters.since(mainBase)
         let counters = Dictionary(vm.counters.map { ($0.name, $0.value) }, uniquingKeysWith: { a, _ in a })
         func d(_ k: String) -> UInt64 { (counters[k] ?? 0) &- (counterBase[k] ?? 0) }
         var line = "scenario=\(name) gc=\(options.string("gc", "cm")) young=\(options.string("young", "offload")) workers=\(options.int("workers", 5))"
         line += " seconds=\(seconds) events=\(eventRate) hog=\(hog ? 1 : 0) budget=\(budgetOff ? "off" : "on") thermal_start=\(thermalStart)"
         line += " nominal_hz=\(f2(nominal)) refresh_hz=\(f2(fa.deliveredHz)) frames=\(fa.frames) expected=\(fa.expected)"
-        line += " ticks_total=\(ticksTotal) last_tick_s=\(f3(lastTickTs)) window_s=\(f3(measureStart))-\(f3(measureEnd))"
+        line += " ticks_total=\(ticksTotal) begin_late_ms=\(f3(beginLateMs)) counted_s=\(f3(counted))"
         line += " drops=\(fa.drops) missed=\(fa.missed) missed120=\(fa120.missed)"
         line += " gap_p50_ms=\(f3(fa.gapP50Ms)) gap_p99_ms=\(f3(fa.gapP99Ms)) gap_max_ms=\(f3(fa.gapMaxMs))"
         line += " cb_late_p50_ms=\(f3(percentile(callbackLate, 0.5))) cb_late_p99_ms=\(f3(percentile(callbackLate, 0.99))) cb_late_max_ms=\(f3(callbackLate.max() ?? 0))"
@@ -259,7 +267,7 @@ import KajoVM
         line += " preemptions=\(d("preemptions")) hops=\(d("hops")) view_calls=\(d("viewCalls")) shell_events=\(d("shellEvents")) stuck_reports=\(d("stuckReports"))"
         line += " stops=\(vm.pauses.count - pauseBase)"
         if let e0 = energyBase, let e1 = Telemetry.energyNj() {
-            line += " energy_mj=\(f1(Double(e1 &- e0) / 1e6)) power_w=\(f3(Double(e1 &- e0) / 1e9 / seconds))"
+            line += " energy_mj=\(f1(Double(e1 &- e0) / 1e6)) power_w=\(f3(Double(e1 &- e0) / 1e9 / counted))"
         }
         // Where the VM's threads ran: CPU on performance and efficiency cores.
         var workers = ThreadCounts(ok: true)

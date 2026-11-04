@@ -23,9 +23,9 @@ run *ARGS:
 bench:
     experiments/vm-language-bench/bench.sh
 
-# Check that the VM core compiles for iOS (every file under Sources/KajoVM)
+# Check that the VM core compiles for iOS (every file under Sources/KajoVM), in the package's language mode (6)
 ios-check:
-    xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk $(xcrun --sdk iphoneos --show-sdk-path) \
+    xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk $(xcrun --sdk iphoneos --show-sdk-path) -swift-version 6 \
         -parse-as-library -module-name KajoVM -package-name kajo -strict-memory-safety $(find Sources/KajoVM -name '*.swift')
 
 # Release disassembly: no retain/release on the allocation, store, dispatch, send and primitive paths; one jump table
@@ -59,3 +59,19 @@ build-image OUT="kernel.img":
 # Module 8b: build kernel/ and run its tests headless (NDJSON on stdout)
 kernel-test *ARGS:
     swift run kajo test {{ARGS}}
+
+# Module 9a: build both shells with xcodebuild from clean (the iOS one unsigned, for the compile), 0 warnings and 0 errors or fail
+apps:
+    scripts/apps-check.sh
+
+# Module 9a: the macOS shell (`just mac-shell build`, `just mac-shell run <out> mode=... key=value`)
+mac-shell *ARGS:
+    scripts/mac-shell.sh {{ARGS}}
+
+# Module 9a: the iOS shell on the attached iPhone (`just device build`, `just device tests <dir>`, `just device run <out> mode=...`)
+device *ARGS:
+    scripts/device.sh {{ARGS}}
+
+# Module 9a: the measurement matrix on the Mac's display or the iPhone (`just shell-matrix mac <outdir>`)
+shell-matrix TARGET OUT *PARTS:
+    scripts/shell-matrix.sh {{TARGET}} {{OUT}} {{PARTS}}

@@ -4,16 +4,10 @@ import Darwin
 /// on first touch. Only the `vm_map.h` family is used: `mach_vm.h` is
 /// unsupported in the iOS SDK (AGENTS.md).
 enum VirtualMemory {
-    /// The task port. The macOS SDK imports `mach_task_self_` as a mutable
-    /// global (unsafe to read), the iOS SDK does not; one accessor keeps
-    /// both builds warning-free.
-    private static var task: mach_port_t {
-        #if os(macOS)
-        unsafe mach_task_self_
-        #else
-        mach_task_self_
-        #endif
-    }
+    /// The task port. The macOS SDK and, since iOS 27 under Xcode's build of
+    /// the package, the iOS SDK import `mach_task_self_` as a mutable global
+    /// (unsafe to read); one accessor keeps every build warning-free.
+    private static var task: mach_port_t { unsafe mach_task_self_ }
 
     /// Distance between the heap and its alias (ADR 0007): an entry state word
     /// holding `offset + aliasDistance` (RELOCATING, module 6) still leads
