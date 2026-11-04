@@ -585,7 +585,8 @@ trip takes 2.5 s as a Swift test).
   is indented with tabs already.
 - **No Extensions are written**: the image does not record where a method
   came from; the benchmark kernels' extensions of UndefinedObject would be
-  written into its file.
+  written into its file. (Closed by module 9b: the image records each
+  method's package and the writer writes a package's extension file.)
 - **The file primitives make no directory** and read and write whole files
   of at most one String (32 760 bytes).
 - **A Tonel file is the whole class** when read: a method of the class the
@@ -636,17 +637,19 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
 ## Not done
 
 - Redefining a class with another superclass or another format kind.
-- Freeing a removed class's indices; the class object stays.
-- Extensions in the written files; normalizing the indentation of
-  multi-line sources.
+- ~~Freeing a removed class's indices; the class object stays.~~ Closed by
+  module 9b: `Smalltalk garbageCollect` frees a removed class nothing
+  names, its indices become holes the next class takes.
+- ~~Extensions in the written files~~ (module 9b: `<Class>.extension.st`
+  per package); normalizing the indentation of multi-line sources.
 - Directories and listings in the file primitives; files larger than one
   String. (A symbolic link as the last path component, which the read
   primitive followed out of the directory, is closed by the follow-up
   `docs/modules/vm-teardown.md`.)
 - A reshape while a frame runs a method of the class (refused by rule).
 - Non-class globals (8b, 8d).
-- `Process>>terminate` running unwind blocks; a frame restart (8b's; 8d's
-  open question 3).
+- ~~`Process>>terminate` running unwind blocks; a frame restart (8b's; 8d's
+  open question 3).~~ Closed by module 9b.
 - Compile warnings as events (8b, agreed, not built here).
 
 ## Open questions for the owner
@@ -672,11 +675,15 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
    be able to unwind such frames to a point outside the class, or restart
    them after the change, as Pharo's restart does? **Owner (2026-11-04):
    the debugger gets frame restart in module 9b
-   (`docs/modules/development-protocol.md`); the rule stays.**
+   (`docs/modules/development-protocol.md`); the rule stays.** Built: a
+   stopped Process's frame restarts by its sender's send running again,
+   the frames above unwound.
 4. **Obsolete classes** stay in the class table and the image forever.
    Should a removal free the indices once no object names the class (a
    collection can tell), with a loader rule for a hole? **Owner
-   (2026-11-04): yes, they should be cleaned; module 9b builds it.**
+   (2026-11-04): yes, they should be cleaned; module 9b builds it.** Built:
+   primitive 163 (run by `Smalltalk garbageCollect`) frees a removed class
+   nothing names; the loader accepts holes.
 5. **A host-side save after a VM ran with nurseries**: a test of this
    module first saved an image on the host (`Image.saveImage`) after a VM
    with the default nursery configuration had run on it, and module 1's

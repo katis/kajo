@@ -535,12 +535,16 @@ From kernel.md and ADR 0009, each with its reason:
   the v1 event kinds have none for compile warnings.
 - **`<mainThread>` and `<devProtocol>` are declared, not acted on**: the
   scheduler's check in checked builds and the remote UI are not built.
+  (`<devProtocol>` is read since module 9b: every request of the
+  development protocol is such a method, `docs/modules/development-protocol.md`.)
 - **The unwind and handler marks are pragmas** (`<unwind>`, `<handler>`)
   that the compilers consume, as `<primitive:>`.
 - **`retry` loops in `on:do:`** over `privateOn:do:` (the handler frame);
-  there is no frame-restart primitive.
-- **`Process>>terminate` does not run ensure blocks** (the VM's terminate
-  cuts the stack).
+  there is no frame-restart primitive. (Module 9b added one for the
+  debugger, primitive 156: a frame's sender runs its send again.)
+- ~~**`Process>>terminate` does not run ensure blocks**~~ Closed by module
+  9b (`docs/modules/development-protocol.md`): it runs them, in the
+  terminated Process, bounded.
 - ~~**Inlined loop bodies' captured and assigned temps are shared across
   iterations**~~ Closed by module 8d (`docs/modules/kernel-live.md`): a
   fresh temp vector per pass, Pharo's rule.
@@ -632,9 +636,10 @@ starting commit's, instruction for instruction (Measurements).
 - ~~Class variables~~ (module 8d); non-class globals.
 - Unicode tables (classification, case mapping beyond ASCII,
   normalization, graphemes); transcendental floats.
-- The scheduler's main-thread check for `<mainThread>`; the development
-  protocol.
-- `Process>>terminate` running unwind blocks; a frame restart.
+- The scheduler's main-thread check for `<mainThread>`; ~~the development
+  protocol~~ (module 9b).
+- ~~`Process>>terminate` running unwind blocks; a frame restart.~~ Closed
+  by module 9b.
 - ~~A per-iteration temp vector for captured temps of inlined loop bodies.~~
   Closed by module 8d.
 - Compile warnings as events.

@@ -494,6 +494,46 @@ class half of 8d's Not done:
   image; the Tonel writer and reader are Smalltalk, and `kernel/` is the
   writer's canonical form byte for byte.
 
+## Built (9b, 2026-11-04)
+
+Module 9b (`docs/modules/development-protocol.md`):
+
+- **The pc-to-source map.** Both compilers record, for every send of a
+  method and of each block method, the byte range of the message in the
+  recorded source; the assembler writes them (pc delta, start, length,
+  LEB128) as a ByteArray, the method's last literal (never merged), read-only
+  like the rest, under a new method flag (16, `sourceMap`; `MethodFlags.all`
+  is 31). `verifyHeapMethod` checks the flag's literal is a ByteArray; the
+  VM never reads the map. 2244 maps, 44 912 bytes of entries, +89 KB (1.8
+  percent) on the kernel image. A Context answers the range its pc is at
+  (`CompiledMethod>>sourceRangeAt:`).
+- **The package slot** is not a slot: a class's package is its
+  `ClassDefinition`'s, a method's is its class's unless it is an
+  extension, recorded beside its category in Smalltalk's tables (as 8e's
+  categories are). CompiledMethod keeps its ten slots.
+- **The class-table hole.** A removed class with no instance that nothing
+  names gives its two indices back (primitive 163, run by `Smalltalk
+  garbageCollect`): a hole is an index with no class object and format 0;
+  the define primitive reuses the lowest pair of consecutive holes; the
+  image loader accepts holes past the well-known classes and refuses any
+  object whose class index is one. A removed class is sealed until freed,
+  so it makes no instance.
+- **Frames**: a third return marker, `step` (3), beside discard and
+  cascade, marks the frame a stepped Process steps (ADR 0012); 8c's
+  loader accepts it in a saved frame.
+- **Three VM selectors** sent to a Process by the VM when it is resumed
+  with an interrupt: `terminateUnwinding` (`Process>>terminate` of another
+  Process runs its ensure blocks), `stopForDebugger` and
+  `stopForDebuggerAfterSend`. Image format version 4 (the selectors, the
+  holes, the flag); versions 1 to 3 are refused.
+- **Sealed classes** take a method that can only send: no primitive, no
+  instance variable, no `slotAt:put:`, `instVarAt:put:`, `become:` or
+  `becomeForward:` (the install primitive's String refusal says which).
+- **Restart and retry**: primitive 156 re-runs the send a frame's sender is
+  after with given operands (a frame restart, a retried doesNotUnderstand:),
+  the frames above unwound in Smalltalk first; section 3's frames-as-indices
+  made it one register change.
+
 ## Consequences
 
 - Modules 4 to 7 implement weak slots and ephemerons as they are built, and

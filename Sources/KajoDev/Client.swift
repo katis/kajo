@@ -23,8 +23,20 @@ public final class ProtocolClient: @unchecked Sendable {
     private var closing = false  // under changed: close() was called
     private var nextId = 1  // under lock
     private var reader: Thread?
+    private var eventHandler: (@Sendable (JSONValue) -> Void)?  // under changed
     /// Called on the reading thread for every event (not replies).
-    public var onEvent: (@Sendable (JSONValue) -> Void)?
+    public var onEvent: (@Sendable (JSONValue) -> Void)? {
+        get {
+            changed.lock()
+            defer { changed.unlock() }
+            return eventHandler
+        }
+        set {
+            changed.lock()
+            eventHandler = newValue
+            changed.unlock()
+        }
+    }
 
     public init(path: String) throws {
         let s = socket(AF_UNIX, SOCK_STREAM, 0)

@@ -16,8 +16,11 @@ as they are understood.
   at will. A build artifact, never committed.
 - **Kernel**: the Smalltalk class library that boots the system, kept as text
   under `kernel/`.
-- **Development protocol**: the connection between a shell or VM being
-  developed and the developer's tools on another machine. Not designed yet.
+- **Development protocol** (module 9b, ADR 0011): the one connection every
+  developer tool (the developer UI, the `kajo` CLI, an agent through MCP)
+  uses to reach a target: JSON lines of requests, replies and events over
+  a transport the host opens, a session per connection opened with the
+  token. Development images only.
 
 ## Execution
 
@@ -471,3 +474,49 @@ as they are understood.
 - **Stuck report**: a main-affine Process runnable for longer than the
   shell's limit (300 ms), reported once to the shell with its id and
   selector.
+
+## The development protocol and the debugger (module 9b)
+
+- **Target**: the running image a development session acts on (the iOS
+  shell, the macOS shell, a headless `kajo run --protocol`).
+- **Request**: a `<devProtocol>` method of `DevSession`; its kind is its
+  selector's first keyword split before the first capital
+  (`process.retrySend`), its arguments its argument names. A **reply**
+  answers one request by its id; an **event** answers none.
+- **Protocol Process**: the target's one Process at the highest priority
+  that takes the transport's requests and runs each in a Process of its
+  own.
+- **Transport**: what carries the protocol's lines (a Unix-domain socket in
+  9b; TCP in 9d), owned by the host; it checks every line before the image
+  sees it.
+- **Pairing token**: the short random string a target shows when it opens
+  its transport; a session opens only with it. Never written to a file by
+  the target.
+- **Session**: one connection's dealings with a target: its client
+  (`developer`, `agent:<name>`, the **author** of every change it makes),
+  its **package**, and the objects it holds by **handle**.
+- **Package**: the project a class or method belongs to (a directory of
+  Tonel files, Kernel for `kernel/`); a method of another package than its
+  class's is an **extension**, written to `<Class>.extension.st`.
+- **Author mark**: who made a method, in its Tonel metadata
+  (`#author : #'agent:claude'`).
+- **Stopped Process** (a **DebugStop**): a Process waiting for the
+  debugger with its stack intact (an unhandled error while the protocol
+  serves, a step's end, a suspend); it runs the debugger's commands on its
+  own stack.
+- **Frame restart**: re-running the send a frame's sender made, with the
+  frame's receiver and arguments, after unwinding the frames above; the
+  method is looked up again. **Retry a send**: the same for the send that
+  ended in doesNotUnderstand: (define the method, then retry).
+- **Step**: into, over, out; decided at the poll for the stepped Process
+  only, its returns caught by the **step marker** on the frame stepped.
+- **Interrupt**: something a Process runs when it is next resumed, as a
+  send from where it stands with the discard marker: `terminateUnwinding`,
+  `stopForDebugger`.
+- **pc-to-source map**: a method's last literal under flag 16, the source
+  range of each send by pc.
+- **Class-table hole**: an index whose removed class was freed; no object
+  carries it, the next class defined takes it.
+- **Sealed extension**: a method installed into a sealed class, allowed
+  when it only sends messages.
+

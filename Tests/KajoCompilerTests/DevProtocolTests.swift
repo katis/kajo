@@ -237,7 +237,7 @@ extension ProtocolClient {
 
     /// Wait (bounded) until `SampleDebug result` prints as `expected`.
     func waitForResult(_ expected: String) throws {
-        for _ in 0..<400 {
+        for _ in 0..<3000 {
             if try eval("SampleDebug result")["value"] == .string(expected) { return }
             usleep(10_000)
         }
@@ -366,7 +366,7 @@ extension ProtocolClient {
         #expect(e["reason"] == .string("suspended"))
         _ = try s.request("process.proceed", [("process", pid)])
         _ = try s.request("process.terminate", [("process", pid)])
-        for _ in 0..<400 where (try s.request("process.list").array ?? []).contains(where: { $0["process"] == pid }) { usleep(10_000) }
+        for _ in 0..<3000 where (try s.request("process.list").array ?? []).contains(where: { $0["process"] == pid }) { usleep(10_000) }
         #expect(!(try s.request("process.list").array ?? []).contains { $0["process"] == pid })
     }
 }

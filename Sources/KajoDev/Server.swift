@@ -57,12 +57,12 @@ public final class ProtocolServer: @unchecked Sendable {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw Failure(description: "socket: \(errnoText())") }
         var addr = ProtocolServer.address(path)
-        let old = umask(0o077)  // the socket file is the user's only
         let bound = withUnsafePointer(to: &addr) {
             unsafe $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { unsafe bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
         }
-        umask(old)
-        guard bound == 0, listen(fd, 16) == 0 else {
+        // The socket file is the user's only (before anyone may connect:
+        // `listen` comes after; the process-wide umask is not touched).
+        guard bound == 0, unsafe chmod(path, 0o600) == 0, listen(fd, 16) == 0 else {
             let e = errnoText()
             close(fd)
             throw Failure(description: "bind \(path): \(e)")

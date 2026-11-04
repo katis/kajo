@@ -524,8 +524,8 @@ not a hot path.
   redefine primitive replaces the pool; a removed variable's Binding
   stays undeclared.
 - Non-class globals.
-- `Process>>terminate` running unwind blocks; a frame restart (8b's; open
-  question 3).
+- ~~`Process>>terminate` running unwind blocks; a frame restart (8b's; open
+  question 3).~~ Closed by module 9b (`docs/modules/development-protocol.md`).
 - The make-and-run fuzz mode does not run looping methods.
 - Compile warnings as events (8b, agreed, not built here).
 
@@ -543,10 +543,14 @@ not a hot path.
    asked "what about extensions?"; provisional answer in module 9b's
    brief: an extension method is allowed when the verifier finds no
    instance-variable access, no slot store, no primitive and no become in
-   it, refused otherwise.**
+   it, refused otherwise.** Built in module 9b (provisional, overturnable):
+   primitive 97 installs such a method into a sealed class and answers
+   the reason it refuses any other.
 3. **`Process>>terminate` running ensure blocks, and a frame restart**
    (8b's Not done): in 9b with the debugger, or earlier? **Owner
-   (2026-11-04): 9b.**
+   (2026-11-04): 9b.** Built in module 9b: terminate unwinds in the
+   terminated Process (bounded at about 1 s), and the debugger restarts a
+   frame by running its sender's send again.
 4. **The parser's nesting limit** of 256 (brackets and now message
    chains) is deep enough for a debug build's code generation to overflow
    a 512 KB thread stack at about 100 (the test of the limit compiles a

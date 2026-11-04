@@ -209,3 +209,24 @@ ms under the storm's stop-the-world scavenges and 16 to 19 ms under the
 ring's, which are its two missed frames. Under load the main thread ran 88 to 100 percent on performance
 cores; idle it ran on efficiency cores and still made every frame. Not
 built: the re-entrancy guard (the shells run no modal loop).
+
+## Built (module 9b, 2026-11-04): the debugger lands
+
+The stuck report and an unhandled error now reach a debugger instead of
+only a report. While the development protocol serves (ADR 0011), an
+unhandled error stops its Process: it waits on a Semaphore with its stack
+intact until a client acts (no timeout in development; a release image
+never stops), and a client may also stop a running or waiting Process
+(`process.suspend`). A stopped main-affine Process just waits, so the
+main thread's turns and every other Process go on: on the macOS shell the
+event loop's own Process was stopped for the whole 10 s window while the
+window kept all 1200 frames (0 missed in three runs) and the target
+answered 182 protocol requests at 1.4 ms p50, and after it was let go it
+handled the events that had queued (`docs/modules/development-protocol.md`,
+"The macOS shell: a stopped event loop"). The frame's Context slot this
+ADR reserved is what the stopped Process's Contexts are made from; the
+budgeted preemption's poll is where stepping is decided (ADR 0012), so the
+interpreter's paths are unchanged. The stuck report itself still only
+reports; a stuck main-affine Process can be suspended for the debugger
+through the protocol.
+
