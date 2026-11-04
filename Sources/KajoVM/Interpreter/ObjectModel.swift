@@ -134,10 +134,18 @@ enum ClassLayout {
     static let size = 5
 }
 
-/// A metaclass object: the class layout, then the one class it describes.
+/// A metaclass object: the class layout, then the one class it describes,
+/// then (module 8d) the class pool of that class: nil, or a read-only
+/// Array of the kernel's Binding objects (key Symbol, value), one per
+/// class variable. The VM never reads the pool; the compilers put a
+/// class variable's Binding in the literal frame of the methods that name
+/// it. The metaclass holds it because a class and its class side share
+/// one metaclass, and because the class layout (and with it the first
+/// slot of every class-side instance variable) stays as it was.
 enum MetaclassLayout {
     static let thisClass = ClassLayout.size
-    static let size = ClassLayout.size + 1
+    static let classPool = ClassLayout.size + 1
+    static let size = ClassLayout.size + 2
 }
 
 /// Method object slots (`CompiledMethod`). A block method is a Method too,

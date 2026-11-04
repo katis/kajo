@@ -22,6 +22,9 @@ package enum Literal: Hashable, Sendable {
     /// its elements, and a literal ByteArray (`#[1 2 3]`).
     case array([Literal])
     case byteArray([UInt8])
+    /// Module 8d: the Binding of class variable `name` declared by class
+    /// `owner` (the image build's class pools). Not in kasm.
+    case binding(owner: String, name: String)
 }
 
 package struct AssembledPragma: Sendable {

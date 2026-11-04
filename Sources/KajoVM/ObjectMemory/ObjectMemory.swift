@@ -453,6 +453,11 @@ extension ObjectMemory: @unchecked Sendable {}
     /// What a weak slot becomes when its referent dies (the image's nil;
     /// `.none` until set: then no class may be weak).
     var nilObject = Oop.none
+    /// Module 8d: the image is a release image (its header's flag): the
+    /// make, install and remove primitives fail. Set by the image loader or
+    /// `Image.seal` before any VM runs over the memory, never afterwards,
+    /// and by no primitive.
+    var releaseImage = false
     /// A mark fired ephemerons since the last `takeFinalizationSignal`.
     var finalizationSignal = false
     /// Heap offsets of the nursery region (module 4), where young bodies

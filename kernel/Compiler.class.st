@@ -47,7 +47,9 @@ Compiler >> declare: aName kind: aKind in: aScope line: n [
 	| v |
 	aKind == #hidden ifFalse: [
 		(#('self' 'super' 'thisContext' 'nil' 'true' 'false') includes: aName) ifTrue: [^ self fail: '''' , aName , ''' cannot be a variable name' line: n].
-		(aScope declared anySatisfy: [:x | x name = aName]) ifTrue: [^ self fail: '''' , aName , ''' declared twice' line: n]].
+		(aScope declared anySatisfy: [:x | x name = aName]) ifTrue: [^ self fail: '''' , aName , ''' declared twice' line: n].
+		(theClass classVariableOwnerOf: aName) ifNotNil: [:owner |
+			^ self fail: '''' , aName , ''' shadows ' , owner name , '''s class variable' line: n]].
 	v := TempVariable name: aName kind: aKind scope: aScope seq: self nextSeq.
 	aScope declared add: v.
 	aScope real locals add: v.
@@ -86,6 +88,7 @@ Compiler >> resolve: aNode in: aScope [
 	v ifNotNil: [:x | self reference: x from: aScope. ^ aNode bind: #local to: x].
 	i := instVarNames indexOf: n.
 	i > 0 ifTrue: [^ aNode bind: #instance to: firstSlot + i - 1].
+	(theClass bindingOf: n) ifNotNil: [:b | ^ aNode bind: #classVariable to: b].
 	(Smalltalk classNamed: n) ifNotNil: [:c | ^ aNode bind: #global to: c].
 	^ self fail: 'undeclared variable ''' , n , '''' line: aNode line
 ]
@@ -131,7 +134,8 @@ Compiler >> analyze: aNode in: aScope [
 			(#(#argument #inlinedArgument) includes: aNode variable target kind) ifTrue: [
 				^ self fail: 'cannot assign to the argument ''' , aNode variable name , '''' line: aNode line].
 			aNode variable target beWritten] ifFalse: [
-		aNode variable binding == #instance ifFalse: [^ self fail: 'cannot assign to ''' , aNode variable name , '''' line: aNode line]].
+		(#(#instance #classVariable) includes: aNode variable binding) ifFalse: [
+			^ self fail: 'cannot assign to ''' , aNode variable name , '''' line: aNode line]].
 		^ self analyze: aNode value in: aScope].
 	c == MessageNode ifTrue: [
 		(self inlinable: aNode) ifTrue: [aNode beInlined. ^ self analyzeInlined: aNode in: aScope].
@@ -286,8 +290,19 @@ Compiler >> gen: aNode in: r on: e value: wantValue [
 		b == #thisContext ifTrue: [^ self emit: e op: #pushThisContext].
 		b == #local ifTrue: [^ self push: aNode target from: r on: e].
 		b == #instance ifTrue: [^ self emit: e op: #pushIvar a: aNode target].
+		b == #classVariable ifTrue: [
+			"The Binding, then its value (no bytecode of its own)."
+			e add: {#literal. aNode target}.
+			^ self send: #value arguments: 0 on: e].
 		^ e add: {#literal. aNode target}].
 	c == AssignmentNode ifTrue: [
+		aNode variable binding == #classVariable ifTrue: [
+			"value: answers its argument, the assignment's value."
+			e add: {#literal. aNode variable target}.
+			self gen: aNode value in: r on: e value: true.
+			self send: #value: arguments: 1 on: e.
+			wantValue ifFalse: [self emit: e op: #pop].
+			^ self].
 		self gen: aNode value in: r on: e value: true.
 		wantValue ifTrue: [self emit: e op: #dup].
 		aNode variable binding == #local

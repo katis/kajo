@@ -399,6 +399,11 @@ package final class Image {
         case .integer(let v): return Oop(smallInteger: v)
         case .symbol(let s): return try intern(s)
         case .classRef(let c): return om.classOop(classesByName[c]!)
+        case .binding(let owner, let name):
+            guard let b = classVariableBinding(owner, name) else {
+                throw LoadError(.unknownClass, "no class variable \(name) in \(owner)")
+            }
+            return b
         case .nilObject: return nilObject
         case .trueObject: return trueObject
         case .falseObject: return falseObject
@@ -554,6 +559,14 @@ enum VMSelector {
     static let aboutToReturn = specialSelectorNames.count + 2
 }
 
+/// Module 8d: the kernel's Binding, a class variable: its name (a Symbol)
+/// and its value. The VM never reads one; the image build makes them.
+enum BindingLayout {
+    static let key = 0
+    static let value = 1
+    static let size = 2
+}
+
 /// Slots of the special-objects Array (root 0 of an image).
 enum SpecialObjects {
     static let nilObject = 0
@@ -613,15 +626,20 @@ package struct KernelClassDefinition: Sendable {
     package let kind: String
     /// Class-side instance variables, inherited included.
     package let metaSlots: Int
+    /// Module 8d: the class's own class variables (the builder checked the
+    /// names); each becomes a Binding in the class pool.
+    package let classVariables: [String]
     package let file: String
     package let line: Int
 
-    package init(name: String, superclass: String?, instSize: Int, kind: String, metaSlots: Int, file: String, line: Int) {
+    package init(name: String, superclass: String?, instSize: Int, kind: String, metaSlots: Int, classVariables: [String] = [],
+                 file: String, line: Int) {
         self.name = name
         self.superclass = superclass
         self.instSize = instSize
         self.kind = kind
         self.metaSlots = metaSlots
+        self.classVariables = classVariables
         self.file = file
         self.line = line
     }
@@ -732,8 +750,53 @@ extension Image {
             om.setClassOop(index, try allocatePinned(meta, slots: ClassLayout.size + d.metaSlots))
             try fillClass(index, meta: meta, name: d.name, superclass: si, format: format, metaSlots: d.metaSlots)
         }
+        for d in defs where !d.classVariables.isEmpty { try defineClassPool(d) }
         loads += 1
     }
+
+    /// Module 8d: a class's pool, a read-only Array of Bindings (the
+    /// kernel's class `Binding`: key, value) in its metaclass's
+    /// `classPool` slot, each key the variable's name as a Symbol and each
+    /// value nil.
+    private func defineClassPool(_ d: KernelClassDefinition) throws(LoadError) {
+        func fail(_ m: String) -> LoadError { LoadError(.badClass, m, file: d.file, line: d.line) }
+        guard let bi = classesByName["Binding"] else { throw fail("\(d.name) has class variables and there is no class Binding") }
+        let bf = om.classFormat(bi)
+        guard bf.kind == .fixed, !bf.isSealed, bf.namedSlots >= BindingLayout.size else {
+            throw fail("Binding is not a fixed class of at least \(BindingLayout.size) slots")
+        }
+        let mc = om.classOop(metaclassIndex(of: classesByName[d.name]!))
+        guard om.load(mc, MetaclassLayout.classPool) == nilObject else { throw fail("\(d.name)'s class pool is defined twice") }
+        let pool = try allocate(WellKnown.array, slots: d.classVariables.count)
+        om.store(mc, MetaclassLayout.classPool, pool)
+        for (i, name) in d.classVariables.enumerated() {
+            let key = try intern(name)
+            let b = try allocate(bi, slots: bf.namedSlots, roots: [key])
+            om.store(b, BindingLayout.key, key)
+            om.store(pool, i, b)
+        }
+        om.setReadOnly(pool, true)
+    }
+
+    /// The Binding of class variable `name` that class `owner` declares.
+    func classVariableBinding(_ owner: String, _ name: String) -> Oop? {
+        guard let ci = classesByName[owner] else { return nil }
+        let pool = om.load(om.classOop(metaclassIndex(of: ci)), MetaclassLayout.classPool)
+        guard pool != nilObject else { return nil }
+        for i in 0..<Int(om.count(of: pool)) {
+            let b = om.load(pool, i)
+            if symbolName(om.load(b, BindingLayout.key)) == name { return b }
+        }
+        return nil
+    }
+
+    /// Module 8d: a release image (the header's flag): Smalltalk cannot
+    /// make, install or remove methods in it.
+    package var isRelease: Bool { om.isReleaseImage }
+
+    /// Mark the image a release image (`kajo build-image --release`, `kajo
+    /// seal`). Before any VM runs over it; nothing clears it.
+    package func seal() { om.isReleaseImage = true }
 
     /// Install compiled methods (the bootstrap compiler's, verified by the
     /// assembler): the instance-variable rules and duplicate checks of the

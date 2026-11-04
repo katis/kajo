@@ -40,6 +40,12 @@ import KajoVM
 //   of the loops) are literal blocks of the right arity. Hidden temps: an
 //   inlined to:do: keeps its limit in one unless the limit is an integer
 //   literal; timesRepeat: keeps a counter, then a limit (the same rule).
+// - Names (module 8d): temps and arguments, instance variables, class
+//   variables (the class's own, then its superclasses'; the same on the
+//   class side), then classes. A class variable is its Binding in the
+//   literal frame: read `push_literal B; value` (the special send), write
+//   `push_literal B; <value>; value:` (`Binding>>value:` answers its
+//   argument), then `pop` for effect. No temp or argument may shadow one.
 // - Literals: an integer in -128...127 is `push_int`, nil, true and false
 //   their own opcodes, anything else a literal; the literal frame is in
 //   first-use order with duplicates merged (the assembler), pragmas last.
@@ -58,6 +64,8 @@ enum Binding {
     case thisContext
     case local(Variable)
     case instanceVariable(Int)
+    /// Module 8d: a class variable (the class that declares it, its name).
+    case classVariable(String, String)
     /// A class (its name).
     case global(String)
 }
@@ -160,14 +168,19 @@ public struct ClassContext: Sendable {
     /// size on the class side).
     public let firstSlot: Int
     public let isClassName: @Sendable (String) -> Bool
+    /// Module 8d: the class variables the class sees (its own and its
+    /// superclasses'; the same on either side), each with the class that
+    /// declares it.
+    public let classVariables: [String: String]
 
     public init(className: String, classSide: Bool, instanceVariables: [String], firstSlot: Int = 0,
-                isClassName: @escaping @Sendable (String) -> Bool) {
+                isClassName: @escaping @Sendable (String) -> Bool, classVariables: [String: String] = [:]) {
         self.className = className
         self.classSide = classSide
         self.instanceVariables = instanceVariables
         self.firstSlot = firstSlot
         self.isClassName = isClassName
+        self.classVariables = classVariables
     }
 }
 
@@ -216,6 +229,7 @@ struct Compiler {
                 throw fail("'\(name)' cannot be a variable name", line)
             }
             if scope.declared.contains(where: { $0.name == name }) { throw fail("'\(name)' declared twice", line) }
+            if let owner = context.classVariables[name] { throw fail("'\(name)' shadows \(owner)'s class variable", line) }
         }
         let v = Variable(name, kind: kind, scope: scope, seq: nextSeq())
         scope.declared.append(v)
@@ -243,6 +257,8 @@ struct Compiler {
                 reference(v, from: scope)
             } else if let i = context.instanceVariables.firstIndex(of: node.name) {
                 node.binding = .instanceVariable(context.firstSlot + i)
+            } else if let owner = context.classVariables[node.name] {
+                node.binding = .classVariable(owner, node.name)
             } else if context.isClassName(node.name) {
                 node.binding = .global(node.name)
             } else {
@@ -311,7 +327,7 @@ struct Compiler {
                     throw fail("cannot assign to the argument '\(v.name)'", a.line)
                 }
                 v.written = true
-            case .instanceVariable:
+            case .instanceVariable, .classVariable:
                 break
             default:
                 throw fail("cannot assign to '\(a.variable.name)'", a.line)
@@ -481,10 +497,23 @@ struct Compiler {
             case .thisContext: e.op(.pushThisContext, 0, 0, v.line)
             case .local(let x): pushVariable(x, r, e, v.line)
             case .instanceVariable(let i): e.op(.pushIvar, i, 0, v.line)
+            case .classVariable(let owner, let name):
+                // The Binding, then its value (module 8d: no new bytecode;
+                // `value` is the special send, which a Binding answers).
+                e.emit(.pushLiteral(.binding(owner: owner, name: name)), v.line)
+                send("value", 0, e, v.line)
             case .global(let name): e.emit(.pushLiteral(.classRef(name)), v.line)
             case .unresolved: throw fail("unresolved '\(v.name)'", v.line)
             }
         case let a as AssignNode:
+            if case .classVariable(let owner, let name) = a.variable.binding {
+                // `value:` answers its argument: the assignment's value.
+                e.emit(.pushLiteral(.binding(owner: owner, name: name)), a.line)
+                try gen(a.value, r, e, value: true)
+                send("value:", 1, e, a.line)
+                if !value { e.op(.pop, 0, 0, a.line) }
+                return
+            }
             try gen(a.value, r, e, value: true)
             if value { e.op(.dup, 0, 0, a.line) }
             switch a.variable.binding {

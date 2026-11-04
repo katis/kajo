@@ -177,6 +177,59 @@ Behavior >> primRemoveSelector: aSymbol [
 	^ self error: 'cannot remove ' , aSymbol printString
 ]
 
+{ #category : #'class variables' }
+Behavior >> classPoolBindings [
+	"The Bindings of the class variables this class declares (its metaclass's pool, module 8d), an Array."
+	^ (self theNonMetaClass class slotAt: 7) ifNil: [#()]
+]
+
+{ #category : #'class variables' }
+Behavior >> classVarNames [
+	"The names of the class variables this class declares, Symbols."
+	^ self classPoolBindings collect: [:b | b key]
+]
+
+{ #category : #'class variables' }
+Behavior >> classPool [
+	"This class's own class variables: a new IdentityDictionary from each name to its Binding."
+	| d |
+	d := IdentityDictionary new.
+	self classPoolBindings do: [:b | d at: b key put: b].
+	^ d
+]
+
+{ #category : #'class variables' }
+Behavior >> classVariableNamed: aString [
+	"The Binding of the class variable aString names that this class sees (its own, then its superclasses'), or nil. The class side sees the same."
+	| sym c |
+	sym := Symbol lookup: aString.
+	sym isNil ifTrue: [^ nil].
+	c := self theNonMetaClass.
+	[c == nil] whileFalse: [
+		c classPoolBindings do: [:b | b key == sym ifTrue: [^ b]].
+		c := c superclass].
+	^ nil
+]
+
+{ #category : #'class variables' }
+Behavior >> bindingOf: aString [
+	"The Binding a method of this class reaches through the name aString: a class variable's, or nil (classes are not bound; Smalltalk at: answers them)."
+	^ self classVariableNamed: aString
+]
+
+{ #category : #'class variables' }
+Behavior >> classVariableOwnerOf: aString [
+	"The class that declares the class variable aString names, as this class sees it, or nil."
+	| sym c |
+	sym := Symbol lookup: aString.
+	sym isNil ifTrue: [^ nil].
+	c := self theNonMetaClass.
+	[c == nil] whileFalse: [
+		(c classPoolBindings anySatisfy: [:b | b key == sym]) ifTrue: [^ c].
+		c := c superclass].
+	^ nil
+]
+
 { #category : #hierarchy }
 Behavior >> allSuperclasses [
 	| out c |

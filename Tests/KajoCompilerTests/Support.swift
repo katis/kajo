@@ -4,11 +4,12 @@ import Testing
 @testable import KajoVM
 
 /// A class file in Tonel from a header and methods (`Foo >> bar [ ... ]`).
-func tonel(_ name: String, _ superclass: String? = "Object", ivars: [String] = [], classIvars: [String] = [], type: String? = nil,
-           _ methods: String) -> (file: String, text: [UInt8]) {
+func tonel(_ name: String, _ superclass: String? = "Object", ivars: [String] = [], classIvars: [String] = [], classVars: [String] = [],
+           type: String? = nil, _ methods: String) -> (file: String, text: [UInt8]) {
     var s = "Class {\n\t#name : #\(name),\n\t#superclass : \(superclass.map { "#" + $0 } ?? "nil"),\n"
     s += "\t#instVars : [ \(ivars.map { "'\($0)'" }.joined(separator: ", ")) ],\n"
     s += "\t#classInstVars : [ \(classIvars.map { "'\($0)'" }.joined(separator: ", ")) ],\n"
+    if !classVars.isEmpty { s += "\t#classVars : [ \(classVars.map { "'\($0)'" }.joined(separator: ", ")) ],\n" }
     if let type { s += "\t#type : #\(type),\n" }
     s += "\t#category : #Test\n}\n\n" + methods
     return ("\(name).class.st", Array(s.utf8))
@@ -33,7 +34,7 @@ let miniKernel: [(file: String, text: [UInt8])] = [
     """),
     tonel("ClassDescription", "Behavior", ""),
     tonel("Class", "ClassDescription", ""),
-    tonel("Metaclass", "ClassDescription", ivars: ["thisClass"], ""),
+    tonel("Metaclass", "ClassDescription", ivars: ["thisClass", "classPool"], ""),
     tonel("SmallInteger", "Object", """
     SmallInteger >> + n [ <primitive: 40> ^ nil ]
     SmallInteger >> - n [ <primitive: 41> ^ nil ]

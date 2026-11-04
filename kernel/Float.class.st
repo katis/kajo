@@ -2,6 +2,11 @@
 Class {
 	#name : #Float,
 	#superclass : #Number,
+	#classVars : [
+		'Infinity',
+		'NegativeInfinity',
+		'NaN'
+	],
 	#category : #'Kernel-Numbers',
 	#type : #bytes
 }
@@ -188,18 +193,26 @@ Float class >> e [
 ]
 
 { #category : #printing }
+Float class >> initialize [
+	"The non-finite constants, made once (class variables, module 8d)."
+	Infinity := 1.0e300 * 1.0e300.
+	NegativeInfinity := 0.0 - Infinity.
+	NaN := Infinity - Infinity
+]
+
+{ #category : #printing }
 Float class >> infinity [
-	^ 1.0e300 * 1.0e300
+	^ Infinity ifNil: [self initialize. Infinity]
 ]
 
 { #category : #printing }
 Float class >> negativeInfinity [
-	^ 0.0 - self infinity
+	^ NegativeInfinity ifNil: [self initialize. NegativeInfinity]
 ]
 
 { #category : #printing }
 Float class >> nan [
-	^ self infinity - self infinity
+	^ NaN ifNil: [self initialize. NaN]
 ]
 
 { #category : #printing }

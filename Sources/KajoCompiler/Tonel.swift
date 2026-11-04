@@ -9,6 +9,7 @@ import KajoVM
 //         #superclass : #Object,
 //         #instVars : [ 'x', 'y' ],
 //         #classInstVars : [ 'origin' ],
+//         #classVars : [ 'Default' ],
 //         #category : #'Kernel-Numbers',
 //         #type : #variable
 //     }
@@ -27,7 +28,9 @@ import KajoVM
 // elsewhere. `#type` is `#normal` (fixed, the default unless the
 // superclass is variable or bytes), `#variable`, `#bytes`, `#words`
 // (32-bit), `#words16`, `#words64`, `#weak` or `#ephemeron`. Class
-// variables (`#classVars`) are not supported in 8b and are refused.
+// variables (`#classVars`, module 8d) are capitalized names the class, its
+// metaclass and every subclass share; the image build checks them
+// (`Plan`).
 
 public struct TonelMethod: Sendable {
     public let className: String
@@ -46,6 +49,8 @@ public struct TonelClass: Sendable {
     public let superclass: String?
     public let instanceVariables: [String]
     public let classInstanceVariables: [String]
+    /// Module 8d: the class variables it declares.
+    public let classVariables: [String]
     public let category: String
     /// nil: inherited (`fixed` under Object).
     public let type: String?
@@ -251,10 +256,10 @@ struct TonelReader {
                 guard let t = s.text, isIdentifier(t) else { throw fail("bad #superclass") }
                 superclass = t
             }
-            if !(try names("classVars")).isEmpty { throw fail("class variables (#classVars) are not supported; use class-side instance variables") }
         }
         var cls = TonelClass(file: file, line: headLine, isExtension: isExtension, name: name, superclass: superclass,
                              instanceVariables: try names("instVars"), classInstanceVariables: try names("classInstVars"),
+                             classVariables: isExtension ? [] : try names("classVars"),
                              category: entry("category")?.text ?? "", type: entry("type")?.text, comment: comment, methods: [])
         while true {
             _ = try space()

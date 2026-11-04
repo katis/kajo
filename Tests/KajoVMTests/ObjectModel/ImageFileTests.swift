@@ -102,7 +102,7 @@ private func run(_ img: Image, _ n: Int64) throws -> Int64 {
 }
 
 private enum Corruption: String, CaseIterable {
-    case badMagic, badVersion, truncated, methodMissingFromTable, extraTableEntry
+    case badMagic, badVersion, aVersion2Image, unknownFlags, truncated, methodMissingFromTable, extraTableEntry
     case badOpcode, jumpIntoAnOperand, maxStackTooSmall, literalNotASelector, ivarOutsideTheClass, methodOfAnotherClass
     case methodNotPinned, liveContext, aProcess, closureOfTheWrongSize, badClassFormatForInstance
     case misplacedSymbol, specialSelectorChanged, wellKnownClassRenamed, dictionaryOfAnotherClass, methodClassCycle
@@ -172,16 +172,21 @@ private func corrupt(_ c: Corruption) throws -> [UInt8] {
     func put(_ i: Int, _ v: UInt64) { for k in 0..<8 { b[8 * i + k] = UInt8(truncatingIfNeeded: v >> (8 * UInt64(k))) } }
     switch c {
     case .badMagic: b[0] ^= 1
-    case .badVersion: put(1, 3)
+    case .badVersion: put(1, 4)
+    // module 8d: 8c's images (version 2) are refused, their Metaclass objects a slot short
+    case .aVersion2Image: put(1, 2)
+    case .unknownFlags: put(5, 2)
     case .truncated: b.removeLast(9)
     case .methodMissingFromTable:
         // drop the first table entry and shrink the count
         let m = Int(b[24]) | Int(b[25]) << 8
-        b.removeSubrange(40..<48)
+        let t = 8 * ImageFile.headerWords
+        b.removeSubrange(t..<(t + 8))
         put(3, UInt64(m - 1))
     case .extraTableEntry:
         let m = Int(b[24]) | Int(b[25]) << 8
-        b.insert(contentsOf: Array(b[40..<48]), at: 40)
+        let t = 8 * ImageFile.headerWords
+        b.insert(contentsOf: Array(b[t..<(t + 8)]), at: t)
         put(3, UInt64(m + 1))
     default: break
     }
@@ -203,6 +208,11 @@ private func theImageLoaderRejects(_ c: Corruption) throws {
 /// verifier) or is refused; nothing traps.
 @Test func mutatedImagesLoadCleanOrAreRejected() throws {
     let seed = try { let i = try builtImage(); defer { i.destroy() }; return i.saveImage() }()
+    // The snapshot fuzzer's image seed (`Fixtures/fuzz/snapshot/image.img`);
+    // `KAJO_WRITE_FUZZ_SEEDS=1` writes it (module 8d: version 3).
+    if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil {
+        try Data(seed).write(to: URL(fileURLWithPath: "\(fixturesDir)/fuzz/snapshot/image.img"))
+    }
     var g = SplitMix(seed: 11)
     var loaded = 0, rejected = 0
     for _ in 0..<300 {

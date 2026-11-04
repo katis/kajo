@@ -6,10 +6,13 @@
 // broken, and nothing is kept.
 //
 //     word 0   magic "KAJOIMG\0"
-//     word 1   version (2; 1 is still read: 8b's images, 8 special objects)
+//     word 1   version (3, module 8d: the Metaclass layout gained the
+//              class pool and the header the flags word; versions 1 and 2
+//              are refused, their Metaclass objects are a slot short)
 //     word 2   the special-objects Array (`SpecialObjects`), a root
 //     word 3   method count M
 //     word 4   snapshot length L in bytes
+//     word 5   flags: bit 0 a release image (module 8d), every other bit 0
 //     M words  the method table: every CompiledMethod in the heap
 //     L bytes  module 1's snapshot (version 3)
 //
@@ -49,7 +52,7 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
     var description: String {
         switch self {
         case .badMagic: "not a Kajo image (bad magic)"
-        case .unsupportedVersion(let v): "unsupported image version \(v)"
+        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before module 8d's Metaclass layout: rebuild it from its sources)" : "")
         case .malformed(let s): "malformed image: \(s)"
         case .snapshot(let e): "image snapshot: \(e)"
         case .rule(let s): "image rejected: \(s)"
@@ -59,11 +62,12 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
 
 enum ImageFile {
     static let magic: UInt64 = 0x0047_4D49_4F4A_414B  // "KAJOIMG\0"
-    /// Module 8c: 2 (the special objects gained the scheduler state). An
-    /// image of version 1 (module 8b's, 8 special objects, no saved
-    /// Process) still loads.
-    static let version: UInt64 = 2
-    static let headerWords = 5
+    /// Module 8d: 3 (Metaclass objects hold the class pool; the header
+    /// has the flags word). Module 8c's 2 and 8b's 1 are refused.
+    static let version: UInt64 = 3
+    static let headerWords = 6
+    /// Flags word bits.
+    static let releaseFlag: UInt64 = 1
 }
 
 extension Image {
@@ -86,11 +90,11 @@ extension Image {
         out.reserveCapacity(8 * (ImageFile.headerWords + methods.count) + snap.count)
         func word(_ v: UInt64) { for k in 0..<8 { out.append(UInt8(truncatingIfNeeded: v >> (8 * UInt64(k)))) } }
         word(ImageFile.magic)
-        // A version 1 image (8 special objects) is written back as one.
-        word(om.count(of: specialObjects) > UInt64(SpecialObjects.scheduler) ? ImageFile.version : 1)
+        word(ImageFile.version)
         word(specialObjects.raw)
         word(UInt64(methods.count))
         word(UInt64(snap.count))
+        word(om.isReleaseImage ? ImageFile.releaseFlag : 0)
         for m in methods { word(m.raw) }
         out += snap
         return out
@@ -108,10 +112,11 @@ extension Image {
         }
         guard b.count >= 8 * ImageFile.headerWords else { throw .malformed("shorter than its header") }
         guard word(0) == ImageFile.magic else { throw .badMagic }
-        guard word(1) == ImageFile.version || word(1) == 1 else { throw .unsupportedVersion(word(1)) }
-        let version = word(1)
+        guard word(1) == ImageFile.version else { throw .unsupportedVersion(word(1)) }
         let special = Oop(raw: word(2))
         let m = word(3), l = word(4)
+        guard word(5) & ~ImageFile.releaseFlag == 0 else { throw .malformed("unknown flags \(word(5))") }
+        let release = word(5) & ImageFile.releaseFlag != 0
         guard m <= UInt64(b.count / 8), l <= UInt64(b.count) else { throw .malformed("counts larger than the image") }
         let tableEnd = 8 * (ImageFile.headerWords + Int(m))
         guard tableEnd + Int(l) == b.count else { throw .malformed("length \(b.count), header says \(tableEnd + Int(l))") }
@@ -123,7 +128,8 @@ extension Image {
             throw .snapshot(error)
         }
         do {
-            try verifyImage(om, special: special, methodTable: table, limits: limits, version: version)
+            try verifyImage(om, special: special, methodTable: table, limits: limits)
+            om.isReleaseImage = release
             return try Image(restoring: om, special: special, limits: limits)
         } catch {
             om.destroy()
@@ -133,8 +139,7 @@ extension Image {
 }
 
 /// The object-model rules (above) on a loaded snapshot.
-func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: LoaderLimits,
-                 version: UInt64 = ImageFile.version) throws(ImageError) {
+func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: LoaderLimits) throws(ImageError) {
     func fail(_ s: String) -> ImageError { .rule(s) }
     let hw = om.highWater
     func used(_ o: Oop) -> Bool { om.isUsedReference(o) }
@@ -149,8 +154,7 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         throw fail("class \(i) has an invalid format")
     }
     // Special objects.
-    // Version 1 (module 8b) had no scheduler state.
-    let specialCount = version == 1 ? SpecialObjects.scheduler : SpecialObjects.size
+    let specialCount = SpecialObjects.size
     guard isA(special, WellKnown.array), om.count(of: special) == UInt64(specialCount) else {
         throw fail("the special objects are not an Array of \(specialCount)")
     }
@@ -215,6 +219,12 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
             guard slots(c, MetaclassLayout.size) else { throw fail("metaclass \(i)'s object") }
             let this = om.load(c, MetaclassLayout.thisClass)
             guard this.isObject, used(this), om.classIndex(of: this) == i else { throw fail("metaclass \(i)'s class") }
+            // Module 8d: the class pool, nil or a read-only Array (of the
+            // kernel's Bindings; the VM reads none of it).
+            let pool = om.load(c, MetaclassLayout.classPool)
+            guard pool == nilObj || isA(pool, WellKnown.array) && om.isReadOnly(pool) else {
+                throw fail("metaclass \(i)'s class pool")
+            }
         }
         // Superclass chain.
         var s = om.load(c, ClassLayout.superclass)

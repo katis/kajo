@@ -350,6 +350,12 @@ extension ObjectMemory {
         nonmutating set { unsafe gc.pointee.nilObject = newValue }
     }
 
+    /// Module 8d: a release image (`MemoryShared.gc.releaseImage`).
+    var isReleaseImage: Bool {
+        get { unsafe gc.pointee.releaseImage }
+        nonmutating set { unsafe gc.pointee.releaseImage = newValue }
+    }
+
     // MARK: - finalization
 
     /// Take the oldest queued ephemeron, or nil when the queue is empty.
