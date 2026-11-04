@@ -676,7 +676,7 @@ call, Strings) are built inside `shellPrimitive`, out of line.
 4. The macOS shell wakes the display and keeps it awake while measuring
    (a user-activity and a display-sleep assertion, nothing persistent). Is
    that acceptable on the mini, or should measurements wait for a woken
-   display?
+   display? **Owner (2026-11-04): acceptable; the shell may wake the TV.**
 
 ## Gates
 
