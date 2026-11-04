@@ -305,8 +305,8 @@ proposed until module 9 has run on the device is the cautious reading.
 ## Device (9a) (2026-11-04)
 
 Module 9a's shells drive module 7's scenarios from a real display link with
-the main thread's work in Smalltalk (docs/modules/shells.md). The phone
-runs await the owner's signing ("What needs the owner"); on the Mac mini's
+the main thread's work in Smalltalk (docs/modules/shells.md). First the
+Mac mini's
 120 Hz display (M2 Pro, 7 background workers, the module 7 QoS policy:
 young collector user-initiated, marker utility), 10 s, three runs, medians
 with ranges; "for others" is ADR 0008's attribution (parked in stops,
@@ -338,6 +338,60 @@ on performance cores at utility QoS with every performance core busy.
 The headless figures of module 7 (8 workers on the M2 Max: storm 708, 134,
 129; ring 2 273, 206, 185; share 139, 195, 203) and the iPhone 17 Pro's
 (device-measurement: storm stw 108, local 25, offload 29 with 5 workers)
-bracket these. Still open for the acceptance question above: the same
-table on the iPhone 13 Pro, where four of six cores are efficiency cores,
-with thermal state over the matrix and energy per scenario.
+bracket these.
+
+**The iPhone 13 Pro** (2026-11-04, after the owner signed Xcode in to the
+team; the iOS shell at 120.0 Hz, 5 background workers, the same QoS
+policy, 10 s, three runs interleaved, medians with ranges). Thermal state
+over the matrix: nominal for three minutes, fair from the golden kernels at
+six workers, **serious from the first ring run (six minutes in) to the end
+(fourteen minutes)**; fib at one worker went from 1808 to 2471 ms, 37
+percent slower. Every row below but storm's first run ran at serious; the
+modes of a scenario ran back to back in each run.
+
+| main thread, ms per 10 s stopped for others | stop-the-world | local | offload |
+|---|--:|--:|--:|
+| storm | 464 (404 to 556) | 43 (42 to 51) | 48 (45 to 50) |
+| ring | 1252 (1226 to 1530) | 76 (76 to 77) | 81 (68 to 83) |
+| share | 113 (97 to 117) | 55 (54 to 55) | 54 (51 to 57) |
+| frames missed of 1200 | storm 0, ring 2 (1 to 4), share 0 | 0 | 0 |
+| process CPU power, W | storm 3.4, ring 1.8, share 2.0 | 2.4, 1.8, 2.0 | 2.0, 1.8, 2.0 |
+| peak footprint, MB | storm 553, ring 558, share 56 | 679, 557, 57 | 655, 557, 57 |
+
+- **share is not worse on the phone**: young collection without stopping
+  the world halves the main thread's stopped time (54 to 55 against 113 ms
+  per 10 s). The acknowledgements are 1 800 to 1 900 per 10 s at 30 µs
+  (the Mac's 4 300 at 25); the stop-the-world scavenges, 300 a run at p50
+  0.99 ms, are what costs more there. On the phone no scenario is worse
+  under local or offload than under the oracle.
+- The gap elsewhere is wider than on the Mac: storm about 10 times,
+  ring 15 to 16 times.
+- The ring under the oracle missed 2 (1 to 4) frames behind stop-the-world
+  scavenges of 8 ms p50 and 14 to 16 ms max; no full collection ran there
+  (old space peaked at 425 to 452 MB), so the Mac's 250 ms compacting
+  pauses did not occur.
+- Acknowledgements on the phone's UI thread: 1 300 (storm) to 2 200 (ring)
+  per 10 s, mean 29 to 31 µs, the longest on the main thread 0.09 to 0.30
+  ms and once 1.5 ms. Over every participant the ack p99 was 0.9 to 2.3 ms
+  and the max 3.6 to 12.4 ms, the slowest a background worker in 21 of 24
+  runs.
+- **The mixed QoS policy on the A15**: the marker at utility ran on the
+  efficiency cores (P share 0.00 to 0.01), 130 ms of wall time and 85 to
+  92 ms of CPU per ring cycle under local and offload (263 to 293 ms wall
+  under the oracle), and kept up: 0 fallbacks and 0 aborts in every run,
+  every cycle but the one open at the window's end finished. The young
+  collector thread (user-initiated) ran on performance cores when it ran
+  (P share 0.96 to 1.00 with events), 0.7 to 1.5 ms of CPU per run: only
+  the main worker's nursery is offloaded and the frame load allocates
+  little. The five workers ran 34 to 36 percent of their CPU on
+  performance cores.
+- **The final mark is longer with young collection on**: max 7.4 to 17.3
+  ms (p50 0.3 to 6.7) under local and offload against 0.18 to 0.59 under
+  the stop-the-world scavenge. It cost no frame (the longest main-thread
+  turn under local and offload was 7.7 ms) and was not investigated here.
+- Energy is the process's CPU only (`ri_energy_nj`; no DRAM, display or
+  render server): 1.8 to 3.4 W with five busy workers, the oracle the
+  highest under the storm.
+
+The table the acceptance question above waited for now exists for the
+iPhone 13 Pro; the decision stays the owner's.

@@ -1,7 +1,9 @@
 # Module 9a: the shells on device
 
-Status: built 2026-11-04, on the Mac; the iPhone runs await the owner (see
-"What needs the owner"). Module 9 of `docs/PLAN.md` is split: 9a (this) is
+Status: built 2026-11-04, on the Mac; on the iPhone 13 Pro 2026-11-04
+18:40 to 18:56, after the owner signed Xcode in to the team: the build,
+the kernel tests (179 of 179) and the whole matrix ran through the scripts
+unchanged ("The iPhone 13 Pro" under Measurements). Module 9 of `docs/PLAN.md` is split: 9a (this) is
 the native shells that run the kernel image on macOS and on the iPhone, the
 host surface they need, the first native view wrappers (ADR 0010,
 proposed), and the device measurements ADRs 0003 to 0008 wait for; 9b, the
@@ -320,8 +322,8 @@ Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS
 module). 2026-11-04 04:20 to 05:05; the agent session was the busiest
 other process. One run per launch (`scripts/shell-matrix.sh mac`), three
 runs of everything interleaved, medians with the range in brackets
-(`scripts/shell-report.py`). The phone's columns are empty: see "What
-needs the owner". Thermal state on the Mac went from nominal to fair over
+(`scripts/shell-report.py`). The phone's columns and tables are from the
+same scripts on the iPhone 13 Pro (below). Thermal state on the Mac went from nominal to fair over
 the matrix (macOS reports it too).
 
 ### The kernel tests in the shell
@@ -330,55 +332,71 @@ the matrix (macOS reports it too).
 behind the wrappers: **141 tests, 141 passed** in 628 ms (release; `kajo
 test` in a debug build takes 12 s). ViewTest's 11 created NSWindows,
 NSTextFields, NSButtons, NSSliders and NSTextViews through the hop
-primitive. On the phone: not run.
+primitive. On the iPhone 13 Pro (`scripts/device.sh tests`, 2026-11-04,
+the kernel at 7df0e5e): **179 tests, 179 passed** in 2223 ms, thermal
+nominal, peak footprint 66 MB; the kernel has grown by 8d, 8e and the
+vm-teardown follow-up since the Mac run's 141. ViewTest's 11 passed through
+UIKit (UILabel, UIButton, UISlider, UITextView behind the hop primitive);
+`tests.ndjson` and `junit.xml` came back over `devicectl`.
 
 ### The kernels in the shell
 
 `mode=golden`, one kernel per launch, `--slice-ms 0`, ms. Every checksum
 is the published one at one worker and the same in every run at two and
-six. The 8c column is `kajo run` on the same Mac (module 8c's aligned
+six, on both machines. The 8c column is `kajo run` on the same Mac (module 8c's aligned
 `-enable-testing` build, five runs); the iPhone 17 Pro column is
 experiments/device-measurement's VMR at one worker where it ran the same
 kernel.
 
 | kernel | workers | macOS shell | 8c `kajo run` | iPhone 13 Pro | iPhone 17 Pro |
 |---|--:|--:|--:|--:|--:|
-| alloc | 1 | 2956 [2950–2958] | 2958 | - | - |
-| alloc | 2 | 1527 [1522–1530] | - | - | - |
-| alloc | 6 | 550 [548–551] | - | - | - |
-| arith | 1 | 2568 [2567–2570] | 2550 | - | - |
-| arith | 2 | 1322 [1321–1323] | - | - | - |
-| arith | 6 | 454 [453–456] | - | - | - |
-| closures | 1 | 3717 [3711–3718] | - | - | - |
-| closures | 2 | 1887 [1881–1888] | - | - | - |
-| closures | 6 | 635 [633–639] | - | - | - |
-| fib | 1 | 1697 [1697–1702] | 1720 | - | - |
-| fib | 2 | 860 [859–867] | - | - | - |
-| fib | 6 | 292 [291–294] | - | - | - |
-| floats | 1 | 3215 [3214–3216] | - | - | - |
-| floats | 2 | 1622 [1617–1624] | - | - | - |
-| floats | 6 | 549 [548–550] | - | - | - |
-| ivars | 1 | 1983 [1978–1984] | 1979 | - | - |
-| ivars | 2 | 1002 [1002–1004] | - | - | - |
-| ivars | 6 | 339 [337–340] | - | - | - |
-| sends | 1 | 2584 [2580–2598] | 2588 | - | - |
-| sends | 2 | 1312 [1302–1315] | - | - | - |
-| sends | 6 | 444 [442–444] | - | - | - |
-| storeheavy | 1 | 2423 [2413–2430] | 2401 | - | - |
-| storeheavy | 2 | 1225 [1223–1231] | - | - | - |
-| storeheavy | 6 | 414 [413–415] | - | - | - |
-| walk | 1 | 3620 [3554–3639] | - | - | - |
-| walk | 2 | 1766 [1761–1773] | - | - | - |
-| walk | 6 | 373 [372–383] | - | - | - |
-| Smalltalk closures | 1 | 3815 [3810–3823] | 3823 | - | - |
-| Smalltalk closures | 2 | 1932 [1932–1937] | - | - | - |
-| Smalltalk closures | 6 | 652 [651–654] | - | - | - |
-| Smalltalk ivars | 1 | 1982 [1977–1982] | 1975 | - | - |
-| Smalltalk ivars | 2 | 1002 [999–1003] | - | - | - |
-| Smalltalk ivars | 6 | 338 [338–340] | - | - | - |
-| Smalltalk sends | 1 | 2307 [2301–2319] | 2267 | - | - |
-| Smalltalk sends | 2 | 1160 [1156–1181] | - | - | - |
-| Smalltalk sends | 6 | 388 [386–391] | - | - | - |
+| alloc | 1 | 2956 [2950–2958] | 2958 | 3544 [3228–3565] | - |
+| alloc | 2 | 1527 [1522–1530] | - | 2336 [2029–2543] | - |
+| alloc | 6 | 550 [548–551] | - | 1588 [1399–1749] | - |
+| arith | 1 | 2568 [2567–2570] | 2550 | 2722 [2674–2756] | - |
+| arith | 2 | 1322 [1321–1323] | - | 1573 [1473–1763] | - |
+| arith | 6 | 454 [453–456] | - | 802 [747–814] | - |
+| closures | 1 | 3717 [3711–3718] | - | 4500 [4065–4594] | - |
+| closures | 2 | 1887 [1881–1888] | - | 3102 [2534–3446] | - |
+| closures | 6 | 635 [633–639] | - | 1664 [1411–1756] | - |
+| fib | 1 | 1697 [1697–1702] | 1720 | 1874 [1800–1886] | - |
+| fib | 2 | 860 [859–867] | - | 1080 [1015–1189] | - |
+| fib | 6 | 292 [291–294] | - | 602 [591–650] | - |
+| floats | 1 | 3215 [3214–3216] | - | 3670 [3447–3695] | - |
+| floats | 2 | 1622 [1617–1624] | - | 2422 [2055–2728] | - |
+| floats | 6 | 549 [548–550] | - | 1358 [1199–1463] | - |
+| ivars | 1 | 1983 [1978–1984] | 1979 | 2147 [2071–2238] | - |
+| ivars | 2 | 1002 [1002–1004] | - | 1368 [1184–1371] | - |
+| ivars | 6 | 339 [337–340] | - | 683 [629–712] | - |
+| sends | 1 | 2584 [2580–2598] | 2588 | 2903 [2710–3000] | - |
+| sends | 2 | 1312 [1302–1315] | - | 1737 [1588–1952] | - |
+| sends | 6 | 444 [442–444] | - | 902 [843–940] | - |
+| storeheavy | 1 | 2423 [2413–2430] | 2401 | 2626 [2521–2717] | - |
+| storeheavy | 2 | 1225 [1223–1231] | - | 1714 [1464–1833] | - |
+| storeheavy | 6 | 414 [413–415] | - | 873 [808–920] | - |
+| walk | 1 | 3620 [3554–3639] | - | 3710 [3542–3715] | - |
+| walk | 2 | 1766 [1761–1773] | - | 2242 [1873–2355] | - |
+| walk | 6 | 373 [372–383] | - | 892 [844–948] | - |
+| Smalltalk closures | 1 | 3815 [3810–3823] | 3823 | 4598 [4214–4610] | - |
+| Smalltalk closures | 2 | 1932 [1932–1937] | - | 3047 [2632–3371] | - |
+| Smalltalk closures | 6 | 652 [651–654] | - | 1602 [1425–1697] | - |
+| Smalltalk ivars | 1 | 1982 [1977–1982] | 1975 | 2168 [2067–2230] | - |
+| Smalltalk ivars | 2 | 1002 [999–1003] | - | 1362 [1208–1443] | - |
+| Smalltalk ivars | 6 | 338 [338–340] | - | 625 [625–650] | - |
+| Smalltalk sends | 1 | 2307 [2301–2319] | 2267 | 2523 [2408–2562] | - |
+| Smalltalk sends | 2 | 1160 [1156–1181] | - | 1610 [1403–1735] | - |
+| Smalltalk sends | 6 | 388 [386–391] | - | 795 [740–810] | - |
+
+The iPhone 13 Pro column: the iOS shell, Release, three runs interleaved
+over 18:42 to 18:48, thermal nominal for the first run and fair for the
+other two (the ranges at two and six workers are wide for that reason and
+because four of the six cores are efficiency cores). At one worker the A15
+is 2 to 21 percent slower than the M2 Pro (walk 1.02, arith 1.06, fib
+1.10, sends 1.12, alloc 1.20, closures 1.21); it is not the iPhone 17
+Pro's "twice the M2 Max". At six workers it is 2.0 to 2.9 times the Mac's
+time: fib scales 3.1x from one worker to six, walk 4.2x, alloc 2.2x, with
+two performance cores. walk's three one-worker runs (3542 to 3715 ms) show
+no second regime (AGENTS.md's slow single-thread regime).
 
 ### The scenarios on the Mac's display
 
@@ -434,22 +452,96 @@ rest of the matrix (the first pass's lines were lost to a filtering
 mistake in the results file), at thermal nominal; the first pass had read
 345 (337 to 371) and 77 (67 to 90) ms per 10 s.
 
+### The scenarios on the iPhone 13 Pro's display
+
+The same matrix on the phone (`scripts/shell-matrix.sh device`, iPhone 13
+Pro, A15: 2 performance and 4 efficiency cores, iOS on the phone as paired,
+its ProMotion panel at `maximumFramesPerSecond` 120 and 120.0 Hz delivered
+in every scenario run but the control), 5 background workers, everything
+else as on the Mac, 2026-11-04 18:46 to 18:56. Thermal state: fair in the
+first run of storm, **serious from the first ring run (18:48) to the end of
+the matrix**; every row below but storm's first run and idle's first ran at
+serious. The modes of one scenario ran back to back in each run, so the
+comparisons between modes hold; the absolute numbers carry the state.
+
+| scenario | young | missed of 1200 | max gap ms | stopped for others ms/10 s | own ms/10 s | acks other (mean µs) | preemptions | collector P | marker P | power W | peak MB |
+|---|---|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|
+| idle | offload | 0 | 8.4 [8.3–8.4] | 0.0 | 0.0 | 0 (-) | 1266 [1266–1267] | 0.00 | 0.00 | 0.016 | 31 [30–31] |
+| storm | stw | 0 | 8.4 | 464.4 [404.0–556.4] | 0.0 | 0 (-) | 10266 [10086–10318] | - | 0.00 [0.00–0.01] | 3.4 [3.4–3.7] | 553 [545–554] |
+| storm | local | 0 | 8.4 | 42.6 [42.2–51.0] | 0.0 | 1322 [1258–1476] (29) | 10021 [8875–10251] | - | 0.01 [0.00–0.01] | 2.4 [2.3–3.3] | 679 [640–683] |
+| storm | offload | 0 | 8.4 [8.3–8.4] | 48.1 [44.8–49.5] | 0.0 | 1398 [1320–1438] (30) | 10320 [9174–10655] | 0.00 | 0.01 [0.00–0.01] | 2.0 [1.9–3.0] | 655 [646–669] |
+| ring | stw | 2 [1–4] | 16.7 [16.7–25.0] | 1252.3 [1225.8–1530.3] | 0.0 | 0 (-) | 8964 [8843–9211] | - | 0.01 | 1.8 [1.8–1.9] | 558 [535–559] |
+| ring | local | 0 | 8.4 [8.3–8.4] | 76.4 [75.8–76.6] | 0.0 | 2167 [2136–2227] (30) | 10394 [10392–10520] | - | 0.00 | 1.8 [1.8–1.9] | 557 [548–562] |
+| ring | offload | 0 | 8.3 [8.3–8.4] | 80.5 [67.6–82.7] | 0.0 | 2175 [2166–2193] (30) | 10359 [10354–10399] | 0.00 | 0.00 | 1.8 [1.8–1.8] | 557 [553–562] |
+| share | stw | 0 | 8.3 [8.3–8.4] | 112.6 [97.2–116.8] | 0.0 | 0 (-) | 11660 [11649–11663] | - | 0.00 | 2.0 [1.9–2.0] | 56 [56–56] |
+| share | local | 0 | 8.4 [8.3–8.4] | 55.1 [54.4–55.3] | 0.0 | 1900 [1885–1906] (30) | 11650 [11642–11656] | - | 0.00 | 2.0 [2.0–2.0] | 57 [57–58] |
+| share | offload | 0 | 8.4 [8.3–8.4] | 53.7 [51.0–57.3] | 0.0 | 1831 [1799–1935] (31) | 11651 [11647–11655] | 0.00 | 0.00 | 2.0 [2.0–2.0] | 57 [57–58] |
+
+What the phone showed that the Mac did not:
+
+- **share is not the bad case on the phone.** Young collection without
+  stopping the world halves the main thread's stopped time against
+  stop-the-world (54 to 55 against 113 ms per 10 s); on the Mac it was the
+  one scenario where it was worse (104 against 89). The acknowledgements
+  are fewer (1 800 to 1 900 per 10 s against 4 300) and slower (30 against
+  25 µs); the stop-the-world scavenges were 300 a run at p50 0.99 ms.
+- **The storm's gap is wider**: stop-the-world 464 ms per 10 s against 43
+  (local) and 48 (offload), about 10 times; on the Mac 3.7 to 3.9 times.
+  The ring: 1252 against 76 and 81.
+- **The ring under the oracle misses 2 (1 to 4) frames of 1200**, max gap
+  16.7 to 25 ms, behind stop-the-world scavenges of 8 ms p50 and 14 to 16
+  ms max (`max_turn_ms` 16 to 19). No full collection ran (old space
+  peaked at 425 to 452 MB, below the soft limit), so the Mac's 250 ms
+  compacting pauses did not occur; the marker kept up (20 of 21 cycles
+  done per run, the last unfinished at the window's end).
+- **The marker ran on the efficiency cores**: P share 0.00 to 0.01 at
+  utility QoS (the Mac: 0.61 to 0.84), 130 ms of wall time per ring cycle
+  under local and offload and 263 to 293 under the oracle, 81 to 92 ms of
+  CPU, and never fell back to a stop-the-world collection (0 fallbacks, 0
+  aborts in every run). The five workers ran 34 to 36 percent of their CPU
+  on performance cores (two of six cores), the main thread 88 to 100
+  percent under load.
+- **The final mark is longer with young collection on**: p50 0.3 to 6.7
+  ms and max 7.4 to 17.3 ms under local and offload, against 0.14 to 0.51
+  p50 and 0.18 to 0.59 max with the stop-the-world scavenge. It cost no
+  frame (the longest main-thread turn under local and offload was 7.7 ms)
+  and was not investigated further here.
+- **The idle main thread runs on efficiency cores**: with no load and no
+  events the main thread's P share was 0.00, its turns up to 3.3 ms (the
+  frame load, 3.7 s of VM per 10 s), and the process drew 0.016 W; with
+  1000 events per second it moved to the performance cores (P share 1.00)
+  and drew 0.3 W. AGENTS.md's "below 50 MB/s everything runs on E cores".
+- The young collector thread (offload) did almost nothing, as on the Mac:
+  1.1 to 1.5 ms of CPU per run.
+- The main thread's acknowledgements: mean 29 to 31 µs (Mac 22 to 25), the
+  longest on the main thread 0.09 to 0.30 ms and once 1.5 ms (ring
+  offload). The collectors' report (every participant) has ack p99 0.9 to
+  2.3 ms and max 3.6 to 12.4 ms; the slowest participant was a background
+  worker in 21 of the 24 runs that name one and the main worker in 3.
+- Power is the process's CPU energy: 1.8 to 3.4 W with five busy workers
+  (Mac 19 to 32 W with seven), stop-the-world the most under the storm
+  (3.4 against 2.0 to 2.4 W).
+- `cb_late` is negative on iOS (about -0.9 ms): the display link's
+  `timestamp` there is later than the moment the callback runs, so it is
+  not the Mac's lateness and is not reported.
+
 Beside module 7's headless matrix (M2 Max, 8 background workers, the
 driver loop's stopped time per 10 s) and the iPhone 17 Pro scenarios of
-experiments/device-measurement (Part C after cooling, 5 workers):
+experiments/device-measurement (Part C after cooling, 5 workers) and the
+iPhone 13 Pro above (5 workers, thermal serious):
 
-| main thread stopped for others, ms per 10 s | macOS shell (M2 Pro, 7 workers) | module 7 headless (M2 Max, 8) | iPhone 17 Pro (5) | iPhone 13 Pro |
+| main thread stopped for others, ms per 10 s | macOS shell (M2 Pro, 7 workers) | module 7 headless (M2 Max, 8) | iPhone 17 Pro (5) | iPhone 13 Pro (5) |
 |---|--:|--:|--:|--:|
-| storm stw | 338² | 708 | 108 | - |
-| storm local | 87 | 134 | 25 | - |
-| storm offload | 92 | 129 | 29 | - |
-| ring stw | 1381¹ | 2273 | - | - |
-| ring local | 148¹ | 206 | 1.6 | - |
-| ring offload | 153¹ | 185 | - | - |
-| share stw | 89² | 139 | - | - |
-| share local | 104 | 195 | - | - |
-| share offload | 104 | 203 | - | - |
-| frames missed (any mode) | 0, ring stw 143¹ | n/a | storm stw 1, others 0 | - |
+| storm stw | 338² | 708 | 108 | 464 |
+| storm local | 87 | 134 | 25 | 43 |
+| storm offload | 92 | 129 | 29 | 48 |
+| ring stw | 1381¹ | 2273 | - | 1252 |
+| ring local | 148¹ | 206 | 1.6 | 76 |
+| ring offload | 153¹ | 185 | - | 81 |
+| share stw | 89² | 139 | - | 113 |
+| share local | 104 | 195 | - | 55 |
+| share offload | 104 | 203 | - | 54 |
+| frames missed (any mode) | 0, ring stw 143¹ | n/a | storm stw 1, others 0 | 0, ring stw 2 (1 to 4) |
 
 - **No frame missed** in any scenario but the ring under the
   stop-the-world scavenge (at 1024 MiB 6 of 1200, max gap 16.7 ms; at the
@@ -487,10 +579,40 @@ experiments/device-measurement (Part C after cooling, 5 workers):
   Its stuck report came at the next frame after the second long turn
   (18 s).
 
+On the iPhone 13 Pro (5 background workers, thermal serious throughout):
+
+| scenario | missed of 1200 | max gap ms | event latency p50 / p99 / max ms | stuck report ms | preemptions per 10 s |
+|---|---|--:|---|--:|--:|
+| idle, 1000 events/s | 0 | 8.4 [8.3–8.4] | 0.242 [0.241–0.244] / 3.49 [3.47–3.49] / 4.0 [3.9–4.0] | - | 906 [887–912] |
+| storm offload, 1000 events/s | 0 | 8.3 | 0.100 [0.100–0.101] / 2.90 [2.90–2.93] / 6.2 [6.1–8.3] | - | 8740 [8697–8951] |
+| hog on main, 1000 events/s | 0 | 8.4 [8.3–8.4] | 0.286 / 3.16 [3.15–3.17] / 4.0 [3.4–4.0] | 304 [303–304] | 2411 [2411–2412] |
+| hog, budget off (control) | 1192 [1192–1193] | 9003.9 [9003.2–9006.0] | - | 18005 [18003–18006] | 2 |
+
+- The same picture as the Mac: every event handled and shown, no frame
+  missed with the hog on main, 2411 preemptions per 10 s, the stuck report
+  at 304 ms against the 300 ms limit; the control holds the main thread for
+  9 s (the display link delivered 1 Hz in that window).
+- The p50 is higher on the phone (0.24 to 0.29 ms idle and with the hog,
+  against 0.06), the p99 about the same (2.9 to 3.5 against 2.1 to 3.2),
+  the max 4.0 to 6.2 (8.3 once, under the storm). Under the storm the p50
+  is lower (0.10) than idle, as on the Mac.
+- The young collector thread ran 97 to 98 percent on performance cores
+  with events and the hog (P share 0.96 to 1.00), but only for 0.7 to 1.5
+  ms of CPU per run.
+
 ### Drift and thermal
 
 fib at one worker before and after the whole Mac matrix (three launches
 each): before 1698 [1696–1702] ms, thermal nominal,nominal,nominal ; after 1724 [1717–1724] ms, thermal fair,fair,fair. The after runs are 1.5 percent slower at thermal fair.
+
+On the iPhone 13 Pro, the matrix (156 launches, 0 failed) ran from 18:42 to
+18:56: nominal for three minutes, fair from 18:45 (the golden kernels at
+six workers), **serious from 18:48** (the first ring scenario) to the end.
+fib at one worker: before 1808 [1793–1812] ms at nominal, after 2471
+[2419–2561] ms at serious, **37 percent slower** (the iPhone 17 Pro's
+matrix: up to 15 percent at serious). Every scenario, event and hog row
+but the first run of idle and storm ran at serious; the phone was not
+cooled between parts, as the script runs them. No cooled re-run was made.
 
 ### Energy and footprint (Mac)
 
@@ -500,6 +622,15 @@ W with the main thread held by the control, 24 to 32 W with seven busy
 workers. Peak `phys_footprint`: 39 MB idle, 82 to 86 MB share, 600 to 790
 MB storm, 630 to 690 MB ring (600 MiB heap), 1 055 MB ring at 1024 MiB
 (the stop-the-world ring at 600 MiB since the follow-up: 840 to 845 MB).
+
+On the iPhone 13 Pro (`ri_energy_nj`, process CPU only, at thermal
+serious): 0.016 W idle with the probe moving (the main thread on efficiency
+cores), 0.3 W with 1000 events per second, 1.6 W with the hog preempted
+every turn, 2.2 W with the main thread held by the control, 1.8 to 3.4 W
+with five busy workers (storm under the oracle the most). Peak
+`phys_footprint`: 31 MB idle, 56 to 58 MB share, 545 to 683 MB storm, 535
+to 562 MB ring (600 MiB heap); `os_proc_available_memory` stayed at 2.4 to
+3.0 GB. The kernel tests peaked at 66 MB.
 
 ### The kernels against the starting commit
 
@@ -553,10 +684,10 @@ switch.
 
 ## Deviations from the brief
 
-- **The device measurements are not done** (What needs the owner): the
-  iPhone build cannot be signed on this Mac. The macOS shell's
-  measurements on the mini's display are, three runs each, with the same
-  scripts the phone will run.
+- **The device measurements came after the Mac's**, once the owner had
+  signed Xcode in to the team (What needs the owner); the scripts ran
+  unchanged and the project spec needed no change. The phone ran hot:
+  serious for everything after the kernels (Drift and thermal).
 - **The ring scenario is bounded.** Module 7's `fragment` kept every 20th
   node to the end of a run of fixed length; a scenario runs for a time, so
   the keep store is a ring of 65 536 nodes (old survivors replaced after
@@ -578,11 +709,11 @@ switch.
 
 ## Not done
 
-- The phone (What needs the owner): kernel tests on device, the kernels at
-  1, 2 and 6 workers, the scenario matrix, events, the hog, thermal over a
-  matrix, footprint and energy on the A15, where the collector thread lands
-  on its efficiency cores, and the share case's acknowledgement on the
-  phone's UI thread.
+- A cooled re-run of the phone's scenarios at thermal nominal: every
+  scenario row ran at fair or serious.
+- Why the final mark is 7 to 17 ms at most on the phone with young
+  collection on, against under 0.6 ms with the stop-the-world scavenge.
+- Energy beyond the process's CPU (DRAM, display, render server).
 - The re-entrancy guard for nested run loops (ADR 0004): the shells run no
   modal loop.
 - Layout, more widgets, text input events beyond the text kind, colors
@@ -592,8 +723,13 @@ switch.
 - An Instruments trace of the stalls ADR 0004 left unexplained.
 ## What needs the owner
 
-**Signing for the iPhone.** `xcodebuild -allowProvisioningUpdates` for the
-device fails on this Mac with
+**Signing for the iPhone. Done 2026-11-04**: the owner signed Xcode in to
+team BDN6M642M2; `scripts/device.sh build` then signed with "Apple
+Development: Joni Katajamaki" and the "iOS Team Provisioning Profile:
+dev.katajamaki.kajo.shell" Xcode made, built (1 warning, the
+AppIntents metadata note) and installed, with no change to the project
+spec. What follows is the state before that. `xcodebuild
+-allowProvisioningUpdates` for the device failed on this Mac with
 
 ```
 error: No Accounts: Add a new account in Accounts settings.
@@ -681,7 +817,11 @@ call, Strings) are built inside `shellPrimitive`, out of line.
 1. Accept ADRs 0004 to 0008 on the Mac's evidence, or keep them proposed
    until the iPhone 13 Pro has run the same matrix (ADR 0008's question;
    the 9a notes in 0003, 0004 and 0008)? The cautious reading is the
-   latter, and it needs only the signing below.
+   latter, and it needs only the signing below. **The phone has run it**
+   (2026-11-04, thermal serious): 0 missed frames in every scenario but the
+   ring under the oracle (2 of 1200), young collection 2 to 16 times
+   better than stop-the-world on the main thread in every scenario, share
+   included. The question is the owner's.
 2. ADR 0010 (proposed): one generic view primitive with a handle table,
    and finalization releasing views. Accept, or prefer per-widget
    primitives or views that live until closed?
@@ -721,8 +861,8 @@ on logged. "Load" is twelve `yes` busy loops.
 | `just fuzz syntax 600` | pass: libFuzzer build ok, 2 264 171 runs, no crash |
 | clean `swift build --scratch-path .build/clean-check` | pass: exit 0, 0 errors, 0 warnings |
 | `just apps` (both shells from clean) | pass: macOS exit 0, 0 errors, 0 warnings; iOS (generic device, unsigned) exit 0, 0 errors, 0 warnings |
-| the iPhone build (`scripts/device.sh build`) | **not run: fails before compiling**, "No Accounts" and no profile for `dev.katajamaki.kajo.shell` (What needs the owner) |
-| the kernel tests on the iPhone (`scripts/device.sh tests`) | **not run** (nothing installed); in the macOS shell: 141 of 141 |
+| the iPhone build (`scripts/device.sh build`) | pass on 7df0e5e after the owner's sign-in (2026-11-04 18:40): signed, built, installed; at ad81366 it failed before compiling, "No Accounts" (What needs the owner) |
+| the kernel tests on the iPhone (`scripts/device.sh tests`) | pass on 7df0e5e: 179 of 179 in 2223 ms, UIKit behind ViewTest; in the macOS shell (ad81366): 141 of 141 |
 
 ## Commands
 

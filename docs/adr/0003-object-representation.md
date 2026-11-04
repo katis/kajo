@@ -219,24 +219,35 @@ are revised to:
 Module 9a built the native shells (docs/modules/shells.md) and was to
 re-measure the kernels on an iPhone 13 Pro (A15: 2 performance, 4
 efficiency cores) inside the iOS shell, at 1, 2 and 6 workers, three runs.
-**The phone runs did not happen**: the iOS shell cannot be signed on the
-Mac mini until the owner signs Xcode in to team BDN6M642M2 (shells.md,
-"What needs the owner"); `scripts/shell-matrix.sh device` runs them
-unchanged once it can. The same kernels ran in the macOS shell (Mac mini,
-M2 Pro, release, through the app's own `Headless`), every checksum the
-published one at one worker and identical across runs at two and six:
+The phone runs waited for the owner to sign Xcode in to team BDN6M642M2
+and ran on 2026-11-04 (18:42 to 18:48, `scripts/shell-matrix.sh device`,
+three runs interleaved, thermal nominal in the first and fair in the other
+two). The same kernels ran in the macOS shell (Mac mini, M2 Pro, release,
+through the app's own `Headless`). Every checksum is the published one at
+one worker and identical across runs at two and six, on both machines:
 
-| kernel (ms, median of 3) | 1 worker | 2 | 6 |
-|---|--:|--:|--:|
-| walk | 3620 | 1766 | 373 |
-| sends | 2584 | 1312 | 444 |
-| ivars | 1983 | 1002 | 339 |
-| alloc | 2956 | 1527 | 550 |
-| fib | 1697 | 860 | 292 |
-| Smalltalk sends | 2307 | 1160 | 388 |
+| kernel (ms, median of 3) | Mac 1 worker | 2 | 6 | iPhone 13 Pro 1 worker | 2 | 6 |
+|---|--:|--:|--:|--:|--:|--:|
+| walk | 3620 | 1766 | 373 | 3710 | 2242 | 892 |
+| sends | 2584 | 1312 | 444 | 2903 | 1737 | 902 |
+| ivars | 1983 | 1002 | 339 | 2147 | 1368 | 683 |
+| alloc | 2956 | 1527 | 550 | 3544 | 2336 | 1588 |
+| fib | 1697 | 860 | 292 | 1874 | 1080 | 602 |
+| Smalltalk sends | 2307 | 1160 | 388 | 2523 | 1610 | 795 |
+
+Ranges on the phone (shells.md): walk 3542 to 3715 at one worker, 1873 to
+2355 at two, 844 to 948 at six; alloc at two 2029 to 2543.
 
 These are the M2 Pro's numbers in an app, within 1.5 percent of `kajo run`
 on the same machine (module 8c's table); they say the shell adds nothing
-to a kernel, not what the table costs on the A15. The decision above
-(accepted, variant B) stands on the iPhone 17 Pro measurements; the 13 Pro's
-two P cores and older cache hierarchy are the open check.
+to a kernel, not what the table costs on the A15. On the A15, at one
+worker, walk (the cache-missing hop through the table) is 1.02 times the
+M2 Pro's time while the compute kernels are 1.06 to 1.12 and alloc 1.20:
+the table's hops cost the 13 Pro relatively less than its other work, not
+more. walk's three one-worker launches (3542 to 3715 ms) show no second,
+slow regime. At six workers walk scales 4.2x from one worker (fib 3.1x,
+alloc 2.2x) on two performance and four efficiency cores. These are whole
+kernels, not a direct-pointer A/B: the 2x per hop and 1.8 to 2x marking
+were not re-measured on the A15. The decision above (accepted, variant B)
+stands on the iPhone 17 Pro measurements; nothing on the 13 Pro
+contradicts it.

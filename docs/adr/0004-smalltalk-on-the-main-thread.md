@@ -161,9 +161,8 @@ Module 9a built the native shells (docs/modules/shells.md): the main
 thread given to the VM in turns from the real run loop (a wakeup, a native
 event, every display refresh with 4 ms of the frame for the VM), the event
 queue and a Smalltalk event loop on the main thread, view wrappers behind
-a hop primitive (ADR 0010), the stuck report as a shell callback. The
-phone runs await the owner's signing (shells.md, "What needs the owner");
-these are the macOS shell on the Mac mini's display (a 120.00 Hz panel,
+a hop primitive (ADR 0010), the stuck report as a shell callback. First
+the macOS shell on the Mac mini's display (a 120.00 Hz panel,
 M2 Pro), 10 s windows, three runs, medians with ranges, a probe view moved
 by Smalltalk every frame and module 7's main-thread load (`mainTick:work:`)
 in every frame:
@@ -182,7 +181,31 @@ the hog's frames 0 against 4 with the same 306 ms report, the storm 0
 against 5 missed frames. The thesis holds on a real run loop on the Mac.
 The p99 of 2 to 3 ms is the same idle, under the storm and with the hog,
 so it does not grow with the VM's work; whether it is the 1 ms event
-timer's lateness or the frame turns it waits behind was not separated. What still waits for the phone: everything above at 120 Hz
-ProMotion on the A15, where a single performance core does the main
-thread's work and the efficiency cores the rest. Not built: the
-re-entrancy guard (the shells run no modal loop).
+timer's lateness or the frame turns it waits behind was not separated.
+
+**The iPhone 13 Pro** (2026-11-04, after the owner signed Xcode in to the
+team; `scripts/shell-matrix.sh device`, the iOS shell on the phone's
+ProMotion panel at 120.0 Hz, 5 background workers, the same windows, runs
+and loads; **thermal serious** for every row but the first run of idle and
+storm, the phone uncooled between parts):
+
+| scenario | frames missed of 1200 | max gap | notes |
+|---|--:|--:|---|
+| idle | 0 | 8.4 ms | the main thread on efficiency cores (P share 0.00), turns up to 3.3 ms, 0.016 W |
+| 1000 events/s handled in Smalltalk | 0 | 8.4 ms | latency p50 0.242 ms, p99 3.49 (3.47 to 3.49), max 4.0 |
+| the same under the allocation storm, 5 workers, offload | 0 | 8.3 ms | p50 0.100, p99 2.90, max 6.2 (6.1 to 8.3) |
+| infinite loop on main, normal priority, with 1000 events/s | 0 | 8.4 ms | 2411 preemptions, stuck report at 304 ms (303 to 304), event p99 3.16 ms |
+| infinite loop with the budget off (the control) | 1192 | 9004 ms | the display link delivered 1 Hz |
+| storm, ring, share at 5 workers under every young mode | 0, but the ring under the stop-the-world scavenge: 2 (1 to 4) | 8.4 ms (16.7, 25 once) | ADR 0008's note |
+
+The thesis holds on the phone's run loop as on the Mac's: the budget keeps
+an infinite loop on main from costing a frame, every event is handled in
+the turn that delivered it, and the stuck report comes at the limit. What
+differs: the event p50 is four times the Mac's (0.24 to 0.29 against 0.06
+ms) with the p99 about the same (2.9 to 3.5 against 2.1 to 3.2); the frame
+load took 3.6 to 3.7 s of the main thread per 10 s (the Mac 2.2 to 2.4),
+the longest turn under load 3 to 8 ms with young collection on, up to 10
+ms under the storm's stop-the-world scavenges and 16 to 19 ms under the
+ring's, which are its two missed frames. Under load the main thread ran 88 to 100 percent on performance
+cores; idle it ran on efficiency cores and still made every frame. Not
+built: the re-entrancy guard (the shells run no modal loop).
