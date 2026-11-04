@@ -399,7 +399,38 @@ reclaim and holder cleanup, counters through pointers);
 
 ## Gates
 
-Run on this commit; the table is added with the results.
+Run by one script on bdf161b (the commit before this table), Mac mini M2
+Pro, swift.org Swift 6.4.2 first on PATH, Xcode 27.2 for the apps,
+2026-11-04 10:06 to 11:43; full output in files, the commit each gate ran
+on logged. "Load" is twelve `gtimeout 1500 yes` busy loops (the
+ThreadSanitizer run under load took 1672 s, so its last three minutes ran
+without them).
+
+| gate | result |
+|---|---|
+| clean build (`swift build --scratch-path .build/clean-check`) | pass: 0 warnings |
+| `swift test` | pass: 312 tests (KajoVMTests) and 48 in 6 suites (KajoCompilerTests) |
+| `swift test` under load | pass: 312 and 48 |
+| `swift test --sanitize=thread` | pass: 312 and 48, 0 ThreadSanitizer reports |
+| the same under load | pass: 312 and 48, 0 ThreadSanitizer reports |
+| `just ios-check` | pass |
+| `just arc-check` | pass: no retain or release on the checked paths, one jump table |
+| `just golden` | pass: 9 kasm and 3 Smalltalk kernels, every checksum |
+| `just test-release` | pass: 312 and 48 |
+| `just model-check` | pass: 15 tests in 4 suites |
+| `just soak` | pass: 1000 seeds under every configuration (the two exhausted ones included), every resumed mode, failing none |
+| `just fuzz kasm 600` | pass: libFuzzer build ok, 2 539 265 runs, no crash |
+| `just fuzz snapshot 600` | pass: libFuzzer build ok, 3 634 450 runs, no crash |
+| `just fuzz syntax 600` | pass: libFuzzer build ok, every input on a 512 KB thread, 1 319 335 runs, no crash |
+| `just apps` | pass: macOS and iOS, 0 errors, 0 warnings |
+
+A first run on 3322e50 stopped at `swift test`: `oneReadyProcessRoundTrips`
+(module 8c) found the counter missing from the saved image. The test took
+164 s in the full suite (109 s in a passing run before this work, 0.05 s
+alone): on a busy machine the saver's thread was descheduled while the
+counter yielded to its end, so the save caught the saver alone. The test
+now repeats its round, at most five times, until the save catches the
+counter still ready (bdf161b), and every gate ran again from the start.
 
 ## Commands
 
