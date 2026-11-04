@@ -248,16 +248,25 @@ import Testing
 }
 
 /// Module 8d's syntax fuzzer run found a binary chain of thousands of sends
-/// overflowing the Swift stack in code generation (a left-deep tree); a
-/// chain longer than the nesting limit is a CompileError, a short chain
-/// compiles.
-@Test func aMessageChainPastTheNestingLimitIsRefused() throws {
-    let long = "f: x ^ x" + String(repeating: " + 1", count: 5000)
-    #expect(throws: CompileError.self) { _ = try compile(long) }
-    let unary = "f: x ^ x" + String(repeating: " yourself", count: 300)
-    #expect(throws: CompileError.self) { _ = try compile(unary) }
-    _ = try compile("f: x ^ x" + String(repeating: " + 1", count: 20))
+/// overflowing the Swift stack in code generation (a left-deep tree). 8d
+/// held chains to the nesting limit; since docs/modules/reserve-and-depth.md
+/// the analysis and code generation walk a chain in a loop and a chain of
+/// any length compiles to the sends in order; the fuzzer's input compiles
+/// and runs.
+@Test func aMessageChainOfAnyLengthCompiles() throws {
+    let long = try compile("f: x ^ x" + String(repeating: " + 1", count: 5000))
+    let l = listing(long)
+    #expect(l.count == 1 + 2 * 5000 + 1)
+    #expect(l.first == "push_temp 0" && l.last == "return_top")
+    #expect(l.filter { $0 == "add" }.count == 5000)
+    let unary = try compile("f: x ^ x" + String(repeating: " yourself", count: 300))
+    #expect(listing(unary).filter { $0.contains("yourself") }.count == 300)
+    // The order of a mixed chain: unary sends bind first, then binary.
+    let mixed = listing(try compile("f: x ^ x a + 1 b * x c"))
+    #expect(mixed.map { String($0.prefix { $0 != " " }) } ==
+            ["push_temp", "send", "push_int", "send", "add", "push_temp", "send", "mul", "return_top"], "\(mixed)")
+    #expect(mixed[1].contains("\"a\"") && mixed[3].contains("\"b\"") && mixed[6].contains("\"c\""), "\(mixed)")
     let input = try Data(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         .appendingPathComponent("Fixtures/syntax/crash-long-binary-chain.st"))
-    #expect(!FuzzSyntax.run([UInt8](input)))
+    _ = FuzzSyntax.run([UInt8](input))
 }

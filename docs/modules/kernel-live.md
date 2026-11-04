@@ -539,7 +539,13 @@ not a hot path.
    chains) is deep enough for a debug build's code generation to overflow
    a 512 KB thread stack at about 100 (the test of the limit compiles a
    chain of 20). Lower the limit, or make code generation iterative for
-   chains?
+   chains? **Built (follow-up, `docs/modules/reserve-and-depth.md`):
+   both.** Chains are walked by loops (no limit but the method's size);
+   brackets and blocks cost 4 to 9.5 KB of stack per level in a debug
+   build and 0.4 to 1.6 KB in release, so the limit is 32 in both
+   compilers, and the deepest input of every construct compiles on a
+   512 KB thread in debug and release; the syntax fuzzer runs every input
+   on a 512 KB thread.
 
 ## Gates
 

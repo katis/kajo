@@ -55,7 +55,7 @@ Parser >> expect: aKind what: aString [
 { #category : #accessing }
 Parser >> enter [
 	depth := depth + 1.
-	depth > 256 ifTrue: [^ self fail: 'nested deeper than 256']
+	depth > 32 ifTrue: [^ self fail: 'nested deeper than 32']
 ]
 
 { #category : #accessing }

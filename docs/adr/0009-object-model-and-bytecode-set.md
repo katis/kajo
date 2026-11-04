@@ -445,6 +445,16 @@ to 8b's questions:
   reason), **144** `Smalltalk isReleaseImage`. 97 and 98 (8a's install and
   remove) now refuse a sealed class (a metaclass by the class it is for)
   and a release image, whose header flag no primitive writes.
+- **The parser's nesting limit** (follow-up after 8d,
+  `docs/modules/reserve-and-depth.md`): 32 levels of brackets, blocks,
+  brace and literal arrays and assignments in both compilers (256 until
+  then), so that the deepest input compiles on a 512 KB thread in a debug
+  build (9.5 KB of stack per block level) and with a margin of four in a
+  release build (1.6 KB); the kernel nests 8 deep at most and the make
+  primitive already refused blocks past 64. A message chain (unary, binary
+  or parenthesized keyword sends) is walked by loops in the bootstrap
+  compiler's analysis and code generation and has no limit of its own but
+  the method's 32 760 bytes of bytecode, as in the compiler in Smalltalk.
 
 ## Consequences
 

@@ -350,7 +350,9 @@ final class AssignNode: Node {
 }
 
 final class SendNode: Node {
-    let receiver: Node
+    /// Optional only so that `deinit` can take a chain apart.
+    private var receiverSlot: Node?
+    var receiver: Node { receiverSlot! }
     let selector: String
     let arguments: [Node]
     /// Set by the analysis: compiled as jumps (ifTrue:, whileTrue:, to:do:, ...).
@@ -358,12 +360,25 @@ final class SendNode: Node {
     /// The hidden temps an inlined loop uses (the limit, a counter).
     var hidden: [Variable] = []
     init(_ receiver: Node, _ selector: String, _ arguments: [Node], line: Int) {
-        self.receiver = receiver
+        self.receiverSlot = receiver
         self.selector = selector
         self.arguments = arguments
         super.init(line: line)
     }
     var isSuper: Bool { (receiver as? VariableNode)?.name == "super" }
+
+    /// A message chain is a left-deep list of sends of any length (the
+    /// parser does not bound it): released one link at a time, not by
+    /// nested deinits that would overflow the stack (module 8d's finding,
+    /// docs/modules/reserve-and-depth.md).
+    deinit {
+        guard var next = receiverSlot as? SendNode else { return }
+        receiverSlot = nil
+        while isKnownUniquelyReferenced(&next), let deeper = next.receiverSlot as? SendNode {
+            next.receiverSlot = nil
+            next = deeper
+        }
+    }
 }
 
 final class CascadeNode: Node {
@@ -435,10 +450,16 @@ final class MethodNode {
 struct Parser {
     var scanner: Scanner
     var token: Token
-    /// Nesting of blocks, parentheses and literal arrays; refused past
-    /// `maxDepth` so a hostile input cannot overflow the Swift stack.
+    /// Nesting of blocks, parentheses, brace and literal arrays and
+    /// assignments; refused past `maxDepth` so a hostile input cannot
+    /// overflow the Swift stack. 32 (256 until docs/modules/reserve-and-depth.md):
+    /// a debug build costs up to 9.5 KB of stack per level (a block), a
+    /// release build 1.6 KB, and the deepest input must compile on a 512 KB
+    /// thread (a Swift Testing or VM worker thread), in release with a
+    /// margin of four. The kernel nests 8 deep at most; the make primitive
+    /// refuses blocks nested past 64. Both compilers share the limit.
     var depth = 0
-    static let maxDepth = 256
+    static let maxDepth = 32
 
     init(_ text: [UInt8], file: String, line: Int = 1) throws(CompileError) {
         scanner = Scanner(text, file: file, line: line)
@@ -633,27 +654,14 @@ struct Parser {
         return r
     }
 
-    /// Module 8d (the syntax fuzzer's make-and-run run): a chain of unary
-    /// and binary sends is a left-deep tree, so a chain of thousands
-    /// overflowed the Swift stack in code generation. A chain is held to
-    /// the nesting limit like brackets are.
-    func chainLength(_ n: Node) -> Int {
-        var k = 0
-        var x: Node = n
-        while let s = x as? SendNode, k <= Parser.maxDepth {
-            k += 1
-            x = s.receiver
-        }
-        return k
-    }
-
+    /// A chain of unary and binary sends is a left-deep tree of any length:
+    /// the parser builds it in a loop, and the analysis and code generation
+    /// walk it in loops (`Compiler.chain`), so it is not held to the nesting
+    /// limit (module 8d held it; docs/modules/reserve-and-depth.md).
     mutating func parseUnaryMessages(_ receiver: Node) throws(CompileError) -> Node {
         var r = receiver
-        var k = chainLength(r)
         while case .identifier(let name) = token.kind {
             r = SendNode(r, name, [], line: token.line)
-            k += 1
-            if k > Parser.maxDepth { throw fail("a message chain longer than \(Parser.maxDepth)") }
             try advance()
         }
         return r
@@ -661,7 +669,6 @@ struct Parser {
 
     mutating func parseBinaryMessages(_ receiver: Node) throws(CompileError) -> Node {
         var r = receiver
-        var k = chainLength(r)
         while true {
             let op: String
             switch token.kind {
@@ -673,8 +680,6 @@ struct Parser {
             try advance()
             let a = try parseUnaryMessages(try parsePrimary())
             r = SendNode(r, op, [a], line: line)
-            k += 1
-            if k > Parser.maxDepth { throw fail("a message chain longer than \(Parser.maxDepth)") }
         }
     }
 

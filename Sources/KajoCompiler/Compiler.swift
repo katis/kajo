@@ -313,6 +313,22 @@ struct Compiler {
         return false
     }
 
+    /// The sends of the message chain that ends in `s`, innermost first,
+    /// and the node they start from: a chain of any length is walked by a
+    /// loop, never by recursion on the receiver (the stack bounds only
+    /// nesting, docs/modules/reserve-and-depth.md). A send that is inlined
+    /// ends the chain (its receiver is a block, or it is the outermost).
+    static func chain(_ s: SendNode) -> (start: Node, sends: [SendNode]) {
+        var sends = [s]
+        var x = s.receiver
+        while let r = x as? SendNode, !r.isSuper, !Compiler.inlinable(r) {
+            sends.append(r)
+            x = r.receiver
+        }
+        sends.reverse()
+        return (x, sends)
+    }
+
     mutating func analyze(_ n: Node, _ scope: Scope) throws(CompileError) {
         switch n {
         case is LiteralNode:
@@ -337,9 +353,15 @@ struct Compiler {
             if Compiler.inlinable(s) {
                 s.inlined = true
                 try analyzeInlined(s, scope)
-            } else {
+            } else if s.isSuper {
                 try analyze(s.receiver, scope)
                 for x in s.arguments { try analyze(x, scope) }
+            } else {
+                // The receiver first, then each send's arguments, innermost
+                // first: the order the recursion had.
+                let (start, sends) = Compiler.chain(s)
+                try analyze(start, scope)
+                for t in sends { for x in t.arguments { try analyze(x, scope) } }
             }
         case let c as CascadeNode:
             try analyze(c.receiver, scope)
@@ -531,9 +553,12 @@ struct Compiler {
                 for a in s.arguments { try gen(a, r, e, value: true) }
                 e.emit(.send(.sendSuper, s.selector, s.arguments.count), s.line)
             } else {
-                try gen(s.receiver, r, e, value: true)
-                for a in s.arguments { try gen(a, r, e, value: true) }
-                send(s.selector, s.arguments.count, e, s.line)
+                let (start, sends) = Compiler.chain(s)
+                try gen(start, r, e, value: true)
+                for t in sends {
+                    for a in t.arguments { try gen(a, r, e, value: true) }
+                    send(t.selector, t.arguments.count, e, t.line)
+                }
             }
             if !value { e.op(.pop, 0, 0, s.line) }
         case let c as CascadeNode:
