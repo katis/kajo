@@ -39,7 +39,8 @@ DevSessionBench class >> begin: aName [
 
 { #category : #running }
 DevSessionBench class >> end [
-	steps add: {stepName. Smalltalk microsecondClock - stepStart. stepStart}.
+	"The step's time recorded, then the next step."
+	self record.
 	self next
 ]
 
@@ -166,7 +167,7 @@ DevSessionBench class >> selectorsPush [
 	t := self measureTable.
 	self begin: 'selectors.request'.
 	self selectors: [:all |
-		self end.
+		self record.
 		self begin: 'selectors.push.' , all size printString.
 		t list: all.
 		self end]
@@ -289,4 +290,10 @@ DevSessionBench class >> startTyping: aSocketPath [
 				v selectFrom: n + 1 to: n.
 				Transcript show: 'devsession: type ' , v handle printString; cr; flush]]].
 	^ true
+]
+
+{ #category : #running }
+DevSessionBench class >> record [
+	"The step's time, its name and when it began (the shell counts the frames missed in it)."
+	steps add: {stepName. Smalltalk microsecondClock - stepStart. stepStart}
 ]

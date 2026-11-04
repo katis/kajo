@@ -70,7 +70,10 @@ final class FlippedView: NSView {
         // is occluded, and the measurement must not depend on window order.
         guard let screen = statusWindow.screen ?? NSScreen.main else { return }
         let l = screen.displayLink(target: self, selector: #selector(frame(_:)))
-        l.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        // 120 Hz whatever the content does (module 9c: the developer UI's
+        // windows move nothing every frame, and with a minimum of 60 the
+        // link ran at 60 Hz for stretches of the typing measurement).
+        l.preferredFrameRateRange = CAFrameRateRange(minimum: 120, maximum: 120, preferred: 120)
         l.add(to: .main, forMode: .common)
         link = l
     }
