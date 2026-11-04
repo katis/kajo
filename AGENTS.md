@@ -489,6 +489,26 @@ Safety:
    `-enable-testing` aligned builds of the same commits ran at parity.
    Before attributing a slowdown to code, diff the disassembly of the hot
    functions; if it is identical, the number is the linker's.
+ - A stop is not a resume point. Module 8a's install stop parks workers
+   wherever they are (inside an allocation's stop, a young collection's
+   wait, a primitive's own stop), and no register set of a Process parked
+   there can be resumed later. The save first holds the scheduler so every
+   running Process leaves its worker at a poll, where module 3's preemption
+   already makes its registers exact, and only then stops. A new way of
+   quiescing the VM is a new protocol: `docs/models/save-hold.md`.
+ - A test that asserts parallelism happened (four scavengers, a stop that
+   lands while workers run) fails on a loaded machine unless it runs long
+   enough to see it. Make the work longer or repeat the round; never weaken
+   the assertion to pass when the parallelism did not occur.
+ - An operand that fits one byte is checked where it is encoded: the
+   assembler trapped on a keyword send of more than 255 arguments, a bug as
+   old as the bootstrap compiler that the syntax fuzzer found only in 8c's
+   gate run. Every count a bytecode encodes has a refusal and a test at
+   its limit.
+ - Inlining moves ARC: when the poll's snapshot trigger was inlined into
+   `pollSlow`, the arrays it built were retained on the poll path and `just
+   arc-check` caught it. Anything that allocates Swift objects stays out of
+   line from the paths the check covers.
 
 ## Verification
 
@@ -549,7 +569,17 @@ build at 2.5 MB, SUnit with the v1 NDJSON event stream and JUnit XML, and
 the Smalltalk kernels at 0.88 to 1.03 of their kasm twins; 8b left class
 variables, a method-install primitive, saved Processes (8c), Unicode
 tables and the main-thread check undone, and its five open questions in
-`docs/modules/kernel-image.md` await the owner). ADRs
+`docs/modules/kernel-image.md` await the owner; Processes saved in the
+image built in module 8c: the stack words copied verbatim into Array
+chunks under special object 8 with the ready queues, the finalization
+Semaphore and the saver, image format version 2, `Smalltalk snapshot:`
+answering false in the saver and true on resume, a hold on the scheduler
+before the stop with its own model, a loader that checks every saved frame
+against its method and the bytecode verifier's depth at its pc, `kajo run`
+resuming such an image until it is quiescent, the random programs saved
+mid-run agreeing with their model, the kernels within noise, a save's stop
+at 0.45 to 0.56 ms; 8c's six open questions in
+`docs/modules/image-processes.md` await the owner). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -601,7 +631,11 @@ cover.
    the UTF-8 String and interned Symbol primitives, read-only bit 50 in
    every store path, stack growth by copying, pragma literals, the image
    format and its loader; module 8b added `ObjectModel/Symbols.swift`'s
-   weak table and `ObjectModel/KernelPrimitives.swift`), `Headless.swift`
+   weak table and `ObjectModel/KernelPrimitives.swift`),
+   `Processes/SavedProcesses.swift` with `Loader/SavedProcessRules.swift`
+   (module 8c, built; `docs/modules/image-processes.md`: the saved form,
+   the save's hold and stop, the load and resume, the loader's rules for
+   saved frames, queues and waiters, `kajo run --snapshot-at`), `Headless.swift`
    the public entry `kajo run` uses. `Sources/KajoCompiler/` the bootstrap
    compiler (module 8b, built; `docs/modules/kernel-image.md`: Smalltalk
    method syntax and Tonel files to the assembler's encoder and the one
@@ -632,8 +666,9 @@ cover.
  * `models/` a separate SwiftPM package holding the exhaustive interleaving
    models of the concurrent protocols (`cd models && swift test`;
    `docs/models/` one brief, later description, per model). The relocation
-   model precedes module 6 and is updated in the same commit as any change
-   to the protocol.
+   model precedes module 6, the young-collection model module 7 and the
+   save-hold model module 8c; each is updated in the same commit as any
+   change to its protocol.
  * `docs/CONTEXT.md` domain vocabulary. `docs/adr/` one decision per file.
    `docs/VERIFICATION.md` how the experiments become the production core
    and what verification that core needs beyond tests and ThreadSanitizer.
