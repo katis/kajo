@@ -274,6 +274,10 @@ func myThread() -> UInt64 {
         vm.start()
         defer { vm.close() }
         #expect(vm.resumedProcessCount >= 2)  // the saver and the event loop
+        // The saver's resume hook detaches every wrapper it finds: views
+        // built before it ran would be detached too (the gate run of 9b
+        // found this race), so wait for it.
+        #expect(drive(vm) { (try? run(vm, "resumeCount", on: "Smalltalk"))??.int ?? 0 >= 1 })
         // The old wrappers came back detached; a new counter works through
         // the resumed loop.
         let button = Int(try #require(try run(vm, "buildCounter")?.int))

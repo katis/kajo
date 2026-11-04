@@ -9,7 +9,8 @@ Class {
 		'organizations',
 		'undeclared',
 		'packages',
-		'authors'
+		'authors',
+		'resumes'
 	],
 	#category : #'Kernel-System'
 }
@@ -381,7 +382,14 @@ Smalltalk class >> resumeAfterSnapshot [
 	Delay resumeAfterSnapshot.
 	Ephemeron resumeAfterSnapshot.
 	View resumeAfterSnapshot.
-	UIEventLoop resumeAfterSnapshot
+	UIEventLoop resumeAfterSnapshot.
+	resumes := self resumeCount + 1
+]
+
+{ #category : #snapshots }
+Smalltalk class >> resumeCount [
+	"How many times this image was resumed and its hook ran to the end (a host waits for it before building views the hook would detach)."
+	^ resumes ifNil: [0]
 ]
 
 { #category : #snapshots }
