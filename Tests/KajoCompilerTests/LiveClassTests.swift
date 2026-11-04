@@ -9,15 +9,13 @@ import Testing
 @testable import KajoCompiler
 @testable import KajoVM
 
-/// Run `className selector` (class side) in a one-worker VM over `image`
-/// and answer the SmallInteger it answered.
+/// Run `className selector` (class side) in a one-worker VM of the default
+/// configuration over `image` and answer the SmallInteger it answered.
+/// Several VMs run over one image in turn and the host saves it afterwards
+/// (docs/modules/vm-teardown.md).
 func answerOf(_ image: Image, _ className: String, _ selector: String, sources: String? = nil) throws -> Int64 {
     var vc = VMConfig()
     vc.backgroundWorkers = 1
-    vc.nursery.bytes = 0
-    vc.marking.enabled = false
-    vc.relocation.enabled = false
-    vc.young.mode = .stw
     vc.sourcesDirectory = sources
     let vm = VM(image: image, config: vc)
     vm.start()
@@ -146,6 +144,18 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
         // a link inside the directory that leads out of it
         try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("out"), withDestinationURL: outside)
+        // links as the last component (docs/modules/vm-teardown.md): to a
+        // file outside, to a file inside, dangling, and in place of the
+        // write's temporary file, leading outside
+        let secret = outside.appendingPathComponent("secret.txt"), kept = outside.appendingPathComponent("kept.txt")
+        try "secret".write(to: secret, atomically: false, encoding: .utf8)
+        try "kept".write(to: kept, atomically: false, encoding: .utf8)
+        try "inside".write(to: dir.appendingPathComponent("sub/target.txt"), atomically: false, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("outfile"), withDestinationURL: secret)
+        try FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("sub/inlink").path, withDestinationPath: "target.txt")
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("dangling"),
+                                                   withDestinationURL: outside.appendingPathComponent("none"))
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("sub/c.txt.kajo-tmp"), withDestinationURL: kept)
         let files = miniKernel + [tonel("F", "Object", """
         F class >> write: p contents: s [
             <primitive: 148>
@@ -167,6 +177,13 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
             (self read: 'nothing.txt') == nil ifFalse: [^ -9].
             (self write: '' contents: 'x') == nil ifFalse: [^ -10].
             (self write: #sym contents: 'x') == nil ifFalse: [^ -11].
+            (self read: 'outfile') == nil ifFalse: [^ -12].
+            (self write: 'outfile' contents: 'x') == nil ifFalse: [^ -13].
+            (self read: 'sub/inlink') == nil ifTrue: [^ -14].
+            (self write: 'sub/inlink' contents: 'replaced') == true ifFalse: [^ -15].
+            (self read: 'dangling') == nil ifFalse: [^ -16].
+            (self write: 'dangling' contents: 'x') == nil ifFalse: [^ -17].
+            (self write: 'sub/c.txt' contents: 'c') == true ifFalse: [^ -18].
             ^ 1
         ]
         F class >> withoutDirectory [
@@ -181,6 +198,15 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         #expect(try answerOf(image, "F", "run", sources: dir.path) == 1)
         #expect(try String(contentsOf: dir.appendingPathComponent("sub/a.txt"), encoding: .utf8) == "again")
         #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("kajo-escape").path))
+        // nothing outside changed; the link inside was replaced, its target kept
+        #expect(try String(contentsOf: secret, encoding: .utf8) == "secret")
+        #expect(try String(contentsOf: kept, encoding: .utf8) == "kept")
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: dir.appendingPathComponent("outfile").path) == secret.path)
+        #expect(try String(contentsOf: dir.appendingPathComponent("sub/target.txt"), encoding: .utf8) == "inside")
+        #expect(try String(contentsOf: dir.appendingPathComponent("sub/inlink"), encoding: .utf8) == "replaced")
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: dir.appendingPathComponent("sub/inlink").path)) == nil)
+        #expect(try String(contentsOf: dir.appendingPathComponent("sub/c.txt"), encoding: .utf8) == "c")
+        #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("none").path))
         #expect(try answerOf(image, "F", "withoutDirectory") == 1)
         // a release image refuses them whatever the directory
         image.seal()

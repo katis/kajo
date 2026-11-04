@@ -727,18 +727,29 @@ private func literalsName(_ m: Machine, _ meth: Oop, _ cls: Oop) -> Bool {
 
 /// The path `relative` names under the VM's sources directory, or nil: no
 /// directory (none was given, or there is no VM), an absolute path, an
-/// empty, `.` or `..` component, a NUL, or a parent directory that
-/// resolves (through symbolic links) outside the directory.
-func sourcesPath(_ m: Machine, _ relative: String) -> String? {
+/// empty, `.` or `..` component, a NUL, a parent directory that resolves
+/// (through symbolic links) outside the directory, or an existing last
+/// component (a file or a symbolic link) whose whole path resolves outside
+/// it or does not resolve (a dangling link): no component leads out
+/// (docs/modules/vm-teardown.md). `path` is the resolved parent and the
+/// last component as named: a write renames over it, replacing a link
+/// inside the directory rather than following it. `resolved` is the whole
+/// path resolved when the last component exists: a read opens it with
+/// `O_NOFOLLOW`.
+func sourcesPath(_ m: Machine, _ relative: String) -> (path: String, resolved: String?)? {
     guard let vm = unsafe workerOf(m.state).pointee.vm, let root = unsafe vm.pointee.config.sourcesDirectory, !root.isEmpty else { return nil }
     guard !relative.isEmpty, !relative.hasPrefix("/"), !relative.contains("\0") else { return nil }
     let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
     guard parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
     guard let realRoot = realPath(root) else { return nil }
+    func inside(_ p: String) -> Bool { p == realRoot || p.hasPrefix(realRoot + "/") }
     let parent = ([root] + parts.dropLast().map(String.init)).joined(separator: "/")
-    guard let realParent = realPath(parent), realParent == realRoot || realParent.hasPrefix(realRoot + "/") else { return nil }
-    let last = String(parts.last!)
-    return realParent + "/" + last
+    guard let realParent = realPath(parent), inside(realParent) else { return nil }
+    let path = realParent + "/" + String(parts.last!)
+    var st = stat()
+    guard unsafe lstat(path, &st) == 0 else { return (path, nil) }
+    guard let whole = realPath(path), inside(whole), whole != realRoot else { return nil }
+    return (path, whole)
 }
 
 private func realPath(_ p: String) -> String? {
@@ -748,7 +759,8 @@ private func realPath(_ p: String) -> String? {
 }
 
 private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
-    guard let rel = m.symbolText(c.arg0), m.classIndex(of: c.arg0) == WellKnown.string, let path = sourcesPath(m, rel) else { return .none }
+    guard let rel = m.symbolText(c.arg0), m.classIndex(of: c.arg0) == WellKnown.string, let named = sourcesPath(m, rel) else { return .none }
+    let path = named.path
     if n == 148 {
         guard c.argc == 2, m.classIndex(of: c.arg1) == WellKnown.string, m.om.isBytes(c.arg1) else { return .none }
         // A refused path never reaches here; the file is replaced whole
@@ -762,15 +774,20 @@ private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         unsafe m.state.pointee.counters.filesWritten &+= 1
         return m.trueObject
     }
-    guard c.argc == 1, let bytes = readFile(path), bytes.count <= Header.maxBytes, String(validating: bytes, as: UTF8.self) != nil else {
+    guard c.argc == 1, let resolved = named.resolved, let bytes = readFile(resolved), bytes.count <= Header.maxBytes, String(validating: bytes, as: UTF8.self) != nil else {
         return .none
     }
     unsafe m.state.pointee.counters.filesRead &+= 1
     return m.newString(bytes)
 }
 
+/// Write `bytes` to a new file at `path`: a link or file already there is
+/// removed first (the link itself, never what it names), and the open
+/// creates exclusively without following a link, so a link planted in its
+/// place between the two refuses the write instead of leading out.
 private func writeFile(_ path: String, _ bytes: [UInt8]) -> Bool {
-    let fd = unsafe open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+    _ = unsafe unlink(path)
+    let fd = unsafe open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
     guard fd >= 0 else { return false }
     defer { close(fd) }
     var off = 0
@@ -783,7 +800,7 @@ private func writeFile(_ path: String, _ bytes: [UInt8]) -> Bool {
 }
 
 private func readFile(_ path: String) -> [UInt8]? {
-    let fd = unsafe open(path, O_RDONLY)
+    let fd = unsafe open(path, O_RDONLY | O_NOFOLLOW)
     guard fd >= 0 else { return nil }
     defer { close(fd) }
     var out: [UInt8] = []
