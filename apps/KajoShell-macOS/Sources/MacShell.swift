@@ -304,6 +304,14 @@ final class FlippedView: NSView {
     static let delegate = AppDelegate()
 
     static func main() {
+        // Wake an asleep display first (the mini's TV sleeps after ten
+        // minutes), as a key press would. No setting is changed.
+        var activity: IOPMAssertionID = 0
+        _ = IOPMAssertionDeclareUserActivity("Kajo shell launch" as CFString, kIOPMUserActiveLocal, &activity)
+        // No window restoration: after a crash AppKit would ask, in a modal
+        // alert at launch, whether to reopen windows, and a scripted run
+        // would wait for it forever (in memory only; nothing is written).
+        UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true])
         let application = NSApplication.shared
         application.delegate = delegate
         application.setActivationPolicy(.regular)

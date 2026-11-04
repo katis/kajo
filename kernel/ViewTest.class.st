@@ -65,7 +65,8 @@ ViewTest >> testSliderActionGetsTheValue [
 ViewTest >> testTextViewAppendsLines [
 	| t |
 	t := TextView new.
-	t appendLine: 'one'; appendLine: 'two'.
+	t appendLine: 'one'.
+	UIEventLoop dispatch: (UIEvent kind: #text target: t handle value: 'two' time: 0).
 	self assert: t text equals: 'one' , (String with: Character lf) , 'two'.
 	t clear.
 	self assert: t text equals: ''

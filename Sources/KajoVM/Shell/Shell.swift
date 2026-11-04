@@ -471,7 +471,8 @@ public final class ShellVM: @unchecked Sendable {
     /// young collector (the main worker is the shell's thread).
     public var threads: [ShellThread] { vm.shellThreads() }
 
-    /// Round latencies of young collection (ns), the hop latencies (ns).
+    /// How long each hop to main took, from the hop to the retried send on
+    /// the main worker (ns).
     public var hopLatencies: [UInt64] { vm.hopLatencies }
 }
 

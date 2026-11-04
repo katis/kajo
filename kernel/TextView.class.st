@@ -39,3 +39,9 @@ TextView >> headlessCall: aName with: anArray [
 		^ self set: 'text' to: (t isEmpty ifTrue: [anArray first] ifFalse: [t , (String with: Character lf) , anArray first])].
 	^ nil
 ]
+
+{ #category : #events }
+TextView >> handleEvent: anEvent [
+	"A text event (the shell's Transcript lines in the demo) appends its value as a line."
+	anEvent kind == #text ifTrue: [self appendLine: anEvent value displayString]
+]
