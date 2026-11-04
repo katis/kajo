@@ -634,7 +634,11 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
 - Extensions in the written files; normalizing the indentation of
   multi-line sources.
 - Directories and listings in the file primitives; files larger than one
-  String.
+  String. A symbolic link as the last path component: the parent is
+  resolved through links and must stay under the directory, but a link
+  named by the last component is followed by the read primitive (a write
+  replaces the link itself), so a link planted in the directory can be
+  read through.
 - A reshape while a frame runs a method of the class (refused by rule).
 - Non-class globals (8b, 8d).
 - `Process>>terminate` running unwind blocks; a frame restart (8b's; 8d's

@@ -268,8 +268,13 @@ Safety:
    primitive (143), which runs the one bytecode verifier on what the
    compiler handed over and makes it read-only and pinned before any other
    Process sees it, and the install primitives (97, 98), which refuse the
-   sealed classes and release images. The primitive is the trust boundary,
-   not the compiler.
+   sealed classes and release images. Since module 8e a class is defined,
+   reshaped or removed from Smalltalk only through the define, redefine and
+   remove primitives (145 to 147), which re-check the image build's class
+   rules with the build's own code (`ClassRules`), make and verify every
+   recompiled method against the new shape before anything changes, and
+   refuse while any frame runs a method of the class. The primitive is the
+   trust boundary, not the compiler.
  - A stress mode that preempts at every poll livelocks: a Process preempted
    at a send is resumed at that send and preempted again. Every slice must
    execute at least one instruction; the stress flag lets the first poll of
@@ -567,6 +572,22 @@ Safety:
    code runs on, per construct, in a debug build: blocks cost 9.5 KB per
    level there, so 256 levels needed 2.4 MB and a 512 KB test thread died
    at about 100. Chains became loops; the rest is bounded at 32.
+ - An invariant the loader checks on load binds every live change. The
+   loader requires every method to fit its class and every class index to
+   name a class, so a reshape forwards the old methods to their recompiled
+   versions (closures follow) and a removal keeps the class object as
+   `AnObsoleteFoo`; an image saved after either still loads. Read the
+   loader's rules before designing a change the image must survive.
+ - When a tool writes files a person also edits, the tool's output is the
+   canonical form and a test asserts byte identity. 8e's image writes
+   `kernel/` out byte for byte as it was read; the rewrite to that form was
+   its own commit, checked method for method on both builds, so a round
+   trip has no normalizing step that can drift.
+ - A gate that finishes ten times faster than it used to has changed; find
+   out what it skipped before counting it. 8e's clean build took 10 s from
+   an empty scratch path (a toolchain compilation cache), so the full
+   strict-memory-safety typecheck of `just ios-check` carried the
+   0-warnings check that run.
 
 ## Verification
 
@@ -680,7 +701,22 @@ compacting full collections of 250 ms where the concurrent modes miss
 none; the same follow-up walks message chains by loops in the bootstrap
 compiler, lowers the nesting limit to 32 in both compilers after
 measuring 4 to 9.5 KB of debug stack per level, and runs the syntax
-fuzzer on a 512 KB thread; its two open questions await the owner). ADRs
+fuzzer on a 512 KB thread; its two open questions await the owner; live
+classes built in module 8e, `docs/modules/live-classes.md`: primitives 145
+to 147 define, redefine and remove a class in the install stop, re-checking
+the build's rules through the shared `ClassRules`, a redefinition making
+every method again against the new shape and reshaping every instance of
+the class and its subclasses by name before anything changes (10 000
+instances and 50 methods in 10.8 ms, the longest install stop 1.04 ms),
+old methods forwarded to the recompiled ones or to an error stub, a
+removed class kept as `AnObsoleteFoo`, the running-frame rule refusing a
+change while any Process runs a method of the class, removed class
+variables left as undeclared Bindings; categories, comments and class
+definitions kept in the image; the Tonel writer and reader in Smalltalk
+over file primitives 148 and 149 bounded to the directory `--sources`
+opens, `kernel/` rewritten in the canonical form the image writes and a
+byte-identical round-trip test; 1500 class-spec and 500 reshape-spec
+mutations; its five open questions await the owner). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -764,17 +800,25 @@ cover.
    (`just device`) builds, signs, installs and runs the iOS shell on the
    attached iPhone through `devicectl`; `mac-shell.sh`, `shell-matrix.sh`
    and `shell-report.py` run the scenario matrix and make its tables.
- * `kernel/` Smalltalk sources the image is built from (module 8b: 123
-   Tonel class files, the kernel of `docs/modules/kernel.md` as built in
+ * `kernel/` Smalltalk sources the image is built from (module 8b: the
+   kernel of `docs/modules/kernel.md` as built in
    `docs/modules/kernel-image.md`, with its SUnit tests beside the classes;
-   `just build-image`, `just kernel-test`). The image is never committed.
+   152 Tonel class files since module 8e, in the canonical form the image
+   itself writes (`Smalltalk writeTonel:`); `just build-image`, `just
+   kernel-test`). The image is never committed.
    Its compiler in Smalltalk compiles every method and is compared with the
    bootstrap compiler's output by `CompilerTest`, and since module 8d
    (`docs/modules/kernel-live.md`) installs: `Behavior>>compile:`,
    `Compiler evaluate:`, class variables, Pharo's per-iteration temp
    vectors, the release flag. `Sources/KajoVM/ObjectModel/LiveMethods.swift`
    (primitives 143, 85, 144) and `Loader/MethodBuilding.swift` (what the
-   image build and the make primitive share) are 8d's.
+   image build and the make primitive share) are 8d's. Module 8e
+   (`docs/modules/live-classes.md`) added defining, reshaping and removing
+   classes, categories and comments in the image, and the Tonel writer and
+   reader in Smalltalk: `ObjectModel/LiveClasses.swift` (primitives 145 to
+   149) and `Loader/ClassRules.swift` (the class rules the build and the
+   primitives share); `kajo run --sources <dir>` and `kajo test --sources
+   <dir>` open the file primitives on one directory.
    Module 9a added the view wrappers (View, Window, Label, Button, TextView,
    Slider, UIEvent, UIEventLoop; ADR 0010).
  * `apps/` the shells (module 9a, built): `KajoShell-macOS` (AppKit) and
