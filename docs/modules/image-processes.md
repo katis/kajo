@@ -472,6 +472,10 @@ the loader's rules and the install are not on the hot path.
 
 ## Open questions for the owner
 
+The owner agreed with every provisional answer on 2026-11-04; 5 and 6 as
+built (no save timeout, `kajo run` ends when quiescent) stand until a
+server image needs otherwise.
+
 The brief's four, built to their provisional answers:
 
 1. A Delay's remaining time continues from the resume (time on disk not

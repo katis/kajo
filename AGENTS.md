@@ -509,6 +509,27 @@ Safety:
    `pollSlow`, the arrays it built were retained on the poll path and `just
    arc-check` caught it. Anything that allocates Swift objects stays out of
    line from the paths the check covers.
+ - A check runs in the mode the product builds in. `just ios-check`
+   typechecked in Swift 5 mode and never saw that Swift 6 mode flags
+   `mach_task_self_` as an unsafe global, which Xcode's iOS build of the
+   package did; the recipe now passes the package's language mode. Second
+   time this gate hid something (8b: `-package-name`); a gate's command
+   line is compared with the real build's before it is trusted.
+ - A budget renewed by frames starves when no frames come. The shell's
+   frame account renewed on the display link, so with no link running
+   (headless modes, an occluded window) normal-priority main Processes
+   waited forever; it renews by the clock and a turn that left work
+   schedules the next. Any allowance tied to an external tick needs a
+   clock fallback.
+ - Scripted UI measurements need the display awake and the app's launch
+   unprompted: an asleep display delivers no frames, and after a crash
+   AppKit's "reopen windows" alert held every scripted launch. The macOS
+   shell holds a display-sleep assertion while it measures and sets
+   `ApplePersistenceIgnoreState`.
+ - A fallback the design promised is checked for every mode that can hit
+   it. Module 4's precondition says a provisioning failure is counted and
+   reported; the stop-the-world oracle's promotion reserve runs out on the
+   ring scenario at 600 MiB and the VM traps instead (open, module 9a).
 
 ## Verification
 
@@ -579,7 +600,21 @@ against its method and the bytecode verifier's depth at its pc, `kajo run`
 resuming such an image until it is quiescent, the random programs saved
 mid-run agreeing with their model, the kernels within noise, a save's stop
 at 0.45 to 0.56 ms; 8c's six open questions in
-`docs/modules/image-processes.md` await the owner). ADRs
+`docs/modules/image-processes.md`; the owner answered 8b's and 8c's
+questions on 2026-11-04: per-iteration temp vectors as Pharo, class
+variables, installing from Smalltalk behind a release flag, module 8d's
+brief `docs/modules/kernel-live.md`, the rest as built); the native shells
+built in module 9a (`docs/modules/shells.md`: the public host surface
+`Sources/KajoVM/Shell/` over which no oop crosses, the event queue on
+module 3's external-signal queue, the first view wrappers behind one hop
+primitive as ADR 0010 (proposed), the AppKit and UIKit shells under
+`apps/` over the shared `KajoShellCore`, the scenario matrix on the Mac
+mini's 120 Hz display: 0 of 1200 frames missed in every scenario but the
+ring under the stop-the-world oracle, event latency p99 2 to 3 ms, a hog
+on main preempted 2414 times per 10 s with 0 frames missed; the iPhone 13
+Pro runs wait for the owner to sign Xcode in to the team, the scripts run
+them unchanged; the stop-the-world scavenge traps when its promotion
+reserve runs out, the ring at 600 MiB, an open finding). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -589,8 +624,9 @@ cover.
 ## Project structure
 
  * `Package.swift` is the root SwiftPM package: `KajoVM` library, `kajo`
-   headless CLI, `KajoCompiler` library, `KajoVMTests` and
-   `KajoCompilerTests` (Swift Testing).
+   headless CLI, `KajoCompiler` library, `KajoShellCore` library (what the
+   shells share, module 9a), `KajoVMTests` and `KajoCompilerTests` (Swift
+   Testing; `ShellTests` live in the latter).
  * `Sources/KajoVM/` the VM core, one directory per module:
    `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`),
    `Interpreter/` and `Loader/` (module 2, built; `docs/modules/interpreter.md`),
@@ -641,7 +677,13 @@ cover.
    method syntax and Tonel files to the assembler's encoder and the one
    bytecode verifier, the variable-layout and inlining rules at the top of
    `Compiler.swift`, the image build, the test harness and its event
-   stream). `Sources/kajo/` the CLI (`kajo run`, `kajo build-image`,
+   stream). `Sources/KajoVM/Shell/` the public host surface (module 9a,
+   built; `docs/modules/shells.md`: `ShellVM`, `ShellValue`, `ShellEvent`,
+   `ShellCallbacks`, primitives 150 to 154: the view hop, `hasShell`,
+   release, the event Semaphore, `nextEvent`; no oop crosses it).
+   `Sources/KajoShellCore/` the shells' shared Swift (`ShellRuntime` on the
+   main run loop with the frame account, the tests, golden, scenario and
+   demo modes, telemetry). `Sources/kajo/` the CLI (`kajo run`, `kajo build-image`,
    `kajo test [image] [--filter] [--tag] [--junit]`); `Sources/fuzz-kasm/`,
    `Sources/fuzz-snapshot/` and `Sources/fuzz-syntax/` the libFuzzer
    targets (`just fuzz kasm|snapshot|syntax <seconds>`, needs a swift.org
@@ -651,15 +693,26 @@ cover.
    release and asserts the loop is one jump table; `golden.sh` (`just
    golden`) runs the fixture kernels through `kajo run` against their
    published checksums; `just test-release` runs the suite in a release
-   build with the full-size kernels.
+   build with the full-size kernels; `apps-check.sh` (`just apps`) builds
+   both shells with xcodebuild from clean, 0 warnings or fail; `device.sh`
+   (`just device`) builds, signs, installs and runs the iOS shell on the
+   attached iPhone through `devicectl`; `mac-shell.sh`, `shell-matrix.sh`
+   and `shell-report.py` run the scenario matrix and make its tables.
  * `kernel/` Smalltalk sources the image is built from (module 8b: 123
    Tonel class files, the kernel of `docs/modules/kernel.md` as built in
    `docs/modules/kernel-image.md`, with its SUnit tests beside the classes;
    `just build-image`, `just kernel-test`). The image is never committed.
    Its compiler in Smalltalk compiles every method and is compared with the
-   bootstrap compiler's output by `CompilerTest`; it does not install yet.
- * `apps/` Xcode projects for the macOS and iOS shells, depending on the root
-   package. Not created yet.
+   bootstrap compiler's output by `CompilerTest`; it does not install yet
+   (module 8d, briefed in `docs/modules/kernel-live.md`, adds the install
+   primitives, class variables and Pharo's per-iteration temp vectors).
+   Module 9a added the view wrappers (View, Window, Label, Button, TextView,
+   Slider, UIEvent, UIEventLoop; ADR 0010).
+ * `apps/` the shells (module 9a, built): `KajoShell-macOS` (AppKit) and
+   `KajoShell-iOS` (UIKit), Xcode projects generated by xcodegen from their
+   committed specs (both committed; `xcodegen` is a Homebrew install), over
+   the root package; `apps/Shared/smalltalk` the scenario loads and the
+   demo, bundled as images by a build phase that uses the PATH toolchain.
  * `experiments/` throwaway spikes with a design brief and results each.
  * `docs/PLAN.md` the module order for building the production core from
    the experiments; `docs/modules/` one brief, later description, per module.
@@ -676,4 +729,5 @@ cover.
    in the design. Gitignored; see `references/MANIFEST.md`.
  * `justfile` has the common commands: `just build`, `just test`, `just run`,
    `just bench`, `just ios-check`, `just build-image`, `just kernel-test`,
-   `just fuzz <target> <seconds>`.
+   `just fuzz <target> <seconds>`, `just apps`, `just mac-shell`, `just
+   device`, `just shell-matrix`.
