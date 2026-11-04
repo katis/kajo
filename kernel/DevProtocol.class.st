@@ -94,12 +94,12 @@ DevProtocol class >> emit: aKind with: aJsonObject [
 	o := JsonObject new.
 	o at: 'v' put: 1; at: 'kind' put: aKind; at: 'ts' put: Smalltalk microsecondClock.
 	aJsonObject keysAndValuesDo: [:k :v | o at: k put: v].
-	^ self primEmit: (Json write: o)
+	^ self primEmit: (Json writePieces: o)
 ]
 
 { #category : #primitives }
 DevProtocol class >> primEmit: aString [
-	"A line to the host's transport as it is: a reply (with its conn) or an event."
+	"A line to the host's transport as it is: a reply (with its conn) or an event; a String, or an Array of Strings and ByteArrays the host joins (module 9c: a line longer than one object can be)."
 	<primitive: 161>
 	^ nil
 ]
@@ -126,8 +126,9 @@ DevProtocol class >> reply: aReplyTo error: aString [
 
 { #category : #replies }
 DevProtocol class >> reply: aReplyTo result: anObject [
-	^ self primEmit: '{"v":1,"kind":"reply","conn":' , aReplyTo first printString , ',"id":' , (Json write: aReplyTo last)
-		, ',"ok":true,"result":' , (Json write: anObject) , '}'
+	"The result is written in pieces (Json writePieces:), so a reply may be longer than one object can be (module 9c)."
+	^ self primEmit: {'{"v":1,"kind":"reply","conn":' , aReplyTo first printString , ',"id":' , (Json write: aReplyTo last) , ',"ok":true,"result":'}
+		, (Json writePieces: anObject) , #('}')
 ]
 
 { #category : #requests }

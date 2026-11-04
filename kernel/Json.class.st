@@ -151,9 +151,9 @@ Json >> skip [
 
 { #category : #reading }
 Json class >> read: aString [
-	"The value aString holds (the whole of it, blanks around allowed)."
+	"The value aString holds (the whole of it, blanks around allowed); aString may be an Array of the text's pieces (module 9c: a line longer than one object, JsonText)."
 	| r v |
-	r := self new setSource: aString.
+	r := self new setSource: (aString isString ifTrue: [aString] ifFalse: [JsonText pieces: aString]).
 	v := r readValue.
 	r skip.
 	r atEnd ifFalse: [^ self error: 'JSON: text after the value'].
@@ -203,13 +203,22 @@ Json class >> write: anObject on: aStream depth: n [
 			aStream nextPut: 58.
 			self write: (anObject at: k) on: aStream depth: n + 1].
 		^ aStream nextPut: 125].
-	((anObject isKindOf: Array) or: [anObject isKindOf: OrderedCollection]) ifTrue: [
+	((anObject isKindOf: Array) or: [(anObject isKindOf: OrderedCollection) or: [anObject isKindOf: LargeArray]]) ifTrue: [
 		aStream nextPut: 91.
 		anObject doWithIndex: [:x :i |
 			i > 1 ifTrue: [aStream nextPut: 44].
 			self write: x on: aStream depth: n + 1].
 		^ aStream nextPut: 93].
 	^ self writeString: anObject printString on: aStream
+]
+
+{ #category : #writing }
+Json class >> writePieces: anObject [
+	"The JSON text of anObject as ByteArrays of at most 16 KiB each, in order (module 9c: a reply longer than one object can be; primitive 161 joins them)."
+	| out |
+	out := JsonPieceStream new.
+	self write: anObject on: out depth: 0.
+	^ out pieces
 ]
 
 { #category : #writing }

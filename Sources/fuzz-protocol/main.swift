@@ -20,7 +20,8 @@ public func fuzzOneInput(_ data: UnsafePointer<UInt8>, _ size: Int) -> CInt {
 /// request's canonical text parsed again (the same request), its line form
 /// too; the whole input through the JSON reader, and an accepted value
 /// written and read again (the same value); the project writer's file-name
-/// rule on each line. Answers whether any line was a request.
+/// rule on each line; each line as the client's transport receives it
+/// (module 9c). Answers whether any line was a request.
 func fuzzProtocol(_ bytes: [UInt8]) -> Bool {
     var any = false
     for line in bytes.split(separator: 10, maxSplits: 64, omittingEmptySubsequences: false) {
@@ -40,6 +41,14 @@ func fuzzProtocol(_ bytes: [UInt8]) -> Bool {
             _ = errorReply(id: refusal.id, refusal.message)
         }
         if let s = String(validating: l, as: UTF8.self) { _ = ProjectWriter.isSourceFileName(s) }
+        // Module 9c: the same line as the client's transport receives it
+        // from a target: a value or a client.error object, whose text the
+        // image is given in pieces that join back to it.
+        let text = String(decoding: writeJSON(ClientHost.check(l)), as: UTF8.self)
+        let pieces = linePieces(text, limit: 32)
+        guard pieces.joined() == text, pieces.allSatisfy({ $0.utf8.count <= 32 }) else {
+            fatalError("a client line's pieces do not join back: \(String(decoding: l, as: UTF8.self))")
+        }
     }
     if case .success(let v) = parseJSON(bytes) {
         guard case .success(let w) = parseJSON(writeJSON(v)), w == v else {

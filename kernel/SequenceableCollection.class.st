@@ -181,20 +181,54 @@ SequenceableCollection >> withIndexDo: aBlock [
 ]
 
 { #category : #sorting }
+SequenceableCollection >> insertionSortFrom: lo to: hi by: aBlock [
+	lo + 1 to: hi do: [:i | | x j |
+		x := self at: i.
+		j := i - 1.
+		[j >= lo and: [(aBlock value: (self at: j) value: x) not]] whileTrue: [
+			self at: j + 1 put: (self at: j).
+			j := j - 1].
+		self at: j + 1 put: x]
+]
+
+{ #category : #sorting }
+SequenceableCollection >> merge: src from: lo mid: mid to: hi into: dst by: aBlock [
+	"src lo..mid and mid+1..hi are sorted: merge them into dst lo..hi, the left run first among equals."
+	| i j k |
+	i := lo.
+	j := mid + 1.
+	k := lo.
+	[i <= mid and: [j <= hi]] whileTrue: [
+		(aBlock value: (src at: i) value: (src at: j))
+			ifTrue: [dst at: k put: (src at: i). i := i + 1]
+			ifFalse: [dst at: k put: (src at: j). j := j + 1].
+		k := k + 1].
+	[i <= mid] whileTrue: [dst at: k put: (src at: i). i := i + 1. k := k + 1].
+	[j <= hi] whileTrue: [dst at: k put: (src at: j). j := j + 1. k := k + 1]
+]
+
+{ #category : #sorting }
 SequenceableCollection >> sort [
 	^ self sort: [:a :b | a <= b]
 ]
 
 { #category : #sorting }
 SequenceableCollection >> sort: aBlock [
-	"Insertion sort, in place, stable."
-	2 to: self size do: [:i | | x j |
-		x := self at: i.
-		j := i - 1.
-		[j >= 1 and: [(aBlock value: (self at: j) value: x) not]] whileTrue: [
-			self at: j + 1 put: (self at: j).
-			j := j - 1].
-		self at: j + 1 put: x]
+	"In place, stable: a merge sort (module 9c: the browser sorts thousands of names) with runs of up to 8 sorted by insertion first."
+	| n src dst width |
+	n := self size.
+	1 to: n by: 8 do: [:lo | self insertionSortFrom: lo to: (lo + 7 min: n) by: aBlock].
+	n <= 8 ifTrue: [^ self].
+	src := Array large: n.
+	1 to: n do: [:i | src at: i put: (self at: i)].
+	dst := Array large: n.
+	width := 8.
+	[width < n] whileTrue: [ | t |
+		1 to: n by: width * 2 do: [:lo |
+			self merge: src from: lo mid: (lo + width - 1 min: n) to: (lo + (width * 2) - 1 min: n) into: dst by: aBlock].
+		t := src. src := dst. dst := t.
+		width := width * 2].
+	1 to: n do: [:i | self at: i put: (src at: i)]
 ]
 
 { #category : #streams }

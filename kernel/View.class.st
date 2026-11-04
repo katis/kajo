@@ -111,6 +111,12 @@ View >> printOn: aStream [
 ]
 
 { #category : #properties }
+View >> autoresize: aString [
+	"Which edges follow the superview's size (module 9c): 'width', 'height', 'width height', 'left', 'top' combined, or '' for none."
+	self set: 'autoresize' to: aString
+]
+
+{ #category : #properties }
 View >> call: aName with: anArray [
 	"A native method of the view (show, close, appendLine, clear): one primitive call."
 	self isHeadless ifTrue: [^ self headlessCall: aName with: anArray].
@@ -121,6 +127,14 @@ View >> call: aName with: anArray [
 View >> color: aString [
 	"A named color: red, green, blue, orange, gray, black, white, clear."
 	self set: 'color' to: aString
+]
+
+{ #category : #properties }
+View >> contextMenu: aMenu [
+	"aMenu opens on a secondary click in this view (module 9c); held here so it lives while the view does."
+	subviews add: aMenu.
+	aMenu setSuperview: self.
+	self call: 'setMenu' with: {aMenu handle}
 ]
 
 { #category : #properties }

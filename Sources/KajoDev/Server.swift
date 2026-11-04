@@ -16,7 +16,11 @@ import Foundation
 /// The text of `errno`.
 func errnoText() -> String { unsafe String(cString: strerror(errno)) }
 
-public final class ProtocolServer: @unchecked Sendable {
+public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
+    /// Reflection (a test's failure message, a debugger's dump) never shows
+    /// the token.
+    public var customMirror: Mirror { Mirror(self, children: ["path": path]) }
+
     public let path: String
     public let token: String
     private let post: @Sendable (Int, [UInt8]) -> Void

@@ -331,6 +331,15 @@ Smalltalk class >> writePackage: aName into: aDirectory [
 	^ out asArray
 ]
 
+{ #category : #packages }
+Smalltalk class >> writePackages: anArray [
+	"anArray holds package names and directories alternately (module 9c: 'Kernel' 'kernel' 'Tools' 'tools'): each package written into its directory, a path under the opened one. Answers how many files."
+	| n |
+	n := 0.
+	1 to: anArray size by: 2 do: [:i | n := n + (self writePackage: (anArray at: i) into: (anArray at: i + 1)) size].
+	^ n
+]
+
 { #category : #primitives }
 Smalltalk class >> primDefineClass: anArray [
 	"A class from its specification (ClassBuilder), or a String saying why not (module 8e). Fails in a release image."

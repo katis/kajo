@@ -74,6 +74,35 @@ public enum ShellEventKind: Int, Sendable, CaseIterable {
     case synthetic = 5
     /// Text was entered (target: the view; value: the String).
     case text = 6
+    // Module 9c (docs/modules/developer-ui.md): the second round of views and
+    // the protocol client.
+    /// A key the view was told to report (`keys`) was pressed before the
+    /// view handled it (target: the view; value: its name, `cmd-s`).
+    case key = 7
+    /// An outline's or a table's selection changed (target: the view;
+    /// value: the item id or the row, 0 for none).
+    case selectionChanged = 8
+    /// An item or a row was double-clicked (value: the item id or the row).
+    case doubleClick = 9
+    /// The user expanded an outline item whose children were not supplied
+    /// yet (value: its id): the on-demand form asks for them.
+    case expand = 10
+    /// A menu or toolbar item was chosen (target: the menu or the toolbar;
+    /// value: the item's id).
+    case menu = 11
+    /// A line a protocol connection received, checked and canonical
+    /// (target: the connection; value: the JSON object's text).
+    case line = 12
+    /// A protocol connection ended (target: the connection; value: why).
+    case lost = 13
+    /// A timer the image asked for fired (target: its token).
+    case timer = 14
+    /// The user changed a text view's text (target: the view).
+    case textChanged = 15
+    /// The first pieces of a line longer than one object can be (target:
+    /// the connection; value: at most 16 KiB of its text, cut between
+    /// scalars); the `line` event that follows carries the last piece.
+    case linePart = 16
 }
 
 /// An event the shell posts. `timeNs` is when it happened (AGENTS.md:
@@ -121,6 +150,13 @@ public struct ShellCallbacks: Sendable {
     /// The wrapper of a handle died (the finalization Process, any worker):
     /// release the native view, on the main thread.
     public var release: (@Sendable (Int) -> Void)?
+    /// Module 9c: the protocol client's transport (primitive 164), any
+    /// worker, in a blocking region: `connect`, `send`, `close`, `targets`,
+    /// `timer` (docs/modules/developer-ui.md). The call's handle is the
+    /// connection. Replies and events come back as `line` and `lost`
+    /// events posted to the event queue. nil fails the primitive. Must not
+    /// call back into the VM and must not block for long.
+    public var client: (@Sendable (ViewCall) -> ShellValue?)?
     public init() {}
 }
 

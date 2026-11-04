@@ -44,7 +44,7 @@ OrderedCollection >> addLast: anObject [
 { #category : #accessing }
 OrderedCollection >> asArray [
 	| a |
-	a := Array new: self size.
+	a := Array large: self size.
 	a replaceFrom: 1 to: self size with: array startingAt: firstIndex.
 	^ a
 ]
@@ -91,7 +91,7 @@ OrderedCollection >> do: aBlock [
 OrderedCollection >> grow [
 	| bigger n start |
 	n := self size.
-	bigger := Array new: (array size * 2 max: 8).
+	bigger := Array large: (array size * 2 max: 8).
 	start := bigger size - n // 2 + 1.
 	bigger replaceFrom: start to: start + n - 1 with: array startingAt: firstIndex.
 	array := bigger.
@@ -178,7 +178,7 @@ OrderedCollection >> select: aBlock [
 
 { #category : #accessing }
 OrderedCollection >> setCapacity: n [
-	array := Array new: (n max: 2).
+	array := Array large: (n max: 2).
 	firstIndex := array size // 4 + 1.
 	lastIndex := firstIndex - 1
 ]

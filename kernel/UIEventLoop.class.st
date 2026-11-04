@@ -1,4 +1,4 @@
-"The kernel's event loop (module 9a, ADR 0004): one main-affine Process at the highest priority waits on a Semaphore the shell's event queue signals once per event, takes the event (primitive 154) and dispatches it to the wrapper of its target handle, synchronously on the main thread in the turn the shell runs after posting. A native callback only enqueues and returns. Frame events go to the frame actions (the display-link probe), synthetic ones to the synthetic action (the latency measurement). An error in a handler is written on the Transcript and the loop goes on. With no shell, start answers false and nothing runs."
+"The kernel's event loop (module 9a, ADR 0004): one main-affine Process at the highest priority waits on a Semaphore the shell's event queue signals once per event, takes the event (primitive 154) and dispatches it to the wrapper of its target handle, synchronously on the main thread in the turn the shell runs after posting. A native callback only enqueues and returns. Frame events go to the frame actions (the display-link probe), synthetic ones to the synthetic action (the latency measurement), the kinds that name no view (module 9c: a protocol connection's line and lost, a timer) to the action registered for the kind, and timer events to the block after:do: registered. An error in a handler is written on the Transcript and the loop goes on; while the debugger is enabled (the development protocol serves, module 9b) the loop instead hands itself over to a new Process and lets the erring one stop for the debugger (module 9c), so an error in a tool never stops the tools. With no shell, start answers false and nothing runs."
 Class {
 	#name : #UIEventLoop,
 	#superclass : #Object,
@@ -8,7 +8,12 @@ Class {
 		'frameActions',
 		'syntheticAction',
 		'handled',
-		'errors'
+		'errors',
+		'kindActions',
+		'timers',
+		'nextTimer',
+		'generation',
+		'handOvers'
 	],
 	#category : #'Kernel-UI'
 }
@@ -26,6 +31,30 @@ UIEventLoop class >> handledCount [
 { #category : #accessing }
 UIEventLoop class >> process [
 	^ process
+]
+
+{ #category : #actions }
+UIEventLoop class >> after: milliseconds do: aBlock [
+	"aBlock runs in the event loop once milliseconds have passed: the host posts a timer event (primitive 164). Answers the timer's token, or nil with no host to post it (headless)."
+	| token |
+	timers isNil ifTrue: [timers := Dictionary new. nextTimer := 0].
+	nextTimer := nextTimer + 1.
+	token := nextTimer.
+	timers at: token put: aBlock.
+	(ClientTransport timer: milliseconds token: token) isNil ifTrue: [timers removeKey: token. ^ nil].
+	^ token
+]
+
+{ #category : #actions }
+UIEventLoop class >> cancelTimer: aToken [
+	timers isNil ifFalse: [timers removeKey: aToken ifAbsent: [nil]]
+]
+
+{ #category : #actions }
+UIEventLoop class >> on: aKind do: aBlock [
+	"aBlock runs with each event of aKind (a Symbol of UIEvent kinds) instead of the target's wrapper: module 9c's #line and #lost of the protocol client's connections."
+	kindActions isNil ifTrue: [kindActions := IdentityDictionary new].
+	kindActions at: aKind put: aBlock
 ]
 
 { #category : #actions }
@@ -59,19 +88,42 @@ UIEventLoop class >> nextEvent [
 ]
 
 { #category : #running }
+UIEventLoop class >> deliver: anEvent [
+	| k |
+	k := anEvent kind.
+	k == #frame ifTrue: [^ frameActions do: [:b | b cull: anEvent]].
+	k == #synthetic ifTrue: [^ syntheticAction ifNotNil: [:b | b cull: anEvent]].
+	k == #timer ifTrue: [
+		^ (timers isNil ifTrue: [nil] ifFalse: [timers removeKey: anEvent target ifAbsent: [nil]]) ifNotNil: [:b | b value]].
+	(kindActions notNil and: [kindActions includesKey: k]) ifTrue: [^ (kindActions at: k) cull: anEvent].
+	^ (View at: anEvent target) ifNotNil: [:v | v handleEvent: anEvent]
+]
+
+{ #category : #running }
 UIEventLoop class >> dispatch: anEvent [
-	"Handle one event: frame and synthetic events by their actions, the rest by the wrapper of the target handle."
+	"Handle one event: frame and synthetic events by their actions, timers by their blocks, the kinds registered with on:do: by theirs, the rest by the wrapper of the target handle. An error goes to the Transcript; while the debugger is enabled it stops the loop's Process for the debugger after a new loop Process has taken over (module 9c)."
 	handled := handled + 1.
-	[anEvent kind == #frame
-		ifTrue: [frameActions do: [:b | b cull: anEvent]]
-		ifFalse: [
-			anEvent kind == #synthetic
-				ifTrue: [syntheticAction ifNotNil: [:b | b cull: anEvent]]
-				ifFalse: [(View at: anEvent target) ifNotNil: [:v | v handleEvent: anEvent]]]]
+	[self deliver: anEvent]
 		on: Error
 		do: [:e |
 			errors := errors + 1.
-			Transcript show: 'event ' , anEvent printString , ': ' , e messageText; cr]
+			(Debugger isEnabled and: [process == ProcessorScheduler activeProcess])
+				ifTrue: [
+					self handOver.
+					e pass]
+				ifFalse: [Transcript show: 'event ' , anEvent printString , ': ' , e messageText; cr]]
+]
+
+{ #category : #running }
+UIEventLoop class >> handOver [
+	"A new loop Process takes the events from now on; the active one, the old loop, ends after the event it is handling (once the debugger lets it go on)."
+	handOvers := (handOvers ifNil: [0]) + 1.
+	self startGeneration
+]
+
+{ #category : #running }
+UIEventLoop class >> handOverCount [
+	^ handOvers ifNil: [0]
 ]
 
 { #category : #running }
@@ -94,8 +146,18 @@ UIEventLoop class >> resumeAfterSnapshot [
 
 { #category : #running }
 UIEventLoop class >> run [
-	[semaphore wait.
-	 self nextEvent ifNotNil: [:a | self dispatch: (UIEvent fromArray: a)]] repeat
+	"The loop of an image saved before module 9c's generations."
+	^ self runGeneration: generation
+]
+
+{ #category : #running }
+UIEventLoop class >> runGeneration: aNumber [
+	"Take events while this Process is the loop: a hand-over makes a new generation, and the old Process ends after its event."
+	[aNumber = generation] whileTrue: [
+		semaphore wait.
+		aNumber = generation
+			ifTrue: [self nextEvent ifNotNil: [:a | self dispatch: (UIEvent fromArray: a)]]
+			ifFalse: [semaphore signal]]
 ]
 
 { #category : #running }
@@ -105,8 +167,14 @@ UIEventLoop class >> start [
 	View hasShell ifFalse: [^ false].
 	semaphore := Semaphore new.
 	self eventSemaphore: semaphore.
-	process := self fork: #run with: nil priority: 2 main: true exit: nil.
+	self startGeneration.
 	^ true
+]
+
+{ #category : #running }
+UIEventLoop class >> startGeneration [
+	generation := (generation ifNil: [0]) + 1.
+	process := self fork: #runGeneration: with: generation priority: 2 main: true exit: nil
 ]
 
 { #category : #running }

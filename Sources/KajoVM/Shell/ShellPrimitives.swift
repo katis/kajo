@@ -28,6 +28,17 @@ import Darwin
 //        the clock of `Smalltalk microsecondClock` (primitive 141). Fails
 //        with no shell.
 //
+// Module 9c (docs/modules/developer-ui.md):
+//
+//   164  ClientTransport class primCall: op handle: h with: args. The
+//        protocol client's transport: op, the connection handle (nil or a
+//        SmallInteger) and args (as primitive 150's) to the host's `client`
+//        callback, on any worker, in a blocking region (it touches no heap
+//        object), and the host's answer. Not a hop: the host owns the
+//        sockets and posts what they receive as `line` and `lost` events.
+//        Fails with no client host, on an argument it cannot decode and
+//        when the host answers nil.
+//
 // Each checks its receiver and arguments and fails cleanly. None of them is
 // on a hot path: they are out of line from `primitive`.
 
@@ -36,7 +47,7 @@ enum ShellPrimitives {
         (150, "primCall:handle:with:", 3), (151, "hasShell", 0), (152, "releaseHandle:", 1),
         (153, "eventSemaphore:", 1), (154, "nextEvent", 0),
         (159, "DevProtocol class primRegister:", 1), (160, "DevProtocol class primNextRequest", 0),
-        (161, "DevProtocol class primEmit:", 1),
+        (161, "DevProtocol class primEmit:", 1), (164, "ClientTransport class primCall:handle:with:", 3),
     ]
 }
 
@@ -116,16 +127,42 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         // A line the protocol wrote (a reply or an event) to the host's
         // event sink as it is: a String of valid UTF-8, one JSON object, no
         // line break. The host's transport routes replies by their "conn".
-        guard c.argc == 1, let bridge, !m.om.isReleaseImage, let line = m.text(c.arg0), bridge.isProtocolOpen else { return .none }
-        let bytes = Array(line.utf8)
+        // Module 9c: or an Array of Strings and ByteArrays, joined (a line
+        // longer than one object can be: `Json writePieces:`).
+        guard c.argc == 1, let bridge, !m.om.isReleaseImage, bridge.isProtocolOpen, let bytes = lineBytes(m, c.arg0) else { return .none }
         guard bytes.first == 123, bytes.last == 125, !bytes.contains(10), !bytes.contains(13),
-              String(validating: m.om.bytes(of: c.arg0), as: UTF8.self) != nil else { return .none }
+              String(validating: bytes, as: UTF8.self) != nil else { return .none }
         unsafe vm.count(.protocolReplies)
         if let f = bridge.callbacks.events { f(bytes) }
         return c.receiver
+    case 164:
+        guard c.argc == 3, let bridge, let host = bridge.callbacks.client, let call = decodeViewCall(m, c) else { return .none }
+        unsafe blockingBegin(vm, w)
+        let answer = host(call)
+        unsafe blockingEnd(vm, w)
+        unsafe vm.count(.clientCalls)
+        guard let answer else { return .none }
+        return encode(m, answer)
     default:
         return .none
     }
+}
+
+/// Primitive 161's line: a String's bytes, or the bytes of an Array's
+/// Strings and ByteArrays joined (at most 64 MiB); nil otherwise.
+private func lineBytes(_ m: Machine, _ v: Oop) -> [UInt8]? {
+    if m.text(v) != nil { return m.om.bytes(of: v) }
+    guard v.isObject, m.classIndex(of: v) == WellKnown.array else { return nil }
+    var out: [UInt8] = []
+    for i in 0..<Int(m.om.count(of: v)) {
+        let p = m.om.load(v, i)
+        guard p.isObject else { return nil }
+        let ci = m.classIndex(of: p)
+        guard m.text(p) != nil || ci == WellKnown.byteArray else { return nil }
+        out += m.om.bytes(of: p)
+        if out.count > 64 << 20 { return nil }
+    }
+    return out
 }
 
 /// op, handle and arguments as Swift values; nil when one cannot be read.

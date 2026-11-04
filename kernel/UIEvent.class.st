@@ -69,6 +69,6 @@ UIEvent class >> kind: aSymbol target: aHandle value: anObject time: microsecond
 
 { #category : #accessing }
 UIEvent class >> kinds [
-	"By the shell's number (ShellEventKind)."
-	^ #(#click #valueChanged #close #frame #synthetic #text)
+	"By the shell's number (ShellEventKind; module 9c added key to textChanged)."
+	^ #(#click #valueChanged #close #frame #synthetic #text #key #selectionChanged #doubleClick #expand #menu #line #lost #timer #textChanged #linePart)
 ]

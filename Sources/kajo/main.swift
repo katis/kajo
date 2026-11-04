@@ -15,7 +15,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--snapshot-at N --snapshot-to out.img] [--sources dir]
        kajo run <image.img> [the options above]
        kajo run <image.img> --protocol <socket> [the options above]
-       kajo build-image [-o kernel.img] [--no-init] [--release] [<dir or file.st>...]   (default: kernel/)
+       kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
        kajo version
@@ -34,7 +34,10 @@ readTonelFile:): they read and write under it and nowhere else; without
 it they fail.
 
 build-image: compiles Tonel class files (a directory's *.st) with the
-bootstrap compiler into a verified image.
+bootstrap compiler into a verified image. --with <dir> (repeatable) adds a
+package directory to kernel/ (or to the directories named): a development
+image is kernel/ --with tools (module 9c), each class recording its
+package.
 
 run --protocol: a development target (module 9b): the image serves the
 development protocol on the Unix socket until interrupted, prints the
@@ -148,6 +151,7 @@ case "run":
 case "build-image":
     var out = "kernel.img"
     var dirs: [String] = []
+    var with: [String] = []
     var options = KernelBuild.Options()
     var i = 0
     while i < args.count {
@@ -156,6 +160,10 @@ case "build-image":
             i += 1
             guard i < args.count else { fail(usage) }
             out = args[i]
+        case "--with":
+            i += 1
+            guard i < args.count else { fail(usage) }
+            with.append(args[i])
         case "--no-init": options.initialize = false
         case "--release": options.release = true
         case "--heap":
@@ -168,6 +176,7 @@ case "build-image":
         i += 1
     }
     if dirs.isEmpty { dirs = ["kernel"] }
+    dirs += with
     do {
         let t0 = Date()
         let r = try KernelBuild.build(KernelBuild.sources(in: dirs), options: options)

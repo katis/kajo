@@ -140,6 +140,17 @@ DevSession >> classDefinition: className [
 ]
 
 { #category : #'requests-browse' }
+DevSession >> classHierarchy [
+	"Every class with its superclass, category and package, sorted by name: the browser's class tree in one request (module 9c)."
+	<devProtocol>
+	^ (Smalltalk allClasses collect: [:c | | o |
+		o := JsonObject new.
+		o at: 'name' put: c name asString; at: 'superclass' put: (c superclass ifNotNil: [:s | s name asString]);
+			at: 'category' put: (Smalltalk categoryOf: c); at: 'package' put: (Smalltalk packageOf: c).
+		o]) asArray sort: [:a :b | (a at: 'name') <= (b at: 'name')]
+]
+
+{ #category : #'requests-browse' }
 DevSession >> classList: category [
 	"The names of the classes, of one category when it is given, sorted."
 	<devProtocol>
@@ -219,6 +230,27 @@ DevSession >> methodSource: className selector: selector side: side [
 		at: 'package' put: (Smalltalk packageOfSelector: sel in: b); at: 'author' put: (Smalltalk authorOfSelector: sel in: b);
 		at: 'source' put: (Smalltalk sourceOf: m).
 	^ o
+]
+
+{ #category : #'requests-browse' }
+DevSession >> packageList [
+	"The packages of the image's classes and methods, sorted (module 9c)."
+	<devProtocol>
+	^ Smalltalk packageNames
+]
+
+{ #category : #'requests-browse' }
+DevSession >> packageSelectors: name [
+	"Every method of a package, 'Class>>selector' or 'Class class>>selector', sorted (module 9c: the browser's list of a package's methods)."
+	<devProtocol>
+	| out |
+	out := OrderedCollection new.
+	Smalltalk allClasses do: [:c |
+		(Array with: c with: c class) do: [:b |
+			b methodsDo: [:m |
+				(Smalltalk packageOfSelector: m selector in: b) = name
+					ifTrue: [out add: b name asString , '>>' , m selector asString]]]].
+	^ out asArray sort: [:a :b | a <= b]
 ]
 
 { #category : #'requests-browse' }

@@ -260,6 +260,8 @@ enum Counter: Int, CaseIterable {
     /// sends re-executed (primitive 156), protocol requests taken and
     /// replies emitted.
     case interruptsAsked, interrupts, stepStops, resends, protocolRequests, protocolReplies
+    /// Module 9c: calls of the protocol client's transport (primitive 164).
+    case clientCalls
 }
 
 /// A snapshot of the counters.

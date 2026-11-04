@@ -17,6 +17,12 @@ Window >> close [
 ]
 
 { #category : #accessing }
+Window >> frame [
+	"{x. y. width. height}: where the window is on the screen and its content's size (module 9c: the tools save it and open there again)."
+	^ {self x. self y. self width. self height}
+]
+
+{ #category : #accessing }
 Window >> isClosed [
 	^ closed == true
 ]
@@ -40,6 +46,13 @@ Window >> title [
 { #category : #accessing }
 Window >> title: aString [
 	self set: 'title' to: aString
+]
+
+{ #category : #accessing }
+Window >> toolbar: aToolbar [
+	subviews add: aToolbar.
+	aToolbar setSuperview: self.
+	self call: 'setToolbar' with: {aToolbar handle}
 ]
 
 { #category : #events }
