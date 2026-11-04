@@ -588,6 +588,15 @@ Safety:
    an empty scratch path (a toolchain compilation cache), so the full
    strict-memory-safety typecheck of `just ios-check` carried the
    0-warnings check that run.
+ - A test that routes around a trap with a configuration switch is hiding
+   a bug. 8e's tests turned the nursery off so a host save would pass the
+   verifier; the VM's end left young objects nowhere and cached entries in
+   no free list. The follow-up made `destroy` leave the image whole and
+   the switch went. When a test needs a special configuration, the reason
+   is written beside it, and "otherwise it traps" is a bug report.
+ - Closing one escape, look beside it for the same shape. The read
+   primitive followed a link in the last path component; the write's
+   temporary file, opened with `O_TRUNC` next to it, followed one too.
 
 ## Verification
 
@@ -716,7 +725,14 @@ definitions kept in the image; the Tonel writer and reader in Smalltalk
 over file primitives 148 and 149 bounded to the directory `--sources`
 opens, `kernel/` rewritten in the canonical form the image writes and a
 byte-identical round-trip test; 1500 class-spec and 500 reshape-spec
-mutations; its five open questions await the owner). ADRs
+mutations; its five open questions await the owner; the vm-teardown
+follow-up, `docs/modules/vm-teardown.md`: `VM.destroy` runs one final
+promote-all stop and hands every stash's entries back, so the image the
+host holds afterwards is whole, `Image.saveImage` works and another VM can
+run over the same image (5 to 15 µs for an empty nursery, 1.0 to 1.2 ms for
+a full one, in release); the file primitives resolve the last path
+component too, read with `O_NOFOLLOW` and create the write's temporary
+file exclusively; its two open questions await the owner). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
