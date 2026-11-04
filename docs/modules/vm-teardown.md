@@ -286,11 +286,15 @@ starting commit's in the aligned bench builds.
 
 1. **Young objects that do not fit old space at the VM's end**: trap (as
    built), grow old space for the final collection, or answer the failure
-   to the host (`destroy` refusing, the VM kept)?
+   to the host (`destroy` refusing, the VM kept)? **Owner (2026-11-04):
+   grow old space for the final collection** (not built yet; a small item
+   for whoever next touches the VM's end).
 2. **The host's save after a VM with live Processes**: should `destroy`
    refuse while Processes are alive, or should the host's save take
    Processes as the VM's own save does (8c), now that the image is whole
-   at the end?
+   at the end? **Owner (2026-11-04): the host's save refuses while any
+   Process has frames, naming the VM's own save** (the main session's
+   recommendation, taken; not built yet).
 
 ## Gates
 

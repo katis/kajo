@@ -392,10 +392,12 @@ reclaim and holder cleanup, counters through pointers);
 1. The oracle's ring at 600 MiB misses 143 frames to compacting full
    collections of about 250 ms. Acceptable for the oracle, or should
    module 5's trigger start marking earlier in the stop-the-world mode
-   (it falls behind: 42 cycles against 80)?
+   (it falls behind: 42 cycles against 80)? **Owner (2026-11-04):
+   acceptable.**
 2. The nesting limit is 32 (debug margin 1.6, release 8). Keep it, lower
    it to about 11 for a margin of four in debug, or spend the work to make
-   the parser's debug frames smaller and raise it again?
+   the parser's debug frames smaller and raise it again? **Owner
+   (2026-11-04): keep 32.**
 
 ## Gates
 

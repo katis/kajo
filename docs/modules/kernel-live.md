@@ -535,12 +535,18 @@ not a hot path.
    word 5 bit 0), set by `kajo build-image --release` or `kajo seal`,
    never cleared, refusing make, install, remove and doits. Should a
    release image also drop the compiler classes, the sources, or the
-   development pragmas?
+   development pragmas? **Owner (2026-11-04): keep the flag as built;
+   dropping things is for when image size becomes an issue.**
 2. **Installs into sealed classes.** Refused (and their class sides);
    `Foo class` of an ordinary class is allowed. Should the kernel's own
-   sealed classes ever take methods from Smalltalk?
+   sealed classes ever take methods from Smalltalk? **Owner (2026-11-04):
+   asked "what about extensions?"; provisional answer in module 9b's
+   brief: an extension method is allowed when the verifier finds no
+   instance-variable access, no slot store, no primitive and no become in
+   it, refused otherwise.**
 3. **`Process>>terminate` running ensure blocks, and a frame restart**
-   (8b's Not done): in 9b with the debugger, or earlier?
+   (8b's Not done): in 9b with the debugger, or earlier? **Owner
+   (2026-11-04): 9b.**
 4. **The parser's nesting limit** of 256 (brackets and now message
    chains) is deep enough for a debug build's code generation to overflow
    a 512 KB thread stack at about 100 (the test of the limit compiles a

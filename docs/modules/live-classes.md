@@ -656,7 +656,7 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
    primitive (the superclass slot changes in the stop; the layouts are
    already by name) once the kernel computes a layout across two chains
    and the VM checks the new chain for cycles; not built within this
-   module.
+   module. **Owner (2026-11-04): later; stays refused for now.**
 2. **The file primitives' directory rule for the shells**: one directory
    the host opens, paths relative to it, no way out through a link in
    any component (the parent resolved under the directory, an existing
@@ -664,15 +664,19 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
    `O_NOFOLLOW`; `docs/modules/vm-teardown.md`), no directory made. On iOS the natural directory is the app's container
    (or a folder the user picks, whose access is security-scoped); on
    macOS the project directory. Is one directory per VM right, or should
-   the host open several (sources, images, exports)?
+   the host open several (sources, images, exports)? **Owner (2026-11-04):
+   one directory per VM.**
 3. **The running-frame rule**: refusing is safe and simple, but a
    long-running Process (an event loop) inside a method of the class
    blocks every reshape of it until it leaves. Should the debugger (9b)
    be able to unwind such frames to a point outside the class, or restart
-   them after the change, as Pharo's restart does?
+   them after the change, as Pharo's restart does? **Owner (2026-11-04):
+   the debugger gets frame restart in module 9b
+   (`docs/modules/development-protocol.md`); the rule stays.**
 4. **Obsolete classes** stay in the class table and the image forever.
    Should a removal free the indices once no object names the class (a
-   collection can tell), with a loader rule for a hole?
+   collection can tell), with a loader rule for a hole? **Owner
+   (2026-11-04): yes, they should be cleaned; module 9b builds it.**
 5. **A host-side save after a VM ran with nurseries**: a test of this
    module first saved an image on the host (`Image.saveImage`) after a VM
    with the default nursery configuration had run on it, and module 1's
