@@ -184,3 +184,40 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         #expect(try answerOf(image, "F", "withoutDirectory", sources: dir.path) == 1)
     }
 }
+
+let measureDirectory: String = {
+    var url = URL(fileURLWithPath: #filePath)
+    url.deleteLastPathComponent()
+    return url.appendingPathComponent("Fixtures/measure").path
+}()
+
+@Suite(.serialized) struct ReshapeMeasureTests {
+    /// A class of 50 methods and 10 000 instances given an instance variable
+    /// in the middle: every instance keeps its values by name and every
+    /// method runs recompiled. The stop's length is reported, not asserted
+    /// (AGENTS.md: tests assert on work).
+    @Test func aClassOfTenThousandInstancesAndFiftyMethodsIsReshaped() throws {
+        let image = try Image.load(image: try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, measureDirectory])).image)
+        defer { image.destroy() }
+        var o = Headless.Options()
+        o.heapMiB = 256
+        o.workers = 2
+        let (vc, c) = try Headless.configs(o).get()
+        _ = c
+        let vm = VM(image: image, config: vc)
+        vm.start()
+        defer { vm.terminateAll(); vm.waitUntilAllTerminated(); vm.shutdown(); vm.destroy() }
+        let ci = try #require(image.classIndex(named: "ReshapeMeasure"))
+        let before = vm.stops.count
+        let p = try #require(vm.spawn(receiver: image.om.classOop(ci), selector: "run"))
+        vm.waitUntilTerminated(p)
+        if let e = vm.error(of: p) { Issue.record("\(e)") }
+        let us = vm.result(of: p)
+        vm.release(p)
+        #expect(us.isSmallInteger && us.smallIntegerValue >= 0)
+        let stops = Array(vm.stops.dropFirst(before)).filter { $0.kind == .other }
+        let longest = stops.map(\.pauseNs).max() ?? 0
+        print("reshape: 10000 instances, 50 methods: the change \(us.smallIntegerValue) us, the longest install stop \(longest / 1000) us "
+              + "(\(stops.count) install stops)")
+    }
+}
