@@ -1,5 +1,6 @@
 import Foundation
 import KajoCompiler
+import KajoDev
 import KajoVM
 
 let usage = """
@@ -13,10 +14,12 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
                 [--snapshot-at N --snapshot-to out.img] [--sources dir]
        kajo run <image.img> [the options above]
+       kajo run <image.img> --protocol <socket> [the options above]
        kajo build-image [-o kernel.img] [--no-init] [--release] [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
        kajo version
+\(clientUsage)
 
 run: loads the kasm files in order into a fresh image (or loads an image),
 runs one Process per worker sending run: i of: workers to nil (to the
@@ -31,7 +34,12 @@ readTonelFile:): they read and write under it and nowhere else; without
 it they fail.
 
 build-image: compiles Tonel class files (a directory's *.st) with the
-bootstrap compiler into a verified image. --release marks it a release
+bootstrap compiler into a verified image.
+
+run --protocol: a development target (module 9b): the image serves the
+development protocol on the Unix socket until interrupted, prints the
+socket and the pairing token a client opens its session with, and prints
+the Transcript and every stopped Process on stderr. Release images refuse. --release marks it a release
 image: Smalltalk cannot make, install or remove methods in it.
 
 seal: loads an image (every loader check), marks it a release image and
@@ -57,6 +65,7 @@ case "version", "--version":
 case "run":
     var options = Headless.Options()
     var paths: [String] = []
+    var protocolSocket: String? = nil
     var i = 0
     func value() -> String {
         i += 1
@@ -96,12 +105,19 @@ case "run":
         case "--snapshot-at": options.snapshotAt = Int(value()) ?? 0
         case "--snapshot-to": options.snapshotTo = value()
         case "--sources": options.sourcesDirectory = value()
+        case "--protocol": protocolSocket = value()
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }
         i += 1
     }
     if paths.isEmpty { fail(usage) }
+    if let socket = protocolSocket {
+        guard paths.count == 1, let data = FileManager.default.contents(atPath: paths[0]), Headless.isImage([UInt8](data)) else {
+            fail("--protocol serves an image")
+        }
+        serveTarget(image: [UInt8](data), options: options, socket: socket)
+    }
     var files: [(path: String, text: String)] = []
     var imageBytes: [UInt8]? = nil
     for p in paths {
@@ -172,7 +188,40 @@ case "seal":
         fail("kajo seal: \(f)", 1)
     }
 case "test":
+    if args.contains("--target") { exit(runClientCommand("test", args)) }
     runTests(args)
+case "eval", "compile", "browse", "debug", "request", "mcp":
+    exit(runClientCommand(command, args))
 default:
     fail(usage)
+}
+
+/// `kajo run <image> --protocol <socket>`: serve until SIGINT or SIGTERM.
+func serveTarget(image: [UInt8], options: Headless.Options, socket: String) -> Never {
+    let target: DevTarget
+    do {
+        target = try DevTarget(image: image, options: options, socket: socket) { line in
+            // The Transcript (a stopped Process prints its line there) on stderr.
+            if let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], o["kind"] as? String == "transcript" {
+                FileHandle.standardError.write(((o["text"] as? String ?? "") + "\n").data(using: .utf8)!)
+            }
+        }
+    } catch {
+        fail("kajo run: \(error)", 1)
+    }
+    print("kajo: development protocol on \(socket)")
+    print("kajo: token \(target.server.token)")
+    fflush(stdout)
+    signal(SIGINT, SIG_IGN)
+    signal(SIGTERM, SIG_IGN)
+    let sources = [SIGINT, SIGTERM].map { sig -> DispatchSourceSignal in
+        let s = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+        s.setEventHandler { target.stop() }
+        s.resume()
+        return s
+    }
+    target.run()
+    _ = sources
+    target.close()
+    exit(0)
 }

@@ -79,7 +79,11 @@ func dequeueLocked(_ vm: VMPointer, main: Bool, minPriority: Int, for w: WorkerP
             if next == nilObject { unsafe vm.pointee.queues[queueCount + q] = 0 }
             unsafe clearingStore(w, head, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
             unsafe setIntSlot(w, head, ProcessLayout.state, Int(ProcessState.running.rawValue))
-            unsafe records(vm, intSlot(om, head, ProcessLayout.record)).pointee.runningOn = w.pointee.index
+            let r = unsafe records(vm, intSlot(om, head, ProcessLayout.record))
+            unsafe r.pointee.runningOn = w.pointee.index
+            // Module 9b: an interrupt goes with the Process to its worker.
+            unsafe w.pointee.interrupt = r.pointee.interrupt
+            unsafe r.pointee.interrupt = 0
             return head
         }
         prio -= 1
@@ -246,7 +250,7 @@ func terminateProcess(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
 }
 
 /// Unlink a ready or waiting Process from its list.
-private func unlinkLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
+func unlinkLocked(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     let om = unsafe vm.pointee.om
     let nilObject = unsafe vm.pointee.nilObject
     if intSlot(om, p, ProcessLayout.state) == Int(ProcessState.waiting.rawValue) {
@@ -374,6 +378,15 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     }
     if unsafe terminatePendingLocked(vm, w) {
         unsafe schedUnlock(vm)
+        return true
+    }
+    // Module 9b: an interrupt is pending (it was asked while the Process
+    // ran elsewhere and its poll did not see it): it does not wait, it is
+    // requeued and runs the interrupt when resumed.
+    if unsafe records(vm, w.pointee.record).pointee.interrupt != 0 {
+        unsafe schedUnlock(vm)
+        let r = unsafe w.pointee.interp.regs
+        unsafe requeueCurrent(vm, w, sp: r.sp, pc: r.pc &- w.pointee.interp.sendLength, reason: .suspended)
         return true
     }
     let p = unsafe w.pointee.current

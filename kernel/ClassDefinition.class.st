@@ -7,7 +7,8 @@ Class {
 		'classInstVarNames',
 		'category',
 		'kind',
-		'comment'
+		'comment',
+		'package'
 	],
 	#category : #'Kernel-Classes'
 }
@@ -55,6 +56,17 @@ ClassDefinition >> instVarNames: anArray [
 { #category : #accessing }
 ClassDefinition >> kind [
 	^ kind
+]
+
+{ #category : #accessing }
+ClassDefinition >> package [
+	"The package the class belongs to (module 9b): a project directory's name, Kernel for kernel/; nil when none was given."
+	^ package
+]
+
+{ #category : #accessing }
+ClassDefinition >> package: aString [
+	package := aString
 ]
 
 { #category : #initialization }

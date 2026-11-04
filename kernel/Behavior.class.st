@@ -115,6 +115,7 @@ Behavior >> compile: aString classified: aCategoryOrNil [
 	Smalltalk noteSource: aString of: method.
 	Smalltalk noteCategory: category of: method selector in: self.
 	old ifNotNil: [:m | Smalltalk forgetSourceOf: m].
+	DevProtocol noteChangeOf: method selector in: self.
 	^ method selector
 ]
 
@@ -186,10 +187,11 @@ Behavior >> >> aSymbol [
 { #category : #methods }
 Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
 	"Install a method (verified by the VM against this class) and note its pragmas."
-	| old |
+	| old result |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	old := self compiledMethodAt: aSymbol ifAbsent: [nil].
-	self primAddSelector: aSymbol withMethod: aCompiledMethod.
+	result := self primAddSelector: aSymbol withMethod: aCompiledMethod.
+	result isString ifTrue: [^ self error: result].
 	Pragma noteRemoved: old; noteInstalled: aCompiledMethod
 ]
 
@@ -237,7 +239,7 @@ Behavior >> methodsDo: aBlock [
 
 { #category : #methods }
 Behavior >> primAddSelector: aSymbol withMethod: aCompiledMethod [
-	"Fails in a release image, for a sealed class (or its class side), or for a method not made for this class and selector."
+	"Fails in a release image, for a sealed class (or its class side), or for a method not made for this class and selector; answers a String saying why when a method may not extend a sealed class (module 9b: no primitive, no instance variable, no slot store or become)."
 	<primitive: 97>
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	^ self error: 'the VM refused the method ' , aSymbol printString , ' for ' , self printString
@@ -252,13 +254,16 @@ Behavior >> primRemoveSelector: aSymbol [
 
 { #category : #methods }
 Behavior >> removeSelector: aSymbol [
-	| old |
+	| old result |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	old := self compiledMethodAt: aSymbol ifAbsent: [^ nil].
-	self primRemoveSelector: aSymbol.
+	result := self primRemoveSelector: aSymbol.
+	result isString ifTrue: [^ self error: result].
 	Pragma noteRemoved: old.
 	Smalltalk forgetSourceOf: old.
 	Smalltalk forgetCategoryOf: aSymbol in: self.
+	Smalltalk notePackage: nil of: aSymbol in: self.
+	Smalltalk noteAuthor: nil of: aSymbol in: self.
 	^ old
 ]
 

@@ -201,6 +201,16 @@ struct SchedulerState {
     var stuckReported = false
     var terminateRequested = false
     var nextFree = -1
+    /// Module 9b: an interrupt to run when the Process is next resumed
+    /// (`InterruptKind`), 0 for none. Written under the scheduler lock; the
+    /// dequeue hands it to the worker that resumes the Process.
+    var interrupt = 0
+    /// Module 9b: stepping (`StepMode`), and the header index of the frame
+    /// it steps; read and written only by the worker running the Process
+    /// (the Process itself sets it, primitive 158, and its polls read it).
+    var stepMode = 0
+    var stepFrame = 0
+    var stepFresh = false
 }
 
 /// Guarded by the pending-root mutex.
@@ -246,6 +256,10 @@ enum Counter: Int, CaseIterable {
     /// hopped there, shell events taken by the kernel's event loop, handle
     /// releases.
     case viewCalls, viewHops, shellEvents, viewReleases
+    /// Module 9b: interrupts asked (primitive 155) and run, step stops,
+    /// sends re-executed (primitive 156), protocol requests taken and
+    /// replies emitted.
+    case interruptsAsked, interrupts, stepStops, resends, protocolRequests, protocolReplies
 }
 
 /// A snapshot of the counters.

@@ -34,8 +34,10 @@ U >> seen [ ^ Count ]
         #expect(try listed("f ^ Count") == ["push_lit \(b)", "value", "return_top"])
         #expect(try listed("f Count := 3") == ["push_lit \(b)", "push_int 3", "value1", "pop", "return_self"])
         #expect(try listed("f ^ Count := Count + 1") == ["push_lit \(b)", "push_lit \(b)", "value", "push_int 1", "add", "value1", "return_top"])
-        // one literal for both uses
-        #expect(try compileMethod(Array("f ^ Count := Count + 1".utf8), file: "t", in: ctx).0.literals == [b])
+        // one literal for both uses (module 9b: then the source map)
+        let lits = try compileMethod(Array("f ^ Count := Count + 1".utf8), file: "t", in: ctx).0.literals
+        #expect(lits.count == 2 && lits[0] == b)
+        if case .byteArray = lits.last {} else { Issue.record("the source map is not the last literal") }
         // a temp, an argument or a block's argument may not shadow it
         for bad in ["f | Count | ^ 1", "f: Count ^ 1", "f ^ [:Count | 1]", "f ^ [| Count | 1]"] {
             #expect(throws: CompileError.self, "\(bad)") { _ = try listed(bad) }

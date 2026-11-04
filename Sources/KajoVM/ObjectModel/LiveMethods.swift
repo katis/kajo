@@ -89,6 +89,56 @@ func installTarget(_ m: Machine, _ cls: Oop) -> UInt64? {
     return om.isSealed(instancesOf) ? nil : ci
 }
 
+/// Module 9b: the class index of a sealed class (or its class side) a
+/// method may extend (`sealedExtensionProblem`), nil in a release image or
+/// for anything else `installTarget` refuses.
+func sealedTarget(_ m: Machine, _ cls: Oop) -> UInt64? {
+    let om = m.om
+    guard !om.isReleaseImage, om.isBehavior(cls) else { return nil }
+    let ciOop = om.load(cls, ClassLayout.classIndex)
+    guard ciOop.isSmallInteger, ciOop.smallIntegerValue > 0, ciOop.smallIntegerValue < Int64(om.classCount) else { return nil }
+    let ci = UInt64(ciOop.smallIntegerValue)
+    return om.classOop(ci) == cls ? ci : nil
+}
+
+/// Module 9b (the owner's question 2 of 8d, provisional): why a method
+/// may not join a sealed class, or nil. Such a method can only send
+/// messages, which a method of any class could already: no primitive, no
+/// instance-variable access (the verifier refuses it too for a sealed
+/// class), and no send of a selector that writes a slot or swaps
+/// identities (`slotAt:put:`, `instVarAt:put:`, `become:`,
+/// `becomeForward:`; a Symbol literal of them counts, for `perform:`), in
+/// the method and in every block method of it.
+func sealedExtensionProblem(_ om: ObjectMemory, _ method: Oop, depth: Int = 0) -> String? {
+    guard depth < 64, method.isObject, om.classIndex(of: method) == WellKnown.method, !om.isBytes(method) else {
+        return "not a method"
+    }
+    let prim = om.load(method, MethodLayout.primitive)
+    if prim != Oop(smallInteger: 0) { return "it has a primitive" }
+    let bc = om.load(method, MethodLayout.bytecodes)
+    guard bc.isObject, om.isBytes(bc) else { return "not a method" }
+    let bytes = om.bytes(of: bc)
+    var at = 0
+    while at < bytes.count {
+        guard let i = decodeInstruction(bytes, at: at) else { return "unreadable bytecodes" }
+        if i.op == .pushIvar || i.op == .storeIvar { return "it reads or writes an instance variable" }
+        at += i.length
+    }
+    let lits = om.load(method, MethodLayout.literals)
+    guard lits.isObject, !om.isBytes(lits) else { return "not a method" }
+    let forbidden: Set<String> = ["slotAt:put:", "instVarAt:put:", "become:", "becomeForward:"]
+    for k in 0..<Int(om.count(of: lits)) {
+        let l = om.load(lits, k)
+        guard l.isObject else { continue }
+        let lc = om.classIndex(of: l)
+        if lc == WellKnown.symbol, om.isBytes(l), let s = String(validating: om.bytes(of: l), as: UTF8.self), forbidden.contains(s) {
+            return "it sends \(s)"
+        }
+        if lc == WellKnown.method, let why = sealedExtensionProblem(om, l, depth: depth + 1) { return why }
+    }
+    return nil
+}
+
 /// What making a method came to: the method, or why not.
 enum MakeOutcome {
     case made(Oop)

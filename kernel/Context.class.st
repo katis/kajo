@@ -133,3 +133,33 @@ Context >> terminateTo: aContext [
 	<primitive: 108>
 	^ self error: 'cannot cut the stack to ' , aContext printString
 ]
+
+{ #category : #debugging }
+Context >> primResend: anArray [
+	"Primitive 156: the receiver, the caller of the running frame, runs again from the send its pc is after, with anArray (the send's receiver, then its arguments) as the operands; the running frame goes."
+	<primitive: 156>
+	^ self error: 'cannot re-execute the send of ' , self printString
+]
+
+{ #category : #debugging }
+Context >> restartSendWith: anArray [
+	"Unwind to the receiver, running every pending ensure: and ifCurtailed: block above it, then run the send the receiver's pc is after again with anArray (its receiver, then its arguments): a frame restart re-enters the current version of the method, a send retried after doesNotUnderstand: is looked up again (module 9b). Never returns here."
+	| ctx unwindBlock |
+	ctx := thisContext findNextUnwindContextUpTo: self.
+	[ctx isNil] whileFalse: [
+		(ctx tempAt: 2) isNil ifTrue: [
+			ctx tempAt: 2 put: true.
+			unwindBlock := ctx tempAt: 1.
+			thisContext terminateTo: ctx.
+			unwindBlock value].
+		ctx := ctx findNextUnwindContextUpTo: self].
+	thisContext terminateTo: self.
+	^ self primResend: anArray
+]
+
+{ #category : #debugging }
+Context >> sendBeforePc [
+	"{selector. argc} of the send the receiver's pc is just after, or nil."
+	<primitive: 157>
+	^ nil
+]

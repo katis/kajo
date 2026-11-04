@@ -28,7 +28,10 @@ import Synchronization
 
     init(_ callbacks: ShellCallbacks) { self.callbacks = callbacks }
 
-    deinit { unsafe freeMutex(lock) }
+    deinit {
+        unsafe freeMutex(lock)
+        unsafe freeMutex(protocolLock)
+    }
 
     /// Any thread: queue `event` and signal the kernel's event Semaphore.
     func post(_ event: ShellEvent) {
@@ -74,6 +77,83 @@ import Synchronization
         unsafe pthread_mutex_lock(lock)
         defer { unsafe pthread_mutex_unlock(lock) }
         return queue.count - head
+    }
+
+    // MARK: module 9b: the development protocol's inbox
+
+    // The same shape as the event queue, its own mutex: requests the
+    // host's transport parsed and checked (`DevRequest`, KajoDev), as
+    // canonical JSON with the connection they came on; the protocol
+    // Process's Semaphore, signalled once per request.
+    private let protocolLock = unsafe makeMutex()
+    private var protocolOpen = false  // under protocolLock
+    private var requests: [(Int, [UInt8])] = []  // under protocolLock
+    private var requestHead = 0  // under protocolLock
+    private var requestSemaphore: Oop? = nil  // under protocolLock
+    private var requestHandle = -1  // under protocolLock
+
+    /// The host opened a transport: primitive 159 may register.
+    func openProtocol() {
+        unsafe pthread_mutex_lock(protocolLock)
+        protocolOpen = true
+        unsafe pthread_mutex_unlock(protocolLock)
+    }
+
+    var isProtocolOpen: Bool {
+        unsafe pthread_mutex_lock(protocolLock)
+        defer { unsafe pthread_mutex_unlock(protocolLock) }
+        return protocolOpen
+    }
+
+    /// Any thread: queue a request and signal the protocol Process.
+    func postRequest(connection: Int, json: [UInt8]) {
+        unsafe pthread_mutex_lock(protocolLock)
+        requests.append((connection, json))
+        let sem = requestSemaphore
+        unsafe pthread_mutex_unlock(protocolLock)
+        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
+    }
+
+    /// Primitive 159: as `register`, for the protocol's Semaphore. nil when
+    /// no transport is open.
+    func registerProtocol(_ sem: Oop, handle: Int) -> (oldHandle: Int, owed: Int)? {
+        unsafe pthread_mutex_lock(protocolLock)
+        defer { unsafe pthread_mutex_unlock(protocolLock) }
+        guard protocolOpen else { return nil }
+        let old = requestHandle
+        requestSemaphore = sem
+        requestHandle = handle
+        return (old, requests.count - requestHead)
+    }
+
+    /// Primitive 160: the oldest request.
+    func takeRequest() -> (Int, [UInt8])? {
+        unsafe pthread_mutex_lock(protocolLock)
+        defer { unsafe pthread_mutex_unlock(protocolLock) }
+        guard requestHead < requests.count else { return nil }
+        let r = requests[requestHead]
+        requestHead += 1
+        if requestHead > 256 && requestHead * 2 > requests.count {
+            requests.removeFirst(requestHead)
+            requestHead = 0
+        }
+        return r
+    }
+
+    var queuedRequests: Int {
+        unsafe pthread_mutex_lock(protocolLock)
+        defer { unsafe pthread_mutex_unlock(protocolLock) }
+        return requests.count - requestHead
+    }
+
+    /// The protocol Semaphore's pending-root slot (-1: none), cleared.
+    func unregisterProtocol() -> Int {
+        unsafe pthread_mutex_lock(protocolLock)
+        defer { unsafe pthread_mutex_unlock(protocolLock) }
+        let h = requestHandle
+        requestHandle = -1
+        requestSemaphore = nil
+        return h
     }
 
     /// The pending-root slot of the registered Semaphore (-1: none), cleared.

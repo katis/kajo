@@ -24,12 +24,15 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     unsafe w.pointee.leave = .none
     unsafe s.pointee.exit = .running
     unsafe s.pointee.countdown = w.pointee.pollEvery
+    // Module 9b: a stepped Process polls at every send and backward jump.
+    if unsafe r.pointee.stepMode != 0 { unsafe s.pointee.countdown = 1 }
     unsafe w.pointee.freshSlice = true
     unsafe vm.count(.slices)
     let sp = intSlot(om, p, ProcessLayout.sp), pc = intSlot(om, p, ProcessLayout.pc)
     let start: Regs
     if pc < 0 {
         // First run: word 0 holds the method; activate it as the host would.
+        unsafe w.pointee.interrupt = 0
         let method = unsafe base[0]
         unsafe base[0] = vm.pointee.nilObject.raw
         unsafe s.pointee.regs = SavedRegisters(sp: sp)
@@ -40,7 +43,15 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
         let fp = intSlot(om, p, ProcessLayout.fp), hdr = intSlot(om, p, ProcessLayout.hdr)
         unsafe s.pointee.regs = SavedRegisters(pc: pc, sp: sp, fp: fp, hdr: hdr, receiver: Oop(raw: base[fp]),
                                                method: hdr > 0 ? Oop(raw: base[hdr]) : .none)
-        start = unsafe restore(s)
+        // Module 9b: an interrupt runs first, as a send from where the
+        // Process stands.
+        if unsafe w.pointee.interrupt != 0 {
+            let kind = unsafe w.pointee.interrupt
+            unsafe w.pointee.interrupt = 0
+            start = unsafe runInterrupt(s, p, kind)
+        } else {
+            start = unsafe restore(s)
+        }
     }
     unsafe interpret(s, start)
     switch unsafe s.pointee.exit {

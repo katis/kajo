@@ -108,7 +108,7 @@ package final class Image {
         doesNotUnderstand = om.load(special, SpecialObjects.doesNotUnderstand)
         let sels = om.load(special, SpecialObjects.selectors)
         specialSelectors = (0..<Int(om.count(of: sels))).map { om.load(sels, $0) }
-        for i in 1..<UInt64(om.classCount) {
+        for i in 1..<UInt64(om.classCount) where om.classOop(i) != .none {
             let c = om.classOop(i)
             instSizes[i] = om.classFormat(i).namedSlots
             if om.classIndex(of: c) != WellKnown.metaclass, let n = symbolName(om.load(c, ClassLayout.name)) {
@@ -501,10 +501,15 @@ package final class Image {
 /// The selectors the VM sends itself, after the special-send selectors in
 /// `Image.specialSelectors` (and the interpreter's `specialSelectors`).
 enum VMSelector {
-    static let names = ["modificationForbiddenAt:value:", "cannotReturn:", "aboutToReturn:through:"]
+    static let names = ["modificationForbiddenAt:value:", "cannotReturn:", "aboutToReturn:through:",
+                        "terminateUnwinding", "stopForDebugger"]
     static let modificationForbidden = specialSelectorNames.count
     static let cannotReturn = specialSelectorNames.count + 1
     static let aboutToReturn = specialSelectorNames.count + 2
+    /// Module 9b: the interrupts a Process runs when it is next resumed
+    /// (`runInterrupt`), sent to the Process itself.
+    static let terminateUnwinding = specialSelectorNames.count + 3
+    static let stopForDebugger = specialSelectorNames.count + 4
 }
 
 /// Module 8d: the kernel's Binding, a class variable: its name (a Symbol)

@@ -41,11 +41,18 @@ ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: 
 		at: 5 put: cv; at: 6 put: kind; at: 7 put: Binding; at: 8 put: inherited size; at: 9 put: inheritedC size.
 	result := Smalltalk primDefineClass: spec.
 	result isString ifTrue: [^ ClassDefinitionError new signal: result].
-	Smalltalk noteDefinition: (ClassDefinition instVarNames: own classInstVarNames: ownC
+	Smalltalk noteDefinition: ((ClassDefinition instVarNames: own classInstVarNames: ownC
 		category: (aCategory ifNil: [#Unclassified] ifNotNil: [:c | c asSymbol]) kind: kind comment: (aCommentOrNil ifNil: ['']))
+			package: ClassBuilder newClassPackage; yourself)
 		of: result.
 	Smalltalk forgetClassNames.
 	^ result
+]
+
+{ #category : #defining }
+ClassBuilder class >> newClassPackage [
+	"The package a class defined now belongs to: the one the active Process's development session names (module 9b), else none."
+	^ DevProtocol packageOfActiveSession
 ]
 
 { #category : #defining }

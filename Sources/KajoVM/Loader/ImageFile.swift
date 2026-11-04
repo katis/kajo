@@ -6,9 +6,11 @@
 // broken, and nothing is kept.
 //
 //     word 0   magic "KAJOIMG\0"
-//     word 1   version (3, module 8d: the Metaclass layout gained the
-//              class pool and the header the flags word; versions 1 and 2
-//              are refused, their Metaclass objects are a slot short)
+//     word 1   version (4, module 9b: two more VM selectors, holes in
+//              the class table, the source-map method flag; 3 since 8d:
+//              the Metaclass layout gained the class pool and the header
+//              the flags word; versions 1 to 3 are refused, images are
+//              rebuilt from their sources)
 //     word 2   the special-objects Array (`SpecialObjects`), a root
 //     word 3   method count M
 //     word 4   snapshot length L in bytes
@@ -23,6 +25,8 @@
 //  - the symbol table: every bucket nil or a WeakArray of Symbols and
 //    nils (module 8b: the table is weak), each Symbol in the bucket its
 //    bytes hash to, no two with the same bytes;
+//  - module 9b: a hole in the class table (no class object, format 0) is
+//    allowed past the well-known classes; no object's class index is one;
 //  - the classes: every registered index's class object a behavior naming
 //    that index, its format valid, its metaclass a sealed behaviors format
 //    whose Metaclass instance names the class back; class objects as large
@@ -52,7 +56,7 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
     var description: String {
         switch self {
         case .badMagic: "not a Kajo image (bad magic)"
-        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before module 8d's Metaclass layout: rebuild it from its sources)" : "")
+        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before module 9b's: rebuild it from its sources)" : "")
         case .malformed(let s): "malformed image: \(s)"
         case .snapshot(let e): "image snapshot: \(e)"
         case .rule(let s): "image rejected: \(s)"
@@ -64,7 +68,7 @@ enum ImageFile {
     static let magic: UInt64 = 0x0047_4D49_4F4A_414B  // "KAJOIMG\0"
     /// Module 8d: 3 (Metaclass objects hold the class pool; the header
     /// has the flags word). Module 8c's 2 and 8b's 1 are refused.
-    static let version: UInt64 = 3
+    static let version: UInt64 = 4
     static let headerWords = 6
     /// Flags word bits.
     static let releaseFlag: UInt64 = 1
@@ -198,6 +202,11 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
     guard isA(dnu, WellKnown.symbol), om.bytes(of: dnu) == Array("doesNotUnderstand:".utf8) else { throw fail("doesNotUnderstand:") }
     // Classes and metaclasses.
     for i in 1..<UInt64(classCount) {
+        // Module 9b: a freed obsolete class's index.
+        if om.classOop(i) == .none {
+            guard i >= WellKnown.firstUserClass, om.isClassHole(i) else { throw fail("class \(i) has no object") }
+            continue
+        }
         let c = om.classOop(i)
         guard slots(c, ClassLayout.size), om.isBehavior(c),
               om.load(c, ClassLayout.classIndex) == Oop(smallInteger: Int64(i)) else { throw fail("class \(i)'s object") }
@@ -264,6 +273,7 @@ func verifyImage(_ om: ObjectMemory, special: Oop, methodTable: [Oop], limits: L
         if !used(o) { continue }
         let h = om.header(o)
         let ci = h.classIndex
+        guard !om.isClassHole(ci) else { throw fail("object \(o)'s class index \(ci) is a hole") }
         guard om.classFormat(ci).admits(isBytes: h.isBytes, count: h.count) else {
             throw fail("object \(o) does not fit class \(ci)'s format")
         }

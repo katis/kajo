@@ -169,6 +169,27 @@ CompilerScope >> vectorVariables [
 	^ vectorVariables
 ]
 
+{ #category : #debugging }
+CompilerScope >> frameVariables [
+	"A real scope's named variables as a frame holds them (module 9b): {name. frame index from 1. index in the temp vector from 1, or nil}; a name declared twice (inlined blocks) keeps its last."
+	| out add |
+	out := OrderedCollection new.
+	add := [:name :frame :slot |
+		name isEmpty ifFalse: [
+			out removeAll: (out select: [:e | e first = name]).
+			out add: {name. frame. slot}]].
+	(locals select: [:v | v kind == #argument]) do: [:v | add value: v name value: v index + 1 value: nil].
+	copied do: [:item |
+		(item isKindOf: CompilerScope)
+			ifTrue: [item vectorVariables do: [:v | add value: v name value: (self copiedIndex: item) + 1 value: v vectorSlot + 1]]
+			ifFalse: [add value: item name value: (self copiedIndex: item) + 1 value: nil]].
+	vectorTemp >= 0 ifTrue: [vectorVariables do: [:v | add value: v name value: vectorTemp + 1 value: v vectorSlot + 1]].
+	loops do: [:l | l vectorTemp >= 0 ifTrue: [l vectorVariables do: [:v | add value: v name value: l vectorTemp + 1 value: v vectorSlot + 1]]].
+	(locals select: [:v | v kind ~~ #argument and: [v kind ~~ #hidden and: [v inVector not]]]) do: [:v |
+		add value: v name value: v index + 1 value: nil].
+	^ out asArray
+]
+
 { #category : #accessing }
 CompilerScope class >> loopIn: aScope seq: n [
 	^ (self new setParent: aScope real: false seq: n) beLoop

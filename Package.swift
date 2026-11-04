@@ -8,6 +8,7 @@ let package = Package(
         .library(name: "KajoVM", targets: ["KajoVM"]),
         .library(name: "KajoCompiler", targets: ["KajoCompiler"]),
         .library(name: "KajoShellCore", targets: ["KajoShellCore"]),
+        .library(name: "KajoDev", targets: ["KajoDev"]),
         .executable(name: "kajo", targets: ["kajo"]),
     ],
     targets: [
@@ -36,11 +37,20 @@ let package = Package(
             dependencies: ["KajoVM", "KajoCompiler"],
             swiftSettings: [.strictMemorySafety()]
         ),
+        // Module 9b: the development protocol outside the VM: its JSON and
+        // request checks (the target's trust boundary), the Unix-socket
+        // transport a target opens, the client, the MCP server and the CLI
+        // commands over it. Ordinary Swift, not a hot path.
+        .target(
+            name: "KajoDev",
+            dependencies: ["KajoVM"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
         // Headless command line: boot an image, run tests, serve the
         // development protocol. No UI here.
         .executableTarget(
             name: "kajo",
-            dependencies: ["KajoVM", "KajoCompiler"]
+            dependencies: ["KajoVM", "KajoCompiler", "KajoDev"]
         ),
         // libFuzzer targets for the kasm and snapshot loaders (`just fuzz`).
         // Built plainly they replay a corpus and mutate it.
@@ -67,7 +77,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KajoCompilerTests",
-            dependencies: ["KajoVM", "KajoCompiler", "KajoShellCore"],
+            dependencies: ["KajoVM", "KajoCompiler", "KajoShellCore", "KajoDev"],
             exclude: ["Fixtures"]
         ),
     ]

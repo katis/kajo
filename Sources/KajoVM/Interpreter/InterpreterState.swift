@@ -46,6 +46,8 @@ struct InterpreterCounters: Sendable, Equatable {
     var classesDefined: UInt64 = 0
     var classesRedefined: UInt64 = 0
     var classesRemoved: UInt64 = 0
+    /// Module 9b: obsolete classes whose indices were freed.
+    var classesFreed: UInt64 = 0
     var classChangesRefused: UInt64 = 0
     var filesWritten: UInt64 = 0
     var filesRead: UInt64 = 0

@@ -35,6 +35,8 @@ enum ShellPrimitives {
     static let table: [(number: Int, selector: String, argc: Int)] = [
         (150, "primCall:handle:with:", 3), (151, "hasShell", 0), (152, "releaseHandle:", 1),
         (153, "eventSemaphore:", 1), (154, "nextEvent", 0),
+        (159, "DevProtocol class primRegister:", 1), (160, "DevProtocol class primNextRequest", 0),
+        (161, "DevProtocol class primEmit:", 1),
     ]
 }
 
@@ -86,6 +88,41 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard let e = bridge.take() else { return m.nilObject }
         unsafe vm.count(.shellEvents)
         return eventArray(m, e)
+    // Module 9b: the development protocol (docs/modules/development-protocol.md).
+    case 159:
+        guard c.argc == 1, let bridge, !m.om.isReleaseImage, c.arg0.isObject,
+              m.om.classIndex(of: c.arg0) == WellKnown.semaphore, bridge.isProtocolOpen else { return .none }
+        let h = unsafe registerPending(vm, c.arg0)
+        if h < 0 { return .none }
+        guard let (old, owed) = bridge.registerProtocol(c.arg0, handle: h) else {
+            unsafe unregisterPending(vm, h)
+            return .none
+        }
+        if old >= 0 { unsafe unregisterPending(vm, old) }
+        for _ in 0..<owed { unsafe signalSemaphore(vm, w, c.arg0) }
+        return c.receiver
+    case 160:
+        guard c.argc == 0, let bridge, !m.om.isReleaseImage else { return .none }
+        guard let (conn, json) = bridge.takeRequest() else { return m.nilObject }
+        let text = m.newString(json)
+        if text == .none { return .none }
+        let a = m.allocate(WellKnown.array, slots: 2, keeping: text)
+        if a == .none { return .none }
+        m.store(a, 0, Oop(smallInteger: Int64(conn)), .atPut)
+        m.store(a, 1, text, .atPut)
+        unsafe vm.count(.protocolRequests)
+        return a
+    case 161:
+        // A line the protocol wrote (a reply or an event) to the host's
+        // event sink as it is: a String of valid UTF-8, one JSON object, no
+        // line break. The host's transport routes replies by their "conn".
+        guard c.argc == 1, let bridge, !m.om.isReleaseImage, let line = m.text(c.arg0), bridge.isProtocolOpen else { return .none }
+        let bytes = Array(line.utf8)
+        guard bytes.first == 123, bytes.last == 125, !bytes.contains(10), !bytes.contains(13),
+              String(validating: m.om.bytes(of: c.arg0), as: UTF8.self) != nil else { return .none }
+        unsafe vm.count(.protocolReplies)
+        if let f = bridge.callbacks.events { f(bytes) }
+        return c.receiver
     default:
         return .none
     }

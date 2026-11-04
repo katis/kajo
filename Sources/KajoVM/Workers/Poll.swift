@@ -61,9 +61,24 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
         if unsafe ri == w.pointee.record {
             unsafe schedLock(vm)
             let kill = unsafe terminatePendingLocked(vm, w)
+            let interrupted = unsafe records(vm, ri).pointee.interrupt != 0
             unsafe schedUnlock(vm)
             if kill { return true }
+            // Module 9b: an interrupt (primitive 155): the Process leaves
+            // here as a preemption does and runs it when it is resumed.
+            if interrupted {
+                let r = unsafe s.pointee.regs
+                unsafe requeueCurrent(vm, w, sp: r.sp, pc: r.pc &- rewind, reason: .suspended)
+                unsafe vm.count(.interrupts)
+                return true
+            }
         }
+    }
+    // Module 9b: a stepped Process polls at every send and backward jump
+    // (its countdown is kept at 1); the step's rule decides here whether it
+    // stops. Nothing of this is on the interpreter's paths.
+    if unsafe w.pointee.record >= 0 && records(vm, w.pointee.record).pointee.stepMode != 0 {
+        if unsafe stepPoll(vm, w, s, rewind: rewind) { return true }
     }
     let fresh = unsafe w.pointee.freshSlice
     unsafe w.pointee.freshSlice = false

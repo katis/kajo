@@ -169,10 +169,13 @@ TonelReader >> readDocument [
 
 { #category : #reading }
 TonelReader >> readMethodInto: aDocument [
-	| category owner classSide patternStart open close end src body |
+	| category author owner classSide patternStart open close end src body meta |
 	category := ''.
+	author := nil.
 	self byte = 123 ifTrue: [
-		category := (self text: 'category' in: (self map: 0)) ifNil: [''].
+		meta := self map: 0.
+		category := (self text: 'category' in: meta) ifNil: [''].
+		author := self text: 'author' in: meta.
 		self space].
 	owner := self identifier.
 	owner isEmpty ifTrue: [^ self fail: 'expected a method: Class >> selector [ ... ]'].
@@ -200,7 +203,7 @@ TonelReader >> readMethodInto: aDocument [
 	src := src , body.
 	position := close + 1.
 	owner = aDocument name ifFalse: [^ self fail: 'a method of ' , owner , ' in ' , aDocument name , '''s file'].
-	aDocument methods add: (Array with: classSide with: category with: src)
+	aDocument methods add: (Array with: classSide with: category with: src with: author)
 ]
 
 { #category : #reading }

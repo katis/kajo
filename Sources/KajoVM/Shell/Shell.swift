@@ -304,6 +304,8 @@ public final class ShellVM: @unchecked Sendable {
         }
         let h = bridge.unregister()
         if h >= 0 { unsafe unregisterPending(vm.state, h) }
+        let ph = bridge.unregisterProtocol()
+        if ph >= 0 { unsafe unregisterPending(vm.state, ph) }
         let fin = unsafe vm.state.pointee.finalization.pointee.handle >= 0 ? 1 : 0
         let deadline = ShellVM.now() + UInt64(timeoutSeconds * 1e9)
         while vm.pendingRootCount > fin && ShellVM.now() < deadline { usleep(5_000) }
@@ -314,6 +316,23 @@ public final class ShellVM: @unchecked Sendable {
 
     /// The uptime clock events are stamped on, in nanoseconds.
     public static func now() -> UInt64 { nanoseconds() }
+
+    // MARK: module 9b: the development protocol
+
+    /// A host serving the development protocol (a transport: KajoDev's
+    /// `ProtocolServer`) opens the inbox before the kernel's protocol
+    /// Process registers (`DevProtocol start`); without it primitive 159
+    /// fails and the image serves nothing. Any thread.
+    public func openProtocol() { bridge.openProtocol() }
+
+    /// Any thread: one request the transport parsed and checked, as the
+    /// canonical JSON object the kernel's reader takes, and the connection
+    /// it came on. The kernel's replies carry `"conn"` and come out through
+    /// `callbacks.events` like every other event.
+    public func postRequest(connection: Int, json: [UInt8]) { bridge.postRequest(connection: connection, json: json) }
+
+    /// Requests posted and not yet taken by the protocol Process.
+    public var queuedRequests: Int { bridge.queuedRequests }
 
     // MARK: turns
 

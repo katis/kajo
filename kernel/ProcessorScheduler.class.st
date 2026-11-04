@@ -18,6 +18,13 @@ ProcessorScheduler class >> detachFromMain [
 ]
 
 { #category : #accessing }
+ProcessorScheduler class >> primAllProcesses [
+	"Every live Process (module 9b, the protocol's process.list), in an Array padded with nil."
+	<primitive: 162>
+	^ #()
+]
+
+{ #category : #accessing }
 ProcessorScheduler class >> terminateActive [
 	self activeProcess terminate
 ]

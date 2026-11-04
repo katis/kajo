@@ -41,6 +41,9 @@ enum LeaveReason: UInt8, Sendable {
     /// the first one pass, or a Process resumed at a send would be
     /// preempted at that send again and never progress.
     var freshSlice = false
+    /// Module 9b: the interrupt the dequeue took from the Process's record
+    /// (`InterruptKind`), run when the slice resumes it.
+    var interrupt = 0
     /// Wait time, kept apart from work time (AGENTS.md): parked in someone
     /// else's stop, stopping the world itself, entering and leaving.
     var parkNs: UInt64 = 0

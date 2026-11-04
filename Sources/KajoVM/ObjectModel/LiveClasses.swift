@@ -39,7 +39,7 @@ enum LiveClassPrimitives {
     static let table: [(number: Int, selector: String, argc: Int)] = [
         (145, "Smalltalk primDefineClass:", 1), (146, "Smalltalk primRedefine:", 1),
         (147, "Smalltalk primRemoveClass:as:", 2), (148, "Smalltalk primWriteFile:contents:", 2),
-        (149, "Smalltalk primReadFile:", 1),
+        (149, "Smalltalk primReadFile:", 1), (163, "Smalltalk primFreeObsoleteClasses", 0),
     ]
 }
 
@@ -66,6 +66,10 @@ func liveClassPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
             return m.nilObject
         }
     case 148, 149: return filePrimitive(n, m, c)
+    case 163:
+        guard c.argc == 0 else { return .none }
+        let freed = inStop(m, keeping: []) { roots in freeObsoleteClasses(m, roots: roots) }
+        return Oop(smallInteger: Int64(freed))
     default: return .none
     }
 }
@@ -192,7 +196,7 @@ private func defineClass(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<
     guard let s = m.arrayElements(spec), s.count == 9 else { return .failure(Refusal("the specification is not an Array of 9")) }
     guard let name = m.symbolText(s[0]), m.classIndex(of: s[0]) == WellKnown.symbol else { return .failure(Refusal("the name is not a Symbol")) }
     if let problem = ClassRules.classNameProblem(name) { return .failure(Refusal(problem)) }
-    for i in 1..<UInt64(om.classCount) {
+    for i in 1..<UInt64(om.classCount) where om.classOop(i) != .none {
         let c = om.classOop(i)
         if !m.isMetaclass(c) && om.load(c, ClassLayout.name) == s[0] { return .failure(Refusal("a class named \(name) exists")) }
     }
@@ -248,7 +252,11 @@ private func defineClass(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<
         }
         bindingClass = bi
     }
-    if UInt64(om.classCount) + 2 > UInt64(LoaderLimits().maxClassIndex) { return .failure(Refusal("more than \(LoaderLimits().maxClassIndex) classes")) }
+    // Module 9b: a freed obsolete class's pair of indices is taken first.
+    let reuse = om.freedClassPair()
+    if reuse == nil && UInt64(om.classCount) + 2 > UInt64(LoaderLimits().maxClassIndex) {
+        return .failure(Refusal("more than \(LoaderLimits().maxClassIndex) classes"))
+    }
 
     // Everything allocated before the class table changes, so a full heap
     // leaves the table as it was.
@@ -271,12 +279,17 @@ private func defineClass(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<
         om.setReadOnly(pool, true)
     }
     guard let metaObject = alloc(WellKnown.metaclass, MetaclassLayout.size) else { return .failure(Refusal("the heap is full")) }
-    let index = om.registerClass(.none)
-    let meta = om.registerClass(.none)
+    let index = reuse ?? om.registerClass(.none)
+    let meta = reuse.map { $0 + 1 } ?? om.registerClass(.none)
     om.setClassFormat(meta, WellKnown.metaclassFormat(classSlots: ClassLayout.size + civars.count))
     om.setClassOop(meta, metaObject)
     guard let classObject = alloc(meta, ClassLayout.size + civars.count) else {
-        om.unregisterLastClasses(2)
+        if reuse != nil {
+            om.makeClassHole(index)
+            om.makeClassHole(meta)
+        } else {
+            om.unregisterLastClasses(2)
+        }
         return .failure(Refusal("the heap is full"))
     }
     om.setClassOop(index, classObject)
@@ -410,7 +423,7 @@ private func redefine(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<Oop
     // a method of a class runs on the instances of its subclasses, so they
     // must have at least its slots (the verifier's bound).
     func slotsAfter(_ i: UInt64) -> Int { shapes.first { $0.index == i }?.newSlots ?? om.classFormat(i).namedSlots }
-    for i in 1..<UInt64(om.classCount) {
+    for i in 1..<UInt64(om.classCount) where om.classOop(i) != .none {
         let c = om.classOop(i)
         let sup = om.load(c, ClassLayout.superclass)
         guard sup != m.nilObject, let si = m.behaviorIndex(sup) else { continue }
@@ -655,7 +668,7 @@ private func removeClass(_ m: Machine, _ cls: Oop, obsoleteName: Oop, roots: () 
         return .failure(Refusal("the obsolete name is not #\(ClassRules.obsoletePrefix)\(name)"))
     }
     let meta = m.classIndex(of: cls)
-    for i in 1..<UInt64(om.classCount) where i != ci && i != meta {
+    for i in 1..<UInt64(om.classCount) where i != ci && i != meta && om.classOop(i) != .none {
         if om.load(om.classOop(i), ClassLayout.superclass) == cls { return .failure(Refusal("\(name) has the subclass \(m.behaviorName(om.classOop(i)))")) }
     }
     var keep = roots() + [cls, obsoleteName]
@@ -701,7 +714,53 @@ private func removeClass(_ m: Machine, _ cls: Oop, obsoleteName: Oop, roots: () 
     m.store(cls, ClassLayout.name, obsoleteName, .installMethod)
     m.store(cls, ClassLayout.superclass, m.nilObject, .installMethod)
     m.store(om.classOop(meta), ClassLayout.superclass, om.classOop(WellKnown.classClass), .installMethod)
+    // Module 9b: an obsolete class makes no instance (the allocation
+    // primitives refuse a sealed class) until its indices are freed.
+    om.setClassFormat(ci, om.classFormat(ci).with(sealed: true))
     return .success(m.nilObject)
+}
+
+// MARK: - 163: free obsolete classes (module 9b)
+
+/// `Smalltalk primFreeObsoleteClasses`, in a stop: after a full collection,
+/// every removed class (`AnObsolete...`, cut from the hierarchy) with no
+/// instance and whose metaclass has no instance but it is taken out of the
+/// class table and a second full collection runs; a class object it freed
+/// was named by nothing (no literal, Binding, frame, stack word, root), and
+/// its two indices become holes the define primitive reuses; one it kept
+/// goes back into the table. Answers how many classes were freed.
+private func freeObsoleteClasses(_ m: Machine, roots: () -> [Oop]) -> Int {
+    let om = m.om
+    var candidates: [(index: UInt64, meta: UInt64, cls: Oop, metaObject: Oop)] = []
+    for i in WellKnown.firstUserClass..<UInt64(om.classCount) {
+        let c = om.classOop(i)
+        guard c != .none, !m.isMetaclass(c), m.isObsolete(c), om.load(c, ClassLayout.superclass) == m.nilObject else { continue }
+        candidates.append((i, m.classIndex(of: c), c, om.classOop(m.classIndex(of: c))))
+    }
+    if candidates.isEmpty { return 0 }
+    let keep = roots()
+    if !om.prepareOldSpaceOperation(keep).isEmpty { return 0 }
+    om.collect(extraRoots: keep)
+    candidates = candidates.filter { om.allInstances(of: $0.index).isEmpty && om.allInstances(of: $0.meta) == [$0.cls] }
+    if candidates.isEmpty { return 0 }
+    for k in candidates {
+        om.setClassOop(k.index, .none)
+        om.setClassOop(k.meta, .none)
+    }
+    om.collect(extraRoots: roots())
+    var freed = 0
+    for k in candidates {
+        if om.isUsedReference(k.cls) {
+            om.setClassOop(k.index, k.cls)
+            om.setClassOop(k.meta, k.metaObject)
+        } else {
+            om.makeClassHole(k.index)
+            om.makeClassHole(k.meta)
+            freed += 1
+        }
+    }
+    unsafe m.state.pointee.counters.classesFreed &+= UInt64(freed)
+    return freed
 }
 
 /// Whether a method (or one of its block methods, a literal Array or a

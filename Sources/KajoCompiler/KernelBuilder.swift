@@ -29,7 +29,26 @@ public struct KernelBuild: Sendable {
         public let warnings: [String]
     }
 
-    /// The `.st` files of the directories, each directory's in name order.
+    /// Module 9b: the package a source file belongs to: the name its
+    /// directory's `package.st` gives (`Package { #name : #Foo }`), else the
+    /// directory's name with its first letter capitalized (`kernel/` is
+    /// `Kernel`).
+    public static func package(ofFile file: String) -> String {
+        let dir = (file as NSString).deletingLastPathComponent
+        if let data = FileManager.default.contents(atPath: (dir as NSString).appendingPathComponent("package.st")),
+           let text = String(data: data, encoding: .utf8),
+           let r = text.range(of: "#name"),
+           let colon = text[r.upperBound...].firstIndex(of: ":") {
+            let rest = text[text.index(after: colon)...].drop { $0 == " " || $0 == "\t" || $0 == "#" || $0 == "'" }
+            let name = String(rest.prefix { $0.isLetter || $0.isNumber || $0 == "-" })
+            if !name.isEmpty { return name }
+        }
+        let base = (dir as NSString).lastPathComponent
+        return base.prefix(1).uppercased() + base.dropFirst()
+    }
+
+    /// The `.st` files of the directories, each directory's in name order
+    /// (`package.st`, a package's name, is not a class file).
     public static func sources(in directories: [String]) throws(CompileError) -> [(file: String, text: [UInt8])] {
         var out: [(String, [UInt8])] = []
         for d in directories {
@@ -39,7 +58,7 @@ public struct KernelBuild: Sendable {
                 out.append((d, [UInt8](data)))
                 continue
             }
-            for n in names.sorted() where n.hasSuffix(".st") {
+            for n in names.sorted() where n.hasSuffix(".st") && n != "package.st" {
                 let p = (d as NSString).appendingPathComponent(n)
                 guard let data = FileManager.default.contents(atPath: p) else { throw CompileError("cannot read \(p)") }
                 out.append((p, [UInt8](data)))
@@ -64,7 +83,9 @@ public struct KernelBuild: Sendable {
             }
             // Every method's source and category, kept in the image
             // (Smalltalk sourceOf:, Behavior>>categoryOf:), in Arrays of at
-            // most 2000 Strings: "Class[ class]\nselector\ncategory\nsource".
+            // most 2000 Strings: "Class[ class]\nselector\ncategory\npackage\nauthor\nsource"
+            // (module 9b: the package when it is not the class's, the
+            // author when the file names one; empty otherwise).
             let sources = plan.sources
             var start = 0
             while start < sources.count {
@@ -85,11 +106,12 @@ struct Plan {
     var classes: [TonelClass] = []
     var definitions: [KernelClassDefinition] = []
     var compiled: [AssembledMethod] = []
-    /// "Class[ class]\nselector\ncategory\nsource" per compiled method.
+    /// "Class[ class]\nselector\ncategory\npackage\nauthor\nsource" per compiled method.
     var sources: [String] = []
     /// Module 8e: per class, in definition order (superclasses first),
-    /// "name\nsuperclass\ninstVars\nclassInstVars\ncategory\nkind\ncomment"
-    /// (names separated by blanks; the comment last, it may hold line breaks).
+    /// "name\nsuperclass\ninstVars\nclassInstVars\ncategory\nkind\npackage\ncomment"
+    /// (names separated by blanks; the comment last, it may hold line
+    /// breaks; module 9b added the package).
     var definitionRecords: [String] = []
     var warnings: [String] = []
     /// Instance variable names (inherited first) and class-side ones.
@@ -171,7 +193,8 @@ struct Plan {
             }
             kinds[c.name] = kind
             definitionRecords.append([c.name, c.superclass ?? "nil", c.instanceVariables.joined(separator: " "),
-                                      c.classInstanceVariables.joined(separator: " "), c.category, kind, c.comment]
+                                      c.classInstanceVariables.joined(separator: " "), c.category, kind,
+                                      KernelBuild.package(ofFile: c.file), c.comment]
                 .joined(separator: "\n"))
             definitions.append(KernelClassDefinition(name: c.name, superclass: c.superclass, instSize: all.count, kind: kind,
                                                      metaSlots: allMeta.count, classVariables: c.classVariables, file: c.file,
@@ -183,13 +206,16 @@ struct Plan {
         let pools = classVariables
         var consumed: Set<String> = []
         var used: [(String, String, Int)] = []  // pragma, file, line
-        var all = ordered.flatMap(\.methods)
+        // Module 9b: each method with the package of the file it came from.
+        var all = ordered.flatMap { c in c.methods.map { ($0, c.file, "") } }
+        var classPackage: [String: String] = [:]
+        for c in ordered { classPackage[c.name] = KernelBuild.package(ofFile: c.file) }
         for e in extensions {
             guard known.contains(e.name) else { throw CompileError("an extension of unknown class \(e.name)", file: e.file, line: e.line) }
-            all += e.methods
+            let p = KernelBuild.package(ofFile: e.file)
+            all += e.methods.map { ($0, e.file, p == classPackage[e.name] ? "" : p) }
         }
-        for m in all {
-            let file = (ordered.first { $0.name == m.className } ?? extensions.first { $0.name == m.className })?.file ?? ""
+        for (m, file, package) in all {
             let ctx = ClassContext(className: m.className, classSide: m.classSide,
                                    instanceVariables: m.classSide ? classInstanceVariables[m.className] ?? []
                                        : instanceVariables[m.className] ?? [],
@@ -197,7 +223,7 @@ struct Plan {
                                    classVariables: pools[m.className] ?? [:])
             let (am, pragmas) = try compileMethod(m.source, file: file, line: m.line, in: ctx)
             compiled.append(am)
-            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n\(m.category)\n"
+            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n\(m.category)\n\(package)\n\(m.author ?? "")\n"
                            + String(decoding: m.source, as: UTF8.self))
             for p in pragmas {
                 if p.selector == "consumesPragmas:", m.classSide, case .array(let xs) = p.arguments[0] {

@@ -7,7 +7,9 @@ Class {
 		'classNames',
 		'definitions',
 		'organizations',
-		'undeclared'
+		'undeclared',
+		'packages',
+		'authors'
 	],
 	#category : #'Kernel-System'
 }
@@ -103,6 +105,19 @@ Smalltalk class >> includesKey: aSymbol [
 ]
 
 { #category : #classes }
+Smalltalk class >> primFreeObsoleteClasses [
+	"Primitive 163: in one stop, every removed class with no instance that no object, frame or root names (two full collections) gives its indices back. Answers how many."
+	<primitive: 163>
+	^ 0
+]
+
+{ #category : #classes }
+Smalltalk class >> primGarbageCollect [
+	<primitive: 11>
+	^ nil
+]
+
+{ #category : #classes }
 Smalltalk class >> rebuildClassNames [
 	classNames := IdentityDictionary new.
 	self allClasses do: [:c | classNames at: c name put: c]
@@ -120,9 +135,16 @@ Smalltalk class >> removeClassNamed: aName [
 ]
 
 { #category : #'entry points' }
+Smalltalk class >> evaluate: aString [
+	"A doit's value (Compiler evaluate:), for hosts and tests that spawn it."
+	^ Compiler evaluate: aString
+]
+
+{ #category : #'entry points' }
 Smalltalk class >> garbageCollect [
-	<primitive: 11>
-	^ nil
+	"A full collection; then the removed classes nothing names any more are freed (module 9b: their class-table indices become holes a new class takes). Answers how many were freed."
+	self primGarbageCollect.
+	^ self primFreeObsoleteClasses
 ]
 
 { #category : #'entry points' }
@@ -238,6 +260,68 @@ Smalltalk class >> initializeKernel [
 	Ephemeron forgetProcess
 ]
 
+{ #category : #packages }
+Smalltalk class >> authorOfSelector: aSelector in: aBehavior [
+	"Who made the method, when a development session did (module 9b: 'developer', 'agent:<name>'), else nil."
+	authors isNil ifTrue: [^ nil].
+	^ (authors at: aBehavior ifAbsent: [^ nil]) at: aSelector ifAbsent: [nil]
+]
+
+{ #category : #packages }
+Smalltalk class >> noteAuthor: aStringOrNil of: aSelector in: aBehavior [
+	aStringOrNil isNil ifTrue: [
+		authors isNil ifFalse: [(authors at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSelector ifAbsent: [nil]]].
+		^ nil].
+	authors isNil ifTrue: [authors := IdentityDictionary new].
+	(authors at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aStringOrNil asString
+]
+
+{ #category : #packages }
+Smalltalk class >> notePackage: aStringOrNil of: aSelector in: aBehavior [
+	"A method's package when it is not its class's (an extension, module 9b); nil or the class's package forgets it."
+	(aStringOrNil isNil or: [aStringOrNil = (self packageOf: aBehavior theNonMetaClass)]) ifTrue: [
+		packages isNil ifFalse: [(packages at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSelector ifAbsent: [nil]]].
+		^ nil].
+	packages isNil ifTrue: [packages := IdentityDictionary new].
+	(packages at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aStringOrNil asString
+]
+
+{ #category : #packages }
+Smalltalk class >> packageNames [
+	"Every package a class or a method of the image belongs to, sorted."
+	| out |
+	out := Set new.
+	self allClasses do: [:c | (self packageOf: c) ifNotNil: [:p | out add: p]].
+	packages isNil ifFalse: [packages do: [:d | d do: [:p | out add: p]]].
+	^ out asArray sort: [:a :b | a <= b]
+]
+
+{ #category : #packages }
+Smalltalk class >> packageOf: aClass [
+	"The class's package (its definition's), or nil."
+	^ (self definitionOf: aClass theNonMetaClass) ifNotNil: [:d | d package]
+]
+
+{ #category : #packages }
+Smalltalk class >> packageOfSelector: aSelector in: aBehavior [
+	"The package a method belongs to: its own when it is an extension, else its class's."
+	packages isNil ifFalse: [
+		((packages at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d at: aSelector ifAbsent: [nil]]) ifNotNil: [:p | ^ p]].
+	^ self packageOf: aBehavior theNonMetaClass
+]
+
+{ #category : #packages }
+Smalltalk class >> writePackage: aName into: aDirectory [
+	"Write the package's files into aDirectory (module 9b): a class file for each of its classes (their methods of the package), an extension file for each other class with methods of the package. Answers the paths."
+	| out |
+	out := OrderedCollection new.
+	self allClasses do: [:c |
+		(self packageOf: c) = aName
+			ifTrue: [out add: (TonelWriter write: c package: aName into: aDirectory)]
+			ifFalse: [(TonelWriter hasMethodsOf: c package: aName) ifTrue: [out add: (TonelWriter write: c package: aName into: aDirectory)]]].
+	^ out asArray
+]
+
 { #category : #primitives }
 Smalltalk class >> primDefineClass: anArray [
 	"A class from its specification (ClassBuilder), or a String saying why not (module 8e). Fails in a release image."
@@ -339,6 +423,8 @@ Smalltalk class >> forgetClass: aClass [
 	self forgetDefinitionOf: aClass.
 	sources isNil ifFalse: [sources removeKey: aClass ifAbsent: [nil]. sources removeKey: aClass class ifAbsent: [nil]].
 	organizations isNil ifFalse: [organizations removeKey: aClass ifAbsent: [nil]. organizations removeKey: aClass class ifAbsent: [nil]].
+	packages isNil ifFalse: [packages removeKey: aClass ifAbsent: [nil]. packages removeKey: aClass class ifAbsent: [nil]].
+	authors isNil ifFalse: [authors removeKey: aClass ifAbsent: [nil]. authors removeKey: aClass class ifAbsent: [nil]].
 	undeclared isNil ifFalse: [undeclared removeKey: aClass ifAbsent: [nil]].
 	classNames := nil
 ]
@@ -391,45 +477,53 @@ Smalltalk class >> noteSource: aString of: aCompiledMethod [
 
 { #category : #sources }
 Smalltalk class >> recordDefinitions: anArray [
-	"The image build hands every class definition over, superclasses first (module 8e): the name, the superclass, the instance variables, the class-side instance variables, the category, the format kind and the comment, a line each (the comment last; names separated by blanks)."
+	"The image build hands every class definition over, superclasses first (module 8e): the name, the superclass, the instance variables, the class-side instance variables, the category, the format kind, the package (module 9b) and the comment, a line each (the comment last; names separated by blanks)."
 	| lf |
 	lf := String with: Character lf.
 	definitions := IdentityDictionary new.
 	anArray do: [:s | | fields start cls |
 		fields := OrderedCollection new.
 		start := 1.
-		6 timesRepeat: [ | j |
+		7 timesRepeat: [ | j |
 			j := s indexOfSubstring: lf startingAt: start.
 			fields add: (s copyFrom: start to: j - 1).
 			start := j + 1].
 		fields add: (s copyFrom: start to: s byteSize).
 		cls := self at: (fields at: 1) asSymbol.
-		definitions at: cls put: (ClassDefinition
+		definitions at: cls put: ((ClassDefinition
 			instVarNames: ((fields at: 3) substrings collect: [:n | n asSymbol])
 			classInstVarNames: ((fields at: 4) substrings collect: [:n | n asSymbol])
 			category: (fields at: 5) asSymbol
 			kind: (fields at: 6) asSymbol
-			comment: (fields at: 7))]
+			comment: (fields at: 8))
+				package: ((fields at: 7) isEmpty ifTrue: [nil] ifFalse: [fields at: 7]);
+				yourself)]
 ]
 
 { #category : #sources }
 Smalltalk class >> recordSources: anArray [
-	"The image build hands every method's source over: 'Class[ class]', the selector, the category and the source, a line each (the source last)."
+	"The image build hands every method's source over: 'Class[ class]', the selector, the category, the package (module 9b: when it is not the class's, else empty), the author (empty when none) and the source, a line each (the source last)."
 	| lf |
 	lf := String with: Character lf.
-	anArray do: [:s | | i j k spec sel cls m cat |
+	anArray do: [:s | | i j k p a spec sel cls m cat pkg author |
 		i := s indexOf: Character lf.
 		j := s indexOfSubstring: lf startingAt: i + 1.
 		k := s indexOfSubstring: lf startingAt: j + 1.
+		p := s indexOfSubstring: lf startingAt: k + 1.
+		a := s indexOfSubstring: lf startingAt: p + 1.
 		spec := s copyFrom: 1 to: i - 1.
 		sel := (s copyFrom: i + 1 to: j - 1) asSymbol.
 		cat := s copyFrom: j + 1 to: k - 1.
+		pkg := s copyFrom: k + 1 to: p - 1.
+		author := s copyFrom: p + 1 to: a - 1.
 		cls := (spec endsWith: ' class')
 			ifTrue: [(self at: (spec copyFrom: 1 to: spec byteSize - 6) asSymbol) class]
 			ifFalse: [self at: spec asSymbol].
 		m := cls compiledMethodAt: sel.
-		self noteSource: (s copyFrom: k + 1 to: s byteSize) of: m.
-		cat isEmpty ifFalse: [self noteCategory: cat asSymbol of: sel in: cls]]
+		self noteSource: (s copyFrom: a + 1 to: s byteSize) of: m.
+		cat isEmpty ifFalse: [self noteCategory: cat asSymbol of: sel in: cls].
+		pkg isEmpty ifFalse: [self notePackage: pkg of: sel in: cls].
+		author isEmpty ifFalse: [self noteAuthor: author of: sel in: cls]]
 ]
 
 { #category : #sources }

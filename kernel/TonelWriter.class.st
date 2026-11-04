@@ -1,4 +1,4 @@
-"The image's classes as Tonel files (module 8e), in the canonical form kernel/ is written in: the class comment (quotes doubled), the class definition with the keys #name, #superclass, #instVars, #classVars, #classInstVars (each only when not empty), #category and #type (only when the format kind is not the one the superclass's gives), a tab before each key and two before each name; then the methods, instance side before class side, grouped by category with the categories sorted, the selectors sorted within each, each one as `{ #category : ... }` on its line and `Class >> pattern [body]` where pattern and body are the recorded source split after the message pattern. A body that does not start on a line of its own is put on one, indented by a tab; anything else of the source is written as recorded. Everything is in the class's file: the image does not record which methods came from an Extension."
+"The image's classes as Tonel files (module 8e), in the canonical form kernel/ is written in: the class comment (quotes doubled), the class definition with the keys #name, #superclass, #instVars, #classVars, #classInstVars (each only when not empty), #category and #type (only when the format kind is not the one the superclass's gives), a tab before each key and two before each name; then the methods, instance side before class side, grouped by category with the categories sorted, the selectors sorted within each, each one as `{ #category : ... }` on its line and `Class >> pattern [body]` where pattern and body are the recorded source split after the message pattern. A body that does not start on a line of its own is put on one, indented by a tab; anything else of the source is written as recorded. A method of another package than its class's is written in that package's <Class>.extension.st, `Extension { #name : ... }` and the methods (module 9b), and a method a development session made carries its author in the method's metadata, `{ #category : ..., #author : ... }`."
 Class {
 	#name : #TonelWriter,
 	#superclass : #Object,
@@ -6,13 +6,34 @@ Class {
 }
 
 { #category : #files }
+TonelWriter class >> fileNameOf: aClass package: aName [
+	"<Name>.class.st when aClass belongs to the package, else <Name>.extension.st (module 9b)."
+	^ (Smalltalk packageOf: aClass) = aName
+		ifTrue: [aClass name , '.class.st']
+		ifFalse: [aClass name , '.extension.st']
+]
+
+{ #category : #files }
 TonelWriter class >> write: aClass into: aDirectory [
 	"Write aClass's file, <Name>.class.st, into aDirectory (a path under the directory the VM was opened with; '' for that directory itself)."
-	| path |
-	path := aDirectory isEmpty ifTrue: [aClass name , '.class.st'] ifFalse: [aDirectory , '/' , aClass name , '.class.st'].
-	(Smalltalk primWriteFile: path contents: (self sourceOf: aClass)) == true
+	^ self write: aClass package: (Smalltalk packageOf: aClass) into: aDirectory
+]
+
+{ #category : #files }
+TonelWriter class >> write: aClass package: aName into: aDirectory [
+	"Write aClass's file for the package aName into aDirectory: its class file when it belongs to the package, else the package's extension file of it."
+	| name path |
+	name := self fileNameOf: aClass package: aName.
+	path := aDirectory isEmpty ifTrue: [name] ifFalse: [aDirectory , '/' , name].
+	(Smalltalk primWriteFile: path contents: (self sourceOf: aClass package: aName)) == true
 		ifFalse: [^ self error: 'cannot write ' , path].
 	^ path
+]
+
+{ #category : #writing }
+TonelWriter class >> hasMethodsOf: aClass package: aName [
+	^ (Array with: aClass with: aClass class) anySatisfy: [:b |
+		b selectors anySatisfy: [:sel | (Smalltalk packageOfSelector: sel in: b) = aName]]
 ]
 
 { #category : #writing }
@@ -51,10 +72,11 @@ TonelWriter class >> list: aKey of: names [
 
 { #category : #writing }
 TonelWriter class >> method: aSelector in: aBehavior category: aCategory [
-	| lf src end pattern body |
+	| lf src end pattern body author |
 	lf := String lf.
 	src := Smalltalk sourceOf: (aBehavior compiledMethodAt: aSelector).
 	src isNil ifTrue: [^ self error: aBehavior name , '>>' , aSelector , ' has no source'].
+	author := Smalltalk authorOfSelector: aSelector in: aBehavior.
 	end := Scanner patternEndIn: src.
 	pattern := src copyFrom: 1 to: end.
 	body := src copyFrom: end + 1 to: src byteSize.
@@ -63,28 +85,42 @@ TonelWriter class >> method: aSelector in: aBehavior category: aCategory [
 			(body beginsWith: lf) ifFalse: [body := lf , (String tab) , (self withoutLeadingBlanks: body)].
 			(body endsWith: lf) ifFalse: [body := body , lf]]
 		ifFalse: [body := lf , (String tab) , body trimmed , lf].
-	^ lf , '{ #category : ' , (self ston: aCategory) , ' }' , lf
+	^ lf , '{ #category : ' , (self ston: aCategory) , (author ifNil: [''] ifNotNil: [:a | ', #author : ' , (self ston: a)]) , ' }' , lf
 		, aBehavior theNonMetaClass name , (aBehavior isMeta ifTrue: [' class'] ifFalse: ['']) , ' >> ' , pattern , ' [' , body , ']' , lf
 ]
 
 { #category : #writing }
 TonelWriter class >> methodsOf: aClass [
-	"Each method's text (a line break, its category, its definition), instance side first, by category, by selector."
+	^ self methodsOf: aClass package: (Smalltalk packageOf: aClass)
+]
+
+{ #category : #writing }
+TonelWriter class >> methodsOf: aClass package: aName [
+	"Each method's text (a line break, its category, its definition) of the package aName, instance side first, by category, by selector."
 	| out |
 	out := OrderedCollection new.
 	(Array with: aClass with: aClass class) do: [:b | | org |
 		org := b organization.
 		(org keys asArray sort: [:x :y | x <= y]) do: [:cat |
-			(org at: cat) do: [:sel | out add: (self method: sel in: b category: cat)]]].
+			(org at: cat) do: [:sel |
+				(Smalltalk packageOfSelector: sel in: b) = aName ifTrue: [out add: (self method: sel in: b category: cat)]]]].
 	^ out
 ]
 
 { #category : #writing }
 TonelWriter class >> sourceOf: aClass [
 	"aClass's Tonel file, a String."
+	^ self sourceOf: aClass package: (Smalltalk packageOf: aClass)
+]
+
+{ #category : #writing }
+TonelWriter class >> sourceOf: aClass package: aName [
+	"The package aName's file of aClass: the class file when aClass belongs to it, else its Extension (module 9b), with the package's methods only."
 	| out |
-	out := self headerOf: aClass.
-	(self methodsOf: aClass) do: [:m | out := out , m].
+	out := (Smalltalk packageOf: aClass) = aName
+		ifTrue: [self headerOf: aClass]
+		ifFalse: ['Extension { #name : ' , (self ston: aClass name) , ' }' , String lf].
+	(self methodsOf: aClass package: aName) do: [:m | out := out , m].
 	^ out
 ]
 

@@ -9,7 +9,8 @@ Class {
 		'seq',
 		'labelCounter',
 		'doit',
-		'pendingBindings'
+		'pendingBindings',
+		'scopes'
 	],
 	#category : #'Kernel-Compiler'
 }
@@ -45,6 +46,17 @@ Compiler >> nextSeq [
 { #category : #accessing }
 Compiler >> pendingBindings: aDictionaryOrNil [
 	pendingBindings := aDictionaryOrNil
+]
+
+{ #category : #accessing }
+Compiler >> recordScopes [
+	"Keep each compiled method's and block's scope (module 9b: the debugger's variable names)."
+	scopes := IdentityDictionary new
+]
+
+{ #category : #accessing }
+Compiler >> scopes [
+	^ scopes
 ]
 
 { #category : #accessing }
@@ -232,7 +244,7 @@ Compiler >> resolve: aNode in: aScope [
 { #category : #compiling }
 Compiler >> compile: aString [
 	"The CompiledCode of a method's source in theClass."
-	| tree scope primitive flags pragmas e returned r |
+	| tree scope primitive flags pragmas e returned r code |
 	tree := Parser parse: aString.
 	scope := CompilerScope parent: nil real: true seq: self nextSeq.
 	tree arguments do: [:a |
@@ -268,9 +280,11 @@ Compiler >> compile: aString [
 	returned ifFalse: [self emit: e op: #returnSelf].
 	r := (BytecodeGenerator new setLines: e) assembleWithExtraLiterals: pragmas.
 	(r at: 4) ifTrue: [flags := flags bitOr: 16].
-	^ CompiledCode new
+	code := CompiledCode new
 		setSelector: tree selector bytecodes: r first literals: (r at: 2) numArgs: tree arguments size
-		numTemps: scope tempCount maxStack: (r at: 3) primitive: primitive flags: flags numCopied: 0
+		numTemps: scope tempCount maxStack: (r at: 3) primitive: primitive flags: flags numCopied: 0.
+	scopes ifNotNil: [:d | d at: code put: scope].
+	^ code
 ]
 
 { #category : #generation }
@@ -415,6 +429,7 @@ Compiler >> genClosure: aNode in: r on: e [
 						self gen: st in: s on: body value: last.
 						last ifTrue: [self emit: body op: #blockReturn]]]].
 	code := self assembleBlock: body scope: s.
+	scopes ifNotNil: [:d | d at: code put: s].
 	s copied do: [:item |
 		(item isKindOf: CompilerScope)
 			ifTrue: [self emit: e op: #pushTemp a: (item real == r ifTrue: [item vectorTemp] ifFalse: [r copiedIndex: item])]
@@ -651,6 +666,78 @@ Compiler class >> compile: aString in: aClass instanceVariableNames: anArray bin
 { #category : #accessing }
 Compiler class >> inlinedSelectors [
 	^ #(#ifTrue: #ifFalse: #and: #or: #ifNil: #timesRepeat: #ifTrue:ifFalse: #ifFalse:ifTrue: #ifNotNil: #ifNil:ifNotNil: #ifNotNil:ifNil: #whileTrue: #whileFalse: #whileTrue #whileFalse #repeat #to:do: #to:by:do:)
+]
+
+{ #category : #debugging }
+Compiler class >> code: aCompiledCode matching: aCompiledMethod find: aTarget [
+	"The CompiledCode in aCompiledCode's tree that stands where aTarget stands in aCompiledMethod's (block methods are literals in the same places in both), or nil."
+	aCompiledMethod == aTarget ifTrue: [^ aCompiledCode].
+	aCompiledCode literals with: aCompiledMethod literals do: [:c :m |
+		((c isKindOf: CompiledCode) and: [m isCompiledMethod]) ifTrue: [
+			(self code: c matching: m find: aTarget) ifNotNil: [:found | ^ found]]].
+	^ nil
+]
+
+{ #category : #debugging }
+Compiler class >> evaluate: aString in: aContext [
+	"The value of the statements aString holds, run once in aContext (module 9b, the debugger's evaluate): compiled as a method of the Context's method's class whose temporaries are the frame's named variables (for a block's frame, its home method's frame's too, when that frame is on the stack below), read from the frames before the statements and written back after them, so the statements read and assign the frame's arguments and temporaries; self is the frame's receiver. aContext must be a live frame of the active Process."
+	| vars contexts src method cls lf |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: aContext receiver class selector: nil; signal].
+	contexts := OrderedCollection with: aContext.
+	vars := (self frameVariablesOf: aContext method) collect: [:v | v , #(1)].
+	aContext method isBlockMethod ifTrue: [
+		(self homeContextOf: aContext) ifNotNil: [:home |
+			contexts add: home.
+			(self frameVariablesOf: home method) do: [:v |
+				(vars anySatisfy: [:w | w first = v first]) ifFalse: [vars := vars , (Array with: v , #(2))]]]].
+	lf := String lf.
+	src := WriteStream on: String new.
+	src nextPutAll: 'doItIn: thisDebuggedContexts'; nextPutAll: lf; nextPutAll: '| '.
+	vars do: [:v | src nextPutAll: v first; nextPutAll: ' '].
+	src nextPutAll: '|'; nextPutAll: lf.
+	vars do: [:v |
+		src nextPutAll: v first; nextPutAll: ' := ((thisDebuggedContexts at: '; print: (v at: 4); nextPutAll: ') tempAt: '; print: (v at: 2); nextPutAll: ')'.
+		(v at: 3) ifNotNil: [:slot | src nextPutAll: ' ifNotNil: [:vector | vector at: '; print: slot; nextPutAll: ']'].
+		src nextPutAll: '.'; nextPutAll: lf].
+	src nextPutAll: '^ [['; nextPutAll: lf; nextPutAll: aString; nextPutAll: lf; nextPutAll: '] value] ensure: ['.
+	vars do: [:v |
+		(v at: 3)
+			ifNil: [src nextPutAll: '(thisDebuggedContexts at: '; print: (v at: 4); nextPutAll: ') tempAt: '; print: (v at: 2); nextPutAll: ' put: '; nextPutAll: v first]
+			ifNotNil: [:slot | src nextPutAll: '((thisDebuggedContexts at: '; print: (v at: 4); nextPutAll: ') tempAt: '; print: (v at: 2); nextPutAll: ') ifNotNil: [:vector | vector at: '; print: slot; nextPutAll: ' put: '; nextPutAll: v first; nextPutAll: ']'].
+		src nextPutAll: '.'; nextPutAll: lf].
+	src nextPutAll: ']'.
+	cls := aContext method methodClass.
+	method := (self compile: src contents in: cls) makeMethodIn: cls.
+	^ method valueWithReceiver: aContext receiver arguments: (Array with: contexts asArray)
+]
+
+{ #category : #debugging }
+Compiler class >> frameVariablesOf: aCompiledMethod [
+	"The named variables of a frame of aCompiledMethod (a method or a block method), each {name. frame index (tempAt:). index in the temp vector held there, or nil}, from compiling its home method's source again with the scopes kept (module 9b). Empty when there is no source."
+	| home src c code target |
+	home := aCompiledMethod homeMethod.
+	home isNil ifTrue: [^ #()].
+	src := Smalltalk sourceOf: home.
+	src isNil ifTrue: [^ #()].
+	c := self new setClass: home methodClass.
+	c recordScopes.
+	code := [c compile: src] on: Error do: [:e | ^ #()].
+	target := self code: code matching: home find: aCompiledMethod.
+	target isNil ifTrue: [^ #()].
+	^ ((c scopes at: target ifAbsent: [^ #()]) frameVariables)
+]
+
+{ #category : #debugging }
+Compiler class >> homeContextOf: aBlockContext [
+	"The live frame of the method a block frame's closure was made in: its home Context when the closure has one, else the nearest frame below running the block's home method with the same receiver."
+	| home ctx |
+	(aBlockContext closure ifNotNil: [:c | c home]) ifNotNil: [:h | h isDead ifFalse: [^ h]].
+	home := aBlockContext method homeMethod.
+	ctx := aBlockContext sender.
+	[ctx notNil] whileTrue: [
+		(ctx method == home and: [ctx receiver == aBlockContext receiver]) ifTrue: [^ ctx].
+		ctx := ctx sender].
+	^ nil
 ]
 
 { #category : #evaluating }

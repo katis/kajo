@@ -204,9 +204,21 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
 private func primInstallMethod(_ m: Machine, _ c: PrimitiveCall, remove: Bool) -> Oop {
     let om = m.om
     // Module 8d: never in a release image, never into a sealed class
-    // (`installTarget`).
-    guard c.argc == (remove ? 1 : 2), c.arg0.isObject, om.classIndex(of: c.arg0) == WellKnown.symbol,
-          let ci = installTarget(m, c.receiver) else { return .none }
+    // (`installTarget`); module 9b: an extension of a sealed class when the
+    // method can do nothing a method of any other class could not
+    // (`sealedExtensionProblem`), the refusal a String naming why.
+    guard c.argc == (remove ? 1 : 2), c.arg0.isObject, om.classIndex(of: c.arg0) == WellKnown.symbol else { return .none }
+    var target = installTarget(m, c.receiver)
+    if target == nil, let ci = sealedTarget(m, c.receiver) {
+        let subject = remove ? lookupInDictionary(m, c.receiver, c.arg0) : c.arg1
+        guard let subject else { return .none }
+        if let why = sealedExtensionProblem(om, subject) {
+            unsafe m.state.pointee.counters.methodsRefused &+= 1
+            return m.newString(Array("\(remove ? "removing" : "installing") \(m.text(c.arg0) ?? "?") \(remove ? "from" : "into") a sealed class: \(why)".utf8))
+        }
+        target = ci
+    }
+    guard let ci = target else { return .none }
     if !remove {
         guard c.arg1.isObject, om.classIndex(of: c.arg1) == WellKnown.method,
               om.load(c.arg1, MethodLayout.methodClass) == c.receiver, om.load(c.arg1, MethodLayout.selector) == c.arg0,
@@ -226,6 +238,15 @@ private func primInstallMethod(_ m: Machine, _ c: PrimitiveCall, remove: Bool) -
     m.flushCache()
     unsafe m.state.pointee.counters.methodsInstalled &+= 1
     return ok ? c.receiver : .none
+}
+
+/// The method `sel` names in `cls`'s own dictionary, or nil.
+private func lookupInDictionary(_ m: Machine, _ cls: Oop, _ sel: Oop) -> Oop? {
+    let om = m.om
+    let d = om.load(cls, ClassLayout.methodDict)
+    guard d != m.nilObject, d.isObject else { return nil }
+    for i in 0..<(Int(om.count(of: d)) / 2) where om.load(d, 2 * i) == sel { return om.load(d, 2 * i + 1) }
+    return nil
 }
 
 /// A new method dictionary with `sel` mapped to `method` (or removed),

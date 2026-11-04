@@ -31,6 +31,10 @@ enum FrameMarker {
     /// (`cannotReturn:`, `aboutToReturn:through:`): the result is returned
     /// from the caller (the block) as well.
     static let cascade: Int64 = 2
+    /// Module 9b: the frame a stepped Process steps (primitive 158): when it
+    /// returns while its Process still steps it, the Process stops in the
+    /// caller (`stepAfterReturn`). Otherwise the value returns as usual.
+    static let step: Int64 = 3
 }
 
 /// A frame's receiver index from its header index: the header follows the
@@ -188,6 +192,7 @@ func returnSlow(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutab
     unsafe hdr[Frame.context] = Frame.emptyContext
     let r = unsafe plainReturn(s, om, regsAt(s, pc, sp, fp, hdr), v)
     if unsafe marker == 0 || s.pointee.exit != .running { return r }
+    if marker == FrameMarker.step { return unsafe stepAfterReturn(s, r, returning: hdr - base) }
     if marker == FrameMarker.discard {
         var out = r
         unsafe out.sp -= 1

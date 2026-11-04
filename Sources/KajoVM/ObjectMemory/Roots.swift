@@ -79,6 +79,32 @@ extension ObjectMemory {
 
     var classCount: Int { unsafe gc.pointee.classTable.count }
 
+    /// Module 9b: an index that names no class (a freed obsolete class's):
+    /// no class object, format 0. The loader accepts one; no object may
+    /// carry it.
+    func isClassHole(_ index: UInt64) -> Bool {
+        guard index != 0, index < UInt64(classCount), classOop(index) == .none else { return false }
+        return unsafe gc.pointee.classFormats[Int(index)] == 0
+    }
+
+    /// Module 9b: make `index` a hole. World stopped.
+    func makeClassHole(_ index: UInt64) {
+        precondition(index != 0)
+        unsafe gc.pointee.classTable[Int(index)] = 0
+        unsafe gc.pointee.classFormats[Int(index)] = 0
+    }
+
+    /// Module 9b: the lowest pair of consecutive holes, a class's and its
+    /// metaclass's indices for a new class. World stopped.
+    func freedClassPair() -> UInt64? {
+        var i: UInt64 = 1
+        while i + 1 < UInt64(classCount) {
+            if isClassHole(i) && isClassHole(i + 1) { return i }
+            i += 1
+        }
+        return nil
+    }
+
     func isRegisteredClass(_ index: UInt64) -> Bool {
         index != 0 && index < UInt64(classCount)
     }

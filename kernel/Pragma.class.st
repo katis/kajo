@@ -75,9 +75,9 @@ Pragma class >> allNamed: aSymbol in: aClass [
 
 { #category : #accessing }
 Pragma class >> consumesPragmas [
-	<consumesPragmas: #(#mainThread #devProtocol)>
-	"Main-thread affinity (ADR 0004) and the development protocol: declared here so the compiler does not warn; nothing reads them in 8b."
-	^ #(#mainThread #devProtocol)
+	<consumesPragmas: #(#mainThread #devProtocol #debuggable)>
+	"Main-thread affinity (ADR 0004), the development protocol's requests (module 9b: DevProtocol reads them) and the requests whose errors stop for the debugger: declared here so the compiler does not warn."
+	^ #(#mainThread #devProtocol #debuggable)
 ]
 
 { #category : #accessing }

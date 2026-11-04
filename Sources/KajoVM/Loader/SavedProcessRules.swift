@@ -349,7 +349,7 @@ func verifySavedProcesses(_ om: ObjectMemory, special: Oop, nilObj: Oop, trueObj
                 guard namedContexts.updateValue(p, forKey: cw) == nil else { throw fail("\(what): its Context names another frame") }
                 marker = mk
             }
-            guard marker == 0 || marker == FrameMarker.discard || marker == FrameMarker.cascade else {
+            guard marker == 0 || marker == FrameMarker.discard || marker == FrameMarker.cascade || marker == FrameMarker.step else {
                 throw fail("\(what): return marker \(marker)")
             }
             // This frame's pc and operand depth against the traced ones.
