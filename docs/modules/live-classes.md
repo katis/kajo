@@ -398,7 +398,13 @@ directory, a path that is not a String. No directory is made, nothing is
 listed or removed: nothing else of a file system
 (`LiveClassTests>>theFilePrimitivesStayInTheirDirectory`: eleven paths,
 among them a symbolic link inside the directory pointing out of it, and a
-release image).
+release image). Since the follow-up `docs/modules/vm-teardown.md` a last
+component that exists must resolve under the directory too (a link to a
+file outside, or a dangling one, is refused for both primitives), the read
+opens the resolved path with `O_NOFOLLOW`, a write replaces a link inside
+the directory rather than following it, and the write's temporary file is
+created exclusively without following a link; the test gained those
+links.
 
 ## Fuzzing the trust boundary
 
@@ -634,11 +640,9 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
 - Extensions in the written files; normalizing the indentation of
   multi-line sources.
 - Directories and listings in the file primitives; files larger than one
-  String. A symbolic link as the last path component: the parent is
-  resolved through links and must stay under the directory, but a link
-  named by the last component is followed by the read primitive (a write
-  replaces the link itself), so a link planted in the directory can be
-  read through.
+  String. (A symbolic link as the last path component, which the read
+  primitive followed out of the directory, is closed by the follow-up
+  `docs/modules/vm-teardown.md`.)
 - A reshape while a frame runs a method of the class (refused by rule).
 - Non-class globals (8b, 8d).
 - `Process>>terminate` running unwind blocks; a frame restart (8b's; 8d's
@@ -654,8 +658,10 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
    and the VM checks the new chain for cycles; not built within this
    module.
 2. **The file primitives' directory rule for the shells**: one directory
-   the host opens, paths relative to it, no way out through links, no
-   directory made. On iOS the natural directory is the app's container
+   the host opens, paths relative to it, no way out through a link in
+   any component (the parent resolved under the directory, an existing
+   last component resolved under it too, the read opened with
+   `O_NOFOLLOW`; `docs/modules/vm-teardown.md`), no directory made. On iOS the natural directory is the app's container
    (or a folder the user picks, whose access is security-scoped); on
    macOS the project directory. Is one directory per VM right, or should
    the host open several (sources, images, exports)?
@@ -675,7 +681,11 @@ to `liveClassPrimitive`, out of line), and `VMConfig` gained a String
    existing test save through the VM's own save or after a VM without
    nurseries, so nothing in the product reaches it; the tests here run
    without nurseries for that reason. Worth a look by whoever next touches
-   the VM's teardown.
+   the VM's teardown. **Closed** by the follow-up
+   `docs/modules/vm-teardown.md`: `VM.destroy` runs a final promote-all
+   stop and hands every nursery stash's entries back, so the image is whole
+   when the VM ends; `answerOf` and `runSmalltalk` run the default
+   configuration now.
 
 ## Gates
 

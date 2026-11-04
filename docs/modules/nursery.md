@@ -271,6 +271,17 @@ compact, become, forward, reshape, snapshot) first runs a **promote-all**
 scavenge in its own stop, through a hook module 1 calls
 (`beforeOldSpaceOperation`), with the operation's roots or the stop's.
 
+**The VM's end** (follow-up `docs/modules/vm-teardown.md`): `VM.destroy`
+first runs one more stop whose work is the promote-all hook above, with
+the stop's roots and every VM thread joined: marking settled, pending
+blocks and deferred frees released, every live young object promoted,
+every nursery empty (a precondition, or a trap when old space cannot take
+them). `NurseryShared.destroy` then gives every entry of every stash back
+to module 1's pool as runs and `releaseNurseryRegion` gives the region
+back, so the image the host holds is whole (its verifiers pass,
+`Image.saveImage` works) and another VM can run over it. About 5 µs with
+the nurseries empty and 1.1 ms for 2.3 MB of live young objects (release).
+
 ## Weak slots, ephemerons and formats (ADR 0009 sections 1 and 6, v0)
 
 - **Format word**: the class table has a format word beside it

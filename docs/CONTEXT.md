@@ -180,6 +180,10 @@ as they are understood.
 - **Entry stash**: an array of free entries owned by one nursery; young
   objects take entries from it in order, and the entry sweep returns the
   dead ones to it.
+- **Final collection**: the stop `VM.destroy` runs before releasing
+  anything: the promote-all hook with every VM thread joined, after which
+  nothing is young and every stash's entries go back to the pool, so the
+  image the host holds is whole (docs/modules/vm-teardown.md).
 - **Weak slot**: an indexed slot of an object whose class format is weak:
   not traced; nil once its referent is reclaimed.
 - **Ephemeron**: an object whose slot 0 (the key) is traced only if the key
