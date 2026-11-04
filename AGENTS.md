@@ -553,6 +553,20 @@ Safety:
    the kernel turns into a CompileError. Skipping the verifier there made
    a mutated method run and trap in the object memory; the seeded
    mutation test and the make-and-run fuzz mode exist to catch that.
+ - When a reserve runs out, suspect the fallback before the sizing. The
+   oracle's promotion reserve was sized right; its full collection was a
+   mark-sweep that frees only empty blocks, and a load keeping one object
+   in twenty per block left old space past its limit for good. A fallback
+   that cannot change the outcome is no fallback; it compacts now.
+ - A trap that only the oracle mode reaches is still a trap: the
+   concurrent modes avoided the exhaustion by sweeping lazily, so no
+   headless matrix saw it until the shells ran the ring under every mode.
+   The random programs now have a configuration with no reserve so the
+   oracle is exercised where it is weakest.
+ - A recursion limit is set from a measurement on the smallest stack the
+   code runs on, per construct, in a debug build: blocks cost 9.5 KB per
+   level there, so 256 levels needed 2.4 MB and a 512 KB test thread died
+   at about 100. Chains became loops; the rest is bounded at 32.
 
 ## Verification
 
@@ -650,8 +664,23 @@ mini's 120 Hz display: 0 of 1200 frames missed in every scenario but the
 ring under the stop-the-world oracle, event latency p99 2 to 3 ms, a hog
 on main preempted 2414 times per 10 s with 0 frames missed; the iPhone 13
 Pro runs wait for the owner to sign Xcode in to the team, the scripts run
-them unchanged; the stop-the-world scavenge traps when its promotion
-reserve runs out, the ring at 600 MiB, an open finding). ADRs
+them unchanged; the stop-the-world scavenge trapped when its promotion
+reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
+follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
+not the reserve's size, a mark-sweep that could not bring old space under
+its soft limit, so a full collection now compacts when the sweep leaves
+old space past the limit, a stop-the-world scavenge keeps in place what
+finds no block and requests the full collection, a module 7 young
+collection opens only with its promotion room promised under the pools
+lock and otherwise stops the world for module 4's scavenge, become,
+reshape and the save refuse with a heap full of live data, two
+random-program configurations run with no reserve; the ring at 600 MiB
+under the oracle now finishes every run, missing 143 of 1200 frames to
+compacting full collections of 250 ms where the concurrent modes miss
+none; the same follow-up walks message chains by loops in the bootstrap
+compiler, lowers the nesting limit to 32 in both compilers after
+measuring 4 to 9.5 KB of debug stack per level, and runs the syntax
+fuzzer on a 512 KB thread; its two open questions await the owner). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on

@@ -1,7 +1,7 @@
 # Build plan: from the experiments to `Sources/KajoVM`
 
 Status: started 2026-11-02; modules 1 to 4 built the same day, modules 5 to 7 and 8a to 8c the next two days, 9a (the Mac part) on 2026-11-04; the relocation, young-collection and save-hold
-models (`docs/models/`) are checked. A follow-up for two latent crashes (the stop-the-world oracle's promotion reserve, the parser's depth against a thread stack) is briefed in `docs/modules/reserve-and-depth.md`, started 2026-11-04. A step or two at a time; the order below is the
+models (`docs/models/`) are checked. A follow-up for two latent crashes (the stop-the-world oracle's promotion reserve, the parser's depth against a thread stack) was built 2026-11-04: `docs/modules/reserve-and-depth.md`, with two open questions for the owner. A step or two at a time; the order below is the
 current best guess, revised as modules land. `docs/VERIFICATION.md` says how
 each module is verified; this file says what is built and in what order.
 
