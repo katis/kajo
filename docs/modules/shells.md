@@ -671,7 +671,8 @@ call, Strings) are built inside `shellPrimitive`, out of line.
    primitives or views that live until closed?
 3. The stop-the-world scavenge traps when its promotion reserve runs out
    (the ring at 600 MiB). Should the oracle mode fall back to a full
-   collection and count it, as the concurrent modes do?
+   collection and count it, as the concurrent modes do? **Owner
+   (2026-11-04): yes, fix it as a follow-up** (after module 8d).
 4. The macOS shell wakes the display and keeps it awake while measuring
    (a user-activity and a display-sleep assertion, nothing persistent). Is
    that acceptable on the mini, or should measurements wait for a woken
