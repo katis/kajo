@@ -11,11 +11,11 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress everyblock,everycycle] [--reloc-threshold 0.5]
                 [--reloc-cap 0.5] [--sample-ms N] [--young stw|local|offload]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
-                [--snapshot-at N --snapshot-to out.img]
+                [--snapshot-at N --snapshot-to out.img] [--sources dir]
        kajo run <image.img> [the options above]
        kajo build-image [-o kernel.img] [--no-init] [--release] [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
-       kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB]
+       kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
        kajo version
 
 run: loads the kasm files in order into a fresh image (or loads an image),
@@ -25,7 +25,10 @@ answers, the run time, the counters, per-worker QoS and the stops.
 --snapshot-at N saves the image with every Process in it at the run's N-th
 slow poll to --snapshot-to. An image with saved Processes is resumed
 instead: its Processes run until nothing can happen without the host, and
-the checksum is the sum of what those that ended answered.
+the checksum is the sum of what those that ended answered. --sources dir
+opens a directory to Smalltalk's file primitives (Smalltalk writeTonel:,
+readTonelFile:): they read and write under it and nowhere else; without
+it they fail.
 
 build-image: compiles Tonel class files (a directory's *.st) with the
 bootstrap compiler into a verified image. --release marks it a release
@@ -92,6 +95,7 @@ case "run":
         case "--main-work": options.mainWork = Int(value()) ?? 0
         case "--snapshot-at": options.snapshotAt = Int(value()) ?? 0
         case "--snapshot-to": options.snapshotTo = value()
+        case "--sources": options.sourcesDirectory = value()
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }

@@ -60,3 +60,9 @@ Class >> removeClassVarNamed: aString [
 	ClassBuilder redefine: self instanceVariableNames: self instVarNames classVariableNames: (self classVarNames reject: [:n | n = aString asSymbol])
 		classInstanceVariableNames: self class instVarNames
 ]
+
+{ #category : #'file out' }
+Class >> tonelSource [
+	"This class's Tonel file in the canonical form (TonelWriter, module 8e)."
+	^ TonelWriter sourceOf: self
+]

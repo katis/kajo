@@ -293,3 +293,19 @@ Scanner >> scanNumber [
 	f isFinite ifFalse: [^ self fail: 'float literal out of range'].
 	^ self token: #float value: f
 ]
+
+{ #category : #accessing }
+Scanner class >> patternEndIn: aString [
+	"The byte offset of the last byte of a method source's message pattern (module 8e: the Tonel writer puts the body's bracket after it)."
+	| s k end |
+	s := self on: aString.
+	k := s next.
+	k == #identifier ifTrue: [^ s stop - 1].
+	(k == #binary or: [k == #bar]) ifTrue: [s next. ^ s stop - 1].
+	end := 0.
+	[k == #keyword] whileTrue: [
+		s next.
+		end := s stop - 1.
+		k := s next].
+	^ end
+]

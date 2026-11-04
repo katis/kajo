@@ -366,3 +366,38 @@ Smalltalk class >> primRemoveClass: aClass as: anObsoleteName [
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: aClass selector: nil; signal].
 	^ self error: 'the VM refused to remove ' , aClass printString
 ]
+
+{ #category : #'file out' }
+Smalltalk class >> writeTonel: aDirectory [
+	"Write every class, sealed ones too, as <Name>.class.st into aDirectory, a path under the directory the VM was opened with (kajo run --sources; '' for that directory itself). Answers how many files. Module 8e."
+	| n |
+	n := 0.
+	self allClasses do: [:c | TonelWriter write: c into: aDirectory. n := n + 1].
+	^ n
+]
+
+{ #category : #'file out' }
+Smalltalk class >> writeAllTonel [
+	"writeTonel: into the opened directory itself."
+	^ self writeTonel: ''
+]
+
+{ #category : #'file out' }
+Smalltalk class >> readTonelFile: aPath [
+	"The text of the file aPath names under the directory the VM was opened with."
+	^ (self primReadFile: aPath) ifNil: [self error: 'cannot read ' , aPath]
+]
+
+{ #category : #primitives }
+Smalltalk class >> primWriteFile: aPath contents: aString [
+	"Replace (or create) the file aPath names, a path under the directory the VM was opened with (no absolute path, no . or .. component, no way out through a link), with aString: true, or nil when refused or failed. Fails in a release image and without a directory (module 8e)."
+	<primitive: 148>
+	^ nil
+]
+
+{ #category : #primitives }
+Smalltalk class >> primReadFile: aPath [
+	"The UTF-8 text of the file aPath names under the opened directory, or nil."
+	<primitive: 149>
+	^ nil
+]

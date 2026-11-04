@@ -69,6 +69,9 @@ public enum Headless {
         /// poll of the run (0: never), to `snapshotTo`.
         public var snapshotAt = 0
         public var snapshotTo: String? = nil
+        /// Module 8e: the directory Smalltalk's file primitives may read
+        /// and write under (`--sources`); nil, they fail.
+        public var sourcesDirectory: String? = nil
 
         public init() {}
     }
@@ -265,6 +268,7 @@ public enum Headless {
         vc.young.mode = mode
         vc.young.stress = YoungStress(parsing: options.youngStress)
         vc.young.verify = options.verify
+        vc.sourcesDirectory = options.sourcesDirectory
 
         if let problem = vc.nursery.validate(workers: options.workers + 2) { return .failure(.unsupported("nursery: \(problem)")) }
         var config = ObjectMemoryConfig()

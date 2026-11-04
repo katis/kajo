@@ -25,6 +25,7 @@ func runTests(_ args: [String]) -> Never {
         case "--heap": options.heapMiB = Int(value()) ?? 0
         case "--gc": options.gc = value()
         case "--young": options.young = value()
+        case "--sources": options.sourcesDirectory = value()
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: imagePath = args[i]
         }
