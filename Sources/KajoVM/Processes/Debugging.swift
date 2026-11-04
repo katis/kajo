@@ -139,19 +139,26 @@ func interrupt(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, kind: Int) -> Bool
     guard unsafe p != w.pointee.current else { return false }
     unsafe schedLock(vm)
     let state = intSlot(om, p, ProcessLayout.state)
-    guard state != Int(ProcessState.terminated.rawValue), intSlot(om, p, ProcessLayout.pc) >= 0 else {
+    guard state != Int(ProcessState.terminated.rawValue) else {
         unsafe schedUnlock(vm)
         return false
     }
     let ri = intSlot(om, p, ProcessLayout.record)
     let r = unsafe records(vm, ri)
+    // Not started (its saved pc -1, and not running: a Process on its first
+    // slice has never written its registers back): no frame to run anything.
+    let running = unsafe r.pointee.runningOn >= 0 || state == Int(ProcessState.running.rawValue)
+    guard running || intSlot(om, p, ProcessLayout.pc) >= 0 else {
+        unsafe schedUnlock(vm)
+        return false
+    }
     if unsafe r.pointee.interrupt != 0 || r.pointee.terminateRequested {
         unsafe schedUnlock(vm)
         return true
     }
     unsafe r.pointee.interrupt = kind
     var needMain = false
-    if unsafe r.pointee.runningOn >= 0 || state == Int(ProcessState.running.rawValue) {
+    if running {
         // It leaves its worker at its next poll (`pollSlow`).
         if unsafe r.pointee.runningOn >= 0 {
             unsafe vm.shared(r.pointee.runningOn).pointee.attention.store(ri + 1, ordering: .relaxed)
