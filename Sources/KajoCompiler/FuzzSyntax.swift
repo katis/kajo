@@ -4,8 +4,10 @@ import KajoVM
 /// a Tonel class file when they start like one, else as a method's source,
 /// through the reader, the parser, the analysis, code generation, the
 /// assembler and the bytecode verifier. Every input must end in a
-/// CompileError or a verified method, never a trap. Answers whether it
-/// compiled.
+/// CompileError or a verified method, never a trap. Module 8d's mode: a
+/// method source that compiles is also made by the make primitive and run
+/// once (`FuzzEntry.makeAndRun`), so every input that compiles crosses
+/// Smalltalk's trust boundary too. Answers whether it compiled.
 public enum FuzzSyntax {
     static let context = ClassContext(className: "Object", classSide: false, instanceVariables: ["a", "b"],
                                       isClassName: { $0.first?.isUppercase == true })
@@ -23,6 +25,8 @@ public enum FuzzSyntax {
             }
             return ok
         }
-        return (try? compileMethod(bytes, file: "fuzz", in: context)) != nil
+        guard let (m, _) = try? compileMethod(bytes, file: "fuzz", in: context) else { return false }
+        FuzzEntry.makeAndRun(m)
+        return true
     }
 }

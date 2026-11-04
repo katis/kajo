@@ -229,3 +229,20 @@ import Testing
     #expect(variable == nil)
     #expect(blockScope == nil)
 }
+
+/// Module 8d: the syntax fuzzer's make-and-run mode on methods that use
+/// every construct: each is made by the make primitive (verified) and,
+/// unless it loops, runs once on the standalone interpreter.
+@Test func compiledMethodsAreMadeAndRunThroughThePrimitive() throws {
+    let sources = ["f ^ 3 + 4", "f: x ^ a := x * 2", "f ^ [:k | b := k] value: 5",
+                   "f ^ #(1 $a 'b' #c #(2 3) #[1 2]) , {1.5. 1.0e300. 123456789012345678901234567890. 'x'}",
+                   "f <tag: 1> <primitive: 60> ^ 0", "f | t | t := 0. #(1 2) do: [:e | t := t + e]. ^ t",
+                   "f 1 to: 3 do: [:i | a := i]. ^ a", "f ^ [:x | x > 1 ifTrue: [^ x]. 0] value: 2", "f ^ Object"]
+    for s in sources {
+        let (m, _) = try compileMethod(Array(s.utf8), file: "t", in: FuzzSyntax.context)
+        #expect(FuzzEntry.makeAndRun(m), "\(s)")
+    }
+    // A class the fuzz image does not have is refused before the primitive.
+    let (unknown, _) = try compileMethod(Array("f ^ NoSuchClass".utf8), file: "t", in: FuzzSyntax.context)
+    #expect(!FuzzEntry.makeAndRun(unknown))
+}

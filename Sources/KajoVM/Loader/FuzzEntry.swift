@@ -75,6 +75,90 @@ public enum FuzzEntry {
         return true
     }
 
+    /// Module 8d: the syntax fuzzer's make-and-run mode. A method the
+    /// bootstrap compiler compiled (for a class with instance variables a
+    /// and b), in the form the compiler in Smalltalk hands over, goes
+    /// through the make primitive (143, the trust boundary: the one
+    /// bytecode verifier on what it made), and a method it made runs once
+    /// through primitive 85 on a standalone interpreter, with 3 for every
+    /// argument. A method whose code loops (a backward jump in it or in a
+    /// block) is made but not run: the standalone interpreter has no
+    /// preemption to end it. Answers whether the method was made. A refusal
+    /// is the normal outcome of what the assembler let through (it is the
+    /// verifier's own check, so it should not happen); a trap is a finding.
+    @discardableResult
+    package static func makeAndRun(_ m: AssembledMethod) -> Bool {
+        guard let image = try? Image(memory: ObjectMemory(config())) else { return false }
+        defer { image.destroy() }
+        do {
+            try image.load([(file: "make.kasm", text: makePrelude)])
+        } catch {
+            preconditionFailure("the make prelude: \(error)")
+        }
+        guard let codeClass = image.classIndex(named: "FuzzCode"), let target = image.classIndex(named: "FuzzTarget"),
+              let (code, root) = try? image.codeObject(m, codeClass: codeClass) else { return false }
+        defer { image.om.removeRoot(root) }
+        let interp = Interpreter(image: image)
+        defer { interp.destroy() }
+        let stack = Stack(words: 1 << 14)
+        defer { stack.destroy() }
+        guard case .success(let made) = interp.run(on: stack, receiver: code, selector: "makeIn:",
+                                                   arguments: [image.om.classOop(target)]) else { return false }
+        guard made.isObject, image.om.classIndex(of: made) == WellKnown.method else {
+            precondition(made == image.nilObject || image.om.classIndex(of: made) == WellKnown.string,
+                         "the make primitive answered neither a method nor a reason")
+            return false
+        }
+        let mh = image.om.addRoot(made)
+        defer { image.om.removeRoot(mh) }
+        precondition(verifyHeapMethod(image.om, made, classIndex: target, nilObject: image.nilObject) == nil,
+                     "a made method the verifier refuses")
+        if loops(image.om, made, depth: 0) { return true }
+        guard let rcv = image.om.allocate(image.context, classIndex: target, slots: 2, fill: image.nilObject),
+              let args = image.om.allocate(image.context, classIndex: WellKnown.array, slots: m.argc,
+                                           fill: Oop(smallInteger: 3), extraRoots: [rcv]) else { return true }
+        let rh = image.om.addRoot(rcv), ah = image.om.addRoot(args)
+        defer { image.om.removeRoot(rh); image.om.removeRoot(ah) }
+        _ = interp.run(on: stack, receiver: made, selector: "valueWithReceiver:arguments:", arguments: [rcv, args])
+        image.om.retireAllContexts()
+        let issues = image.om.verifyHeap() + image.om.verifyFreeLists()
+        precondition(issues.isEmpty, "a made method's run left a bad heap: \(issues)")
+        return true
+    }
+
+    /// The make-and-run mode's image: the code class (the kernel's
+    /// CompiledCode layout), the class methods are made for, the two
+    /// primitives as methods.
+    static let makePrelude = """
+    class FuzzCode Object 9 fixed
+    class FuzzTarget Object 2 fixed
+    method FuzzCode makeIn: temps=0 prim=143
+      push_nil
+      return_top
+    end
+    method CompiledMethod valueWithReceiver:arguments: temps=0 prim=85
+      push_nil
+      return_top
+    end
+    """
+
+    /// A backward jump in the method or one of its block methods.
+    private static func loops(_ om: ObjectMemory, _ method: Oop, depth: Int) -> Bool {
+        if depth > 64 { return true }
+        let bytes = om.bytes(of: om.load(method, MethodLayout.bytecodes))
+        var off = 0
+        while off < bytes.count, let d = decodeInstruction(bytes, at: off) {
+            if d.op.isJump && d.a < 0 { return true }
+            off += d.length
+        }
+        let lits = om.load(method, MethodLayout.literals)
+        for k in 0..<Int(om.count(of: lits)) {
+            let l = om.load(lits, k)
+            if l.isObject, om.classIndex(of: l) == WellKnown.method, loops(om, l, depth: depth + 1) { return true }
+        }
+        return false
+    }
+
     /// The snapshot target's entry: an image when the bytes start with the
     /// image magic, else a module 1 snapshot.
     @discardableResult
