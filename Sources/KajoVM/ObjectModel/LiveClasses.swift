@@ -725,10 +725,11 @@ private func removeClass(_ m: Machine, _ cls: Oop, obsoleteName: Oop, roots: () 
 /// `Smalltalk primFreeObsoleteClasses`, in a stop: after a full collection,
 /// every removed class (`AnObsolete...`, cut from the hierarchy) with no
 /// instance and whose metaclass has no instance but it is taken out of the
-/// class table and a second full collection runs; a class object it freed
+/// class table (its metaclass, which nothing but the table names, stops
+/// naming it) and a second full collection runs; a class object it freed
 /// was named by nothing (no literal, Binding, frame, stack word, root), and
 /// its two indices become holes the define primitive reuses; one it kept
-/// goes back into the table. Answers how many classes were freed.
+/// goes back. Answers how many classes were freed.
 private func freeObsoleteClasses(_ m: Machine, roots: () -> [Oop]) -> Int {
     let om = m.om
     var candidates: [(index: UInt64, meta: UInt64, cls: Oop, metaObject: Oop)] = []
@@ -743,17 +744,22 @@ private func freeObsoleteClasses(_ m: Machine, roots: () -> [Oop]) -> Int {
     om.collect(extraRoots: keep)
     candidates = candidates.filter { om.allInstances(of: $0.index).isEmpty && om.allInstances(of: $0.meta) == [$0.cls] }
     if candidates.isEmpty { return 0 }
+    // The class leaves the table and its metaclass stops naming it; the
+    // metaclass stays in the table (nothing else names it: a class names
+    // its metaclass by index), so a second collection frees the class
+    // exactly when nothing else names it.
     for k in candidates {
         om.setClassOop(k.index, .none)
-        om.setClassOop(k.meta, .none)
+        m.store(k.metaObject, MetaclassLayout.thisClass, m.nilObject, .installMethod)
     }
     om.collect(extraRoots: roots())
     var freed = 0
     for k in candidates {
         if om.isUsedReference(k.cls) {
             om.setClassOop(k.index, k.cls)
-            om.setClassOop(k.meta, k.metaObject)
+            m.store(k.metaObject, MetaclassLayout.thisClass, k.cls, .installMethod)
         } else {
+            // The metaclass object is garbage from here on.
             om.makeClassHole(k.index)
             om.makeClassHole(k.meta)
             freed += 1

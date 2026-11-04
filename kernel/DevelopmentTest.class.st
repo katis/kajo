@@ -39,6 +39,24 @@ DevelopmentTest >> testAContextRunsItsSendAgain [
 ]
 
 { #category : #tests }
+DevelopmentTest >> testARemovedClassStillNamedIsKept [
+	"A removed class an object still names keeps its indices until nothing does."
+	| a index holder |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	a := Object subclass: #DevelopmentSampleA instanceVariableNames: '' classVariableNames: '' category: 'Kernel-Tests-Development'.
+	index := a classIndex.
+	Smalltalk removeClass: a.
+	holder := Array with: a.
+	a := nil.
+	Smalltalk garbageCollect.
+	self assert: (Smalltalk classAt: index) == holder first.
+	self assert: holder first isObsolete.
+	holder := nil.
+	self assert: Smalltalk garbageCollect >= 1.
+	self assert: (Smalltalk classAt: index) isNil
+]
+
+{ #category : #tests }
 DevelopmentTest >> testEvaluateInAContextReadsAndWritesItsVariables [
 	| x y r |
 	Smalltalk isReleaseImage ifTrue: [^ self].
