@@ -255,7 +255,8 @@ sequences. The test takes 11 s in a debug build (the comparison compiles
 the whole image in Smalltalk on the interpreter); it is tagged `<slow>`.
 
 The Smalltalk compiler's output is not installed: the VM has no primitive
-that makes a CompiledMethod from Smalltalk (Not done).
+that makes a CompiledMethod from Smalltalk (Not done; module 8d made it the
+live compiler, `docs/modules/kernel-live.md`).
 
 ## The image build
 
@@ -517,7 +518,9 @@ What the kernel needed:
 
 From kernel.md and ADR 0009, each with its reason:
 
-- **No class variables** (`#classVars` is refused). Shared state is
+- ~~**No class variables** (`#classVars` is refused).~~ Closed by module
+  8d (`docs/modules/kernel-live.md`): class variables as Bindings in a
+  pool the metaclass holds. Shared state is
   class-side instance variables (Transcript, Ephemeron, Smalltalk,
   PragmaIndex), which need no bindings in literal frames; class variables
   would need Association literals that are not read-only, and a rule for
@@ -538,9 +541,9 @@ From kernel.md and ADR 0009, each with its reason:
   there is no frame-restart primitive.
 - **`Process>>terminate` does not run ensure blocks** (the VM's terminate
   cuts the stack).
-- **Inlined loop bodies' captured and assigned temps are shared across
-  iterations** (one temp vector for the enclosing real scope); the loop
-  counter itself is per iteration (above).
+- ~~**Inlined loop bodies' captured and assigned temps are shared across
+  iterations**~~ Closed by module 8d (`docs/modules/kernel-live.md`): a
+  fresh temp vector per pass, Pharo's rule.
 - **`gc` events are emitted after the run**, each stamped with its pause's
   start: the stop log is read once the Processes have ended.
 - **Objects are at most one block** (module 1): an Array or
@@ -623,16 +626,17 @@ starting commit's, instruction for instruction (Measurements).
 
 - Saved Processes in images: module 8c, next (the entry point stays
   beside them).
-- A primitive that makes a CompiledMethod from the Smalltalk compiler's
-  output and installs it (the compiler compiles and compares; it does not
-  install, so there is no `Compiler evaluate:` yet).
-- Class variables; non-class globals.
+- ~~A primitive that makes a CompiledMethod from the Smalltalk compiler's
+  output and installs it~~ Closed by module 8d (`docs/modules/kernel-live.md`):
+  primitives 143 and 85, `Behavior>>compile:`, `Compiler evaluate:`.
+- ~~Class variables~~ (module 8d); non-class globals.
 - Unicode tables (classification, case mapping beyond ASCII,
   normalization, graphemes); transcendental floats.
 - The scheduler's main-thread check for `<mainThread>`; the development
   protocol.
 - `Process>>terminate` running unwind blocks; a frame restart.
-- A per-iteration temp vector for captured temps of inlined loop bodies.
+- ~~A per-iteration temp vector for captured temps of inlined loop bodies.~~
+  Closed by module 8d.
 - Compile warnings as events.
 - Out of the first image by decision: ScaledDecimal, Date and Time (a
   Temporal-style API later), Random, regular expressions, Bag,

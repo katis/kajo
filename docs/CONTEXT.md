@@ -241,6 +241,35 @@ as they are understood.
   it reads with a class-side `<consumesPragmas: #(...)>`; any other pragma
   is a compile warning.
 
+## Live compilation (module 8d)
+
+- **Loop body vector**: the temp vector an inlined loop body (`to:do:`,
+  `whileTrue:`, `timesRepeat:` and the other inlined loops) owns for its
+  captured and assigned temps, made afresh at the top of every pass, so a
+  block made in one iteration keeps that iteration's values (Pharo's
+  rule). The vector's **owner** is the nearest enclosing scope that is
+  real or a loop body; inlined conditionals own none.
+- **Class variable**: a capitalized name declared in a Tonel file's
+  `#classVars`, shared by the class, its class side and every subclass.
+- **Binding**: the kernel object (key Symbol, value) that is a class
+  variable. The **class pool**, a read-only Array of a class's Bindings,
+  sits in its metaclass; a method that names the variable holds the
+  Binding itself in its literal frame and sends it `value` or `value:`.
+- **Make** (a method): primitive 143, the kernel compiler's CompiledCode
+  made into a CompiledMethod by the VM: read in a stop, built by the code
+  the image build uses, verified by the one bytecode verifier, read-only
+  and pinned before anything else sees it. The trust boundary for code
+  from Smalltalk; a refusal is a String the kernel signals as a
+  CompileError.
+- **Doit**: source evaluated by `Compiler evaluate:`: compiled as a method
+  `DoIt` of the receiver's class answering its last statement, made, run
+  once by primitive 85 (`valueWithReceiver:arguments:`), never installed.
+- **Release image**: an image whose header's flag (format 3, word 5 bit 0)
+  forbids making, installing and removing methods from Smalltalk; set by
+  `kajo build-image --release` or `kajo seal`, never cleared, read by
+  `Smalltalk isReleaseImage`. The kernel signals **InstallForbidden**.
+- **Development image**: an image without that flag.
+
 ## Saved Processes (module 8c)
 
 - **Saved Process**: a live Process in an image: its Process object (state

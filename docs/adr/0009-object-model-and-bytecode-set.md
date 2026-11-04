@@ -4,7 +4,8 @@ Date: 2026-11-02
 Status: proposed (accepted in principle by the project owner; each section
 is revised as the module that implements it is built). Sections 2 to 11
 built in module 8a; see "Built (8a)". The kernel's parts and section 12
-built in module 8b; see "Built (8b)".
+built in module 8b; see "Built (8b)". Saved Processes in 8c, live
+compilation in 8d; see "Built (8c)" and "Built (8d)".
 
 ## Context
 
@@ -409,6 +410,41 @@ Module 8c (`docs/modules/image-processes.md`) built the owner's answer
   does. `Smalltalk snapshot:` answers false where it saved and true where
   the image resumes; Delays are re-armed by the kernel for the time they
   had left.
+
+## Built (8d, 2026-11-04)
+
+Module 8d (`docs/modules/kernel-live.md`) built the owner's three answers
+to 8b's questions:
+
+- **4** (temp vectors): Pharo's per-iteration rule. A captured and
+  assigned temp declared in an inlined loop body (both blocks of
+  `whileTrue:`/`whileFalse:`, `whileTrue`, `whileFalse`, `repeat`, the
+  block of `to:do:`, `to:by:do:`, `timesRepeat:`) lives in a vector the
+  body owns and makes at the top of every pass (`push_new_array`,
+  `store_temp` into a temp of the enclosing real scope); nested loops each
+  own theirs; an inlined conditional owns none (its temps belong to the
+  nearest loop body or real scope). Both compilers, every kernel method
+  still identical between them.
+- **6** (classes): class variables. A class's pool is a read-only Array of
+  Bindings (the kernel's class `Binding`: key, value) in a new metaclass
+  slot (`MetaclassLayout.classPool`, Metaclass fixed 7); the class layout
+  and so every class-side instance variable index are unchanged. Image
+  format 3 (versions 1 and 2 are refused) with a flags word.
+- **10** (bytecodes): no bytecode added. A class variable read is
+  `push_literal <Binding>` then the special send `value`; a write
+  `push_literal <Binding>`, the value, the special send `value:` (which
+  answers its argument), `pop` for effect. The literal frame stays
+  read-only, the Binding does not.
+- **11** (sends): installing from Smalltalk. New primitives: **85**
+  `CompiledMethod valueWithReceiver:arguments:` (an activation primitive:
+  a method run once without installing it, its receiver of its class or a
+  subclass, no primitive), **143** `CompiledCode primMakeMethodIn:` (the
+  kernel compiler's output made into a CompiledMethod in a stop by the
+  image build's own code, verified by the one bytecode verifier with each
+  block method, read-only and pinned; a refusal answers the verifier's
+  reason), **144** `Smalltalk isReleaseImage`. 97 and 98 (8a's install and
+  remove) now refuse a sealed class (a metaclass by the class it is for)
+  and a release image, whose header flag no primitive writes.
 
 ## Consequences
 
