@@ -150,3 +150,28 @@ SnapshotScenarios class >> removedMethod [
 	done wait.
 	^ result + ((SnapshotScenarios respondsTo: #liveWaitOn:) ifTrue: [10] ifFalse: [0])
 ]
+
+{ #category : #scenarios }
+SnapshotScenarios class >> redefinedClass [
+	"Module 8e: a class defined at run time, with instances, a class variable, a class-side instance variable and an old closure, reshaped on both sides, its pool changed, a second class defined and removed, all before the save; the resumed image (whose loader verified every method against its class's new shape) answers from them: 2 + 2 + 5 + 10 + 20."
+	| c x blk gone |
+	c := Object subclass: #LiveSnapshotSample instanceVariableNames: 'a b' classVariableNames: 'Total' category: 'Scenarios'.
+	c compile: 'b ^ b'. c compile: 'b: v b := v'. c compile: 'reader ^ [b]'.
+	c compile: 'total ^ Total'. c compile: 'total: v Total := v'.
+	c class instanceVariableNames: 'made'.
+	c class compile: 'made ^ made'. c class compile: 'made: v made := v'.
+	x := c new b: 2; yourself.
+	blk := x reader.
+	c made: 5.
+	x total: 10.
+	c instanceVariableNames: 'z b'.
+	c class instanceVariableNames: 'first made'.
+	c addClassVarNamed: 'Extra'.
+	c compile: 'extra ^ Extra'. c compile: 'extra: v Extra := v'.
+	x extra: 20.
+	gone := Object subclass: #LiveSnapshotGone instanceVariableNames: 'p' classVariableNames: '' category: 'Scenarios'.
+	gone := nil.
+	Smalltalk removeClass: (Smalltalk at: #LiveSnapshotGone).
+	Smalltalk snapshot: nil.
+	^ x b + blk value + c made + x total + x extra
+]
