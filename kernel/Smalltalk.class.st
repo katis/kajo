@@ -163,6 +163,51 @@ Smalltalk class >> testFilter: aPatternOrNil tag: aTagOrNil [
 	^ TestRunner new runFilter: aPatternOrNil tag: aTagOrNil
 ]
 
+{ #category : #'file in' }
+Smalltalk class >> isIdentifier: aString [
+	"A letter or _ first, then letters, digits and _ (the bootstrap compiler's rule for ASCII; any scalar above 127 counts as a letter)."
+	aString isEmpty ifTrue: [^ false].
+	(aString first isLetter or: [aString first = $_]) ifFalse: [^ false].
+	^ aString allSatisfy: [:c | c isLetter or: [c isDigit or: [c = $_]]]
+]
+
+{ #category : #'file in' }
+Smalltalk class >> methodListsOf: anArray [
+	"For each class anArray names, its methods (both sides, by selector): selector, bytecodes, literal count, header (a test compares two images)."
+	^ anArray collect: [:n | | c out |
+		c := self at: n asSymbol.
+		out := ''.
+		(Array with: c with: c class) do: [:b |
+			(b selectors asArray sort: [:x :y | x <= y]) do: [:sel | | m |
+				m := b compiledMethodAt: sel.
+				out := out , b name , '>>' , sel , ' ' , m bytecodes printString , ' ' , m literals size printString , ' ' , m numArgs printString , ' ' , m numTemps printString , ' ' , m primitive printString , String lf]].
+		out]
+]
+
+{ #category : #'file in' }
+Smalltalk class >> readTonel: aString [
+	"Define or redefine the class one Tonel file holds and install its methods (module 8e): the file is the class, so a method of the class the file does not hold is removed. A new class is defined, then its methods compiled; an existing one (of the same superclass) is redefined in one step whose new methods are the file's, made against the new shape, and its subclasses' recompiled. Answers the class."
+	^ TonelLoader load: (TonelReader read: aString)
+]
+
+{ #category : #'file in' }
+Smalltalk class >> readTonelAll: anArray [
+	"readTonel: each text in turn; answer what each class writes out afterwards."
+	^ anArray collect: [:t | (self readTonel: t) tonelSource]
+]
+
+{ #category : #'file in' }
+Smalltalk class >> tonelSourcesOf: anArray [
+	"The Tonel file of each class anArray names (a test's way out of the image)."
+	^ anArray collect: [:n | (self at: n asSymbol) tonelSource]
+]
+
+{ #category : #'file in' }
+Smalltalk class >> tonelSummaries: anArray [
+	"For each Tonel text, its TonelReader summary (a test compares them with the bootstrap reader's)."
+	^ anArray collect: [:t | (TonelReader read: t) summary]
+]
+
 { #category : #'file out' }
 Smalltalk class >> readTonelFile: aPath [
 	"The text of the file aPath names under the directory the VM was opened with."
@@ -274,6 +319,12 @@ Smalltalk class >> definitionOf: aClass [
 	"aClass's ClassDefinition, or nil."
 	definitions isNil ifTrue: [^ nil].
 	^ definitions at: aClass ifAbsent: [nil]
+]
+
+{ #category : #sources }
+Smalltalk class >> forgetCategoriesOf: aBehavior [
+	organizations isNil ifTrue: [^ nil].
+	^ organizations removeKey: aBehavior ifAbsent: [nil]
 ]
 
 { #category : #sources }
