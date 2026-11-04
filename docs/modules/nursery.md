@@ -248,8 +248,19 @@ reserve beyond it (`reserveBytes`) that only promotion may take
 at twice everything the nurseries hold, plus a third for block tails, plus
 two blocks per participant; a VM whose object memory has less lowers the
 soft limit instead (and refuses to start when that leaves nothing).
-Promotion that still finds no block traps with a counted report
-(`reserveExhaustions`): a provisioning failure, never hidden.
+Promotion that still finds no block no longer traps (follow-up,
+`docs/modules/reserve-and-depth.md`): the claim writes a kept header
+instead (young, its own nursery, this scavenge's tag), the body stays
+until the stopper places it after the join (its eden from the start, then
+its new survivor-from's tail), the scavenge requests the full collection,
+and every exhaustion is counted (`reserveExhaustions`,
+`exhaustedScavenges`, `keptObjects`) and reported by `kajo run` and the
+shells. A full collection whose mark-sweep leaves old space past its soft
+limit compacts (`fullCompactions`): a mark-sweep frees whole blocks only,
+and an old space whose every block keeps a few live objects (the shells'
+ring) stayed past the limit while each scavenge promoted into the reserve
+until it ran out. Module 1's operations collect around kept objects or
+refuse (become, reshape, snapshot) when old space cannot take them.
 
 **Full collections**: never inside a scavenge's pause. A scavenge that
 leaves old space past its soft limit sets `fullRequested` and keeps the

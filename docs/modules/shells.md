@@ -399,22 +399,35 @@ process's CPU energy: no DRAM, display or window server).
 | storm | stw² | 0 | 8.4 | 337.7 [293.4–337.9] | 0.0 | 0 (-) | 14403 [14396–14414] | - | 0.72 [0.69–0.77] | 29.7 [29.0–30.6] | 593 [582–600] |
 | storm | local | 0 | 8.4 | 86.7 [86.0–93.8] | 0.0 | 3391 [3390–3435] (22) | 14413 [14295–14447] | - | 0.76 [0.73–0.77] | 31.5 [31.3–31.7] | 766 [742–784] |
 | storm | offload | 0 | 8.4 | 92.4 [89.0–98.9] | 0.0 | 3436 [3388–3496] (22) | 14335 [14321–14405] | 0.00 | 0.73 [0.71–0.75] | 31.3 [31.0–31.6] | 760 [758–776] |
-| ring | stw¹ | 6 [5–7] | 16.7 | 1196.2 [1145.7–1211.8] | 0.0 | 0 (-) | 11696 [11629–11844] | - | 0.61 [0.60–0.64] | 24.0 [24.0–24.2] | 1055 [1035–1061] |
-| ring | local | 0 | 8.4 | 143.2 [137.8–152.8] | 0.0 | 4714 [4666–4862] (21) | 13842 [13821–13877] | - | 0.84 [0.84–0.84] | 25.4 [25.3–25.9] | 653 [635–687] |
-| ring | offload | 0 | 8.4 | 125.8 [123.2–136.0] | 0.0 | 4850 [4746–4944] (20) | 13870 [13816–13897] | 0.00 | 0.84 [0.83–0.85] | 25.7 [25.5–26.1] | 654 [629–657] |
+| ring | stw¹ | 143 [139–146] | 251.1 [246.2–256.0] | 1381.1 [1266.2–1826.6] | 374.1 [68.3–897.6] | 0 (-) | 10363 [10104–10379] | - | 0.81 [0.80–0.82] | 20.0 [19.5–20.1] | 843 [840–845] |
+| ring | local¹ | 0 | 8.4 | 148.4 [126.9–152.9] | 0.0 | 4797 [4761–4896] (22) | 13861 [13750–13953] | - | 0.83 [0.82–0.84] | 18.8 [18.1–20.7] | 624 [622–638] |
+| ring | offload¹ | 0 | 8.4 | 152.8 [151.9–172.1] | 0.0 | 4770 [4748–4913] (22) | 13816 [13751–13889] | 0.00 | 0.82 [0.81–0.82] | 18.6 [18.5–19.6] | 622 [621–624] |
 | share | stw² | 0 | 8.4 [8.4–8.4] | 89.2 [78.4–91.2] | 0.0 | 0 (-) | 14719 [14713–14723] | - | 0.00 | 30.0 [29.1–30.5] | 83 [83–83] |
 | share | local | 0 | 8.4 | 104.1 [102.2–104.1] | 0.0 | 4345 [4337–4402] (25) | 14717 [14714–14729] | - | 0.00 | 29.9 [28.2–29.9] | 86 [85–86] |
 | share | offload | 0 | 8.4 | 103.5 [103.3–105.2] | 0.0 | 4338 [4294–4435] (25) | 14716 [14714–14720] | 0.00 | 0.00 | 29.8 [28.6–30.0] | 86 [85–87] |
 
-¹ heap 1024 MiB; at the default 600 MiB this scenario traps in the
-parallel stop-the-world scavenge ("promotion found no block: the
-promotion reserve is exhausted") in every run (three of three in the
-matrix, one of one by hand). The oracle mode exhausts its promotion
-reserve where local and offloaded young collection, with concurrent
-marking keeping up, never come near it. Module 4's precondition is the
-design ("a provisioning failure to count and report"), but here it is a
-crash, not a counted fallback: a finding for the collectors, not changed
-here.
+¹ The ring's three rows were re-measured at the default 600 MiB after
+the follow-up `docs/modules/reserve-and-depth.md` (2026-11-04, commit
+7c9cc94's shell, three runs interleaved, thermal nominal). Before it the
+stop-the-world row was measured at 1024 MiB (6 [5–7] missed, max gap
+16.7 ms, 1196 ms/10 s stopped for others, 1055 MB peak): at 600 MiB the
+parallel stop-the-world scavenge trapped in every run ("promotion found
+no block: the promotion reserve is exhausted"). The cause was the full
+collection, not the reserve: in the oracle mode the marker falls behind
+(42 cycles per run against 80 with young collection beside the
+mutators), old space crosses its soft limit 12 times a run (8 with
+marking idle, 4 with a cycle unfinished), and the full collection that
+follows was a mark-sweep, which frees whole blocks only; the ring keeps
+one node in twenty in every block, so it freed almost nothing, old space
+stayed past the limit, no marking cycle starts while a full collection is
+due, and each scavenge promoted up to the nurseries' size into a reserve
+of twice that. Now a full collection that leaves old space past its soft
+limit compacts (3 of the 12 per run), the scenario runs to its end with
+0 promotion-reserve exhaustions (a scavenge that still finds no block
+keeps objects young in place and counts them; none did here), and the
+frames it misses are the compacting full collections' pauses (max 244 to
+254 ms on the main thread, `max_turn_ms`), not a trap. Local and offload
+did not change (no full collection, no exhaustion, no refusal).
 
 ² storm and share under stop-the-world were re-run 25 minutes after the
 rest of the matrix (the first pass's lines were lost to a filtering
@@ -430,16 +443,18 @@ experiments/device-measurement (Part C after cooling, 5 workers):
 | storm stw | 338² | 708 | 108 | - |
 | storm local | 87 | 134 | 25 | - |
 | storm offload | 92 | 129 | 29 | - |
-| ring stw | 1196¹ | 2273 | - | - |
-| ring local | 143 | 206 | 1.6 | - |
-| ring offload | 126 | 185 | - | - |
+| ring stw | 1381¹ | 2273 | - | - |
+| ring local | 148¹ | 206 | 1.6 | - |
+| ring offload | 153¹ | 185 | - | - |
 | share stw | 89² | 139 | - | - |
 | share local | 104 | 195 | - | - |
 | share offload | 104 | 203 | - | - |
-| frames missed (any mode) | 0, ring stw 6 | n/a | storm stw 1, others 0 | - |
+| frames missed (any mode) | 0, ring stw 143¹ | n/a | storm stw 1, others 0 | - |
 
 - **No frame missed** in any scenario but the ring under the
-  stop-the-world scavenge (6 of 1200, max gap 16.7 ms). The display link
+  stop-the-world scavenge (at 1024 MiB 6 of 1200, max gap 16.7 ms; at the
+  default 600 MiB, since the follow-up, 143 of 1200 behind compacting full
+  collections of about 250 ms). The display link
   ran at 120.0 Hz throughout; the callbacks were late by 0.5 ms at p50.
 - **share**, ADR 0008's open case, on a real UI thread: as headless, worse
   than stop-the-world (104 against 89 ms per 10 s), all of it the 4 300
@@ -483,7 +498,8 @@ Process CPU energy (`ri_energy_nj`): 0.4 W idle with the probe moving, 0.6
 W with 1000 events per second, 1.5 W with the hog preempted every turn, 5
 W with the main thread held by the control, 24 to 32 W with seven busy
 workers. Peak `phys_footprint`: 39 MB idle, 82 to 86 MB share, 600 to 790
-MB storm, 630 to 690 MB ring (600 MiB heap), 1 055 MB ring at 1024 MiB.
+MB storm, 630 to 690 MB ring (600 MiB heap), 1 055 MB ring at 1024 MiB
+(the stop-the-world ring at 600 MiB since the follow-up: 840 to 845 MB).
 
 ### The kernels against the starting commit
 
@@ -672,7 +688,10 @@ call, Strings) are built inside `shellPrimitive`, out of line.
 3. The stop-the-world scavenge traps when its promotion reserve runs out
    (the ring at 600 MiB). Should the oracle mode fall back to a full
    collection and count it, as the concurrent modes do? **Owner
-   (2026-11-04): yes, fix it as a follow-up** (after module 8d).
+   (2026-11-04): yes, fix it as a follow-up** (after module 8d). **Built
+   in `docs/modules/reserve-and-depth.md`**: the full collection compacts
+   a fragmented old space, a scavenge keeps what finds no block, and the
+   ring runs at 600 MiB (footnote ¹).
 4. The macOS shell wakes the display and keeps it awake while measuring
    (a user-activity and a display-sleep assertion, nothing persistent). Is
    that acceptable on the mini, or should measurements wait for a woken

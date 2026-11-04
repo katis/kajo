@@ -46,10 +46,7 @@ for part in ${=parts}; do
         one $out/scenarios.txt mode=scenario scenario=idle young=offload workers=$W seconds=$SECS run=$run
         for s in storm ring share; do
           for y in stw local offload; do
-            # The stop-the-world scavenge's promotion reserve runs out on the
-            # ring at the default 600 MiB (a trap in module 4): 1024 MiB.
-            heap=(); [[ $s == ring && $y == stw ]] && heap=(heap=1024)
-            one $out/scenarios.txt mode=scenario scenario=$s young=$y workers=$W seconds=$SECS run=$run $heap
+            one $out/scenarios.txt mode=scenario scenario=$s young=$y workers=$W seconds=$SECS run=$run
           done
         done
       done ;;
