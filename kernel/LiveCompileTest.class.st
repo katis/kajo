@@ -132,15 +132,22 @@ LiveCompileTest >> testRunWithoutInstalling [
 
 { #category : #tests }
 LiveCompileTest >> testSealedClassesStayClosed [
+	"Module 9b: a sealed class (and its class side) takes a method that only sends (an extension), never one with a primitive, an instance variable or a slot store, and keeps every kernel method that does."
 	Smalltalk isReleaseImage ifTrue: [^ self].
 	#(#CompiledMethod #MethodDictionary #Metaclass #Class #Behavior #Process #Context) do: [:n | | c |
 		c := Smalltalk at: n.
-		self should: [c compile: 'liveAnswer ^ 1'] raise: Error.
-		self should: [c class compile: 'liveAnswer ^ 1'] raise: Error.
+		self should: [c compile: 'liveAnswer <primitive: 117> ^ 1'] raise: Error.
+		self should: [c class compile: 'liveAnswer ^ self instVarAt: 1 put: 1'] raise: Error.
 		self deny: (c includesSelector: #liveAnswer).
-		self deny: (c class includesSelector: #liveAnswer)].
-	self should: [CompiledMethod removeSelector: #selector] raise: Error.
-	self assert: (CompiledMethod includesSelector: #selector)
+		self deny: (c class includesSelector: #liveAnswer).
+		c compile: 'liveAnswer ^ 1'.
+		self assert: (c includesSelector: #liveAnswer).
+		c removeSelector: #liveAnswer.
+		self deny: (c includesSelector: #liveAnswer)].
+	self should: [Process removeSelector: #primTerminate] raise: Error.
+	self assert: (Process includesSelector: #primTerminate).
+	self should: [Context removeSelector: #pc] raise: Error.
+	self assert: (Context includesSelector: #pc)
 ]
 
 { #category : #tests }
