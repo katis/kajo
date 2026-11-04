@@ -68,6 +68,16 @@ apps:
 mac-shell *ARGS:
     scripts/mac-shell.sh {{ARGS}}
 
+# Module 9c: the development image, kernel/ and tools/ (OUT defaults to dev.img)
+dev-image OUT="dev.img":
+    swift run kajo build-image -o {{OUT}} --with tools
+
+# Module 9c: the developer UI: the development image in the macOS shell, its tools on its own socket, changes written to tools/
+tools:
+    just dev-image dev.img
+    scripts/mac-shell.sh build
+    ${DD:-${TMPDIR:-/tmp}/kajo-shell-mac}/Build/Products/Release/KajoShell.app/Contents/MacOS/KajoShell mode=dev image=$PWD/dev.img project=$PWD/tools
+
 # Module 9a: the iOS shell on the attached iPhone (`just device build`, `just device tests <dir>`, `just device run <out> mode=...`)
 device *ARGS:
     scripts/device.sh {{ARGS}}

@@ -40,19 +40,10 @@ TableView >> columns: anArray [
 ]
 
 { #category : #rows }
-TableView >> flat: anArray [
-	| n out |
-	n := anArray isEmpty ifTrue: [1] ifFalse: [anArray first size].
-	out := OrderedCollection new.
-	out add: n.
-	anArray do: [:r | r do: [:c | out add: c]].
-	^ out asArray
-]
-
-{ #category : #rows }
 TableView >> headlessCall: aName with: anArray [
 	aName = 'setColumns' ifTrue: [^ self set: 'columns' to: anArray].
 	aName = 'setRows' ifTrue: [^ self set: 'rows' to: anArray].
+	aName = 'addRows' ifTrue: [^ self set: 'rows' to: (self get: 'rows') , (anArray copyFrom: 2 to: anArray size)].
 	aName = 'setRowCount' ifTrue: [^ self set: 'rowCount' to: anArray first].
 	aName = 'setRowsAt' ifTrue: [^ self set: 'page' to: anArray].
 	aName = 'selectRow' ifTrue: [^ self set: 'selected' to: anArray first].
@@ -73,14 +64,14 @@ TableView >> rowCount: anInteger [
 
 { #category : #rows }
 TableView >> rows: anArray [
-	"Every row at once: anArray of Arrays of Strings, as many as there are columns (one view call)."
-	self call: 'setRows' with: (self flat: anArray)
+	"Every row at once: anArray of Arrays of Strings, as many as there are columns; one view call per 4000 cells (an Array argument holds at most 4095 values)."
+	self send: 'setRows' then: 'addRows' head: nil rows: anArray
 ]
 
 { #category : #rows }
 TableView >> rows: anArray at: aFirstRow [
 	"Rows aFirstRow on, for the on-demand form."
-	self call: 'setRowsAt' with: {aFirstRow} , (self flat: anArray)
+	self send: 'setRowsAt' then: 'setRowsAt' head: aFirstRow rows: anArray
 ]
 
 { #category : #rows }
@@ -91,6 +82,25 @@ TableView >> selectRow: anInteger [
 { #category : #rows }
 TableView >> selectedRow [
 	^ (self get: 'selected') ifNil: [0]
+]
+
+{ #category : #rows }
+TableView >> send: aFirstOp then: aNextOp head: aFirstRowOrNil rows: anArray [
+	"aFirstOp with the first row (when given), the column count and the first rows' cells flat, aNextOp with the next ones'."
+	| n cols per i |
+	n := anArray size.
+	cols := n = 0 ifTrue: [1] ifFalse: [anArray first size max: 1].
+	per := 4000 // cols.
+	i := 1.
+	[ | flat stop |
+		stop := i + per - 1 min: n.
+		flat := OrderedCollection new: (stop - i + 1) * cols + 2.
+		aFirstRowOrNil isNil ifFalse: [flat add: aFirstRowOrNil + i - 1].
+		flat add: cols.
+		i to: stop do: [:k | (anArray at: k) do: [:c | flat add: c]].
+		self call: (i = 1 ifTrue: [aFirstOp] ifFalse: [aNextOp]) with: flat asArray.
+		i := stop + 1.
+		i <= n] whileTrue
 ]
 
 { #category : #registry }

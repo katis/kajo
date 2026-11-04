@@ -20,11 +20,16 @@ final class FlippedView: NSView {
         let kind: String
         let view: NSView
         var window: NSWindow? = nil
+        /// Module 9c: what holds the view's state for the toolkit (a text
+        /// view, a data source, a toolbar's or a menu's delegate).
+        var object: AnyObject? = nil
     }
 
     var entries: [Int: Entry] = [:]
     var next = 1
     var eventHandler: ((ShellEvent) -> Void)?
+    /// Module 9c: a text view drew (the typing measurement).
+    var textDrawn: ((Int) -> Void)?
     let statusWindow: NSWindow
     let statusLabel: NSTextField
     var link: CADisplayLink?
@@ -83,7 +88,7 @@ final class FlippedView: NSView {
     func viewCall(_ call: ViewCall) -> ShellValue? {
         let a = call.arguments
         if call.op == "create" {
-            guard case .string(let kind)? = a.first, let e = make(kind) else { return nil }
+            guard case .string(let kind)? = a.first, let e = make9c(kind, next) ?? make(kind) else { return nil }
             let h = next
             next += 1
             entries[h] = e
@@ -94,10 +99,11 @@ final class FlippedView: NSView {
         switch call.op {
         case "set":
             guard a.count == 2, case .string(let k) = a[0] else { return nil }
+            if let ok = set9c(e, k, a[1]) { return ok ? a[1] : nil }
             return set(e, k, a[1]) ? a[1] : nil
         case "get":
             guard a.count == 1, case .string(let k) = a[0] else { return nil }
-            return get(e, k)
+            return get9c(e, k) ?? get(e, k)
         case "frame":
             guard a.count == 4, let x = a[0].double, let y = a[1].double, let w = a[2].double, let h = a[3].double else { return nil }
             if let win = e.window {
@@ -115,11 +121,11 @@ final class FlippedView: NSView {
             return .nil
         case "add":
             guard case .int(let c)? = a.first, let child = entries[Int(c)], child.window == nil else { return nil }
-            e.view.addSubview(child.view)
+            if !add9c(e, child) { e.view.addSubview(child.view) }
             return .nil
         case "call":
             guard case .string(let m)? = a.first else { return nil }
-            return invoke(e, m, Array(a.dropFirst()))
+            return call9c(e, m, Array(a.dropFirst())) ?? invoke(e, m, Array(a.dropFirst()))
         default:
             return nil
         }
@@ -203,6 +209,12 @@ final class FlippedView: NSView {
         case ("minimum", let s as NSSlider): return .double(s.minValue)
         case ("maximum", let s as NSSlider): return .double(s.maxValue)
         case ("hidden", _): return .bool(e.view.isHidden)
+        // A window's position is its frame's top left on the screen, y down
+        // from the visible frame's top: what the frame op takes (module 9c).
+        case ("x", _) where e.window != nil: return num(e.window!.frame.minX)
+        case ("y", _) where e.window != nil:
+            let top = (e.window!.screen ?? NSScreen.main)?.visibleFrame.maxY ?? 800
+            return num(top - e.window!.frame.maxY)
         case ("x", _): return num(e.view.frame.origin.x)
         case ("y", _): return num(e.view.frame.origin.y)
         case ("width", _): return num(e.window.map { $0.contentLayoutRect.width } ?? e.view.frame.width)

@@ -826,6 +826,28 @@ events; an outline (tree) view; a table or list view with selection; a
 split view; menus and keyboard shortcuts; a scroll view; buttons with
 images; a window with a toolbar.
 
+**As 9c used it** (`docs/modules/developer-ui.md`): every request above
+is a message of the Smalltalk client (`DevClient`, compared with
+`protocol.describe` by `DevClientTest`); the tools send all of them but
+`class.list`, `class.categories`, `class.tonel`, `method.bytecodes`,
+`process.list` and `process.suspend` (left to scripts and agents). Three
+requests were added as `<devProtocol>` methods: **`class.hierarchy`**
+(every class with its superclass, category and package: the browser's
+class tree in one request), **`package.list`** and
+**`package.selectors`** (every method of a package, the measurement's
+20 000 selectors). Two things 9b did not need and 9c changed: a reply or
+event longer than one heap object (32 KiB) could not be written at all,
+so the kernel writes replies and events in pieces (`Json writePieces:`,
+primitive 161 taking an Array of Strings and ByteArrays it joins), and
+the client's transport hands a long line to the image in pieces as well;
+and the session token never enters the client image (the host's
+`ClientHost` opens the session). The `files` of every reply are written
+by the client's transport into the project directory given at connect, as
+the CLI does. Still not done: a request whose canonical text exceeds one
+heap object (a method source over 32 KiB) cannot reach the image
+(primitive 160 cannot make the String) and gets no reply; buttons with
+images; method versions.
+
 ## Gates
 
 The code and this doc but for this table, the unsafe count and the

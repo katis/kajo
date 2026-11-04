@@ -228,6 +228,24 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         host.closeAll()
     }
 
+    @Test func aRequestTooLongForTheImageIsRefusedNotDropped() throws {
+        let t = try LocalTools()
+        defer { t.close() }
+        let c = try ProtocolClient(path: t.path)
+        defer { c.close() }
+        let token = t.server.token
+        try c.open(token: token, client: "developer", timeout: 60)
+        let long = "^ '" + String(repeating: "x", count: 40_000) + "'"
+        let r = try c.send("evaluate", [("source", .string(long))], timeout: 60)
+        #expect(r["ok"] == .bool(false))
+        #expect(r["error"]?.string?.contains("one heap block") == true)
+        // A reply longer than one heap block comes back whole (written in
+        // pieces in the target, joined by its transport).
+        let methods = try c.request("package.selectors", [("name", .string("Kernel"))], timeout: 60)
+        #expect((methods.array?.count ?? 0) > 2000)
+        #expect(writeJSON(methods).count > 32 * 1024)
+    }
+
     @Test func theToolsDevelopTheImageTheyRunIn() throws {
         let t = try LocalTools()
         defer { t.close() }

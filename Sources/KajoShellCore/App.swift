@@ -85,6 +85,8 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
     public private(set) var scenario: ScenarioMode?
     public private(set) var demo: DemoMode?
     var tests: TestsMode?
+    var dev: DevMode?
+    var devSession: DevSessionMode?
 
     public init(platform: ShellPlatform, options: LaunchOptions = LaunchOptions()) {
         self.options = options
@@ -109,6 +111,14 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
             let s = ScenarioMode(o, platform: platform)
             scenario = s
             s.start()
+        case "dev":
+            let d = DevMode(o, platform: platform)
+            dev = d
+            d.start()
+        case "devsession":
+            let d = DevSessionMode(o, platform: platform)
+            devSession = d
+            d.start()
         default:
             let d = DemoMode(o, platform: platform)
             demo = d

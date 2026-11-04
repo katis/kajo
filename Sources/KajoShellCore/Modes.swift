@@ -13,6 +13,10 @@ public struct ShellResources: Sendable {
 
     public var kernelImage: String { directory + "/kernel.img" }
     public var shellImage: String { directory + "/shell.img" }
+    /// Module 9c: the development image (kernel/, tools/, the scenario
+    /// loads and the scripted session), and the same with 2000 classes.
+    public var devImage: String { directory + "/dev.img" }
+    public var dev2000Image: String { directory + "/dev2000.img" }
     public func smalltalkImage(_ name: String) -> String { directory + "/st-\(name).img" }
     public func kasm(_ name: String) -> String { directory + "/kasm/\(name).kasm" }
 }

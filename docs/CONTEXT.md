@@ -520,3 +520,26 @@ as they are understood.
 - **Sealed extension**: a method installed into a sealed class, allowed
   when it only sends messages.
 
+- **Development image**: an image built from `kernel/` and `tools/` (and
+  any other package, `kajo build-image --with <dir>`): the one the
+  developer UI runs in. A release image never carries `tools/`.
+- **Tools** (the package): the developer UI in Smalltalk (module 9c): the
+  browser, workspace, inspector, debugger, test runner, transcript and
+  target picker, each a **model** (what it shows and asks its target,
+  tested with a fake client) and a **window** (the views over it).
+- **DevClient**: the protocol's client in Smalltalk, one per connected
+  target; requests are messages, replies and events arrive on the UI's
+  event loop.
+- **Local target**: the development image serving its own protocol, its
+  tools connected to its own socket: Kajo develops Kajo.
+- **Client transport**: the host's side of a DevClient's connection
+  (primitive 164, `ClientHost`): it owns the socket and the token, checks
+  every line and posts it as a `line` event (a long one in `linePart`
+  pieces) and the end as a `lost` event.
+- **Hand-over**: the event loop giving the events to a new loop Process
+  when a tool's error stops the old one for the debugger.
+- **Push and on-demand** (a data source's forms): the image gives a
+  table or an outline all its rows or items at once, or a row count and
+  the roots first and the rest as the view asks (an `expand` event).
+- **LargeArray**: a sequence longer than one heap object can be, made of
+  Arrays of 2048; the growable collections use it past 4095 slots.

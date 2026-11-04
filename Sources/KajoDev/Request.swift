@@ -44,6 +44,9 @@ public enum RequestLimits {
     public static let idBytes = 256
     public static let arguments = 32
     public static let nameBytes = 64
+    /// Module 9c: what the image can take as one request: its canonical
+    /// text is one String, and no object is larger than one heap block.
+    public static let imageBytes = 32 * 1024 - 64
 }
 
 /// A lower-camel identifier: a lowercase ASCII letter, then letters and digits.

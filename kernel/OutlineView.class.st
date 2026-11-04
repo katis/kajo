@@ -35,12 +35,8 @@ OutlineView >> onSelect: aBlock [
 
 { #category : #items }
 OutlineView >> children: anArray of: aParentId [
-	"The children of aParentId (0: the roots) are anArray of {id. title. hasChildren} triples, replacing any it had; one view call."
-	| flat |
-	flat := OrderedCollection new.
-	flat add: aParentId.
-	anArray do: [:t | flat add: t first; add: (t at: 2); add: (t at: 3)].
-	self call: 'setChildren' with: flat asArray
+	"The children of aParentId (0: the roots) are anArray of {id. title. hasChildren} triples, replacing any it had: one view call per 1300 children (an Array argument holds at most 4095 values)."
+	self send: 'setChildren' then: 'addChildren' head: {aParentId} triples: anArray
 ]
 
 { #category : #items }
@@ -59,7 +55,11 @@ OutlineView >> headlessCall: aName with: anArray [
 	aName = 'setChildren' ifTrue: [
 		d := (self get: 'children') ifNil: [self set: 'children' to: Dictionary new].
 		^ d at: anArray first put: (anArray copyFrom: 2 to: anArray size)].
+	aName = 'addChildren' ifTrue: [
+		d := self get: 'children'.
+		^ d at: anArray first put: (d at: anArray first) , (anArray copyFrom: 2 to: anArray size)].
 	aName = 'setTree' ifTrue: [^ self set: 'tree' to: anArray].
+	aName = 'addTree' ifTrue: [^ self set: 'tree' to: (self get: 'tree') , anArray].
 	aName = 'select' ifTrue: [^ self set: 'selected' to: anArray first].
 	^ nil
 ]
@@ -75,12 +75,25 @@ OutlineView >> selectedId [
 ]
 
 { #category : #items }
+OutlineView >> send: aFirstOp then: aNextOp head: aHead triples: anArray [
+	"aFirstOp with aHead and the first 1300 triples flat, aNextOp with aHead and each next 1300."
+	| i n |
+	n := anArray size.
+	i := 1.
+	[ | flat stop |
+		stop := i + 1299 min: n.
+		flat := OrderedCollection new: (stop - i + 1) * 3 + aHead size.
+		flat addAll: aHead.
+		i to: stop do: [:k | | t | t := anArray at: k. flat add: t first; add: (t at: 2); add: (t at: 3)].
+		self call: (i = 1 ifTrue: [aFirstOp] ifFalse: [aNextOp]) with: flat asArray.
+		i := stop + 1.
+		i <= n] whileTrue
+]
+
+{ #category : #items }
 OutlineView >> tree: anArray [
-	"The whole tree at once: anArray is {id. parentId. title} triples, parents before their children (one view call)."
-	| flat |
-	flat := OrderedCollection new.
-	anArray do: [:t | flat add: t first; add: (t at: 2); add: (t at: 3)].
-	self call: 'setTree' with: flat asArray
+	"The whole tree at once: anArray is {id. parentId. title} triples, parents before their children; one view call per 1300 items."
+	self send: 'setTree' then: 'addTree' head: #() triples: anArray
 ]
 
 { #category : #registry }

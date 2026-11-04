@@ -9,3 +9,6 @@ target/
 *.xcuserstate
 DerivedData/
 .DS_Store
+
+# Module 9c: the development image `just dev-image` builds
+/dev.img

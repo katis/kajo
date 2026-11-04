@@ -48,4 +48,4 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          "$SRCROOT/../Shared/build-images.sh" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
+          "$SRCROOT/../Shared/build-images.sh" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH" mac

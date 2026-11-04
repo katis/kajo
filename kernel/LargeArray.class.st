@@ -10,6 +10,12 @@ Class {
 }
 
 { #category : #accessing }
+LargeArray >> asArray [
+	"Itself: an Array of this size cannot be made."
+	^ self
+]
+
+{ #category : #accessing }
 LargeArray >> at: index [
 	(index isInteger and: [index between: 1 and: size]) ifFalse: [^ self indexError: index].
 	^ (chunks at: index - 1 // 2048 + 1) at: index - 1 \\ 2048 + 1

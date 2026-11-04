@@ -12,7 +12,9 @@ import Darwin
 //        the main worker, as primitive 29 does. Fails with no shell (so
 //        headless code never hops to a main thread nobody turns), at the
 //        bottom of a Process, on an argument it cannot decode, and when the
-//        host answers nil (an unknown op or handle).
+//        host answers nil (an unknown op or handle). Module 9c: a call on
+//        main that ends past the turn's deadline makes the next poll check
+//        the budget (a view call can take milliseconds, a send nanoseconds).
 //   151  View class hasShell: whether a view host is installed.
 //   152  View class releaseHandle: h. Tells the shell the wrapper of h died
 //        (any worker; the shell releases the native view on its main
@@ -65,6 +67,12 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
             let answer = host(call)
             unsafe blockingEnd(vm, w)
             unsafe vm.count(.viewCalls)
+            // Module 9c: a view call can take milliseconds of the toolkit's
+            // time (a window made, a table reloaded) where a send takes
+            // nanoseconds, so a turn that makes many overran its budget by
+            // the time of the 1024 polls before its next budget check: past
+            // the deadline, the next poll checks it.
+            if unsafe ticks() >= w.pointee.deadline { unsafe w.pointee.interp.countdown = 1 }
             guard let answer else { return .none }
             return encode(m, answer)
         }

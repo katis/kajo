@@ -19,7 +19,8 @@ Class {
 		'messages',
 		'messagesTitle',
 		'afterSave',
-		'files'
+		'files',
+		'indexByName'
 	],
 	#category : #'Tools-Models'
 }
@@ -284,13 +285,23 @@ BrowserModel >> classTree [
 
 { #category : #classes }
 BrowserModel >> entryOf: aName [
-	^ self hierarchy detect: [:e | (e at: 'name') = aName] ifNone: [nil]
+	| i |
+	i := self idOfClass: aName.
+	^ i = 0 ifTrue: [nil] ifFalse: [hierarchy at: i]
 ]
 
 { #category : #classes }
 BrowserModel >> idOfClass: aName [
-	hierarchy doWithIndex: [:e :i | (e at: 'name') = aName ifTrue: [^ i]].
-	^ 0
+	indexByName isNil ifTrue: [^ 0].
+	^ indexByName at: aName ifAbsent: [0]
+]
+
+{ #category : #classes }
+BrowserModel >> setHierarchy: anArray [
+	"Every class's entry (name, superclass, category, package), and its index by name."
+	hierarchy := anArray.
+	indexByName := Dictionary new: anArray size.
+	anArray doWithIndex: [:e :i | indexByName at: (e at: 'name') put: i]
 ]
 
 { #category : #classes }
@@ -352,7 +363,7 @@ BrowserModel >> refresh [
 		packages := r.
 		self changed: #packages].
 	self request: 'class.hierarchy' args: #() then: [:r |
-		hierarchy := r.
+		self setHierarchy: r.
 		self changed: #classes]
 ]
 

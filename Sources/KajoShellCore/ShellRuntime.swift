@@ -22,6 +22,12 @@ import Synchronization
     /// Where the platform's controls send their events (a click, a slider
     /// move, a window closed); the runtime sets it.
     var eventHandler: ((ShellEvent) -> Void)? { get set }
+    /// Module 9c: a text view drew (its handle), for the typing measurement.
+    var textDrawn: ((Int) -> Void)? { get set }
+    /// Module 9c: a key typed into the text view `handle` as the window
+    /// server would deliver it (the typing measurement); false when the
+    /// platform cannot.
+    func typeKey(_ handle: Int, _ text: String) -> Bool
 }
 
 /// Where a turn came from.
@@ -34,6 +40,9 @@ final class RuntimeLink: @unchecked Sendable {
     let events: @Sendable ([UInt8]) -> Void
     /// Module 9b: the development protocol's transport, when it serves.
     let server = Mutex<ProtocolServer?>(nil)
+    /// Module 9c: the protocol client's transport (primitive 164): the
+    /// sockets the image's DevClients connect through, owned here.
+    let client = ClientHost()
     init(events: @escaping @Sendable ([UInt8]) -> Void) { self.events = events }
 
     /// Every kernel line: the mode's sink, the transport (replies to their
@@ -86,6 +95,8 @@ final class RuntimeLink: @unchecked Sendable {
         self.link = link
         self.platform = platform
         vm = try ShellVM(imageAt: imagePath, options: options, callbacks: ShellRuntime.callbacks(link))
+        let shell = vm
+        link.client.setSink { e in shell.post(e) }
         Telemetry.noteImage(release: vm.isReleaseImage)
         link.runtime = self
         platform.eventHandler = { [weak self] e in self?.deliver(e) }
@@ -105,10 +116,15 @@ final class RuntimeLink: @unchecked Sendable {
         c.release = { h in DispatchQueue.main.async { MainActor.assumeIsolated { link.runtime?.platform.releaseView(h) } } }
         c.stuck = { r in MainActor.assumeIsolated { link.runtime?.onStuck?(r) } }
         c.events = { e in link.emit(e) }
+        c.client = link.client.callback
         return c
     }
 
     public func start() { vm.start() }
+
+    /// Module 9c: the client transport's targets (the shell's own when it
+    /// serves, those of `~/.kajo/targets`). Their tokens stay in it.
+    public var clientHost: ClientHost { link.client }
 
     // MARK: module 9b: the development protocol
 
@@ -136,11 +152,15 @@ final class RuntimeLink: @unchecked Sendable {
             return nil
         }
         server.start()
+        // Module 9c: the image's own tools may connect to it (the local
+        // target): the client transport holds the token, the image never.
+        link.client.addTarget(ClientHost.Target(name: "local", path: server.path, token: server.token))
         return server
     }
 
     /// Stop serving (the socket file goes).
     public func stopProtocol() {
+        link.client.closeAll()
         let s = link.server.withLock { s in
             let old = s
             s = nil
@@ -149,9 +169,16 @@ final class RuntimeLink: @unchecked Sendable {
         s?.stop()
     }
 
+    /// Module 9c: every view call's time in the platform (ns), after it.
+    public var onViewDone: ((ViewCall, UInt64) -> Void)?
+
     func view(_ call: ViewCall) -> ShellValue? {
         onView?(call)
-        return platform.viewCall(call)
+        guard let done = onViewDone else { return platform.viewCall(call) }
+        let t0 = ShellVM.now()
+        let r = platform.viewCall(call)
+        done(call, ShellVM.now() &- t0)
+        return r
     }
 
     /// Whether a display link calls `tick`. Without one the frame account

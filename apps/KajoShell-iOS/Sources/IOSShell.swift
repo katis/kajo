@@ -27,6 +27,9 @@ import UIKit
     var entries: [Int: Entry] = [:]
     var next = 1
     var eventHandler: ((ShellEvent) -> Void)?
+    /// Module 9c: not measured on iOS.
+    var textDrawn: ((Int) -> Void)?
+    func typeKey(_ handle: Int, _ text: String) -> Bool { false }
     var link: CADisplayLink?
     var tickHandler: (@MainActor (Double, Double) -> Void)?
 
@@ -143,6 +146,7 @@ import UIKit
         case "textView":
             let t = UITextView(frame: CGRect(x: 0, y: 0, width: 200, height: 100))
             t.isEditable = false
+            t.delegate = self
             t.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             return Entry(kind: kind, view: t)
         default:
@@ -154,6 +158,10 @@ import UIKit
         switch (k, e.view) {
         case ("text", let l as UILabel): l.text = v.string ?? "\(v)"
         case ("text", let t as UITextView): t.text = v.string ?? "\(v)"
+        // Module 9c: the text view's second round (the other kinds are
+        // the Mac's for now, docs/modules/developer-ui.md).
+        case ("editable", let t as UITextView): t.isEditable = v == .bool(true)
+        case ("keys", _ as UITextView): break
         case ("title", _) where e.kind == "window": e.titleLabel?.text = v.string ?? "\(v)"
         case ("title", let b as UIButton): b.setTitle(v.string ?? "\(v)", for: .normal)
         case ("value", let s as UISlider): s.value = Float(v.double ?? 0)
@@ -179,6 +187,10 @@ import UIKit
         switch (k, e.view) {
         case ("text", let l as UILabel): return .string(l.text ?? "")
         case ("text", let t as UITextView): return .string(t.text ?? "")
+        case ("editable", let t as UITextView): return .bool(t.isEditable)
+        case ("selection", let t as UITextView):
+            let r = TextOffsets.byteRange(t.text ?? "", t.selectedRange)
+            return .string("\(r.start) \(r.stop)")
         case ("title", _) where e.kind == "window": return .string(e.titleLabel?.text ?? "")
         case ("title", let b as UIButton): return .string(b.title(for: .normal) ?? "")
         case ("value", let s as UISlider): return .double(Double(s.value))
@@ -213,6 +225,39 @@ import UIKit
         case "clear":
             (e.view as? UITextView)?.text = ""
             return .nil
+        case "select":
+            guard let t = e.view as? UITextView, args.count == 2, let a = args[0].int, let b = args[1].int,
+                  let r = TextOffsets.nsRange(t.text ?? "", start: Int(a), stop: Int(b)) else { return nil }
+            t.selectedRange = r
+            return .nil
+        case "scrollTo":
+            guard let t = e.view as? UITextView, let a = args.first?.int,
+                  let r = TextOffsets.nsRange(t.text ?? "", start: Int(a), stop: Int(a) - 1) else { return nil }
+            t.scrollRangeToVisible(r)
+            return .nil
+        case "focus":
+            guard let t = e.view as? UITextView else { return nil }
+            t.becomeFirstResponder()
+            return .nil
+        case "setStyles":
+            guard let t = e.view as? UITextView, args.count % 3 == 0 else { return nil }
+            var triples: [(Int64?, Int64?, String?)] = []
+            var k = 0
+            while k + 2 < args.count { triples.append((args[k].int, args[k + 1].int, args[k + 2].string)); k += 3 }
+            let text = t.text ?? ""
+            let plain = UIFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+            let out = NSMutableAttributedString(string: text, attributes: [.font: plain, .foregroundColor: UIColor.label])
+            for (r, st) in TextOffsets.styles(text, triples) {
+                switch st {
+                case .bold: out.addAttribute(.font, value: UIFont.monospacedSystemFont(ofSize: 11, weight: .bold), range: r)
+                case .color(let c): out.addAttribute(.foregroundColor, value: color(c), range: r)
+                case .background(let c): out.addAttribute(.backgroundColor, value: color(c).withAlphaComponent(0.3), range: r)
+                }
+            }
+            let sel = t.selectedRange
+            t.attributedText = out
+            t.selectedRange = sel
+            return .nil
         default:
             return nil
         }
@@ -232,6 +277,10 @@ import UIKit
         case "gray": .systemGray
         case "black": .black
         case "white": .white
+        case "purple": .systemPurple
+        case "brown": .systemBrown
+        case "teal": .systemTeal
+        case "yellow", "highlight": .systemYellow
         default: .clear
         }
     }
@@ -246,6 +295,13 @@ import UIKit
 
     @objc func slid(_ s: UISlider, event: UIEvent?) {
         eventHandler?(ShellEvent(kind: .valueChanged, target: s.tag, value: .double(Double(s.value)), timeNs: stamp(event)))
+    }
+}
+
+extension IOSPlatform: UITextViewDelegate {
+    /// Module 9c: the user changed a text view's text.
+    func textViewDidChange(_ t: UITextView) {
+        eventHandler?(ShellEvent(kind: .textChanged, target: t.tag, timeNs: ShellVM.now()))
     }
 }
 

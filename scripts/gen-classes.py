@@ -3,15 +3,17 @@
 (docs/modules/developer-ui.md, Measurements): N classes in a tree (each
 class's superclass one of the earlier ones), M methods each, in categories,
 as Tonel files in the canonical form. Usage: gen-classes.py <dir> <classes> <methods>"""
-import os, sys
+import os, random, sys
 
 out, n, m = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
 os.makedirs(out, exist_ok=True)
+rng = random.Random(9)
 with open(os.path.join(out, "package.st"), "w") as f:
     f.write("Package { #name : #Generated }\n")
 for i in range(n):
     name = "Gen%04d" % i
-    sup = "Object" if i < 20 else "Gen%04d" % ((i * 7919) % i)
+    # a tree of varied depth and fan-out: each class under an earlier one
+    sup = "Object" if i < 20 else "Gen%04d" % int(i * rng.uniform(0.3, 1.0))
     cats = {}
     for j in range(m):
         cats.setdefault("cat%d" % (j % 4), []).append(j)
