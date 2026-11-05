@@ -250,6 +250,8 @@ private func relocationScenario(_ blind: RunReader?) throws -> (selectedRun: Boo
         rt.vm.release(p)
         let m = rt.vm.markingCounters
         print("large churn \(young): cycles \(m.cycles), started after a large allocation \(m.cyclesAfterLarge), fallbacks \(m.fallbacks), full collections \(rt.image.om.counters.collections)")
+        // Work started, not completed (AGENTS.md): under the sanitizer and
+        // load the marker may finish none before the program ends.
         #expect(m.cyclesAfterLarge > 0, "\(young): \(m)")
         #expect(m.cycles > 0)
         rt.noFailures()
