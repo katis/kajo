@@ -285,8 +285,14 @@ Safety:
    same boundary from the other side: the host owns the sockets and the
    token never enters the image, the image sees five transport operations
    (targets, connect, send, close, timer), every received line is checked
-   and a bad one is a `client.error` event, never a trap. The primitive is
-   the trust boundary, not the compiler.
+   and a bad one is a `client.error` event, never a trap. Since 9d the
+   same server listens on TCP with a Bonjour advertisement, development
+   images only and only when asked, three wrong tokens close a connection
+   and ten failures in a minute pause the listener; and no token passes
+   through the image at all, typed ones included: the target picker's
+   Pair asks the host, which takes the token in a secure field of its own
+   (the `pairing` op) and keeps it. The primitive is the trust boundary,
+   not the compiler.
  - A stress mode that preempts at every poll livelocks: a Process preempted
    at a send is resumed at that send and preempted again. Every slice must
    execute at least one instruction; the stress flag lets the first poll of
@@ -642,6 +648,21 @@ Safety:
    the VM's longest turn 13 to 15 ms either way; the misses are not the
    VM's and are not explained yet. Measure idle and loaded both, and do
    not take the loaded number as the worst.
+ - A secret's rule covers the whole path, including the convenient one.
+   9c kept tokens in the host and then let the target picker take a typed
+   one through a Smalltalk String; the owner closed it in 9d with a
+   secure field the host owns, so pairing a phone is reading its screen
+   and typing into the host, and no method can ever see a token.
+ - A descriptor closed twice closes someone else's. 9b's client could
+   close its socket again from `deinit`; by then the number belonged to a
+   Bonjour resolver, which lost its socket under 9d's tests. Close once,
+   mark it closed, and assert in the tests that a closed thing is closed
+   exactly once.
+ - A gate that waits on a prompt is a blocked gate, not a slow one.
+   `codesign` sat at 0 percent CPU for minutes inside the device build
+   three times; the agent reported it and measured Mac to Mac instead of
+   answering a keychain prompt it was not allowed to touch. Report what
+   blocks and what was done without it.
 
 ## Verification
 
@@ -796,7 +817,36 @@ first windows, typing under load p50 2.3 ms and p99 2.9 ms, idle p50 5.5
 ms with unexplained frame misses, `class.hierarchy` 0.33 s and
 `package.selectors` 0.7 s round trips, bench A/B within noise and
 `interpret` unchanged; the kernel has 200 SUnit tests and `tools/` 25;
-its five open questions await the owner; the stop-the-world scavenge trapped when its promotion
+its five open questions answered by the owner on 2026-11-05 (a
+large-object space in the VM as a module of its own, push by default and
+on demand for long lists, a tool's error stops for the debugger, apps
+against a second target image, no token in the image); the phone
+transport built in module 9d, `docs/modules/phone-transport.md`:
+`ProtocolServer` listens on TCP beside the Unix socket with one accept
+loop and the same reader and token rule, `TCP_NODELAY` and keepalive,
+three wrong tokens close a connection and ten failures in a minute pause
+the listener, a Bonjour advertisement `_kajo-dev._tcp` through dns_sd
+whose TXT record names the image and the versions and never the token,
+the iOS shell's `protocol=tcp` with a pairing screen (token per install
+in Application Support at 0600, a New token button that ends every
+session), `TargetAddress` reading `/path`, `tcp://host:port` and
+`bonjour:<name>` for `ClientHost`, the Swift client, the CLI, MCP and the
+targets file, phones found by `NWBrowser` listed by `targets` with a
+`targets.changed` event, `DevClient` reconnecting with 1, 2, 4 s backoff
+up to a minute and sending again every request but `evaluate`,
+`process.evaluate`, `process.step` and `test.run`, debuggers refreshing
+from `process.list`, 9c's scripted session against another target
+(`mode=devsession target=`, `mode=serve`, `scripts/remote-session.sh`)
+with define-and-retry and a dropped link as steps; measured Mac to Mac
+because the iPhone build waited on a keychain prompt the agent could not
+answer: TCP adds about 0.07 ms a request over the Unix socket, round
+trips through the tools match the local ones, the first Bonjour connect
+costs 0.3 to 0.4 s of resolution, define-and-retry across the link 0.2
+s, a dropped link is whole again in 1.05 to 1.09 s of which 1.006 s is
+the backoff, the serving shell missed 0 of 2400 frames idle and ring with
+and without a client, bench within noise and `interpret` identical; 9b's
+client closed a descriptor twice from `deinit` (fixed); the phone's rows
+wait on the owner's signing, six open questions await the owner; the stop-the-world scavenge trapped when its promotion
 reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
 follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
 not the reserve's size, a mark-sweep that could not bring old space under
@@ -913,8 +963,11 @@ cover.
    side: bounded JSON, the Unix-socket server and token, the headless
    `DevTarget`, the client, the MCP server and the CLI's development
    commands, and since 9c `ClientHost`, the image's client transport
-   (primitive 164: targets, connect, send, close, timer; the token stays in
-   the host); `Sources/KajoVM/Processes/Debugging.swift` the stop, step and
+   (primitive 164: targets, connect, send, close, timer, and since 9d
+   pairing; the token stays in the host); since 9d (module 9d,
+   `docs/modules/phone-transport.md`) the server and the clients speak TCP
+   as well (`TargetAddress`, Bonjour through dns_sd and `NWBrowser`, `kajo
+   run --protocol tcp[:port] --name`); `Sources/KajoVM/Processes/Debugging.swift` the stop, step and
    interrupt machinery; primitives 159 to 161 carry requests and replies.
    The kernel's `DevSession` holds the requests as `<devProtocol>` methods. `scripts/`:
    `check-hot-path-arc.sh` (`just arc-check`) greps the release disassembly
@@ -927,7 +980,11 @@ cover.
    (`just device`) builds, signs, installs and runs the iOS shell on the
    attached iPhone through `devicectl`; `mac-shell.sh`, `shell-matrix.sh`
    and `shell-report.py` run the scenario matrix and make its tables;
-   `canonical-tonel.sh` rewrites a package in the image's canonical form.
+   `canonical-tonel.sh` rewrites a package in the image's canonical form;
+   `remote-session.sh` and `remote-report.py` (module 9d) run the scripted
+   session against a serving target (the phone through `device.sh serve`
+   and `device.sh token`, the Mac shell's `mode=serve`, or `kajo run
+   --protocol tcp`) and make its tables.
  * `tools/` the developer UI (module 9c, `docs/modules/developer-ui.md`,
    ADR 0013): 27 Tonel class files, `DevClient` over primitive 164, the
    models and windows of the browser, workspace, inspector, debugger, test

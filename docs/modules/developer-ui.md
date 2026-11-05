@@ -642,6 +642,25 @@ collections are Smalltalk.
    once and is not kept. Refuse typed tokens (only `~/.kajo/targets` and
    the shell's own)? Provisional: allow.
 
+### The owner's answers (2026-11-05)
+
+1. **Large objects: a large-object space in the VM**, as a module of its
+   own after 9d (ADR 0003 and 0007 territory: such objects do not move).
+   `LargeArray` and the pieced lines stay until it exists; 9d found no
+   reply over the link that needed more (the largest was 57 KB).
+2. **Data source: push by default, on demand for long lists.**
+3. **A tool's error stops its Process for the debugger.**
+4. **Apps are developed against a second target image**; the local target
+   is for the tools themselves, and the project directory is the changes
+   file (the owner asked how the other remote Smalltalks did it: GemStone's
+   GemTools and Jade, TelePharo and Newspeak's mirrors keep the tools in a
+   client image apart from the target; the one-image Smalltalks rely on the
+   changes file and the emergency evaluator).
+5. **No token in the image, typed ones included**: the target picker asks
+   the host, which takes the token in a secure field of its own; built in
+   9d, which removed the typed path (primitive 164's `connect` lost its
+   token argument).
+
 ## What 9d needs
 
 - **A transport in `ClientHost`**: TCP to the phone (9b's answer: Bonjour
