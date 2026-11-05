@@ -265,7 +265,12 @@ UITextView; a CADisplayLink asking for 80 to 120 Hz preferring 120 with
 `CADisableMinimumFrameDurationOnPhone`; a render-server spinner so the
 screen is never idle; the idle timer off; the mode starts after
 `viewDidAppear`. Control events are stamped with the native event's
-timestamp.
+timestamp. Since 2026-11-06 the iOS app targets the iPhone and the iPad
+(`TARGETED_DEVICE_FAMILY` 1,2 in its spec; portrait and full screen on
+both, nothing else changed), for the iPad Pro 12.9-inch (3rd generation,
+A12X: 4 performance and 4 efficiency cores, 120 Hz) attached to the mini;
+`DEVICE=<UDID>` points `scripts/device.sh` and `shell-matrix.sh device`
+at it.
 
 **Modes** (`key=value` launch arguments; every mode prints one result line
 per run with `thermal`, `footprint_mb`, `footprint_peak_mb`, `avail_mb`):
@@ -338,6 +343,15 @@ nominal, peak footprint 66 MB; the kernel has grown by 8d, 8e and the
 vm-teardown follow-up since the Mac run's 141. ViewTest's 11 passed through
 UIKit (UILabel, UIButton, UISlider, UITextView behind the hop primitive);
 `tests.ndjson` and `junit.xml` came back over `devicectl`.
+
+Again on the iPhone on 2026-11-06 (c2de63f, module 10's kernel): 202
+tests, 198 passed, 1 failed and 3 errors, all four in 9c's
+`ViewWrapperTest`, in 5348 ms at nominal (`docs/modules/phone-transport.md`,
+"On the devices"; the macOS shell's tests mode fails three of the same
+four, 199 of 202). **The iPad Pro's rows** (its kernel tests and the whole
+matrix, the scenarios at 5 and at 7 workers) **did not run**: its build
+failed at signing, "No Accounts" and a team profile that does not include
+the iPad; Xcode's account is the owner's to add.
 
 ### The kernels in the shell
 
@@ -864,7 +878,8 @@ on logged. "Load" is twelve `yes` busy loops.
 | clean `swift build --scratch-path .build/clean-check` | pass: exit 0, 0 errors, 0 warnings |
 | `just apps` (both shells from clean) | pass: macOS exit 0, 0 errors, 0 warnings; iOS (generic device, unsigned) exit 0, 0 errors, 0 warnings |
 | the iPhone build (`scripts/device.sh build`) | pass on 7df0e5e after the owner's sign-in (2026-11-04 18:40): signed, built, installed; at ad81366 it failed before compiling, "No Accounts" (What needs the owner) |
-| the kernel tests on the iPhone (`scripts/device.sh tests`) | pass on 7df0e5e: 179 of 179 in 2223 ms, UIKit behind ViewTest; in the macOS shell (ad81366): 141 of 141 |
+| the kernel tests on the iPhone (`scripts/device.sh tests`) | pass on 7df0e5e: 179 of 179 in 2223 ms, UIKit behind ViewTest; in the macOS shell (ad81366): 141 of 141; on c2de63f (2026-11-06): 198 of 202, the four failures 9c's ViewWrapperTest (Measurements) |
+| the iPad Pro build (`DEVICE=00008027-0012592C0185002E scripts/device.sh build`, 2026-11-06, c2de63f) | **failed at signing**: "No Accounts", and the team profile does not include the iPad; nothing ran on the iPad |
 
 ## Commands
 

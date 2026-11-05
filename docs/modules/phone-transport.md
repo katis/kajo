@@ -27,6 +27,21 @@ rows, its thermal states and the phone's frames are in "Not done" with the
 commands that make them once the build signs (`scripts/remote-session.sh
 device`).
 
+**2026-11-06, the devices.** The iPhone build signs now (the owner allowed
+codesign on the key): the iOS shell built, signed and installed on the
+iPhone 13 Pro in about a minute, served over TCP on it and kept every
+frame while serving (Measurements, "On the devices"). Section 3's rows
+with a client still did not run, for two reasons outside the code: from
+the agent's session on the Mac every host of the LAN but the router
+answers "No route to host" (the phone, the iPad, another Mac; the same
+with the agent's sandbox off), which is macOS's local network privacy
+refusing the session's processes, so the macOS shell started from it
+cannot reach the phone either; and the phone's `_kajo-dev._tcp`
+advertisement never appeared on the network, which points at iOS's local
+network permission for the shell, not yet given on the phone. The iPad Pro
+attached the same day could not be built for (its signing needs Xcode's
+account, below).
+
 New: `Sources/KajoDev/Transport.swift` (the address forms, one stream
 opener for every transport, the TXT record, Bonjour advertising,
 resolving and browsing, the machine's addresses),
@@ -316,7 +331,8 @@ a targets file of mode 0600 and from there into the client shell's memory.
 Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS
 27.2, its display a Samsung TV at 2560 x 1440 and 120 Hz; swift.org Swift
 6.4.2 for `kajo` and the gates, Xcode 27.2 for the apps (Release). **Mac to
-Mac, not the phone** (the status note). Every number below is from the gate
+Mac** below; what the devices ran is under "On the devices", with these
+tables kept for the comparison. Every number below is from the gate
 run on a487630, 2026-11-05 12:42 to 12:53 (`m9d/section3/`, `scripts/remote-session.sh`
 and `scripts/remote-report.py`), three runs of each row interleaved,
 medians with the range in brackets; thermal state fair throughout (the
@@ -485,6 +501,102 @@ serving), 2026-11-05 12:42 to 12:53, thermal fair:
 - Thermal: the Mac's state was fair in every row of the gate run and
   nominal in every row of the first run; the phone's states (9a: serious
   from its first ring row) are not measured.
+
+### On the devices
+
+2026-11-06 00:17 to 00:31, on 79ef19d (module 10's VM and kernel, the iOS
+spec at device family 1 and 2, the two script fixes below), the iOS shell
+Release as `scripts/device.sh build` makes it.
+
+**What ran.** The iPhone 13 Pro (iOS 27.2) built, signed and installed;
+the kernel tests ran on it (below); the shell served the protocol over
+TCP and showed its pairing screen in every serving launch; its frames
+while serving were measured against the same scenario not serving.
+**What did not**: every row with a client (round trips over Wi-Fi,
+define-and-retry across the link, the dropped link, the phone's frames
+with a client), on the iPhone and on the iPad, and everything on the
+iPad:
+
+- `scripts/remote-session.sh device <out> lan-1 idle lan 1` stopped at
+  the token: `device.sh token` found no `_kajo-dev._tcp` service, and
+  `dns-sd -B` on the Mac saw none in any serving launch while it listed
+  the network's other services. From the agent's session, `ping` and a
+  TCP connect to the phone's Wi-Fi address (192.168.1.103) and to its USB
+  link (169.254.53.71) answered "No route to host", as did every other
+  LAN host but the router (the router and the internet answered), with
+  the agent's sandbox on and off: macOS's local network privacy for the
+  session. 9d's Mac-to-Mac rows never met it, because the Mac's own LAN
+  address is not another host. The owner allows Local Network for the
+  terminal the sessions run from (System Settings, Privacy and Security)
+  and taps Allow on the phone if iOS asks for Kajo; nothing was answered
+  or changed here.
+- The iPad: `DEVICE=00008027-0012592C0185002E scripts/device.sh build`
+  failed before compiling: "No Accounts: Add a new account in Accounts
+  settings" and "Provisioning profile 'iOS Team Provisioning Profile:
+  dev.katajamaki.kajo.shell' doesn't include the currently selected
+  device". The iPhone's profile is on the Mac; adding a device to it needs
+  Xcode's account (or the iPad registered in the team's portal), the
+  owner's.
+
+**Two bugs in the scripts, fixed** (written in 9d, never run against a
+phone): `device.sh token` copied the token file onto a directory, which
+`devicectl` refuses ("Cannot open destination file ...: Is a directory"),
+so no token ever arrived; and `remote-session.sh device ... lan` took the
+first address of the phone's list, which is the USB link's 169.254 one
+(the list is 169.254.53.71, 192.0.0.6, 192.168.1.103 and four IPv6), so a
+"lan" row would not have crossed Wi-Fi. It now takes the address on the
+Mac's own network. The phone's console output carries no token.
+
+**The phone's frames while serving** (`device.sh serve` as
+`remote-session.sh device` launches it for its control row, sessions 0:
+`mode=serve protocol=tcp:47100`, 20 s after 1 s of warmup, the default
+5 background workers and offload young collection), against the same
+scenario not serving (`mode=scenario`, the same window), three runs of
+each interleaved with 20 s between launches; `remote-report.py` and the
+result lines, with the Mac-to-Mac no-client rows of the table above and
+9a's phone rows (10 s windows at thermal serious) beside them:
+
+| row | runs | missed of 2400 | max gap ms | longest turn ms | main thread CPU ms per 10 s | main stopped for others ms per 10 s | power W | peak MB | thermal start→end |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| iPhone, idle, serving, no client | 3 | 0 | 8.4 | 3.4 [3.3–3.8] | 3708 [3708–3714] | 0 | 0.016 | 33 | nominal, nominal, fair |
+| iPhone, idle, not serving | 3 | 0 | 8.4 | 3.3 [3.2–3.3] | 3715 [3712–3717] | 0 | 0.015 | 32 | nominal |
+| iPhone, ring, serving, no client | 3 | 0 | 8.4 | 4.5 [4.4–5.2] | 2671 [2574–2744] | 48.3 [46.4–49.5] | 4.1 [3.9–4.4] | 575 [561–590] | nominal |
+| iPhone, ring, not serving | 3 | 0 (2399 frames counted once) | 8.4 | 4.9 [4.9–5.1] | 2837 [2768–2924] | 52.4 [48.8–54.4] | 3.7 [3.5–3.8] | 591 [585–598] | nominal, nominal, nominal→fair |
+| 9a's iPhone rows (10 s, serious): idle / ring offload | 3 | 0 / 0 of 1200 | 8.4 / 8.3 | - | - | 0.0 / 80.5 | 0.016 / 1.8 | 31 / 557 | serious |
+| Mac to Mac: idle / ring, no client | 3 | 0 / 0 | 8.4 / 8.4 | 3.3 / 3.1 | 3574 / 2057 | - | - | - | fair |
+
+- **Serving costs the phone nothing without a client**: the serving rows
+  equal the plain ones (no frame missed, the same turns, CPU and power),
+  as on the Mac. The listener and the pairing screen are idle work.
+- The ring at thermal nominal stopped the main thread 46 to 54 ms per
+  10 s, against 9a's 68 to 83 at serious; 0 frames missed either way.
+  The process drew 3.5 to 4.4 W under the ring at nominal against 9a's
+  1.8 at serious (a hot phone runs slower clocks).
+- The phone stayed nominal for ten of the twelve launches (fair from the
+  last idle serving row; the build, the tests and three probe launches
+  came first).
+
+**The kernel tests on the iPhone** (`scripts/device.sh tests`, c2de63f,
+module 10's kernel): 202 tests, **198 passed, 1 failed, 3 errors** in
+5348 ms, thermal nominal, peak 70 MB. All four are `ViewWrapperTest`
+(9c's second round of wrappers): `testMenusAndToolbars` and
+`testOutlinesAndTables` ("the view call #create failed": UIKit has none
+of those kinds, 9c's known gap), `testATextViewsSelectionStylesAndKeys`
+("the view call #get failed", `get: 'styles'`), and
+`testTheEventLoopsKindActionsAndTimers` (its "without a host a timer
+cannot be asked for" assertion fails where a shell is the host). The
+macOS shell's tests mode on the same commit fails three of them the same
+way (199 of 202: the text view's `get`, `testOutlinesAndTables`'s `get`,
+the timer assertion): the test is written for the headless host, and
+9a's and 9c's shell runs predate it. Not changed here (the code is not
+this run's to change).
+
+**The question 9d left for the phone** (whether the class tree wants the
+on-demand form or a request per package over Wi-Fi) is still not
+answered by a measurement: no request crossed Wi-Fi. The Mac-to-Mac
+reasoning stands (the reply's bytes cost a tenth of the request at most
+next to building and reading the JSON, so push stays the default) until
+`remote-session.sh device` runs.
 
 ### The kernels against the starting commit
 
@@ -689,10 +801,13 @@ binaries.
 
 ## Not done
 
-- **The phone.** The iOS shell's serve mode, pairing screen, token file,
-  Bonjour advertisement and `Info.plist` keys have not run on the iPhone
-  13 Pro (its build could not be signed during the module); so neither
-  have section 3's rows on the phone: the round trips over Wi-Fi, the
+- **The phone's rows with a client.** Since 2026-11-06 the iOS shell
+  builds, signs and serves on the iPhone 13 Pro, with its pairing screen
+  and token file, and its frames while serving with no client are
+  measured ("On the devices"); its Bonjour advertisement was never seen
+  on the network, and the Mac's tools could not reach it (local network
+  privacy on the Mac, probably the phone's permission too; "On the
+  devices"). So section 3's rows on the phone are still not run: the round trips over Wi-Fi, the
   phone's frames while serving against 9a's phone rows, the debugger and
   the dropped link across Wi-Fi, the phone's thermal state per row, and
   whether iOS asks for local network access. The commands are ready:
@@ -701,7 +816,10 @@ binaries.
   `scripts/device.sh serve`, takes the token with `scripts/device.sh
   token` and runs the sessions from the macOS shell), with a bounded
   cooling wait between rows as 9a's matrix had none. `device.sh serve`
-  and `token` are written but not run.
+  ran (12 launches); `token` copies the token since its fix and has not
+  yet found the service by name. The iPad Pro (iPadOS 26.7.2, device
+  family 2 since 2026-11-06) ran nothing: its build waits on Xcode's
+  account to add it to the profile.
 - **TLS** (the owner's question below) and any encryption; USB
   tunnelling; the developer UI on the phone; more than one Mac's tools on
   one phone at a time beyond what the server already allows (it accepts
@@ -740,6 +858,11 @@ binaries.
    minutes); the 9a and 9c device runs signed. The phone's rows need it
    answered (or the key's access set to allow codesign) by the owner;
    then `scripts/remote-session.sh device` makes the rows.
+   *2026-11-06*: codesign is allowed and the iPhone builds, signs and
+   installs (about a minute). Two things remain before the rows run:
+   Local Network access on the Mac for the session that starts the
+   client (and on the phone for Kajo, if it asks), and Xcode's account
+   for the iPad's profile ("On the devices").
 6. **The not-retried requests.** `evaluate`, `process.evaluate`,
    `process.step` and `test.run` fail at a dropped link instead of being
    sent again; the tool shows the error and the developer repeats the doit
@@ -826,7 +949,7 @@ came; everything was run again on a487630.
 | clean build | exit 0, 0 errors, 0 warnings (11 s from an empty scratch path: the toolchain's compilation cache, as in 8e and 9b; `just ios-check` typechecks every KajoVM file with strict memory safety from nothing) |
 | 9c's scripted session on the macOS shell (`just mac-shell`, local target) | 12 launches (three each of the 2000-class session with no load and with the storm, typing with the storm and with none), every result line written, no failure; 9c's numbers hold: `class.hierarchy` of 2009 classes 326 to 334 ms (9c 329), `package.selectors` 640 ms (657), typing with the storm p50 4.9 ms, 1 frame missed of 1259; the session is 5.7 to 5.9 s now against 3.7 to 3.9 (the two new steps, 1.9 to 2.0 s with 11 to 14 frames missed; drop.reconnect is 1.33 to 1.41 s there, the 2009-class hierarchy being one of the two requests sent again) |
 | section 3, Mac to Mac (`scripts/remote-session.sh mac` and `kajo`) | 51 sessions, no failure; 18 serving rows, 0 frames missed in each; tables under Measurements |
-| section 3 on the phone | **not run**: the iPhone build could not be signed (the status note) |
+| section 3 on the phone | **not run**: the iPhone build could not be signed (the status note); 2026-11-06 on 79ef19d: built, signed, served 12 launches with 0 frames missed, the client rows blocked by local network access, the iPad not built ("On the devices") |
 | bench A/B | within noise (Measurements) |
 
 (312 is `KajoVMTests`, 82 `KajoCompilerTests`, whose kernel-image suite
