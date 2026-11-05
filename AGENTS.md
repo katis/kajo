@@ -559,8 +559,8 @@ Safety:
    it. Module 4's precondition says a provisioning failure is counted and
    reported; the stop-the-world oracle's promotion reserve runs out on the
    ring scenario at 600 MiB and the VM traps instead (open, module 9a).
- - No object is larger than one block, so a table that is one object has
-   a hard capacity. 8b's sources table was one IdentityDictionary whose
+ - A table that is one object has a hard capacity (one block, 4095 slots,
+   until module 10's large-object space). 8b's sources table was one IdentityDictionary whose
    Array could not pass 4095 slots; at 1550 methods it died in an
    unhandled error and the build went on with 14 sources missing, because
    the build read only VM errors. Tables that grow with the kernel are
@@ -636,9 +636,23 @@ Safety:
    written; nothing noticed until 9c built an image of 2000 classes.
    `LargeArray` behind the collections, a merge sort in place of the
    insertion sort that cost 5.3 s for 5000 items, and JSON lines carried
-   in pieces both ways answer it in the kernel; a large-object space in
-   the VM is an open question. When a module's first big input is its
-   gate, build the big input first.
+   in pieces both ways answered it in the kernel until module 10 built
+   the large-object space (runs of blocks, old at birth, never moved,
+   image version 5) and the kernel went back to plain Arrays. When a
+   module's first big input is its gate, build the big input first.
+ - A new object held only by the stop that allocated it is unrooted the
+   moment its worker parks for another worker's stop. Module 10's first
+   cycle trigger started marking from the allocating worker's own stop
+   with the large object as its only root; the random programs crashed in
+   release and reported "reachable but not marked" under
+   `markingAlwaysOn`. An object that must outlive a collection it starts
+   is a pending root on the normal young-collection path, never a local.
+ - Every allocation path decides the collector's trigger. Module 5's
+   trigger was decided at young collections; a Process allocating only
+   large objects never filled a nursery, so no cycle ever started and old
+   space fell back to full collections that went uncounted. A fallback
+   that is not a counter is a fallback no test sees (module 10 counts
+   old-allocation full collections as module 5's fallback).
  - A counter bumped after its lock is let go is read with a bounded wait,
    never once. The Process tests read `terminations` the instant the last
    Process read as terminated; the count landed after, a race as old as
@@ -726,8 +740,8 @@ tables and the main-thread check undone, and its five open questions in
 `docs/modules/kernel-image.md` await the owner; Processes saved in the
 image built in module 8c: the stack words copied verbatim into Array
 chunks under special object 8 with the ready queues, the finalization
-Semaphore and the saver, image format version 2 (3 since 8d, 4 since 9b for class-table holes; 1 to 3 are
-refused, images are rebuilt from sources), `Smalltalk snapshot:`
+Semaphore and the saver, image format version 2 (3 since 8d, 4 since 9b for class-table holes, 5 since module 10 for runs of blocks; 1 to 4 are
+refused naming module 10, images are rebuilt from sources), `Smalltalk snapshot:`
 answering false in the saver and true on resume, a hold on the scheduler
 before the stop with its own model, a loader that checks every saved frame
 against its method and the bytecode verifier's depth at its pc, `kajo run`
@@ -808,9 +822,11 @@ table, split, scroll, toolbar, menus, window frame) on AppKit, the text
 view's new features only on iOS; the tools push items to the views, the
 on-demand form is built and measured (ADR 0010's Built (9c) note); a view
 call past the turn's deadline makes the next poll check the budget
-(longest turn 40 to 13 ms); no object passes one heap block, so
+(longest turn 40 to 13 ms); no object passed one heap block then, so
 `LargeArray`, a merge sort and pieced JSON lines went into the kernel and
-an oversize request is refused with a reply; on the Mac mini's display at
+an oversize request was refused with a reply (module 10 removed
+`LargeArray` and lifted the request limit to 16 MiB; the merge sort and
+the pieces stay); on the Mac mini's display at
 120 Hz a scripted session over 2009 classes and 22 284 methods ran in 3.7
 to 3.9 s missing 26 to 32 frames of about 450, mostly AppKit opening the
 first windows, typing under load p50 2.3 ms and p99 2.9 ms, idle p50 5.5
@@ -846,7 +862,7 @@ s, a dropped link is whole again in 1.05 to 1.09 s of which 1.006 s is
 the backoff, the serving shell missed 0 of 2400 frames idle and ring with
 and without a client, bench within noise and `interpret` identical; 9b's
 client closed a descriptor twice from `deinit` (fixed); the phone's rows
-wait on the owner's signing, its six open questions answered by the owner on 2026-11-05 (plain TCP now and PSK-TLS as a later module, no token expiry, any number of sessions on the phone, serving only by launch argument, signing is the owner's, doits fail at a dropped link rather than being resent); the owner's distribution shape (2026-11-05): Kajo ships as one Mac app (`Kajo.dmg`, outside the App Store) carrying the development image, in which the developer customizes the tools and creates new apps; a new app is a generated project (an xcodegen spec with a Mac and an iOS target sharing one Tonel directory, a pinned dependency on the Kajo package, the Debug configuration bundling the development image with the protocol compiled in, the Release configuration the release image without it), so the phone runs the developer's own development build installed with Xcode and no Kajo app is ever reviewed under guideline 2.5.2; serving on the phone therefore becomes a property of the development build, not a launch argument, with the pairing screen reached from the running app; a separate iOS/iPadOS Kajo app, a teaching tool and playground with the tools on the device, is a later idea, not planned; the stop-the-world scavenge trapped when its promotion
+wait on the owner's signing, its six open questions answered by the owner on 2026-11-05 (plain TCP now and PSK-TLS as a later module, no token expiry, any number of sessions on the phone, serving only by launch argument, signing is the owner's, doits fail at a dropped link rather than being resent); the owner's distribution shape (2026-11-05): Kajo ships as one Mac app (`Kajo.dmg`, outside the App Store) carrying the development image, in which the developer customizes the tools and creates new apps; a new app is a generated project (an xcodegen spec with a Mac and an iOS target sharing one Tonel directory, a pinned dependency on the Kajo package, the Debug configuration bundling the development image with the protocol compiled in, the Release configuration the release image without it), so the phone runs the developer's own development build installed with Xcode and no Kajo app is ever reviewed under guideline 2.5.2; serving on the phone therefore becomes a property of the development build, not a launch argument, with the pairing screen reached from the running app; a separate iOS/iPadOS Kajo app, a teaching tool and playground with the tools on the device, is a later idea, not planned; module 10 (large objects, built 2026-11-06, `docs/modules/large-objects.md`, ADR 0003's and 0007's Built (10) notes): an object past one 32 KiB block (4095 slots) is a run of contiguous blocks, one head and continuations in a one-byte-per-block kind table, allocated old, never young, never relocated or compacted, its largeness read from the header's count (no header bit), the limit the 24-bit count field (16 777 215 slots, 128 MiB, or 16 MiB - 1 bytes); every reader of a body walks runs (verifiers, both sweeps, the block pool, compaction, the relocator and its verifier, snapshot writer and loader, reshape, become); the marker scans a large object 4096 slots at a time and polls by work done; a large allocation decides module 5's trigger and starts the cycle from the allocating worker's young collection with the object a pending root (the first version rooted it only in its own stop and the random programs crashed); a full collection forced by an old allocation counts as module 5's fallback; image version 5 (snapshot 4), versions 1 to 4 refused naming module 10, fuzz seeds upgraded plus `large-objects.img`; the kernel back to plain Arrays (`LargeArray` and `Array class>>large:` gone, `basicNew:` names the limit), the transport's request limit 16 MiB - 1 with replies still in pieces; vm-teardown's two items built (old space grows for the VM's final collection out of address space reserved with the heap, `Image.saveImage` throws `processesHaveFrames` naming `Smalltalk snapshot:`); the random programs gained a large-object step and the shells `scenario=large`; measured on the mini: 1 MiB allocate p50 0.044 ms and 16 MiB 0.62 ms, freeing them 0.020 ms, `at:`/`at:put:` on a million elements 1016 ms against `LargeArray`'s 4567, marking a 1M-slot Array 0.8 ms in 244 chunks with 0.013 ms between polls, the large churn scenario 0 of 1200 frames missed with 811 to 819 cycles per 10 s all started by large allocations, the 2000-class image 481 ms against 518, `package.selectors` 443 ms against 657 and 19 866 rows pushed in 36 ms against 108, bench within noise and `interpret` identical, worst-case fragmentation 1.64 times live data (683 free blocks with no three adjacent), 46 new `unsafe` sites in the object memory and marker; four test bounds of earlier modules widened under the sanitizer only or repeated a round (9d's listener pause and 9b's evaluate under ThreadSanitizer with load, the relocation fragment kernel's two selecting cycles, the exhausted-reserve heaps two blocks larger); not done: no card table for large objects (a remembered one is scanned whole by a scavenge), filling a large object does not poll (about 5 ms at 128 MiB), runs never move so fragmentation between them persists, LargeIntegers stay one block, nothing ran on the iPhone; four open questions await the owner (16 MiB enough for bytes, ever relocate a run, keep the pieces, card marking before the shells hold large young collections); the stop-the-world scavenge trapped when its promotion
 reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
 follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
 not the reserve's size, a mark-sweep that could not bring old space under
@@ -898,7 +914,9 @@ cover.
    shells share, module 9a), `KajoVMTests` and `KajoCompilerTests` (Swift
    Testing; `ShellTests` live in the latter).
  * `Sources/KajoVM/` the VM core, one directory per module:
-   `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`),
+   `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`;
+   since module 10 large objects as runs of contiguous blocks with a
+   one-byte block-kind side table, `docs/modules/large-objects.md`),
    `Interpreter/` and `Loader/` (module 2, built; `docs/modules/interpreter.md`),
    `Workers/` and `Processes/` (module 3, built; `docs/modules/workers.md`:
    workers, safepoints, Process-owned stacks, scheduler, budgeted
@@ -997,8 +1015,9 @@ cover.
  * `kernel/` Smalltalk sources the image is built from (module 8b: the
    kernel of `docs/modules/kernel.md` as built in
    `docs/modules/kernel-image.md`, with its SUnit tests beside the classes;
-   172 Tonel class files since module 9c (`LargeArray` and a merge sort
-   since 9c), in the canonical form the image
+   170 Tonel class files since module 10 (`LargeArray` removed in 10,
+   `LargeObjectTest` in place of `LargeArrayTest`; the merge sort since
+   9c), in the canonical form the image
    itself writes (`Smalltalk writeTonel:`); `just build-image`, `just
    kernel-test`). The image is never committed.
    Its compiler in Smalltalk compiles every method and is compared with the
