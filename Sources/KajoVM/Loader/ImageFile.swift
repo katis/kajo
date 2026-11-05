@@ -19,6 +19,11 @@
 //     M words  the method table: every CompiledMethod in the heap
 //     L bytes  module 1's snapshot (version 4)
 //
+// Module 1's loader checks the heap's structure, since module 10 the block
+// table's runs too (every head's used past one block and within the
+// snapshot, its continuations after it with nothing used, no entry into a
+// continuation, a large body exactly at a head).
+//
 // Rules checked after module 1's (`verifyImage`):
 //  - the special objects: nil, true, false of their classes; the globals
 //    and the symbol table Arrays of their sizes; the selectors Array holding

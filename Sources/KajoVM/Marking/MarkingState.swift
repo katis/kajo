@@ -168,6 +168,9 @@ struct MarkingCounters: Sendable {
     /// Module 10: chunks of large objects the marker put back on its stack
     /// (a large object's scan split at `MarkChunk.slots`).
     var chunksSplit: UInt64 = 0
+    /// Module 10: stops a large allocation ran to start a cycle
+    /// (`startCycleAfterLargeAllocation`).
+    var cyclesAfterLarge: UInt64 = 0
     var markerCpuNs: UInt64 = 0
     var sweepNs: UInt64 = 0
     var entriesFreed: UInt64 = 0

@@ -204,3 +204,32 @@ extension ObjectMemory {
 extension BlockHeap {
     func inUseRun(_ b: Int) -> Bool { isInUse(b) && isRun(b) }
 }
+
+/// Module 10: a large allocation fills old space without a scavenge, and
+/// module 5's trigger is decided at the end of young collections only; a
+/// Process that allocates nothing but large objects would fill old space to
+/// its soft limit and fall back to a full collection with no cycle ever
+/// started (AGENTS.md: a trigger must watch every resource a fallback can
+/// exhaust). So after a large allocation the trigger is decided again, and
+/// when it fires a cycle starts at once: module 7's initial-mark pause (any
+/// stop: its young-root scan covers the nurseries), or, under the
+/// stop-the-world scavenge, a scavenge whose end takes the snapshot. The
+/// new object is kept as a root of that stop: it is old, so it is a
+/// snapshot entry, and nothing else holds it yet.
+func startCycleAfterLargeAllocation(_ vm: VMPointer, _ w: WorkerPointer, _ o: Oop) {
+    guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .idle,
+          let trigger = unsafe decideTrigger(mk, rate: 0, oldEntries: nil, record: false) else { return }
+    if let y = unsafe vm.pointee.young {
+        unsafe stopWorld(vm, w, retry: true, keeping: [o]) { stop in
+            guard unsafe mk.phaseNow == .idle else { return }
+            unsafe mk.pointee.log.pointee.counters.cyclesAfterLarge &+= 1
+            unsafe initialMarkPause(vm, y, mk, stop, trigger: trigger)
+        }
+    } else if unsafe vm.pointee.nursery != nil {
+        unsafe stopWorld(vm, w, retry: true, keeping: [o]) { stop in
+            guard unsafe mk.phaseNow == .idle else { return }
+            unsafe mk.pointee.log.pointee.counters.cyclesAfterLarge &+= 1
+            unsafe youngPause(vm, w, stop, full: false)
+        }
+    }
+}

@@ -243,7 +243,9 @@ struct CacheEntry {
     @inline(never)
     func allocateLarge(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop = .none) -> Oop {
         guard count >= 0, count <= Header.maxLargeCount else { return .none }
-        return allocateOld(cls, count: count, bytes: bytes, keeping: extra, softFailure: true)
+        let o = allocateOld(cls, count: count, bytes: bytes, keeping: extra, softFailure: true)
+        if o != .none, let vm = unsafe workerOf(state).pointee.vm { unsafe startCycleAfterLargeAllocation(vm, workerOf(state), o) }
+        return o
     }
 
     /// An old object (no nursery, or one too large for eden): the context's

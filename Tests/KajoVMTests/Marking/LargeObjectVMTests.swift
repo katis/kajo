@@ -30,6 +30,27 @@ method UndefinedObject mkLarge:at: temps=1
   push_int 0
   return_top
 end
+method UndefinedObject churnLarge: temps=1
+  push_int 0
+  store_temp 1
+loop:
+  push_temp 1
+  push_temp 0
+  lt
+  jump_if_false done
+  push_lit @Array
+  push_lit 20000
+  send new: 1
+  pop
+  push_temp 1
+  push_int 1
+  add
+  store_temp 1
+  jump loop
+done:
+  push_int 0
+  return_top
+end
 method UndefinedObject lastOf: temps=1
   push_nil
   push_temp 0
@@ -206,6 +227,31 @@ private func relocationScenario(_ blind: RunReader?) throws -> (selectedRun: Boo
               + "p50 \(String(format: "%.3f", Double(s[s.count / 2]) / 1e6)) ms, total \(String(format: "%.2f", Double(total) / 1e6)) ms, chunks \(rt.vm.markingCounters.chunksSplit)")
         rt.vm.sweep()
         rt.scavenge()
+        rt.noFailures()
+        rt.stop()
+    }
+}
+
+/// A Process that allocates nothing but large garbage (160 KiB Arrays, 64
+/// MiB of them in a 16 MiB heap) never fills a nursery, so no young
+/// collection decides module 5's trigger: the large allocation decides it
+/// (`startCycleAfterLargeAllocation`) and cycles start before old space
+/// reaches its soft limit. Without that, every collection here would be a
+/// full collection, counted as a fallback.
+@Test func largeAllocationsStartMarkingCycles() throws {
+    for young in [YoungMode.offload, .stw] {
+        let rt = try Runtime(largeSrc, background: 1, heapBlocks: 512, configure: { c in
+            c.marking.enabled = true
+            c.young.mode = young
+        })
+        let p = rt.spawn("churnLarge:", [int(400)])
+        #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+        #expect(rt.result(p) == 0)
+        rt.vm.release(p)
+        let m = rt.vm.markingCounters
+        print("large churn \(young): cycles \(m.cycles), started after a large allocation \(m.cyclesAfterLarge), fallbacks \(m.fallbacks), full collections \(rt.image.om.counters.collections)")
+        #expect(m.cyclesAfterLarge > 0, "\(young): \(m)")
+        #expect(m.cycles > 0)
         rt.noFailures()
         rt.stop()
     }
