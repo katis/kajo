@@ -108,3 +108,41 @@ every later wrapper inherits.
 - A shell implements `ShellPlatform` (KajoShellCore): the view host, the
   display link, the release, the status line.
 - docs/modules/shells.md describes the built form and its measurements.
+
+## Built (9c)
+
+Module 9c (`docs/modules/developer-ui.md`) added the second round through
+the same primitive and handle table, with no change to the decision: an
+editing `TextView` (selection, range styles, the keys it reports before
+handling them, the text-changed event, read-only mode, positions as the
+kernel's UTF-8 byte offsets converted by the shell), `OutlineView`,
+`TableView`, `SplitView`, `ScrollView`, `Toolbar`, `Menu` (the menu bar
+and context menus with key equivalents), autoresizing, and a window's
+frame on the screen. Event kinds 7 to 16.
+
+**The data-source decision.** AppKit's outline and table data sources ask
+synchronously, inside the toolkit, for an item's children or a row; the
+hop rule forbids calling into the VM there. So a toolkit callback becomes
+a hop-safe **event**: the shell's data source holds what the image gave
+it, and when the view needs what it was not given (an item expanded, a
+page of rows scrolled into view) it posts an `expand` event and shows them
+when the image sends them in a later view call. Both forms are built
+behind the same wrappers, **push** (everything at once, in pages of at
+most 4095 values per call, one object's limit) and **on demand** (the
+roots or a row count first, the rest as asked). Measured on the Mac mini
+with 2000 classes and 19 866 selectors (three runs in each of four gate attempts): the class tree in
+50 to 91 ms pushed and 49 to 82 ms on demand (the request, 0.33 s, is
+most of the browser's population either way); a table of 19 866 rows in
+68 to 117 ms pushed (five calls) against 10 to 18 ms on demand. **The
+tools push**: a programmatic selection (the browser going to a class from
+a senders list) needs the item in the data source, and every list the
+tools show is a class's or a package's, small next to a page; the on-demand
+form stays for long lists.
+
+**A view call can take milliseconds** (a toolbar set on a window 14 ms),
+where the turn's budget is checked every 1024 polls: a turn building a
+window ran 40 ms in one slice. The hop primitive now makes the next poll
+check the budget after a view call that ended past the turn's deadline
+(the longest turn of the scripted session went to 13 to 16 ms). The
+batching this ADR's costs mention is still not needed.
+
