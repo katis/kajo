@@ -243,3 +243,21 @@ iOS (`just ios-check`) but not run on a device; the main thread's spin time
 is zero only headlessly (module 9's app measures it); the cheaper store
 check is not built. Accepting would make the double mapping and the
 post-store check the old-space design until a cheaper check is measured.
+
+## Built (10): large objects outside the nursery (2026-11-05)
+
+The consequence "large objects outside the nursery" is built in module 10
+(docs/modules/large-objects.md). A large object (one whose body passes a
+32 KiB block) is allocated in old space at birth, as a run of blocks under
+the pools lock: it is never young, never copied by a scavenge, never
+promoted, never relocated (the relocator never selects a run's block) and
+never compacted (compaction keeps a live run's blocks as it keeps pinned
+ones). Its stores run the ordinary barrier: an old large object holding a
+young pointer is remembered like any old object. A marking cycle in
+progress never sweeps one allocated after its snapshot (it is not a
+snapshot entry, and every block of its run carries the cycle's stamp).
+Runs can fragment the address space between them, since nothing moves
+them: the worst case measured leaves 21 MiB of free single and double
+blocks no run of three blocks can use (the module's fragmentation table).
+Whether a large object should ever be relocated is a question for the
+owner there.

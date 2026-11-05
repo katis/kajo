@@ -541,8 +541,10 @@ as they are understood.
 - **Push and on-demand** (a data source's forms): the image gives a
   table or an outline all its rows or items at once, or a row count and
   the roots first and the rest as the view asks (an `expand` event).
-- **LargeArray**: a sequence longer than one heap object can be, made of
-  Arrays of 2048; the growable collections use it past 4095 slots.
+- **LargeArray** (module 9c, removed by module 10): a sequence longer
+  than one heap object could be, made of Arrays of 2048; the growable
+  collections used it past 4095 slots until large objects made it
+  unnecessary.
 
 ## The phone transport (module 9d)
 
@@ -576,3 +578,32 @@ as they are understood.
 - **Pairing**: giving the host a target's token: the developer reads it
   off the phone's screen and types it into the host's own secure field
   (`ClientTransport pair:`); no token ever passes through the image.
+
+## Large objects (module 10)
+
+- **Large object**: an object whose body does not fit one 32 KiB block
+  (more than 4095 slots or 32 760 bytes), up to the header's count field
+  (16 777 215 slots or bytes). Old at birth, never young, never relocated
+  or compacted. Recognised by its count (`Header.isLarge`), not by a
+  header bit.
+- **Run**: the contiguous blocks a large object's body owns alone: the
+  **head**, where the body starts (its `used` is the body's bytes, past
+  the block), and its **continuations** (`used` 0). No entry points into
+  a continuation; no run block is ever in the block pool.
+- **Block kind** (the **side table**): per block, ordinary, head or
+  continuation (`BlockHeap.kind`); a free block is ordinary and not in
+  use. Written under the pools lock or with the world stopped, and saved
+  in the snapshot's block table (image format 5).
+- **Run blind** (a test switch, `TestSwitches.runBlind`): one reader of a
+  body treats runs as ordinary blocks, so that reader's test shows the run
+  rule matters.
+- **Mark chunk**: the 4096 slots of a large object the concurrent marker
+  scans at a time; the rest goes back on its stack as the oop with the
+  next chunk's number in bits 40..63, and counts 32 objects toward the
+  marker's poll interval.
+- **End growth**: blocks reserved past the promotion reserve that only
+  the VM's final collection may take (`ObjectMemoryConfig.endGrowthBytes`,
+  as large as the reserve unless set), so the promote-all at the VM's end
+  grows old space instead of trapping.
+- **Hard limit**: the blocks a promotion may hold, the soft limit plus
+  the promotion reserve; past it lies the end growth.

@@ -251,3 +251,27 @@ kernels, not a direct-pointer A/B: the 2x per hop and 1.8 to 2x marking
 were not re-measured on the A15. The decision above (accepted, variant B)
 stands on the iPhone 17 Pro measurements; nothing on the 13 Pro
 contradicts it.
+
+## Built (10): large objects (2026-11-05)
+
+Module 10 (docs/modules/large-objects.md) lifts module 1's "bodies never
+span blocks". An object whose body does not fit one 32 KiB block (more
+than 4095 slots or 32 760 bytes) gets a **run** of contiguous blocks it
+owns alone, up to the header's count field (16 777 215 slots, 128 MiB, or
+16 777 215 bytes). The layout is the ordinary one: the entry holds the
+state word and the header, the body's first word is the back reference
+(entry index, size in words; 32 bits of words hold 128 MiB), slots or
+bytes follow. What is new lies beside the table, not in it: a **side
+table** of block kinds (ordinary, head, continuation), the head's `used`
+being the body's bytes and each continuation's 0, so a reader that walks
+a block from its start to its `used` walks a run's one body. No header bit
+marks a large object (bit 51 stays reserved): the count says it, and no
+hot path asks. Loads, stores, the barriers, become and the class's format
+go through the entry as before, so the interpreter and the allocation fast
+path are unchanged instruction for instruction (the disassembly diff in
+the module doc). The snapshot saves each block's kind in the high byte of
+its used word (module 1's snapshot version 4, image format 5); the loader
+checks every run before the heap verifier runs. One cost is new: a large
+object's slots are one body, so a remembered large object is scanned
+whole by a scavenge (no card table), and the stop-the-world collector
+marks it whole; the concurrent marker scans it in chunks of 4096 slots.

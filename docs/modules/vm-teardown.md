@@ -271,11 +271,22 @@ starting commit's in the aligned bench builds.
   VM's end** traps in `destroy` rather than leaving a corrupt image. It
   needs old space past its soft limit and the promotion reserve both used
   up, which the reserve's sizing makes unlikely; nothing tests it.
+  **Built in module 10** (docs/modules/large-objects.md, section 4): the
+  reservation keeps blocks past the promotion reserve that only the final
+  collection may take (`ObjectMemoryConfig.endGrowthBytes`, as large as
+  the reserve unless set), so old space grows instead; only a growth too
+  small for the young objects still traps, and
+  `VMEndTests>>oldSpaceGrowsForTheFinalCollection` fills old space and the
+  nursery and ends the VM.
 - **Process stacks** are still freed by `destroy`, as before: a live
   Process's stack lives outside the heap, so an image saved on the host
   after a VM ended with live Processes holds Process objects whose frames
   are gone. Saving running Processes is the VM's own save (8c); `kajo run`
-  and the shells terminate every Process before ending the VM.
+  and the shells terminate every Process before ending the VM. **Built in
+  module 10**: `Image.saveImage` now throws `ImageError.processesHaveFrames`
+  while any Process in the heap is neither terminated nor saved by the
+  VM's own save, naming `Smalltalk snapshot:`
+  (`VMEndTests>>theHostSaveRefusesWhileAProcessHasFrames`).
 - Races with another process changing the sources directory between the
   check and the open are narrowed (`O_NOFOLLOW` on the last component,
   exclusive creation of the temporary file) but not closed for the parent
@@ -287,14 +298,15 @@ starting commit's in the aligned bench builds.
 1. **Young objects that do not fit old space at the VM's end**: trap (as
    built), grow old space for the final collection, or answer the failure
    to the host (`destroy` refusing, the VM kept)? **Owner (2026-11-04):
-   grow old space for the final collection** (not built yet; a small item
-   for whoever next touches the VM's end).
+   grow old space for the final collection**; built in module 10 (growth
+   reserved with the heap, docs/modules/large-objects.md section 4).
 2. **The host's save after a VM with live Processes**: should `destroy`
    refuse while Processes are alive, or should the host's save take
    Processes as the VM's own save does (8c), now that the image is whole
    at the end? **Owner (2026-11-04): the host's save refuses while any
    Process has frames, naming the VM's own save** (the main session's
-   recommendation, taken; not built yet).
+   recommendation, taken); built in module 10 (`Image.saveImage` throws
+   `processesHaveFrames`).
 
 ## Gates
 
