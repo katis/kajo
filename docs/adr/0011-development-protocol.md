@@ -101,3 +101,33 @@ Processes wait with no timeout in development and never stop in release.
   handle (9c's inspector will say).
 - Whether a stopped request's eventual result should be sent as an event.
 - TCP, Bonjour and the phone's pairing (9d).
+
+## Built (9d)
+
+Module 9d (`docs/modules/phone-transport.md`) put TCP and Bonjour beside
+the Unix socket, as this ADR's Open item said. One accept loop serves
+both (`ProtocolServer(tcpPort:)`), with the same bounded reader, the same
+first-line token rule and the same 64 MiB drop; on a network where every
+host may try the token, three failed `session.open` close a connection and
+ten failures within a minute make the listener refuse every connection for
+a minute. The iOS shell serves when launched with `protocol=tcp[:port]`
+(`mode=serve`), only from a development image, and shows its token on a
+pairing screen with its Bonjour name (`_kajo-dev._tcp`, the TXT record
+without the token) and addresses; the token is kept per install in the
+app's Application Support with mode 0600 and a new one ends every session.
+No token passes through the image, not even a typed one (the owner,
+2026-11-05): a phone is paired by typing the token its screen shows into
+the host's own secure field. The Mac's `ClientHost` and the Swift client reach a target by a name, a
+socket path, `tcp://host:port` or `bonjour:<name>` through one stream
+opener (`openStream`), browse the phones (`NWBrowser`, a `targets` event
+when the list changes) and keep every token in the host. A dropped link
+is the client's to repair: `DevClient` reconnects with a growing wait and
+sends again every pending request but `evaluate`, `process.evaluate`,
+`process.step` and `test.run`, which may have run once already; stopped
+Processes live in the target and the debuggers refresh from
+`process.list`. The link is plain TCP: encryption is the owner's question
+(the module's open questions suggest the pairing token as a TLS
+pre-shared key). The first remote session was measured Mac to Mac (the
+macOS shell in the phone's serve mode, and `kajo run --protocol tcp`):
+the iPhone build could not be signed on the mini during the module
+(codesign waited on a keychain prompt), so the phone's rows are not done.

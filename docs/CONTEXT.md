@@ -543,3 +543,36 @@ as they are understood.
   the roots first and the rest as the view asks (an `expand` event).
 - **LargeArray**: a sequence longer than one heap object can be, made of
   Arrays of 2048; the growable collections use it past 4095 slots.
+
+## The phone transport (module 9d)
+
+- **Target address**: where a target listens, in one of three forms a
+  person can type and a targets file can hold: a Unix socket's path,
+  `tcp://host:port`, `bonjour:<name>`. A **target name** (a line of
+  `~/.kajo/targets`, or a phone the network shows) stands for one.
+- **Serve mode**: a shell serving the development protocol over TCP while
+  a scenario runs (`mode=serve`, or `protocol=tcp[:port]`): the iOS
+  shell's way of being a target, the macOS shell's stand-in for the phone.
+  Only a development image serves, and only when asked.
+- **Bonjour advertisement**: the `_kajo-dev._tcp` service a serving shell
+  registers, named after the device; its **TXT record** carries the
+  image's name, the protocol's version and the kernel's version, never the
+  token.
+- **Pairing screen**: what a serving phone shows: the token, large, its
+  Bonjour name and addresses, what the listener does, and a **new token**
+  button that ends every session.
+- **Failed pairing**: a `session.open` with a wrong token, or a first
+  request that is not `session.open`; three close a connection, ten within
+  a minute make the listener **refuse** every connection for a minute.
+- **Dropped link**: a connection that ended without its client closing
+  it (the phone left the network, the socket died); the client
+  **reconnects** with a growing wait (1, 2, 4 s, up to a minute) and opens
+  a new session as the same client in the same package.
+- **Retried request**: a request pending at a dropped link, sent again
+  on the new session with its id; the **not-retried** kinds (`evaluate`,
+  `process.evaluate`, `process.step`, `test.run`) fail instead, because
+  running them twice is not running them once.
+- **Outage**: from a dropped link to the new session's opening.
+- **Pairing**: giving the host a target's token: the developer reads it
+  off the phone's screen and types it into the host's own secure field
+  (`ClientTransport pair:`); no token ever passes through the image.

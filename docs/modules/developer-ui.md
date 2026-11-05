@@ -667,6 +667,28 @@ collections are Smalltalk.
   only 9a's wrappers for the app; the second round's AppKit kinds stay on
   the Mac.
 
+**As 9d used it** (`docs/modules/phone-transport.md`): the client
+transport's ops stayed the five of primitive 164; `connect` takes a target
+name or an address (a socket path, `tcp://host:port`, `bonjour:<name>`),
+resolved and connected on the connection's thread through one stream
+opener the Swift client shares, and `targets` lists the `_kajo-dev._tcp`
+services a Bonjour browser sees with the rest, a change of that list being
+a new event kind (`targets`, 17) the target picker refreshes on. The token
+stays in the host, and since the owner's decision of 2026-11-05 (this
+module's question 5) a token is never typed into the image either: the
+picker's Pair button has the host take it in a secure field of its own
+(`ClientTransport pair:`, the host's `pairing` op), and `connect` lost its
+token argument.
+`DevClient` reconnects after a dropped link (timer events, 1, 2, 4 s up to
+a minute, a new session as the same client and package) and sends again
+every pending request but `evaluate`, `process.evaluate`, `process.step`
+and `test.run`; a refused session and `close` end it for good; the target
+picker shows `reconnecting`; the debuggers refresh from `process.list`
+when the session opens again. `files` are written into the project given
+at connect as before (the remote session's changes landed in the Mac's
+project directory). The round trips over TCP are compared with this
+module's local ones there. Nothing of the developer UI runs on the phone.
+
 ## Gates
 
 The code is 2650aea's; this doc (and ADR 0010's note) were edited in the
