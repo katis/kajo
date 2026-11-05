@@ -63,7 +63,12 @@ esac
 case $form in
   lan)
     if [[ $serve == device ]]; then
-      host=$(sed -n 's/^serving=tcp .*addresses=\([^, ]*\).*/\1/p' $log | head -1)
+      # the phone's address on the Mac's network (its list also holds the
+      # USB link's 169.254 address and the cellular 192.0.0 one)
+      mine=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1)
+      all=$(sed -n 's/^serving=tcp .*addresses=\([^ ]*\).*/\1/p' $log | head -1 | tr ',' '\n')
+      host=$(print -r -- $all | grep -F "${mine%.*}." | head -1)
+      [[ -n $host ]] || host=$(print -r -- $all | head -1)
     else
       host=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1)
     fi

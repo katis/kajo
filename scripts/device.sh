@@ -75,8 +75,8 @@ token() {
   local tmp=$(mktemp -d)
   chmod 700 $tmp
   gtimeout 120 xcrun devicectl device copy from --device $DEVICE --domain-type appDataContainer \
-    --domain-identifier $BUNDLE --source "Library/Application Support/kajo-pairing-token" --destination $tmp > /dev/null 2>&1 \
-    || { rm -rf $tmp; print "no token: is the shell installed and has it served once?"; return 1; }
+    --domain-identifier $BUNDLE --source "Library/Application Support/kajo-pairing-token" --destination $tmp/kajo-pairing-token > $tmp/copy.log 2>&1 \
+    || { grep -iE "error|fail" $tmp/copy.log | head -5; rm -rf $tmp; print "no token: is the shell installed and has it served once?"; return 1; }
   if [[ -z $name ]]; then
     name=$(gtimeout 5 dns-sd -B _kajo-dev._tcp local 2>/dev/null | awk '/Add/ && /_kajo-dev/ {for (i=7;i<=NF;i++) printf "%s%s", $i, (i<NF?" ":""); print ""; exit}')
   fi
