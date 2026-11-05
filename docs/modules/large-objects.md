@@ -297,20 +297,21 @@ young collection, concurrent marking, relocation on), three launches each,
 running `ShellBench class >> large` (a 1 000 000-slot Array kept live
 throughout, then forever a 1 MiB Array filled and checked, the last four
 kept, and every sixteenth time a 16 MiB ByteArray written at both ends and
-dropped). `m10/mac-shell-large.results`.
+dropped). `m10/mac-shell-large.results` (the final commit's; 68d860a's
+run, the same code but for tests, is in `m10/shell-68d860a/` and agrees).
 
 | scenario | frames (of 1200) | missed | max gap | longest turn | main stopped by others per 10 s | stops per 10 s | marking cycles | longest final mark | fallbacks | peak footprint |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| idle | 1200, 1200, 1200 | 0, 0, 0 | 8.40 ms | 3.2 ms | 0 | 0 | 0 | | 0 | 47 MB |
-| large | 1200, 1200, 1200 | 0, 0, 0 | 8.40 ms | 2.5 to 3.0 ms | 69 ms | 2214 to 2220 | 809 to 810 | 1.7 to 1.9 ms | 0 | 435 MB |
+| idle | 1200, 1200, 1200 | 0, 0, 0 | 8.40 ms | 3.1 to 3.2 ms | 0 | 0 | 0 | | 0 | 47 MB |
+| large | 1200, 1200, 1200 | 0, 0, 0 | 8.40 ms | 2.5 to 2.8 ms | 59 to 67 ms | 2220 to 2240 | 811 to 819 | 1.6 to 1.8 ms | 0 | 434 to 440 MB |
 
 0 frames missed, the bar 9a set. The churn allocates about 1.1 GB/s of
 large objects without one young collection (no scavenge ran): every cycle
 was started by a large allocation (`byFloor` 810, `startCycleAfterLargeAllocation`),
-81 cycles a second with the marker busy 1.45 s of CPU per 10 s, final marks
-of 0.16 ms p50 and 0.79 ms p99, the applies 0.055 ms p50, and no fallback:
-dead runs are freed at each apply. The main thread was stopped 69 ms per
-10 s by the 2214 stops (initial marks, final marks, applies), never for
+81 cycles a second with the marker busy about 1.45 s of CPU per 10 s,
+final marks of 0.16 ms p50 and 0.79 ms p99 (68d860a's run), the applies
+0.055 ms p50, and no fallback: dead runs are freed at each apply. The main
+thread was stopped 59 to 67 ms per 10 s by the 2220 to 2240 stops (initial marks, final marks, applies), never for
 more than a frame's slack. That a floor-triggered cycle starts at every
 large allocation once old space sits above the floor is the trigger's
 rule, not a new policy; a churn of this rate keeps old space there.
@@ -397,34 +398,35 @@ own tables'.
 
 | classes | load | seconds | frames (of expected) | missed | max gap ms | longest turn ms | peak footprint MB |
 |--:|---|--:|--:|--:|--:|--:|--:|
-| 2000 | none | 5.4 [5.3–5.4] | 597 (642) | 44 [43–44] | 31.3 [27.3–32.1] | 15.7 [15.3–16.3] | 342 [337–343] |
-| 2000 | storm | 5.1 [5.0–5.1] | 570 (612) | 41 [35–44] | 31.6 [27.3–39.2] | 14.1 [13.6–15.3] | 870 [850–872] |
+| 2000 | none | 5.3 [5.2–5.4] | 582 (632) | 51 [50–53] | 41.2 [38.0–47.1] | 14.2 [13.7–17.2] | 343 [338–345] |
+| 2000 | storm | 5.1 [5.1–5.1] | 568 (611) | 44 [38–46] | 35.2 [33.9–38.1] | 13.9 [13.8–14.1] | 844 [839–862] |
 
 The steps and requests 9c measured, against 9c's tables (no load):
 
 | step or request | 9c | module 10 |
 |---|--:|--:|
-| open | 387 ms | 408 [403–414] ms |
-| populate, tree pushed | 384 | 349 [344–374] |
-| populate, tree on demand | 451 | 433 [400–449] |
-| the tree alone, pushed / on demand | 65 / 57 | 60 / 60 |
-| `package.selectors` (19 866) as a step | 706 | 437 [428–439] |
-| 19 866 rows pushed | 108 | 38 [31–50] |
-| ten classes and a method each | 201 | 194 [185–218] |
-| an error, the debugger open | 401 | 401 [400–408] |
-| `class.hierarchy` round trip p50 | 329 | 329 [328–341] |
-| `package.selectors` round trip p50 | 657 | 437 [428–439] |
-| `class.selectors` p50 | 4.2 | 2.6 |
+| open | 387 ms | 403 [389–404] ms |
+| populate, tree pushed | 384 | 352 [341–407] |
+| populate, tree on demand | 451 | 432 [351–443] |
+| the tree alone, pushed / on demand | 65 / 57 | 60 / 66 |
+| `package.selectors` (19 866) as a step | 706 | 443 [426–479] |
+| 19 866 rows pushed | 108 | 36 [32–52] |
+| ten classes and a method each | 201 | 178 [176–185] |
+| an error, the debugger open | 401 | 385 [349–398] |
+| `class.hierarchy` round trip p50 | 329 | 336 [336–337] |
+| `package.selectors` round trip p50 | 657 | 443 [426–479] |
+| `class.selectors` p50 | 4.2 | 2.8 |
 
 The browser's population is unchanged (its time is the requests' JSON,
 not the collections); `package.selectors`, whose 19 866 selectors went
-through LargeArrays in the target (collected, sorted, written), is 34
+through LargeArrays in the target (collected, sorted, written), is 37
 percent faster with plain Arrays, and the 19 866 rows pushed into the
-table 65 percent (the tools' collections are Arrays too). Typing: key to
-redraw p50 5.4 ms and p99 6.9 ms with no load, 2.6 and 3.2 ms under the
-storm (9c: 5.5 idle, 2.3 and 2.9 loaded); frames missed while typing 36
-of 1224 idle and 1 of 1259 under the storm (9c: 1 to 170 idle, 1 to 18
-loaded, the idle misses 9c could not explain). The 44 frames missed per
+table 67 percent (the tools' collections are Arrays too). Typing: key to
+redraw p50 7.1 ms and p99 7.4 ms with no load, 6.0 and 6.4 ms under the
+storm (9c: 5.5 idle, 2.3 and 2.9 loaded; 68d860a's run of the same code
+5.4 and 6.9 idle, 2.6 and 3.2 loaded, so this is launch-to-launch spread);
+frames missed while typing 3 of 1257 idle and 1 of 1259 under the storm
+(9c: 1 to 170 idle, 1 to 18 loaded). The 44 to 51 frames missed per
 session are, as in 9c, AppKit's while the first windows open and in the
 debugger and define-and-retry steps; the longest turn of the image stays
 under 16 ms.
@@ -437,7 +439,11 @@ past its first block and read back, its size, and the task's current tree
 stored in its last slot and summed through it; then dropped. Every
 configuration runs it, including the exhausted-reserve ones, whose heap
 gains two blocks per task (each task may hold a run at once; their
-garbage still does not fit). ⟨TBD: soak⟩
+garbage still does not fit). `just soak` on 7987f59: 1000 seeds under
+each of the 20 configurations and the 6 resumed modes, no failing seed
+(Gates). The step found the bug of the trigger's unrooted object (section
+1) and a division by zero in its own first version (an Array of exactly
+4096 slots).
 
 ### The kernels against the starting commit
 
@@ -528,9 +534,14 @@ overlapping ranges (alloc on eight: 440 to 505 against 434 to 497).
   alias), and a second reservation would need a second mapping every
   reader of a body would have to know.
 - **The exhausted-reserve random-program configurations** gain two blocks
-  per task (they had the image's block and two more): with a run of two
-  blocks live per task at once, three blocks could not hold the live data
-  the configuration promises to fit.
+  per task and two more (they had the image's block and two more): with a
+  run of two blocks live per task at once, three blocks could not hold the
+  live data the configuration promises to fit, and with two per task only
+  one seed in a thousand found no two free blocks side by side.
+- **Three earlier tests got the sanitizer's bound or a repeated round**
+  (Gates): `PhoneTransportTests`' wait for the end of a listener's pause
+  and the protocol tests' evaluate under ThreadSanitizer, and the
+  relocation kernel tests' two selecting cycles in the release suite.
 - **Reshape** takes a large body's run against the promotion reserve's
   limit, not the soft limit: it runs after a promote-all in a stop, and a
   reshape that fails is all or nothing anyway.
@@ -686,7 +697,51 @@ release builds (`just arc-check`'s), normalized for addresses
 
 ## Gates
 
-⟨TBD⟩
+Every gate ran on 7987f59 (the code of this module; the commits after it
+are this doc), Mac mini (M2 Pro), swift.org 6.4.2 (the toolchain first on
+PATH), 2026-11-05 21:51 to 2026-11-06 00:05, every output in a file under
+the session's `m10/`, each step logged with the commit it ran on
+(`m10/gates.log`). Earlier runs stopped at a failure and every gate ran
+again after the fix: run 1 (c0d2269/4209c33) at ThreadSanitizer's
+`PhoneTransportTests` bound, run 2 (7781fe9) at ThreadSanitizer under
+load's `AgentInterfaceTests` evaluate bound (both 9b and 9d tests' wall
+clocks, given the sanitizer's bound), run 3 (f793776) at `just
+test-release`'s relocation kernel test (one selecting cycle of two; 8 and
+9 alone on this and the starting commit; the round is repeated now), run
+4 (3d3067d) at the soak's exhaustedReserve seed 803 (no two free blocks
+side by side for a run; the heap gained two blocks). Their outputs are in
+`m10/run1` to `run4`.
+
+| gate | result |
+|---|---|
+| `swift test` | 340 + 84 passed, 278 + 87 s |
+| under load (12 busy loops) | 340 + 84 passed, 330 + 107 s |
+| ThreadSanitizer | 340 + 84 passed, 0 reports, 464 + 2192 s |
+| ThreadSanitizer under load | 340 + 84 passed, 0 reports, 700 + 2715 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release in 135 functions, `interpret` 1056 instructions, one indirect branch and one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 340 + 84 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | passed: 1000 seeds under every configuration (26 lines, no failing seed), the large-object step in each; the resumed modes saving 968 to 979 of 1000 |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.32 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 2.17 million runs, no crash (seeds with runs, the old corpus moved aside) |
+| `just fuzz syntax 600` | libFuzzer build ok, 0.87 million runs, no crash |
+| `just fuzz protocol 600` | libFuzzer build ok, 1.46 million runs, no crash |
+| 9c's scripted session, 12 launches | 12 result lines, 0 failed (tables in Measurements) |
+| the large-object churn (`scenario=large`, 3 launches, `idle` beside) | 0 of 1200 frames missed in all six |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| clean build (`--scratch-path .build/clean-check`) | exit 0, 0 errors, 0 warnings |
+
+(340 is `KajoVMTests`, 84 `KajoCompilerTests`.) The clean build took 11 s
+from an empty scratch path (the toolchain's compilation cache, as since
+8e); `just ios-check` typechecks every KajoVM file with strict memory
+safety from nothing and reports no warning either. The disassembly
+comparison of the Hot-path check was redone on 7987f59's
+`just arc-check` build. The bench A/B (Measurements) ran on f01333b; the
+VM's code after it changed only `allocateLarge`'s slow path and
+`allocateOld`'s fallback count, out of line from every kernel, and
+`interpret` is identical.
 
 ## Commands
 
