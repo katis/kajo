@@ -32,7 +32,7 @@ mkdir -p $out/proj-$tag
 targets=$out/targets-$tag
 tok=$out/tok-$tag
 mkdir -p $tok && chmod 700 $tok
-rm -f $tok/* $targets
+rm -f $tok/*(N) $targets
 args=(seconds=20 warmup=1 "$@")
 case $serve in
   mac)
@@ -50,7 +50,8 @@ case $serve in
     $root/scripts/device.sh token $targets || { print "remote-session: no token from the phone"; }
     token=$(awk -F'\t' '{print $3}' $targets 2>/dev/null) ;;
   kajo)
-    kajo=$(swift build --package-path $root --show-bin-path)/kajo
+    swift build -c release --package-path $root --product kajo > /dev/null || exit 1
+    kajo=$(swift build -c release --package-path $root --show-bin-path)/kajo
     [[ -f $out/shell.img ]] || $kajo build-image -o $out/shell.img $root/kernel $root/apps/Shared/smalltalk > /dev/null
     gtimeout ${TIMEOUT:-200} $kajo run $out/shell.img --protocol tcp:$port --name "kajo-$tag" > $tok/out 2> $out/serve-$tag.err &
     spid=$!
@@ -81,7 +82,7 @@ case $form in
 esac
 (umask 077; printf 'target\t%s\t%s\n' "$addr" "$token" > $targets)
 start=$(date +%s)
-for k in $(seq 1 $n); do
+for (( k = 1; k <= n; k++ )); do
   (( $(date +%s) - start < ${LIMIT:-14} )) || break
   kill -0 $spid 2>/dev/null || break
   TIMEOUT=${TIMEOUT:-200} $root/scripts/mac-shell.sh run $out/client-$tag.txt mode=devsession classes=0 target=target \
