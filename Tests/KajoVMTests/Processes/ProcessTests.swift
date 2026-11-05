@@ -12,7 +12,9 @@ import Testing
     rt.waitAllTerminated()
     #expect(rt.result(p) == 42)
     #expect(rt.state(p) == .terminated)
-    #expect(rt.vm.counters.forks == 1 && rt.vm.counters.terminations == 1)
+    // A termination is counted after the scheduler lock is let go, so the
+    // last count may land after the Process reads as terminated.
+    #expect(eventually { rt.vm.counters.forks == 1 && rt.vm.counters.terminations == 1 })
     rt.stop()
 }
 
@@ -553,7 +555,7 @@ end
     #expect(eventually { rt.state(running) == .terminated })
     #expect(eventually { rt.vm.excessSignals(e4) == 1 })
     #expect(rt.vm.liveProcessCount == 0)
-    #expect(rt.vm.counters.terminations == 4)
+    #expect(eventually { rt.vm.counters.terminations == 4 })
     rt.stop()
 }
 
@@ -586,7 +588,7 @@ end
     rt.vm.collect()
     for _ in 0..<n { rt.vm.signal(sem) }
     rt.waitAllTerminated()
-    #expect(rt.vm.counters.terminations == UInt64(n))
+    #expect(eventually { rt.vm.counters.terminations == UInt64(n) })
     #expect(rt.vm.liveRecordCount == 0)
     rt.stop()
 }
@@ -759,6 +761,6 @@ end
     for _ in 0..<200 { rt.spawn("pinger:", [int(50)]) }
     rt.waitAllTerminated()
     #expect(rt.vm.excessSignals(sem) == 200 * 50)
-    #expect(rt.vm.counters.terminations == 200)
+    #expect(eventually { rt.vm.counters.terminations == 200 })
     rt.stop()
 }
