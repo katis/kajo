@@ -537,7 +537,10 @@ overlapping ranges (alloc on eight: 440 to 505 against 434 to 497).
 
 ## Tests
 
-⟨TBD counts⟩
+Swift: 340 `KajoVMTests` (312 at the start) and 84 `KajoCompilerTests`
+(82), Swift Testing's count, parameterized tests once: `LargeObjectTests`
+(19), `LargeObjectVMTests` (8), `ImageFileTests` (one more), `VMEndTests`
+(two more).
 
 `LargeObjectTests` (object memory): a large object is a run of blocks,
 old at birth, its slots read and written past the first block, a byte

@@ -66,7 +66,13 @@ final class RunningTarget: @unchecked Sendable {
 }
 
 extension ProtocolClient {
-    func eval(_ source: String) throws -> JSONValue { try request("evaluate", [("source", .string(source))]) }
+    /// 60 s for a reply, the sanitizer's 300 under ThreadSanitizer: one
+    /// evaluate of `aSessionsProjectRebuildsTheImageItEdited` (every
+    /// source of five classes, sorted and printed) passed 60 s in module
+    /// 10's gate run under the sanitizer and twelve busy loops.
+    func eval(_ source: String) throws -> JSONValue {
+        try request("evaluate", [("source", .string(source))], timeout: compilerTestsUnderThreadSanitizer ? 300 : 60)
+    }
     /// The next process.stopped event after `mark` (60 s at most).
     func stopped(since mark: Int, process: JSONValue? = nil) throws -> JSONValue {
         guard let e = waitForEvent(since: mark, timeout: 60, { $0["kind"]?.string == "process.stopped" && (process == nil || $0["process"] == process) })
