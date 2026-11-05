@@ -1,9 +1,26 @@
-"Module 9c's wrappers headless (the same protocol the shells implement): a text view's selection, styles, keys and lines; an outline's children and tree; a table's rows and pages; a menu's and a toolbar's items; the event loop's actions by kind and its timers' tokens."
+"Module 9c's wrappers on whatever host runs the suite (headless, AppKit in the Mac shell's tests mode, UIKit on the phone): a text view's selection, styles, keys and lines; an outline's children and tree; a table's rows and pages; a menu's and a toolbar's items; the event loop's actions by kind and its timers' tokens. The tests ask the host what it supports rather than assume the headless one: a kind the toolkit lacks (View class>>supports:) must be refused with an error and the rest of that case is skipped; what the native view holds and the protocol has no get for is read back only where the wrapper keeps it itself (readsBack:); a timer is a token with a host and nil without (ClientTransport hasHost). tearDown leaves the main thread, as ViewTest's does."
 Class {
 	#name : #ViewWrapperTest,
 	#superclass : #TestCase,
 	#category : #'Kernel-Tests'
 }
+
+{ #category : #helpers }
+ViewWrapperTest >> assertRefused: aViewClass [
+	"A host without aViewClass's kind refuses to make one with an error a test can catch, not a trap."
+	self should: [aViewClass new] raise: Error
+]
+
+{ #category : #helpers }
+ViewWrapperTest >> readsBack: aView [
+	"Whether what aView was given can be read back: a text view's styles and keys, an outline's children and tree, a table's rows and page. On AppKit and UIKit the native view holds them and the protocol has no get for them (nothing the toolkit holds is mirrored, module 9c); only the headless wrapper, which keeps its properties itself, answers them."
+	^ aView isHeadless
+]
+
+{ #category : #running }
+ViewWrapperTest >> tearDown [
+	ProcessorScheduler detachFromMain
+]
 
 { #category : #tests }
 ViewWrapperTest >> testATextViewsSelectionStylesAndKeys [
@@ -15,9 +32,12 @@ ViewWrapperTest >> testATextViewsSelectionStylesAndKeys [
 	self assert: t selection equals: #(6 10).
 	self assert: t selectedText equals: '^ bar'.
 	t styles: #(1 3 'bold').
-	self assert: (t get: 'styles') equals: #(1 3 'bold').
+	"Styling changes neither the text nor the selection, on every host."
+	self assert: t selection equals: #(6 10).
+	self assert: t selectedText equals: '^ bar'.
+	(self readsBack: t) ifTrue: [self assert: (t get: 'styles') equals: #(1 3 'bold')].
 	t bindKeys: #('cmd-s' 'cmd-d').
-	self assert: (t get: 'keys') equals: 'cmd-s cmd-d'.
+	(self readsBack: t) ifTrue: [self assert: (t get: 'keys') equals: 'cmd-s cmd-d'].
 	keys := OrderedCollection new.
 	t onKey: [:k | keys add: k].
 	t onChange: [:v | changed := v].
@@ -44,17 +64,24 @@ f'.
 
 { #category : #tests }
 ViewWrapperTest >> testMenusAndToolbars [
-	| m sub b chosen w |
-	m := Menu new.
-	m title: 'Tools'.
-	m addItem: 1 title: 'Browser' key: 'cmd-b'.
-	sub := Menu new.
-	m addSubmenu: sub.
-	self assert: m items size equals: 1.
-	self assert: (m subviews includes: sub).
-	m action: [:id | chosen := id].
-	m handleEvent: (UIEvent kind: #menu target: m handle value: 1 time: 0).
-	self assert: chosen equals: 1.
+	| m sub b chosen w v |
+	(View supports: Menu kind)
+		ifFalse: [self assertRefused: Menu]
+		ifTrue: [
+			m := Menu new.
+			m title: 'Tools'.
+			m addItem: 1 title: 'Browser' key: 'cmd-b'.
+			sub := Menu new.
+			m addSubmenu: sub.
+			self assert: m items size equals: 1.
+			self assert: (m subviews includes: sub).
+			m action: [:id | chosen := id].
+			m handleEvent: (UIEvent kind: #menu target: m handle value: 1 time: 0).
+			self assert: chosen equals: 1.
+			v := Window new add: TextView new.
+			v contextMenu: m.
+			self assert: (v subviews includes: m)].
+	(View supports: Toolbar kind) ifFalse: [^ self assertRefused: Toolbar].
 	b := Toolbar new.
 	b addItem: 7 title: 'Proceed'.
 	b action: [:id | chosen := id].
@@ -62,31 +89,34 @@ ViewWrapperTest >> testMenusAndToolbars [
 	w toolbar: b.
 	b handleEvent: (UIEvent kind: #menu target: b handle value: 7 time: 0).
 	self assert: chosen equals: 7.
-	(w add: TextView new) contextMenu: m.
 	self assert: (w subviews includes: b)
 ]
 
 { #category : #tests }
 ViewWrapperTest >> testOutlinesAndTables [
 	| o t chosen |
-	o := OutlineView new.
-	o children: #(#(1 'Object' true) #(2 'Proto' false)) of: 0.
-	self assert: ((o get: 'children') at: 0) equals: #(1 'Object' true 2 'Proto' false).
-	o tree: #(#(1 0 'Object') #(3 1 'Shape')).
-	self assert: (o get: 'tree') equals: #(1 0 'Object' 3 1 'Shape').
-	o onSelect: [:id | chosen := id].
-	o handleEvent: (UIEvent kind: #selectionChanged target: o handle value: 3 time: 0).
-	self assert: chosen equals: 3.
-	o onExpand: [:id | chosen := id negated].
-	o handleEvent: (UIEvent kind: #expand target: o handle value: 1 time: 0).
-	self assert: chosen equals: -1.
+	(View supports: OutlineView kind)
+		ifFalse: [self assertRefused: OutlineView]
+		ifTrue: [
+			o := OutlineView new.
+			o children: #(#(1 'Object' true) #(2 'Proto' false)) of: 0.
+			(self readsBack: o) ifTrue: [self assert: ((o get: 'children') at: 0) equals: #(1 'Object' true 2 'Proto' false)].
+			o tree: #(#(1 0 'Object') #(3 1 'Shape')).
+			(self readsBack: o) ifTrue: [self assert: (o get: 'tree') equals: #(1 0 'Object' 3 1 'Shape')].
+			o onSelect: [:id | chosen := id].
+			o handleEvent: (UIEvent kind: #selectionChanged target: o handle value: 3 time: 0).
+			self assert: chosen equals: 3.
+			o onExpand: [:id | chosen := id negated].
+			o handleEvent: (UIEvent kind: #expand target: o handle value: 1 time: 0).
+			self assert: chosen equals: -1].
+	(View supports: TableView kind) ifFalse: [^ self assertRefused: TableView].
 	t := TableView new.
 	t columns: #('Name' 'Value').
 	t rows: #(#('a' '1') #('b' '2')).
-	self assert: (t get: 'rows') equals: #(2 'a' '1' 'b' '2').
+	(self readsBack: t) ifTrue: [self assert: (t get: 'rows') equals: #(2 'a' '1' 'b' '2')].
 	t rowCount: 20000.
 	t rows: #(#('x' 'y')) at: 101.
-	self assert: (t get: 'page') equals: #(101 2 'x' 'y').
+	(self readsBack: t) ifTrue: [self assert: (t get: 'page') equals: #(101 2 'x' 'y')].
 	t onDoubleClick: [:row | chosen := row].
 	t handleEvent: (UIEvent kind: #doubleClick target: t handle value: 2 time: 0).
 	self assert: chosen equals: 2
@@ -94,12 +124,19 @@ ViewWrapperTest >> testOutlinesAndTables [
 
 { #category : #tests }
 ViewWrapperTest >> testTheEventLoopsKindActionsAndTimers [
-	| got |
+	| got token |
 	UIEventLoop on: #line do: [:e | got := e value].
 	UIEventLoop dispatch: (UIEvent kind: #line target: 1 value: '{}' time: 0).
 	self assert: got equals: '{}'.
-	"Without a host to post it a timer cannot be asked for."
-	self assert: (UIEventLoop after: 10 do: [got := #fired]) isNil.
+	token := UIEventLoop after: 10 do: [got := #fired].
+	ClientTransport hasHost
+		ifTrue: [
+			"A host posts the timer and answers its token; cancelled, its event finds no block."
+			self assert: (token isInteger and: [token > 0]).
+			UIEventLoop cancelTimer: token]
+		ifFalse: [
+			"Without a host to post it a timer cannot be asked for."
+			self assert: token isNil].
 	UIEventLoop dispatch: (UIEvent kind: #timer target: 99 value: nil time: 0).
 	self assert: got equals: '{}'.
 	self assert: (UIEvent fromArray: #(15 3 nil 0)) kind equals: #textChanged.

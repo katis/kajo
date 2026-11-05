@@ -567,6 +567,31 @@ on). Smalltalk: the kernel's tests gain `ViewWrapperTest` (5) and
 by `ToolsTests` class by class. 312 `KajoVMTests` (as at the start) and 76 `KajoCompilerTests` (70 at the start; Swift Testing's count), whose kernel-image suite runs the kernel's 200 SUnit tests (192 at the start). Waits are bounded (60 s per condition, for a hang only); the
 assertions are on what happened.
 
+**`ViewWrapperTest` on every host (2026-11-06, after the first device
+run).** As built, the test assumed the headless host: it made every 9c
+kind, read back what it had given a view (a text view's styles and keys,
+an outline's children and tree, a table's rows and page) and asserted that
+a timer is refused. Only the headless wrapper keeps those properties; on
+AppKit and UIKit the native view holds them and the protocol has no get
+for them, by design (nothing the toolkit holds is mirrored). The iOS text
+view has `setStyles` like the Mac's, so `styles` was not missing on UIKit;
+no host could answer `get styles`. UIKit has no outline, table, toolbar or
+menu, and a host does post timers. On c2de63f the iPhone failed 4 of 202
+and the Mac shell's tests mode 3. The test now asks the host: `View class
+>> supports: aKind` (true headless; with a shell the view primitive is
+asked to make one, the view released at once, and its clean error answers
+false), and where a kind is unsupported the test asserts that making one
+raises an `Error` and skips the rest of that case; the read-backs run only
+where the wrapper keeps its properties itself (`readsBack:`, the
+wrapper's `isHeadless`), and after styling the text view the selection is
+asserted unchanged on every host; the timer is nil without a host and a
+positive token with one (`ClientTransport hasHost`), cancelled at once. A
+`tearDown` leaves the main thread as `ViewTest`'s does. 202 of 202 pass
+headless (`kajo test`), in the Mac shell's `mode=tests` (AppKit, every
+case's full assertions bar the read-backs) and on the iPhone 13 Pro
+(`scripts/device.sh tests`; the outline, table, toolbar and menu cases
+assert the refusal).
+
 ## Broken variants run by hand
 
 Each on the final code with one rule broken, then put back; the outputs

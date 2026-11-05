@@ -254,6 +254,17 @@ View class >> resumeAfterSnapshot [
 ]
 
 { #category : #registry }
+View class >> supports: aKind [
+	"Whether this host makes native views of aKind (a wrapper class's kind: 'outline', 'menu'). Headless every kind is supported: the wrapper keeps its properties itself. With a shell the view primitive is asked to make one and the view it made is released at once; a refusal is the primitive's clean error, so a kind the toolkit lacks (UIKit has no outline, table, toolbar or menu, module 9c) answers false. A test of a protocol with several hosts asks this before it builds a kind."
+	| h |
+	self hasShell ifFalse: [^ true].
+	h := [self primCall: #create handle: nil with: {aKind}] on: Error do: [:e | nil].
+	h isNil ifTrue: [^ false].
+	self releaseHandle: h.
+	^ true
+]
+
+{ #category : #registry }
 View class >> track: aView [
 	"Register aView by its handle (weakly) and arrange for its handle to be released when it is collected. The finalizer holds the handle, never the wrapper."
 	| cell h |
