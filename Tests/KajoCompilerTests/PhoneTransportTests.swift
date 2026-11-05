@@ -110,7 +110,11 @@ final class TestClock: Sendable {
         #expect(v.sessions >= 3)
         #expect(v.requests >= 3)
         #expect(v.bytesWritten > 0)
-        let end = ShellVM.now() + 10_000_000_000
+        // The end of the pause is reported on a global queue: under
+        // ThreadSanitizer, with the suite's other targets busy, it came
+        // later than 10 s once (module 10's gate run), so the bound is the
+        // sanitizer's there (AGENTS.md: a bound the sanitizer inflates).
+        let end = ShellVM.now() + (compilerTestsUnderThreadSanitizer ? 120 : 10) * 1_000_000_000
         while ShellVM.now() < end && refusals.withLock({ $0.count }) < 2 { usleep(2000) }
         #expect(refusals.withLock { $0 } == [true, false])
     }
@@ -257,3 +261,7 @@ final class TestClock: Sendable {
         #expect(remote.target.server.stats.values.sessions >= 3)
     }
 }
+
+/// The suite runs under ThreadSanitizer as a gate; a bound it inflates gets
+/// a value of its own (as `KajoVMTests`' `underThreadSanitizer`).
+let compilerTestsUnderThreadSanitizer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "__tsan_init") != nil
