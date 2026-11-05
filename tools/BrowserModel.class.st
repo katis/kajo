@@ -20,7 +20,8 @@ Class {
 		'messagesTitle',
 		'afterSave',
 		'files',
-		'indexByName'
+		'indexByName',
+		'sourceToken'
 	],
 	#category : #'Tools-Models'
 }
@@ -398,11 +399,13 @@ BrowserModel >> selectPackage: aName [
 { #category : #selecting }
 BrowserModel >> selectSelector: aSelector [
 	"A method: its source in the pane."
+	| t |
 	selector := aSelector.
 	self changed: #selector.
 	aSelector isNil ifTrue: [^ self showDefinition].
+	t := self nextSourceToken.
 	self request: 'method.source' args: {'className'. className. 'selector'. aSelector. 'side'. self side} then: [:r |
-		selector = aSelector ifTrue: [
+		(t = sourceToken and: [selector = aSelector]) ifTrue: [
 			self status: (r at: 'class') , '>>' , aSelector , ((r at: 'author') ifNil: [''] ifNotNil: [:a | '  (' , a , ')']).
 			self showSource: (r at: 'source') kind: #method]]
 ]
@@ -449,6 +452,13 @@ BrowserModel >> newMethodTemplate [
 ]
 
 { #category : #source }
+BrowserModel >> nextSourceToken [
+	"A new token for the pane: only the reply to the last request for it is shown."
+	sourceToken := (sourceToken ifNil: [0]) + 1.
+	^ sourceToken
+]
+
+{ #category : #source }
 BrowserModel >> patternOf: aSelector [
 	"A message pattern for aSelector with argument names (anObject, arg2, ...)."
 	| parts |
@@ -464,22 +474,27 @@ BrowserModel >> patternOf: aSelector [
 
 { #category : #source }
 BrowserModel >> showComment [
+	| t |
 	className isNil ifTrue: [^ self].
+	t := self nextSourceToken.
 	self request: 'class.definition' args: {'className'. className} then: [:d |
-		self showSource: ((d at: 'comment') ifNil: ['']) kind: #comment]
+		t = sourceToken ifTrue: [self showSource: ((d at: 'comment') ifNil: ['']) kind: #comment]]
 ]
 
 { #category : #source }
 BrowserModel >> showDefinition [
-	| c |
+	| c t |
 	c := className.
 	c isNil ifTrue: [^ self].
+	t := self nextSourceToken.
 	self request: 'class.definition' args: {'className'. c} then: [:d |
-		(c = className and: [selector isNil]) ifTrue: [self showSource: (self definitionText: d) kind: #definition]]
+		(t = sourceToken and: [c = className and: [selector isNil]]) ifTrue: [self showSource: (self definitionText: d) kind: #definition]]
 ]
 
 { #category : #source }
 BrowserModel >> showSource: aString kind: aSymbol [
+	"What the pane shows from now on; a reply to an earlier request for the pane (a definition still on its way when a template is shown) is dropped."
+	self nextSourceToken.
 	source := aString.
 	sourceKind := aSymbol.
 	errorLine := nil.

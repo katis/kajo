@@ -48,13 +48,14 @@ ToolsProbe class >> debuggerReady [
 
 { #category : #probing }
 ToolsProbe class >> defineTheMissingMethod [
-	"In the debugger: define the method (a browser opens on the class with a template), then accept it there: the send is retried."
-	| before b |
+	"In the debugger: define the method (a browser opens on the class with a template): true, or what went otherwise."
+	| before b d |
 	before := self browsers.
-	DevTools debuggers last model defineMissingMethod.
-	self browsers > before ifFalse: [^ false].
+	d := DevTools debuggers last model.
+	d defineMissingMethod.
+	self browsers > before ifFalse: [^ 'no browser opened: ' , d status , ' ' , self state].
 	b := (DevTools windowsOf: BrowserWindow) last model.
-	^ b sourceKind == #newMethod
+	^ b sourceKind == #newMethod ifTrue: [true] ifFalse: [b sourceKind printString , ' ' , b className printString , ' ' , self state]
 ]
 
 { #category : #probing }

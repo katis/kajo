@@ -282,7 +282,8 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         #expect(try t.probe("loopProcessId")?.int != loop0)
         // Define the missing method from the debugger; accepting it in the
         // browser that opened retries the send, and the action finishes.
-        #expect(try t.probe("defineTheMissingMethod") == .bool(true))
+        let defined = try t.probe("defineTheMissingMethod")
+        #expect(defined == .bool(true), "\(defined.map { "\($0)" } ?? "nil")")
         #expect(try t.probe("acceptTheFix") == .bool(true))
         let end = ShellVM.now() + 60_000_000_000
         while ShellVM.now() < end, (try? t.probe("results"))?.string?.contains("42") != true {
