@@ -53,6 +53,16 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
     // method.
     var blocks: [[String]] = Array(repeating: [], count: k)
 
+    func sumTree(_ o: Int) -> Int64 {
+        objects[o].reduce(Int64(0)) { s, v in
+            switch v {
+            case .none: s
+            case .int(let x): s &+ x
+            case .object(let p): s &+ sumTree(p)
+            }
+        }
+    }
+
     func ops(_ i: Int, _ n: Int, signals: Bool, waits: Int, acc: inout Int64) -> [String] {
         var out: [String] = []
         var waitsLeft = waits
@@ -118,6 +128,21 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                 let b = "b\(blocks[i].count)"
                 blocks[i].append("block \(b) args=1 copied=1 temps=0\n  push_temp 0\n  push_temp 1\n  add\n  block_return")
                 out += ["push_temp 1", "push_int \(v)", "push_closure \(b) 1", "push_int \(w)", "value1", "add", "store_temp 1"]
+            case 11:  // module 10: a large Array (old at birth, a run of two blocks): an integer stored past
+                      // the first block and read back, its size, and the current object stored in it and summed
+                let n = 4096 + rng.below(4000), j = 4096 + rng.below(n - 4096), v = Int64(rng.below(201) - 100)
+                acc &+= v &+ Int64(n)
+                out += ["push_lit @Array", "push_lit \(n)", "send new: 1", "store_temp 3",
+                        "push_temp 3", "push_lit \(j + 1)", "push_int \(v)", "send at:put: 2", "pop",
+                        "push_temp 1", "push_temp 3", "push_lit \(j + 1)", "send at: 1", "add", "store_temp 1",
+                        "push_temp 1", "push_temp 3", "size", "add", "store_temp 1"]
+                if let c = current {
+                    acc &+= sumTree(c)
+                    out += ["push_temp 3", "push_lit \(n)", "push_temp 2", "send at:put: 2", "pop",
+                            "push_temp 1", "push_nil", "push_temp 3", "push_lit \(n)", "send at: 1", "send sum: 1", "add",
+                            "store_temp 1"]
+                }
+                out += ["push_nil", "store_temp 3"]
             case 13:  // module 8: acc += nil nlr: v (a non-local return from a block two frames up)
                 let v = Int64(rng.below(201) - 100)
                 acc &+= v
@@ -148,15 +173,6 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
         answers[i] = acc
     }
 
-    func sumTree(_ o: Int) -> Int64 {
-        objects[o].reduce(Int64(0)) { s, v in
-            switch v {
-            case .none: s
-            case .int(let x): s &+ x
-            case .object(let p): s &+ sumTree(p)
-            }
-        }
-    }
     let expected = answers.reduce(0, &+) &+ published.compactMap { $0 }.map(sumTree).reduce(0, &+)
 
     // t0 = arg, t1 = acc, t2 = current, t3 = scratch, t4 = loop counter
@@ -323,7 +339,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
         let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
-        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks : 256,
+        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks : 256,
                            reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
                            configure: { c in
                                // Programs allocate tens of KiB: 512 KiB
@@ -388,6 +404,9 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
 
 /// The exhausted-reserve configurations' whole heap (the image takes one
 /// block): every program's live data fits, its garbage does not.
+/// Module 10: plus two per task (`runtime`), since each task may hold a
+/// large Array (a run of two blocks) at once in its large-object step;
+/// their garbage still does not fit.
 let exhaustedHeapBlocks = Int(ProcessInfo.processInfo.environment["KAJO_EXHAUSTED_BLOCKS"] ?? "") ?? 3
 
 /// Even tasks forked with main affinity (`offloadCollection`): the main

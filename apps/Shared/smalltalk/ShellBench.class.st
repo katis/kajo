@@ -1,4 +1,4 @@
-"Module 9a's measurement scenarios in Smalltalk (the shells' mode=scenario): module 7's background loads (storm, ring, share) forked on the background workers until the shell terminates them, the measurement window built from the kernel's view wrappers, a frame action that runs module 7's main-thread load (mainTick:work:) and moves a probe view every frame, a synthetic-event action that sets a label (the latency measurement), and the main-thread hog."
+"Module 9a's measurement scenarios in Smalltalk (the shells' mode=scenario): module 7's background loads (storm, ring, share; module 10's large) forked on the background workers until the shell terminates them, the measurement window built from the kernel's view wrappers, a frame action that runs module 7's main-thread load (mainTick:work:) and moves a probe view every frame, a synthetic-event action that sets a label (the latency measurement), and the main-thread hog."
 Class {
 	#name : #ShellBench,
 	#superclass : #Object,
@@ -62,11 +62,33 @@ ShellBench class >> startLoad: aName workers: n [
 	failures := 0.
 	aName = 'storm' ifTrue: [n timesRepeat: [[self storm] forkAt: 1]. ^ n].
 	aName = 'ring' ifTrue: [1 to: n do: [:w | [self ring: w] forkAt: 1]. ^ n].
+	aName = 'large' ifTrue: [[self large] forkAt: 1. ^ 1].
 	aName = 'share' ifTrue: [
 		shared := Array new: n * 256.
 		0 to: n - 1 do: [:w | [self share: w of: n] forkAt: 1].
 		^ n].
 	^ 0
+]
+
+{ #category : #loads }
+ShellBench class >> large [
+	"Module 10's churn of large objects, on one Process: an Array of 1 000 000 slots kept live throughout (every marking cycle traces it, a small Array in every 1000th slot), then forever an Array of 131 072 slots (1 MiB, a run of 33 blocks) filled and checked, and every 16th time a ByteArray of 16 MiB - 1 (a run of 513 blocks) written at both ends; the last four Arrays stay live, everything else is dropped."
+	| keep i a b huge |
+	huge := Array new: 1000000.
+	1 to: 1000000 by: 1000 do: [:k | huge at: k put: (Array new: 2)].
+	keep := Array new: 4.
+	i := 0.
+	[a := Array new: 131072.
+	 1 to: 131072 by: 1024 do: [:k | a at: k put: k].
+	 (a at: 130049) = 130049 ifFalse: [failures := failures + 1].
+	 keep at: i \\ 4 + 1 put: a.
+	 i \\ 16 = 0 ifTrue: [
+		b := ByteArray new: 16777215.
+		b at: 1 put: 1; at: 16777215 put: 255.
+		(b at: 16777215) = 255 ifFalse: [failures := failures + 1].
+		b := nil].
+	 (huge at: 999001) size = 2 ifFalse: [failures := failures + 1].
+	 i := i + 1] repeat
 ]
 
 { #category : #loads }
