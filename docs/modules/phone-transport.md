@@ -746,6 +746,28 @@ binaries.
    if wanted. Right, or should a doit be sent again too (at most twice)?
    Provisional: fail them.
 
+### The owner's answers (2026-11-05)
+
+1. **TLS**: plain TCP stays for now; TLS with the pairing token as a
+   pre-shared key (both sides on Network.framework) is a later module.
+2. **Token expiry**: none; the token is stable per install until the New
+   token button.
+3. **Sessions on the phone**: any number. A cap would refuse the
+   reconnect that overlaps the connection it replaces, and agents share a
+   phone with the developer's tools; the token and the failure limits are
+   the protection. A session list with a disconnect button is the tool if
+   a forgotten client ever matters.
+4. **Serving without the launch argument**: no; serving stays an explicit
+   act of a development image.
+5. **Signing**: the owner clears the keychain prompt on the mini, then the
+   phone's rows run with `scripts/device.sh build` and
+   `scripts/remote-session.sh device`.
+6. **The not-retried requests**: fail them, as built. A resend cannot tell
+   a doit that never arrived from one whose reply was lost, so it guesses
+   wrong exactly when the doit had side effects. If doits are ever
+   retried, the form is a request id the target remembers and answers
+   from, a protocol change, not a flag.
+
 ## What a later module needs
 
 - **The developer UI on the phone** (if ever): the second round of view

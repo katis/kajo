@@ -846,7 +846,7 @@ s, a dropped link is whole again in 1.05 to 1.09 s of which 1.006 s is
 the backoff, the serving shell missed 0 of 2400 frames idle and ring with
 and without a client, bench within noise and `interpret` identical; 9b's
 client closed a descriptor twice from `deinit` (fixed); the phone's rows
-wait on the owner's signing, six open questions await the owner; the stop-the-world scavenge trapped when its promotion
+wait on the owner's signing, its six open questions answered by the owner on 2026-11-05 (plain TCP now and PSK-TLS as a later module, no token expiry, any number of sessions on the phone, serving only by launch argument, signing is the owner's, doits fail at a dropped link rather than being resent); the stop-the-world scavenge trapped when its promotion
 reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
 follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
 not the reserve's size, a mark-sweep that could not bring old space under
