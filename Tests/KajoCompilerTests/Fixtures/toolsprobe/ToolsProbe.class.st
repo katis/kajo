@@ -142,3 +142,9 @@ ToolsProbe class >> results [
 ToolsProbe class >> transcriptHas: aString [
 	^ DevTools transcript lines anySatisfy: [:l | l includesSubstring: aString]
 ]
+
+{ #category : #probing }
+ToolsProbe class >> compiledThroughTheBrowser [
+	"The browser has the compile's reply: the method is in the image and its file was written before the reply reached the tools (the client's transport writes the files first)."
+	^ self hasProbeAnswer and: [self browser model status beginsWith: 'compiled']
+]

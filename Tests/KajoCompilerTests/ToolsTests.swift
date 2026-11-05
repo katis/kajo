@@ -256,7 +256,9 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         // A browser compiles a method into the running image through the
         // protocol; its file is written into the project directory.
         #expect(try t.probe("compileThroughTheBrowser") == .bool(true))
-        #expect(t.until("hasProbeAnswer"))
+        // The method is installed before the reply leaves the target: wait
+        // for the reply, after which the file is written.
+        #expect(t.until("compiledThroughTheBrowser"))
         let file = project.appendingPathComponent("ToolsProbe.extension.st").path
         #expect((try? String(contentsOfFile: file, encoding: .utf8))?.contains("probeAnswer") == true)
         #expect(((try t.probe("latencyCount"))?.int ?? 0) >= 4)
