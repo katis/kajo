@@ -185,11 +185,11 @@ extension ObjectMemory {
 
     /// Module 10's counters: large objects allocated, their bytes, runs
     /// freed, large requests that found no run.
-    var largeObjectCounters: (allocations: UInt64, bytes: UInt64, runsFreed: UInt64, failures: UInt64) {
+    var largeObjectCounters: (allocations: UInt64, bytes: UInt64, runsFreed: UInt64, failures: UInt64, triggers: UInt64) {
         lockPools()
         defer { unlockPools() }
         let p = unsafe pools.pointee
-        return (p.largeAllocations, p.largeBytes, p.runsFreed, p.largeFailures)
+        return (p.largeAllocations, p.largeBytes, p.runsFreed, p.largeFailures, p.largeTriggers)
     }
 
     /// Blocks in runs (heads and continuations). World stopped.
@@ -211,25 +211,28 @@ extension BlockHeap {
 /// its soft limit and fall back to a full collection with no cycle ever
 /// started (AGENTS.md: a trigger must watch every resource a fallback can
 /// exhaust). So after a large allocation the trigger is decided again, and
-/// when it fires a cycle starts at once: module 7's initial-mark pause (any
-/// stop: its young-root scan covers the nurseries), or, under the
-/// stop-the-world scavenge, a scavenge whose end takes the snapshot. The
-/// new object is kept as a root of that stop: it is old, so it is a
-/// snapshot entry, and nothing else holds it yet.
+/// when it fires this worker runs the young collection whose end decides
+/// it and takes the snapshot, as when its eden fills: module 7's local
+/// collection of its own nursery, or the stop-the-world scavenge. The new
+/// object is a pending root meanwhile (`registerPending`): it is old, so a
+/// snapshot entry, nothing else holds it yet, and this worker may park for
+/// another worker's stop (whose initial mark would miss it, and whose
+/// sweep would free it: a stop's `keeping` covers only the stopper's own
+/// stop). The random programs under `cycleEveryScavenge` crashed and
+/// reported missed objects until it was rooted so.
 func startCycleAfterLargeAllocation(_ vm: VMPointer, _ w: WorkerPointer, _ o: Oop) {
     guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .idle,
-          let trigger = unsafe decideTrigger(mk, rate: 0, oldEntries: nil, record: false) else { return }
+          unsafe decideTrigger(mk, rate: 0, oldEntries: nil, record: false) != nil else { return }
+    let h = unsafe registerPending(vm, o)
+    if h < 0 { return }  // the pending table is full: the next young collection decides
+    defer { unsafe unregisterPending(vm, h) }
+    let om = unsafe vm.pointee.om
+    om.lockPools()
+    unsafe om.pools.pointee.largeTriggers &+= 1
+    om.unlockPools()
     if let y = unsafe vm.pointee.young {
-        unsafe stopWorld(vm, w, retry: true, keeping: [o]) { stop in
-            guard unsafe mk.phaseNow == .idle else { return }
-            unsafe mk.pointee.log.pointee.counters.cyclesAfterLarge &+= 1
-            unsafe initialMarkPause(vm, y, mk, stop, trigger: trigger)
-        }
+        unsafe collectOwnNursery(vm, y, w, held: o)
     } else if unsafe vm.pointee.nursery != nil {
-        unsafe stopWorld(vm, w, retry: true, keeping: [o]) { stop in
-            guard unsafe mk.phaseNow == .idle else { return }
-            unsafe mk.pointee.log.pointee.counters.cyclesAfterLarge &+= 1
-            unsafe youngPause(vm, w, stop, full: false)
-        }
+        unsafe stopWorld(vm, w, retry: true, keeping: [o]) { stop in unsafe youngPause(vm, w, stop, full: false) }
     }
 }

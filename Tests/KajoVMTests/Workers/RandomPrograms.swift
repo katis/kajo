@@ -130,7 +130,7 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                 out += ["push_temp 1", "push_int \(v)", "push_closure \(b) 1", "push_int \(w)", "value1", "add", "store_temp 1"]
             case 11:  // module 10: a large Array (old at birth, a run of two blocks): an integer stored past
                       // the first block and read back, its size, and the current object stored in it and summed
-                let n = 4096 + rng.below(4000), j = 4096 + rng.below(n - 4096), v = Int64(rng.below(201) - 100)
+                let n = 4096 + rng.below(4000), j = 4095 + rng.below(n - 4095), v = Int64(rng.below(201) - 100)
                 acc &+= v &+ Int64(n)
                 out += ["push_lit @Array", "push_lit \(n)", "send new: 1", "store_temp 3",
                         "push_temp 3", "push_lit \(j + 1)", "push_int \(v)", "send at:put: 2", "pop",
@@ -459,6 +459,11 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     }
     let v = rt.vm.result(of: root)
     if let e = rt.vm.error(of: root) { Issue.record("seed \(p.seed) \(config): \(e)") }
+    // Module 10: a verifier's report names its seed (an answer can be right
+    // while a verifier saw a missed object).
+    if rt.image.om.counters.verifierFailures > 0 {
+        Issue.record("seed \(p.seed) \(config): \(rt.image.om.verifierReports.prefix(2))")
+    }
     // the stress really happened
     let c = rt.vm.counters
     #expect(c.forks == UInt64(p.tasks + 1) && c.processErrors == 0)
@@ -520,9 +525,12 @@ let randomSeedBase = UInt64(ProcessInfo.processInfo.environment["KAJO_SEED_BASE"
 /// under every configuration: each answer is the model's.
 @Test(arguments: RandomConfig.allCases)
 func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
+    // KAJO_RANDOM_ONLY=<configuration> runs one configuration (debugging).
+    if let only = ProcessInfo.processInfo.environment["KAJO_RANDOM_ONLY"], only != config.rawValue { return }
     var failed: [UInt64] = []
     for s in 0..<UInt64(randomSeedCount(config)) {
         let p = randomProgram(randomSeedBase &+ s)
+        if ProcessInfo.processInfo.environment["KAJO_RANDOM_TRACE"] != nil { print("seed \(p.seed) \(config) starts"); fflush(stdout) }
         let v = try runRandom(p, config)
         if v != p.expected {
             failed.append(p.seed)

@@ -418,6 +418,9 @@ extension ObjectMemory: @unchecked Sendable {}
     var largeBytes: UInt64 = 0
     var runsFreed: UInt64 = 0
     var largeFailures: UInt64 = 0
+    /// Large allocations after which module 5's trigger fired and this
+    /// worker collected its nursery to start a cycle.
+    var largeTriggers: UInt64 = 0
     /// Module 7 under the reserve's rule: blocks promised to young
     /// collections in flight (`reservePromotion`).
     var promotionReserved = 0

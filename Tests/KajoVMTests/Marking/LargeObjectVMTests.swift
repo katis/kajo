@@ -249,10 +249,11 @@ private func relocationScenario(_ blind: RunReader?) throws -> (selectedRun: Boo
         #expect(rt.result(p) == 0)
         rt.vm.release(p)
         let m = rt.vm.markingCounters
-        print("large churn \(young): cycles \(m.cycles), started after a large allocation \(m.cyclesAfterLarge), fallbacks \(m.fallbacks), full collections \(rt.image.om.counters.collections)")
+        let triggers = rt.image.om.largeObjectCounters.triggers
+        print("large churn \(young): cycles \(m.cycles), triggers after a large allocation \(triggers), fallbacks \(m.fallbacks), full collections \(rt.image.om.counters.collections)")
         // Work started, not completed (AGENTS.md): under the sanitizer and
         // load the marker may finish none before the program ends.
-        #expect(m.cyclesAfterLarge > 0, "\(young): \(m)")
+        #expect(triggers > 0 && m.cycles > 0, "\(young): \(m)")
         #expect(m.cycles > 0)
         rt.noFailures()
         rt.stop()
