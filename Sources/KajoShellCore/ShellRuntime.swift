@@ -28,6 +28,11 @@ import Synchronization
     /// server would deliver it (the typing measurement); false when the
     /// platform cannot.
     func typeKey(_ handle: Int, _ text: String) -> Bool
+    /// Module 9d: while the shell serves over TCP, what a developer needs
+    /// to pair with it (its Bonjour name, addresses, the token, large; nil
+    /// hides it), and the action of the "new token" button.
+    func showPairing(_ info: PairingInfo?)
+    var onNewToken: (() -> Void)? { get set }
 }
 
 /// Where a turn came from.
@@ -40,6 +45,8 @@ final class RuntimeLink: @unchecked Sendable {
     let events: @Sendable ([UInt8]) -> Void
     /// Module 9b: the development protocol's transport, when it serves.
     let server = Mutex<ProtocolServer?>(nil)
+    /// Module 9d: its Bonjour advertisement, when it serves over TCP.
+    let advertiser = Mutex<BonjourAdvertiser?>(nil)
     /// Module 9c: the protocol client's transport (primitive 164): the
     /// sockets the image's DevClients connect through, owned here.
     let client = ClientHost()
@@ -136,10 +143,19 @@ final class RuntimeLink: @unchecked Sendable {
         if vm.isReleaseImage { return nil }
         let shell = vm
         let server = try ProtocolServer(path: path) { conn, json in shell.postRequest(connection: conn, json: json) }
+        return startServing(server)
+    }
+
+    /// The transport is open: the inbox, the kernel's protocol Process; the
+    /// image's own tools may connect to it (the local target: the client
+    /// transport holds the token, the image never). Nil when the image
+    /// would not start it.
+    func startServing(_ server: ProtocolServer) -> ProtocolServer? {
         link.server.withLock { $0 = server }
         vm.openProtocol()
         guard let p = vm.spawn("start", receiver: "DevProtocol") else {
             server.stop()
+            link.server.withLock { $0 = nil }
             return nil
         }
         let end = ShellVM.now() + 10_000_000_000
@@ -152,14 +168,16 @@ final class RuntimeLink: @unchecked Sendable {
             return nil
         }
         server.start()
-        // Module 9c: the image's own tools may connect to it (the local
-        // target): the client transport holds the token, the image never.
         link.client.addTarget(ClientHost.Target(name: "local", path: server.path, token: server.token))
         return server
     }
 
     /// Stop serving (the socket file goes).
     public func stopProtocol() {
+        link.advertiser.withLock { a in
+            a?.stop()
+            a = nil
+        }
         link.client.closeAll()
         let s = link.server.withLock { s in
             let old = s

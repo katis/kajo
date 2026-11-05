@@ -28,13 +28,23 @@ import KajoVM
 // more than one heap block. When the connection was opened with a project directory,
 // the `files` of every reply are written there (9b's `ProjectWriter`: file
 // names only). The end of a connection is a `lost` event.
+//
+// Module 9d (docs/modules/phone-transport.md): a target is a name or an
+// address (a socket path, `tcp://host:port`, `bonjour:<name>`), resolved
+// and connected on the connection's own thread; `targets` also lists the
+// `_kajo-dev._tcp` services a Bonjour browser sees (`startBrowsing`), and a
+// change of that list is a `targets` event. The host keeps every token:
+// those of `~/.kajo/targets` (whose lines may name any address form), its
+// own transport's, and one the developer typed (remembered for the
+// address, so a reconnect needs no second typing; never handed back).
 
 public final class ClientHost: @unchecked Sendable, CustomReflectable {
     /// Reflection never shows the tokens the host holds.
     public var customMirror: Mirror { Mirror(self, children: ["connections": openConnections]) }
 
-    /// A known target: where its socket is and, when the host knows it,
-    /// its token (in memory only: never written, never handed to the image).
+    /// A known target: where it is (a socket path or another address form,
+    /// `TargetAddress`) and, when the host knows it, its token (in memory
+    /// only: never written, never handed to the image).
     public struct Target: Sendable, CustomReflectable {
         public var customMirror: Mirror { Mirror(self, children: ["name": name, "path": path]) }
         public let name: String
@@ -53,6 +63,8 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     private var connections: [Int: ClientConnection] = [:]  // under lock
     private var next = 1  // under lock
     private var closedAll = false  // under lock
+    private var typedTokens: [String: String] = [:]  // under lock: address -> a token given at connect
+    private var browser: BonjourBrowser?  // under lock
     /// Lines received and malformed lines (for tests).
     private var lines = 0  // under lock
     private var malformed = 0  // under lock
@@ -98,22 +110,101 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         return targets
     }
 
-    /// `~/.kajo/targets` (or `path`): one target per line, `name path
-    /// [token]`, blank-separated; `#` starts a comment. Answers how many
-    /// were read. The tokens stay in this object.
+    /// `~/.kajo/targets` (or `path`): one target per line, `name address
+    /// [token]`, blank-separated, or tab-separated when the line has a tab
+    /// (a Bonjour name may hold blanks); `#` starts a comment. The address
+    /// is any `TargetAddress` form. Answers how many were read. The tokens
+    /// stay in this object.
     @discardableResult
     public func readTargetsFile(_ path: String = NSHomeDirectory() + "/.kajo/targets") -> Int {
         guard let data = FileManager.default.contents(atPath: path), data.count < 1 << 20,
               let text = String(data: data, encoding: .utf8) else { return 0 }
         var n = 0
         for raw in text.split(separator: "\n") {
-            let line = raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? ""
-            let f = line.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
-            guard f.count >= 2, f.count <= 3, f[0].count <= 64, f[1].utf8.count < 104 else { continue }
-            addTarget(Target(name: f[0], path: f[1], token: f.count == 3 ? f[2] : nil))
+            guard let t = ClientHost.targetLine(String(raw)) else { continue }
+            addTarget(t)
             n += 1
         }
         return n
+    }
+
+    /// One line of a targets file, or nil (a comment, a blank line, or a
+    /// line that is not `name address [token]` with a name of 1 to 64
+    /// printable bytes, an address `TargetAddress` reads and a token of
+    /// letters and digits). Fuzzed (`just fuzz protocol`).
+    public static func targetLine(_ raw: String) -> Target? {
+        let line = String(raw.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first ?? "")
+        let f: [String]
+        if line.contains("\t") {
+            f = line.split(separator: "\t").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        } else {
+            f = line.split(whereSeparator: { $0 == " " }).map(String.init)
+        }
+        guard f.count >= 2, f.count <= 3, isTargetName(f[0]), TargetAddress.parse(f[1]) != nil else { return nil }
+        if f.count == 3 {
+            guard !f[2].isEmpty, f[2].utf8.count <= 128, f[2].utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) })
+            else { return nil }
+        }
+        return Target(name: f[0], path: f[1], token: f.count == 3 ? f[2] : nil)
+    }
+
+    /// A target's name: 1 to 64 bytes, no control characters.
+    public static func isTargetName(_ n: String) -> Bool {
+        !n.isEmpty && n.utf8.count <= 64 && !n.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 })
+    }
+
+    /// Module 9d: browse for phones (`_kajo-dev._tcp`); the image gets a
+    /// `targets` event whenever the list changes.
+    public func startBrowsing() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard browser == nil else { return }
+        browser = BonjourBrowser { [weak self] in
+            self?.post(ShellEvent(kind: .targets, timeNs: ShellVM.now()))
+        }
+    }
+
+    public func stopBrowsing() {
+        lock.lock()
+        let b = browser
+        browser = nil
+        lock.unlock()
+        b?.stop()
+    }
+
+    /// The targets the image may list: the known ones, then each Bonjour
+    /// service not already known by its address (named by its service
+    /// name, at `bonjour:<name>`, with the token a known target of that
+    /// address holds).
+    public var listedTargets: [Target] {
+        lock.lock()
+        let known = targets
+        let b = browser
+        lock.unlock()
+        var out = known
+        for s in b?.services ?? [] {
+            let address = TargetAddress.bonjour(s.name).description
+            if out.contains(where: { $0.path == address || $0.name == s.name }) { continue }
+            out.append(Target(name: s.name, path: address, token: nil))
+        }
+        return out
+    }
+
+    /// What a `connect` names: a known or browsed target's name, or an
+    /// address. The address and the token the host holds for it.
+    func resolve(_ named: String) -> (address: TargetAddress, token: String?)? {
+        let all = listedTargets
+        lock.lock()
+        let typed = typedTokens
+        lock.unlock()
+        func token(_ address: String) -> String? {
+            all.first(where: { $0.path == address && $0.token != nil })?.token ?? typed[address]
+        }
+        if let t = all.first(where: { $0.name == named }), let a = TargetAddress.parse(t.path) {
+            return (a, t.token ?? token(t.path))
+        }
+        guard let a = TargetAddress.parse(named) else { return nil }
+        return (a, token(a.description))
     }
 
     /// The callback for `ShellCallbacks.client`.
@@ -123,20 +214,30 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         let a = call.arguments
         switch call.op {
         case "targets":
-            let lines = knownTargets.map { "\($0.name)\t\($0.path)\t\($0.token == nil ? 0 : 1)" }
+            // Names and addresses are checked where they enter (no tab, no
+            // line break): the image splits these lines on tabs.
+            let all = listedTargets
+            lock.lock()
+            let typed = typedTokens
+            lock.unlock()
+            let lines = all.map { "\($0.name)\t\($0.path)\t\($0.token == nil && typed[$0.path] == nil ? 0 : 1)" }
             return .string(lines.joined(separator: "\n"))
         case "connect":
-            guard a.count == 5, let path = a[0].string, path.utf8.count < 104, let client = a[1].string else { return nil }
+            guard a.count == 5, let named = a[0].string, let client = a[1].string,
+                  let (address, held) = resolve(named) else { return nil }
             let package = a[2].string, project = a[4].string
-            let token = a[3].string ?? knownTargets.first(where: { $0.path == path && $0.token != nil })?.token
+            let token = a[3].string ?? held
             lock.lock()
             if closedAll {
                 lock.unlock()
                 return nil
             }
+            // A token typed by hand is kept for the address (in memory):
+            // a reconnect after a dropped link opens the session with it.
+            if let typed = a[3].string { typedTokens[address.description] = typed }
             let id = next
             next += 1
-            let c = ClientConnection(id: id, path: path, project: project)
+            let c = ClientConnection(id: id, address: address, project: project)
             connections[id] = c
             lock.unlock()
             let t = Thread { [self] in run(c, client: client, package: package, token: token) }
@@ -172,7 +273,7 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     /// the end, then the `lost` event.
     private func run(_ c: ClientConnection, client: String, package: String?, token: String?) {
         guard let token else {
-            finish(c, "no token for \(c.path): enter it or list it in ~/.kajo/targets")
+            finish(c, "no token for \(c.address): enter it or list it in ~/.kajo/targets")
             return
         }
         if let e = c.connect() {
@@ -246,6 +347,16 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         defer { lock.unlock() }
         return connections.count
     }
+
+    /// Module 9d: end every connection's socket as a dropped link would
+    /// (the client did not close it: its `DevClient` reconnects). The
+    /// measurement's dropped link and the tests'.
+    public func dropConnections() {
+        lock.lock()
+        let all = Array(connections.values)
+        lock.unlock()
+        for c in all { c.drop() }
+    }
 }
 
 /// A line in pieces of at most 16 KiB, cut between scalars: no object of
@@ -280,7 +391,7 @@ func clientError(_ message: String) -> JSONValue {
 /// the end, which also closes the descriptor (after the queued writes).
 final class ClientConnection: @unchecked Sendable {
     let id: Int
-    let path: String
+    let address: TargetAddress
     let project: String?
     private let lock = NSLock()
     private var fd: Int32 = -1  // under lock
@@ -289,28 +400,17 @@ final class ClientConnection: @unchecked Sendable {
     private var closed = false  // under lock
     private let queue: DispatchQueue
 
-    init(id: Int, path: String, project: String?) {
+    init(id: Int, address: TargetAddress, project: String?) {
         self.id = id
-        self.path = path
+        self.address = address
         self.project = project
         queue = DispatchQueue(label: "kajo-client-write-\(id)")
     }
 
-    /// nil, or why not.
+    /// nil, or why not (resolving a name and connecting: `openStream`).
     func connect() -> String? {
-        let s = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard s >= 0 else { return "socket: \(errnoText())" }
-        var one: Int32 = 1
-        unsafe setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        var addr = ProtocolServer.address(path)
-        let r = withUnsafePointer(to: &addr) {
-            unsafe $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { unsafe Darwin.connect(s, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-        }
-        if r != 0 {
-            let e = errnoText()
-            Darwin.close(s)
-            return "connect \(path): \(e)"
-        }
+        let s: Int32
+        do { s = try openStream(address) } catch { return "\(error)" }
         lock.lock()
         if closed {
             lock.unlock()
@@ -397,6 +497,15 @@ final class ClientConnection: @unchecked Sendable {
                 buffer.removeAll()
             }
         }
+    }
+
+    /// Any thread: the socket ends under the connection as a link that
+    /// died would (writes fail, the reader sees the end).
+    func drop() {
+        lock.lock()
+        let f = fd
+        lock.unlock()
+        if f >= 0 { shutdown(f, SHUT_RDWR) }
     }
 
     /// Any thread: end the connection (the reader sees the end).

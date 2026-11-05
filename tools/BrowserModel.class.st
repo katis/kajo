@@ -411,6 +411,12 @@ BrowserModel >> selectSelector: aSelector [
 ]
 
 { #category : #selecting }
+BrowserModel >> selectorsLoaded [
+	"Whether the selected class's selectors came (a class may have none)."
+	^ selectorsByCategory notNil
+]
+
+{ #category : #selecting }
 BrowserModel >> toggleByCategory [
 	byCategory := self byCategory not.
 	self changed: #classes

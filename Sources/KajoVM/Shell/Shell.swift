@@ -103,6 +103,10 @@ public enum ShellEventKind: Int, Sendable, CaseIterable {
     /// the connection; value: at most 16 KiB of its text, cut between
     /// scalars); the `line` event that follows carries the last piece.
     case linePart = 16
+    /// Module 9d: the client transport's targets changed (a phone appeared
+    /// on the network or went; value: nil): the target picker lists them
+    /// again (`ClientTransport targets`).
+    case targets = 17
 }
 
 /// An event the shell posts. `timeNs` is when it happened (AGENTS.md:

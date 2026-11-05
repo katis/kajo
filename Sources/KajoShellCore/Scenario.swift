@@ -19,6 +19,12 @@ import KajoVM
 /// debugger for the whole window, asking the target to evaluate `3 + 4`
 /// every 50 ms meanwhile; then lets it go on and checks it handles the
 /// events that queued. The frames are the window's, the event loop stopped.
+///
+/// Module 9d: `protocol=tcp[:port]` (and `mode=serve`, which defaults to it
+/// and to `scenario=idle`) serves the development protocol over TCP with
+/// Bonjour and the pairing screen while the scenario runs; whoever connects
+/// (the Mac's tools) makes requests meanwhile, and the result line counts
+/// what the server did in the window.
 @MainActor public final class ScenarioMode {
     let options: LaunchOptions
     let platform: ShellPlatform
@@ -32,7 +38,10 @@ import KajoVM
     let hog: Bool
     let budgetOff: Bool
     let debugStop: Bool
+    let servePort: Int?
     var protocolServer: ProtocolServer?
+    var tcpServer: ProtocolServer?
+    var servedBase = ServerStats.Values()
     let debugResult = DebugStopBox()
 
     // frames (seconds, uptime clock)
@@ -85,6 +94,7 @@ import KajoVM
         hog = options.int("hog", 0) == 1
         budgetOff = options.string("budget", "on") == "off"
         debugStop = options.int("debugstop", 0) == 1
+        servePort = tcpPort(options.string("protocol", options.mode == "serve" ? "tcp" : ""))
     }
 
     /// After the first frame (iOS kills an app that blocks its main thread
@@ -113,6 +123,20 @@ import KajoVM
                 Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=protocol_\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
                 finish(2)
             }
+        }
+        if let port = servePort {
+            do {
+                tcpServer = try runtime.serveTCP(port: port, store: pairingTokenStore(options), imageName: "shell.img")
+            } catch {
+                Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=protocol_\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
+                finish(2)
+            }
+            guard let s = tcpServer else {
+                Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=no_protocol_in_this_image"))
+                finish(2)
+            }
+            // The port goes to the console (the token never does).
+            Output.shared.emit("serving=tcp port=\(s.port ?? 0) addresses=\(localAddresses().joined(separator: ","))")
         }
         runtime.onTurn = { [unowned self] t, k in self.noteTurn(t, k) }
         runtime.onView = { [unowned self] c in self.noteView(c) }
@@ -232,6 +256,7 @@ import KajoVM
         threadBase = vm.threads.map { ($0, ThreadCounts.of($0.threadID)) }
         mainThreadBase = ThreadCounts.of(mainTid)
         pauseBase = vm.pauses.count
+        servedBase = tcpServer?.stats.values ?? ServerStats.Values()
         latencies = []
         beginNs = ShellVM.now()
         beginLateMs = (Double(beginNs) / 1e9 - measureStart) * 1000
@@ -291,6 +316,16 @@ import KajoVM
             line += " debug_stopped=\(r.stopped ? 1 : 0) debug_reason=\(r.reason) debug_process=\(r.process) debug_stopped_s=\(f3(r.stoppedSeconds))"
             line += " protocol_replies=\(r.rtts.count) protocol_errors=\(r.errors) protocol_rtt_p50_ms=\(f3(percentile(r.rtts, 0.5))) protocol_rtt_p99_ms=\(f3(percentile(r.rtts, 0.99))) protocol_rtt_max_ms=\(f3(r.rtts.max() ?? 0))"
             line += " debug_resumed=\(r.resumed ? 1 : 0) handled_while_stopped=\(r.handledWhileStopped) handled_after_resume=\(r.handledAfterResume) debug_error=\(r.error.isEmpty ? "-" : r.error.replacingOccurrences(of: " ", with: "_"))"
+            runtime.stopProtocol()
+        }
+        if let s = tcpServer {
+            // What the server did in the window (sessions, requests, bytes
+            // written; the longest a VM thread spent handing it a line).
+            let v = s.stats.values, b = servedBase
+            line += " served=tcp served_sessions=\(v.sessions - b.sessions) served_requests=\(v.requests - b.requests) served_bytes=\(v.bytesWritten - b.bytesWritten)"
+            line += " served_failed_opens=\(v.failedOpens - b.failedOpens) served_refused=\(v.refusedConnections - b.refusedConnections) served_open_sessions=\(s.sessionCount)"
+            let n = v.delivers - b.delivers
+            line += " deliver_n=\(n) deliver_mean_us=\(n == 0 ? "-" : f1(Double(v.deliverTotalNs &- b.deliverTotalNs) / Double(n) / 1e3)) deliver_max_us=\(f1(Double(v.deliverMaxNs) / 1e3)) writer_max_pending_kb=\(f1(Double(v.maxPendingBytes) / 1024))"
             runtime.stopProtocol()
         }
         line += " preemptions=\(d("preemptions")) hops=\(d("hops")) view_calls=\(d("viewCalls")) shell_events=\(d("shellEvents")) stuck_reports=\(d("stuckReports"))"
@@ -404,4 +439,18 @@ nonisolated func startDebugClient(path: String, token: String, until: UInt64, re
             result.withLock { $0.error = "\(error)" }
         }
     }
+}
+
+/// Where the pairing token is kept: the app's Application Support on iOS
+/// (stable per install, mode 0600); on the Mac in memory (nil: its shell
+/// shows the token in the status line as 9b's does) unless `tokendir=`
+/// names a directory (the Mac-to-Mac measurement reads it from there as
+/// the phone's is copied from its container).
+func pairingTokenStore(_ options: LaunchOptions) -> PairingTokenStore? {
+    #if os(iOS)
+    guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
+    return PairingTokenStore(directory: dir.path)
+    #else
+    return options["tokendir"].map { PairingTokenStore(directory: $0) }
+    #endif
 }

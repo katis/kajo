@@ -31,6 +31,10 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        # Module 9d: the development protocol's Bonjour service and why the
+        # shell is on the local network (shown if iOS asks).
+        NSBonjourServices: [_kajo-dev._tcp]
+        NSLocalNetworkUsageDescription: Kajo serves the development protocol to the Mac's developer tools on the local network.
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
           UISceneConfigurations:

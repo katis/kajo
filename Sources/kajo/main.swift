@@ -14,7 +14,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
                 [--snapshot-at N --snapshot-to out.img] [--sources dir]
        kajo run <image.img> [the options above]
-       kajo run <image.img> --protocol <socket> [the options above]
+       kajo run <image.img> --protocol <socket>|tcp[:port] [--name <Bonjour name>] [the options above]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
@@ -42,7 +42,10 @@ package.
 run --protocol: a development target (module 9b): the image serves the
 development protocol on the Unix socket until interrupted, prints the
 socket and the pairing token a client opens its session with, and prints
-the Transcript and every stopped Process on stderr. Release images refuse. --release marks it a release
+the Transcript and every stopped Process on stderr. Release images refuse.
+--protocol tcp[:port] (module 9d) serves on TCP instead, on every
+interface, advertised with Bonjour as _kajo-dev._tcp (--name, or this
+Mac's name), and prints the port and the addresses with the token. --release marks it a release
 image: Smalltalk cannot make, install or remove methods in it.
 
 seal: loads an image (every loader check), marks it a release image and
@@ -69,6 +72,7 @@ case "run":
     var options = Headless.Options()
     var paths: [String] = []
     var protocolSocket: String? = nil
+    var serviceName: String? = nil
     var i = 0
     func value() -> String {
         i += 1
@@ -109,6 +113,7 @@ case "run":
         case "--snapshot-to": options.snapshotTo = value()
         case "--sources": options.sourcesDirectory = value()
         case "--protocol": protocolSocket = value()
+        case "--name": serviceName = value()
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }
@@ -119,7 +124,7 @@ case "run":
         guard paths.count == 1, let data = FileManager.default.contents(atPath: paths[0]), Headless.isImage([UInt8](data)) else {
             fail("--protocol serves an image")
         }
-        serveTarget(image: [UInt8](data), options: options, socket: socket)
+        serveTarget(image: [UInt8](data), options: options, socket: socket, name: serviceName)
     }
     var files: [(path: String, text: String)] = []
     var imageBytes: [UInt8]? = nil
@@ -206,10 +211,15 @@ default:
 }
 
 /// `kajo run <image> --protocol <socket>`: serve until SIGINT or SIGTERM.
-func serveTarget(image: [UInt8], options: Headless.Options, socket: String) -> Never {
+func serveTarget(image: [UInt8], options: Headless.Options, socket: String, name: String?) -> Never {
     let target: DevTarget
+    var listen = DevTarget.Listen.unix(socket)
+    if socket == "tcp" || socket.hasPrefix("tcp:") {
+        guard let port = Int(socket == "tcp" ? "0" : String(socket.dropFirst(4))), (0...65535).contains(port) else { fail("--protocol tcp:<port>") }
+        listen = .tcp(port: port, loopbackOnly: false, advertise: true, name: name)
+    }
     do {
-        target = try DevTarget(image: image, options: options, socket: socket) { line in
+        target = try DevTarget(image: image, options: options, listen: listen) { line in
             // The Transcript (a stopped Process prints its line there) on stderr.
             if let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], o["kind"] as? String == "transcript" {
                 FileHandle.standardError.write(((o["text"] as? String ?? "") + "\n").data(using: .utf8)!)
@@ -218,7 +228,11 @@ func serveTarget(image: [UInt8], options: Headless.Options, socket: String) -> N
     } catch {
         fail("kajo run: \(error)", 1)
     }
-    print("kajo: development protocol on \(socket)")
+    if let port = target.server.port {
+        print("kajo: development protocol on tcp port \(port): \(localAddresses().map { $0.contains(":") ? "tcp://[\($0)]:\(port)" : "tcp://\($0):\(port)" }.joined(separator: " "))")
+    } else {
+        print("kajo: development protocol on \(socket)")
+    }
     print("kajo: token \(target.server.token)")
     fflush(stdout)
     signal(SIGINT, SIG_IGN)

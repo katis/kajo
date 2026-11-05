@@ -11,6 +11,8 @@ import KajoVM
 public final class DevTarget: @unchecked Sendable {
     public let vm: ShellVM
     public let server: ProtocolServer
+    /// Module 9d: the Bonjour advertisement of a TCP target.
+    public private(set) var advertiser: BonjourAdvertiser?
     private let wake = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var stopping = false
@@ -22,7 +24,20 @@ public final class DevTarget: @unchecked Sendable {
     /// Open the image and the socket and start serving. `onLine` sees every
     /// line the kernel emits (replies and events) before the transport
     /// routes it (kajo run prints the transcript and the stops).
-    public init(image: [UInt8], options: Headless.Options = Headless.Options(), socket path: String,
+    public convenience init(image: [UInt8], options: Headless.Options = Headless.Options(), socket path: String,
+                            token: String = ProtocolServer.makeToken(), onLine: (@Sendable ([UInt8]) -> Void)? = nil) throws {
+        try self.init(image: image, options: options, listen: .unix(path), token: token, onLine: onLine)
+    }
+
+    /// Where a target listens (module 9d): a Unix socket, or TCP on a port
+    /// (0: any) on every interface, advertised with Bonjour under `name`
+    /// (nil: this machine's), or on loopback only and advertised there.
+    public enum Listen: Sendable {
+        case unix(String)
+        case tcp(port: Int, loopbackOnly: Bool, advertise: Bool, name: String?)
+    }
+
+    public init(image: [UInt8], options: Headless.Options = Headless.Options(), listen: Listen,
                 token: String = ProtocolServer.makeToken(), onLine: (@Sendable ([UInt8]) -> Void)? = nil) throws {
         if Headless.isReleaseImage(image) == true { throw Failure(description: "a release image serves no development protocol") }
         let box = ServerBox()
@@ -40,7 +55,12 @@ public final class DevTarget: @unchecked Sendable {
         }
         let shell = vm
         do {
-            server = try ProtocolServer(path: path, token: token) { conn, json in shell.postRequest(connection: conn, json: json) }
+            switch listen {
+            case .unix(let path):
+                server = try ProtocolServer(path: path, token: token) { conn, json in shell.postRequest(connection: conn, json: json) }
+            case .tcp(let port, let loopbackOnly, _, _):
+                server = try ProtocolServer(tcpPort: port, loopbackOnly: loopbackOnly, token: token) { conn, json in shell.postRequest(connection: conn, json: json) }
+            }
         } catch {
             vm.close()
             throw Failure(description: "\(error)")
@@ -62,6 +82,10 @@ public final class DevTarget: @unchecked Sendable {
             throw Failure(description: "DevProtocol start answered \(started.map { "\($0)" } ?? "nothing")")
         }
         server.start()
+        if case .tcp(_, let loopbackOnly, true, let name) = listen, let port = server.port {
+            advertiser = try? BonjourAdvertiser(name: name, port: port, txt: [("image", "kajo-run"), ("protocol", "1"), ("kernel", KajoVM.version)],
+                                                loopbackOnly: loopbackOnly) { _, _ in }
+        }
     }
 
     /// Turn the main worker until `stop` (main-affine Processes, a stopped
@@ -87,6 +111,7 @@ public final class DevTarget: @unchecked Sendable {
 
     /// Close the socket and the VM (after `run` returned, or instead of it).
     public func close() {
+        advertiser?.stop()
         server.stop()
         vm.close()
     }

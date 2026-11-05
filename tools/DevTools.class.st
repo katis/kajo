@@ -8,7 +8,8 @@ Class {
 		'transcript',
 		'project',
 		'menu',
-		'debuggers'
+		'debuggers',
+		'targetsWatched'
 	],
 	#category : #'Tools-Windows'
 }
@@ -27,10 +28,16 @@ DevTools class >> clients [
 { #category : #clients }
 DevTools class >> connect: aPath name: aName token: aTokenOrNil [
 	"A client of a target, opening its session as the developer in package Tools when it is the local target; its stops open debuggers, its transcript joins the transcript's."
+	^ self connect: aPath name: aName token: aTokenOrNil project: (aName = 'local' ifTrue: [project] ifFalse: [nil])
+]
+
+{ #category : #clients }
+DevTools class >> connect: aTarget name: aName token: aTokenOrNil project: aDirectoryOrNil [
+	"A client of aTarget (a socket path, an address, or a target's name: module 9d's phone), the changes it makes written into aDirectoryOrNil."
 	| c |
 	(self clientNamed: aName) ifNotNil: [:old | old isOpen ifTrue: [^ old]].
-	c := DevClient connect: aPath name: aName client: 'developer' package: (aName = 'local' ifTrue: ['Tools'] ifFalse: [nil])
-		token: aTokenOrNil project: (aName = 'local' ifTrue: [project] ifFalse: [nil]).
+	c := DevClient connect: aTarget name: aName client: 'developer' package: (aName = 'local' ifTrue: ['Tools'] ifFalse: [nil])
+		token: aTokenOrNil project: aDirectoryOrNil.
 	c isNil ifTrue: [^ nil].
 	self register: c.
 	^ c
@@ -48,6 +55,7 @@ DevTools class >> register: aClient [
 	clients at: aClient name put: aClient.
 	aClient on: 'process.stopped' do: [:e :c | self stopped: e client: c].
 	aClient on: 'process.resumed' do: [:e :c | self resumed: e client: c].
+	aClient on: 'connection.open' do: [:e :c | c reconnects > 0 ifTrue: [self reconnected: c]].
 	self transcript listenTo: aClient
 ]
 
@@ -60,6 +68,18 @@ DevTools class >> debuggerFor: aProcessId client: aClient [
 { #category : #debugging }
 DevTools class >> debuggers [
 	^ debuggers ifNil: [#()]
+]
+
+{ #category : #debugging }
+DevTools class >> reconnected: aClient [
+	"Module 9d: after a dropped link the stopped Processes are still stopped in the target: each debugger of aClient asks for its frames again, or says its Process went on or is gone (process.list)."
+	aClient processList: [:list |
+		self debuggers do: [:w |
+			(w isOpen and: [w model client == aClient]) ifTrue: [ | p |
+				p := list detect: [:e | (e at: 'process') = w model process] ifNone: [nil].
+				(p notNil and: [(p at: 'stopped') notNil])
+					ifTrue: [w model refresh]
+					ifFalse: [w model resumed]]]]
 ]
 
 { #category : #debugging }
@@ -143,12 +163,30 @@ DevTools class >> openLocal: aSocketPath project: aDirectoryOrNil [
 ]
 
 { #category : #opening }
+DevTools class >> openTarget: aTarget name: aName project: aDirectoryOrNil [
+	"Module 9d: the tools on another target (the phone, by its name or address), the changes they make written into aDirectoryOrNil. Answers the client."
+	| c |
+	project := aDirectoryOrNil.
+	UIEventLoop start.
+	c := self connect: aTarget name: aName token: nil project: aDirectoryOrNil.
+	c isNil ifTrue: [^ nil].
+	self installMenu.
+	self openTranscript.
+	self openTargets.
+	self browse: c.
+	^ c
+]
+
+{ #category : #opening }
 DevTools class >> openTargets [
 	| m |
 	m := TargetPickerModel new.
 	m connectAction: [:name :path :token | self connect: path name: name token: token].
 	(TargetPickerWindow on: m) open.
 	m refresh.
+	targetsWatched == true ifFalse: [
+		targetsWatched := true.
+		DevClient onTargetsChanged: [(self windowsOf: TargetPickerWindow) do: [:w | w model refresh]]].
 	^ m view
 ]
 

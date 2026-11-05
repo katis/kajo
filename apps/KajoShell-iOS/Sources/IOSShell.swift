@@ -4,7 +4,11 @@
 // shared with the macOS shell. Launch arguments select the mode:
 //
 //   xcrun devicectl device process launch --console --device <udid> \
-//       dev.katajamaki.kajo.shell mode=tests|golden|scenario|demo key=value...
+//       dev.katajamaki.kajo.shell mode=tests|golden|scenario|serve|demo key=value...
+//
+// Module 9d: mode=serve (or protocol=tcp[:port] in a scenario) serves the
+// development protocol over TCP, advertised with Bonjour, and shows the
+// pairing screen: the token, the name, the addresses, a "new token" button.
 //
 // iOS kills an app that blocks its main thread at launch: the mode starts
 // after the first frame, headless modes run on a background thread, and the
@@ -32,6 +36,13 @@ import UIKit
     func typeKey(_ handle: Int, _ text: String) -> Bool { false }
     var link: CADisplayLink?
     var tickHandler: (@MainActor (Double, Double) -> Void)?
+    /// Module 9d: the pairing screen while the shell serves over TCP.
+    var onNewToken: (() -> Void)?
+    var pairingView: UIView?
+    let pairingName = UILabel()
+    let pairingToken = UILabel()
+    let pairingAddresses = UILabel()
+    let pairingStatus = UILabel()
 
     init(root: UIView) {
         self.root = root
@@ -60,6 +71,53 @@ import UIKit
     var maximumFramesPerSecond: Int { root.window?.windowScene?.screen.maximumFramesPerSecond ?? 60 }
 
     func showStatus(_ line: String) { statusLabel.text = String(line.prefix(1200)) }
+
+    /// Module 9d: the token large, the Bonjour name and the addresses, what
+    /// the listener does, and a button that makes a new token (which ends
+    /// every session). Above every Smalltalk window; nil hides it.
+    func showPairing(_ info: PairingInfo?) {
+        guard let info else {
+            pairingView?.removeFromSuperview()
+            pairingView = nil
+            return
+        }
+        if pairingView == nil {
+            let v = UIView(frame: CGRect(x: 12, y: root.safeAreaInsets.top + 44, width: root.bounds.width - 24, height: 210))
+            v.backgroundColor = UIColor.secondarySystemBackground.withAlphaComponent(0.95)
+            v.layer.cornerRadius = 12
+            v.autoresizingMask = [.flexibleWidth]
+            pairingName.font = .boldSystemFont(ofSize: 17)
+            pairingToken.font = .monospacedSystemFont(ofSize: 28, weight: .bold)
+            pairingToken.adjustsFontSizeToFitWidth = true
+            pairingAddresses.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+            pairingAddresses.numberOfLines = 3
+            pairingStatus.font = .systemFont(ofSize: 13)
+            pairingStatus.numberOfLines = 2
+            let w = v.bounds.width - 24
+            pairingName.frame = CGRect(x: 12, y: 8, width: w, height: 22)
+            pairingToken.frame = CGRect(x: 12, y: 34, width: w, height: 40)
+            pairingAddresses.frame = CGRect(x: 12, y: 78, width: w, height: 48)
+            pairingStatus.frame = CGRect(x: 12, y: 128, width: w, height: 36)
+            let b = UIButton(type: .system)
+            b.setTitle("New token", for: .normal)
+            b.frame = CGRect(x: 12, y: 166, width: 140, height: 36)
+            b.addTarget(self, action: #selector(newToken), for: .touchUpInside)
+            for l in [pairingName, pairingToken, pairingAddresses, pairingStatus] {
+                l.autoresizingMask = [.flexibleWidth]
+                v.addSubview(l)
+            }
+            v.addSubview(b)
+            root.addSubview(v)
+            pairingView = v
+        }
+        pairingName.text = "Kajo serves: " + (info.name.isEmpty ? "(advertising)" : info.name)
+        pairingToken.text = info.token
+        pairingAddresses.text = info.addresses.map { $0.contains(":") ? "[\($0)]:\(info.port)" : "\($0):\(info.port)" }.joined(separator: "\n")
+        pairingStatus.text = info.status
+        if let v = pairingView { root.bringSubviewToFront(v) }
+    }
+
+    @objc func newToken() { onNewToken?() }
 
     func startDisplayLink(_ tick: @escaping @MainActor (Double, Double) -> Void) {
         tickHandler = tick
@@ -211,6 +269,7 @@ import UIKit
             guard e.kind == "window" else { return nil }
             e.view.isHidden = false
             root.insertSubview(e.view, belowSubview: statusLabel)
+            if let p = pairingView { root.bringSubviewToFront(p) }
             return .nil
         case "close":
             guard e.kind == "window" else { return nil }

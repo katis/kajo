@@ -1,10 +1,14 @@
-"Module 9c's tests drive the developer UI in a test shell through these: open the tools on the image's own socket, ask what the windows show, act as a user would (a browser compiling a method, a menu action that fails), and read what happened."
+"Module 9c's tests drive the developer UI in a test shell through these (module 9d: and the tools on another target over TCP, whose link drops): open the tools on the image's own socket, ask what the windows show, act as a user would (a browser compiling a method, a menu action that fails), and read what happened."
 Class {
 	#name : #ToolsProbe,
 	#superclass : #Object,
 	#classInstVars : [
 		'results',
-		'menu'
+		'menu',
+		'listed',
+		'hierarchy',
+		'framesBefore',
+		'remoteProcess'
 	],
 	#category : #'Toolsprobe'
 }
@@ -147,4 +151,79 @@ ToolsProbe class >> transcriptHas: aString [
 ToolsProbe class >> compiledThroughTheBrowser [
 	"The browser has the compile's reply: the method is in the image and its file was written before the reply reached the tools (the client's transport writes the files first)."
 	^ self hasProbeAnswer and: [self browser model status beginsWith: 'compiled']
+]
+
+{ #category : #remote }
+ToolsProbe class >> openRemote: anAddress [
+	"Module 9d: the tools on another target, by its address (the host holds its token)."
+	^ (DevTools openTarget: anAddress name: 'remote' project: nil) notNil
+]
+
+{ #category : #remote }
+ToolsProbe class >> remote [
+	^ DevTools clientNamed: 'remote'
+]
+
+{ #category : #remote }
+ToolsProbe class >> remoteReady [
+	| c |
+	c := self remote.
+	^ c notNil and: [c isOpen and: [self browsers > 0 and: [self browser model hierarchy size > 100]]]
+]
+
+{ #category : #remote }
+ToolsProbe class >> stopRemote [
+	"A doit on the target stops at a missing method; a debugger opens."
+	(WorkspaceModel new client: self remote; yourself) doIt: 'nil probeMissing'.
+	^ true
+]
+
+{ #category : #remote }
+ToolsProbe class >> remoteDebuggerReady [
+	| d |
+	DevTools debuggers isEmpty ifTrue: [^ false].
+	d := DevTools debuggers last model.
+	(d client == self remote and: [d state == #stopped and: [d frames notEmpty]]) ifFalse: [^ false].
+	remoteProcess := d process.
+	^ true
+]
+
+{ #category : #remote }
+ToolsProbe class >> dropWithRequests [
+	"The link drops (the test's host closes the sockets on this line), then two requests go out on the dead link: both are pending at the loss."
+	| c |
+	c := self remote.
+	listed := nil.
+	hierarchy := nil.
+	framesBefore := (c latencies select: [:l | l first = 'process.frames']) size.
+	Transcript show: 'probe: drop'; cr; flush.
+	c processList: [:l | listed := l].
+	c classHierarchy: [:h | hierarchy := h size].
+	^ true
+]
+
+{ #category : #remote }
+ToolsProbe class >> reconnected [
+	"The client is open again on a new session, both requests were answered, the stopped Process is listed stopped, and its debugger fetched its frames again."
+	| c d |
+	c := self remote.
+	(c isOpen and: [c reconnects > 0 and: [listed notNil and: [hierarchy notNil]]]) ifFalse: [^ false].
+	(listed anySatisfy: [:p | (p at: 'process') = remoteProcess and: [(p at: 'stopped') notNil]]) ifFalse: [^ false].
+	d := DevTools debuggers last model.
+	^ d state == #stopped and: [(c latencies select: [:l | l first = 'process.frames']) size > framesBefore]
+]
+
+{ #category : #remote }
+ToolsProbe class >> remoteRetried [
+	^ self remote retried
+]
+
+{ #category : #remote }
+ToolsProbe class >> remoteProcess [
+	^ remoteProcess
+]
+
+{ #category : #remote }
+ToolsProbe class >> remoteReconnects [
+	^ self remote reconnects
 ]

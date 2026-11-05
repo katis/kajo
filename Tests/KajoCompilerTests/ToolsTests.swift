@@ -111,10 +111,18 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     let shell = ToolsShell()
     let path = socketNames.next()
 
-    init(image: [UInt8] = probedImage) throws {
+    /// `dropOn`: a Transcript line that makes the client transport drop
+    /// every socket as a dead link would (module 9d's tests).
+    init(image: [UInt8] = probedImage, dropOn: String? = nil) throws {
         let box = ServerBox()
         var c = shell.callbacks
-        c.events = { line in box.server?.deliver(line) }
+        let h = host
+        c.events = { line in
+            if let marker = dropOn, line.count < 200, String(decoding: line, as: UTF8.self).contains("\"text\":\"\(marker)\"") {
+                h.dropConnections()
+            }
+            box.server?.deliver(line)
+        }
         c.client = host.callback
         var o = Headless.Options()
         o.heapMiB = 512

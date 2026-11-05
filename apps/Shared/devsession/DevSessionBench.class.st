@@ -1,4 +1,4 @@
-"Module 9c's scripted developer session (docs/modules/developer-ui.md, Measurements), run by the macOS shell's mode=devsession in a development image: the tools open on the image's own socket, the browser is populated (the class tree pushed whole and on demand, a package's selectors in a table pushed whole and on demand), classes and methods are selected, a method compiled, a test class run, an error raised that opens a debugger, two steps, and a fix that restarts the frame. Each step waits for what the tools show (polled by timer events, never a wait in the UI) and is timed; at the end a transcript line 'devsession: done <json>' carries the steps and the client's request round trips by kind. startTyping: opens a method in a browser and asks the shell to type into it ('devsession: type <handle>')."
+"Module 9c's scripted developer session (docs/modules/developer-ui.md, Measurements), run by the macOS shell's mode=devsession in a development image: the tools open on the image's own socket, the browser is populated (the class tree pushed whole and on demand, a package's selectors in a table pushed whole and on demand), classes and methods are selected, a method compiled, a test class run, an error raised that opens a debugger, two steps, and a fix that restarts the frame. Each step waits for what the tools show (polled by timer events, never a wait in the UI) and is timed; at the end a transcript line 'devsession: done <json>' carries the steps and the client's request round trips by kind. startTyping: opens a method in a browser and asks the shell to type into it ('devsession: type <handle>'). Module 9d: startRemote:package:project: runs the session against another target (the phone, DevSessionTarget in its image) and both forms end with two more steps: a missing method defined from the debugger and the send retried (its file lands in the project), and a dropped link (the shell closes the client's sockets on 'devsession: drop') with a Process stopped in the target, after which the client reconnects, the requests pending at the loss are answered, the stopped Process is still there and its debugger shows its frames again."
 Class {
 	#name : #DevSessionBench,
 	#superclass : #Object,
@@ -11,7 +11,8 @@ Class {
 		'queue',
 		'failure',
 		'package',
-		'measureWindow'
+		'measureWindow',
+		'targetClass'
 	],
 	#category : #'Devsession'
 }
@@ -84,6 +85,9 @@ DevSessionBench class >> finish [
 		v := (byKind at: k) asArray sort: [:a :b | a <= b].
 		lat at: k put: {v size. v at: (v size + 1 // 2). v at: ((v size * 99 + 99) // 100 min: v size). v last}].
 	o at: 'requests' put: lat.
+	client isNil ifFalse: [
+		o at: 'reconnects' put: client reconnects; at: 'retried' put: client retried.
+		o at: 'outages' put: (client outages collect: [:x | x asArray]) asArray].
 	Transcript show: 'devsession: done ' , (Json write: o); cr; flush
 ]
 
@@ -93,17 +97,92 @@ DevSessionBench class >> start: aSocketPath package: aPackage [
 	steps := OrderedCollection new.
 	failure := nil.
 	package := aPackage.
+	targetClass := 'DevSessionBench'.
 	DevTools openLocal: aSocketPath project: nil.
 	client := DevTools local.
+	^ self run: OrderedCollection new
+]
+
+{ #category : #session }
+DevSessionBench class >> startRemote: aTarget package: aPackage project: aDirectoryOrNil [
+	"Module 9d: the same session against aTarget (a target's name or address: the phone), its changes written into aDirectoryOrNil. DevSessionTarget's failingStep is put back first and its undefinedStep removed, so one target serves several sessions."
+	steps := OrderedCollection new.
+	failure := nil.
+	package := aPackage.
+	targetClass := 'DevSessionTarget'.
+	client := DevTools openTarget: aTarget name: 'remote' project: aDirectoryOrNil.
+	client isNil ifTrue: [Transcript show: 'devsession: done {"failure":"no transport"}'; cr; flush. ^ false].
+	^ self run: (OrderedCollection new add: [self reset]; yourself)
+]
+
+{ #category : #session }
+DevSessionBench class >> run: firstSteps [
 	browser := (DevTools windowsOf: BrowserWindow) first model.
-	queue := OrderedCollection new.
+	queue := firstSteps.
 	queue add: [self populatePush]; add: [self populateOnDemand]; add: [self treeOnly: #push]; add: [self treeOnly: #onDemand];
 		add: [self selectorsPush]; add: [self selectorsOnDemand];
 		add: [self selectClasses]; add: [self compile]; add: [self runTests]; add: [self raiseError];
-		add: [self stepOnce]; add: [self stepOnce]; add: [self fixAndProceed].
+		add: [self stepOnce]; add: [self stepOnce]; add: [self fixAndProceed]; add: [self defineAndRetry]; add: [self dropLink].
 	self begin: 'open'.
 	self when: [client isOpen and: [browser hierarchy size > 0]] then: [self end].
 	^ true
+]
+
+{ #category : #session }
+DevSessionBench class >> reset [
+	"The target as a session expects it: failingStep fails again, undefinedStep is not there."
+	| n |
+	self begin: 'reset'.
+	n := 0.
+	client methodCompile: 'DevSessionTarget' source: DevSessionTarget originalFailingStep category: 'session' side: nil then: [:r | n := n + 1].
+	client request: 'method.remove' args: {'className'. 'DevSessionTarget'. 'selector'. 'undefinedStep'} then: [:r | n := n + 1] else: [:e | n := n + 1].
+	self when: [n = 2] then: [self end]
+]
+
+{ #category : #session }
+DevSessionBench class >> defineAndRetry [
+	"An error on the target stops its Process at a missing method; the debugger defines the method in a browser, the send is retried and the Process goes on; the method's file is written into the project."
+	| w before d |
+	w := WorkspaceModel new client: client; yourself.
+	before := DevTools debuggers size.
+	self begin: 'define.retry'.
+	w doIt: 'DevSessionTarget new definedLater'.
+	self when: [DevTools debuggers size > before and: [self debugger isDoesNotUnderstand and: [self debugger frames notEmpty]]] then: [
+		d := self debugger.
+		d defineMissingMethod.
+		self when: [(DevTools windowsOf: BrowserWindow) last model sourceKind == #newMethod] then: [
+			(DevTools windowsOf: BrowserWindow) last model accept: 'undefinedStep
+	^ 41'.
+			self when: [d state == #running] then: [self end]]]
+]
+
+{ #category : #session }
+DevSessionBench class >> dropLink [
+	"A Process stops in the target; the link drops (the shell closes the client's sockets) with two requests on their way; the client reconnects, both are answered, the stopped Process is still there and its debugger shows its frames again; then it is terminated."
+	| w before d r frames hierarchy processes |
+	w := WorkspaceModel new client: client; yourself.
+	before := DevTools debuggers size.
+	self begin: 'drop.stop'.
+	w doIt: 'DevSessionTarget new stopForDrop'.
+	self when: [DevTools debuggers size > before and: [self debugger frames notEmpty]] then: [
+		d := self debugger.
+		self record.
+		self begin: 'drop.reconnect'.
+		r := client reconnects.
+		frames := (client latencies select: [:l | l first = 'process.frames']) size.
+		Transcript show: 'devsession: drop'; cr; flush.
+		client classHierarchy: [:h | hierarchy := h size].
+		client processList: [:l | processes := l].
+		self when: [client isOpen and: [client reconnects > r and: [hierarchy notNil and: [processes notNil]]]] then: [
+			(processes anySatisfy: [:p | (p at: 'process') = d process and: [(p at: 'stopped') notNil]])
+				ifFalse: [self fail: 'the stopped Process is gone after the reconnect']
+				ifTrue: [
+					self when: [d state == #stopped and: [(client latencies select: [:l | l first = 'process.frames']) size > frames]] then: [
+						self record.
+						self begin: 'drop.terminate'.
+						d terminate.
+						"Its reply (ended) and the process.resumed event (running) may come in either order."
+						self when: [d state ~~ #stopped] then: [self end]]]]]
 ]
 
 { #category : #session }
@@ -205,17 +284,20 @@ DevSessionBench class >> selectEach: aCollection [
 	aCollection isEmpty ifTrue: [^ self end].
 	c := aCollection removeFirst.
 	browser selectClass: c.
-	self when: [browser className = c and: [browser selectors notEmpty]] then: [ | sel |
-		sel := browser selectors first.
-		browser selectSelector: sel.
-		self when: [browser selector = sel and: [browser sourceKind == #method]] then: [self selectEach: aCollection]]
+	self when: [browser className = c and: [browser selectorsLoaded]] then: [ | sel |
+		browser selectors isEmpty
+			ifTrue: [self selectEach: aCollection]
+			ifFalse: [
+				sel := browser selectors first.
+				browser selectSelector: sel.
+				self when: [browser selector = sel and: [browser sourceKind == #method]] then: [self selectEach: aCollection]]]
 ]
 
 { #category : #session }
 DevSessionBench class >> compile [
 	self begin: 'compile'.
-	browser selectClass: 'DevSessionBench'.
-	self when: [browser className = 'DevSessionBench' and: [browser sourceKind == #definition]] then: [
+	browser selectClass: targetClass.
+	self when: [browser className = targetClass and: [browser sourceKind == #definition]] then: [
 		browser newMethodTemplate.
 		browser accept: 'benchAnswer
 	^ 42'.
@@ -242,7 +324,7 @@ DevSessionBench class >> raiseError [
 	| w |
 	w := WorkspaceModel new client: client; yourself.
 	self begin: 'error.debugger'.
-	w doIt: 'DevSessionBench new failingStep'.
+	w doIt: targetClass , ' new failingStep'.
 	self when: [self debugger notNil and: [self debugger frames notEmpty]] then: [self end]
 ]
 
@@ -262,7 +344,7 @@ DevSessionBench class >> fixAndProceed [
 	| d i |
 	d := self debugger.
 	i := 0.
-	d frames doWithIndex: [:f :k | (i = 0 and: [(f at: 'method') = 'DevSessionBench>>failingStep']) ifTrue: [i := k]].
+	d frames doWithIndex: [:f :k | (i = 0 and: [(f at: 'method') = (targetClass , '>>failingStep')]) ifTrue: [i := k]].
 	i = 0 ifTrue: [^ self fail: 'no frame of failingStep'].
 	self begin: 'fix.proceed'.
 	d selectFrame: i.

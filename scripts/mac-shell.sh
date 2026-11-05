@@ -5,6 +5,14 @@
 #   scripts/mac-shell.sh build
 #   scripts/mac-shell.sh run <out> key=value...
 #
+# Module 9d: the scripted session against another target,
+#   scripts/mac-shell.sh run <out> mode=devsession classes=0 target=<name|address> \
+#       targets=<targets file> project=<dir> [package=Kernel]
+# (target= a name in the targets file, tcp://host:port or bonjour:<name>;
+# the token stays in the file, mode 0600, and in the shell's memory), and
+# the shell serving over TCP as the phone does:
+#   scripts/mac-shell.sh run <out> mode=serve scenario=idle protocol=tcp:<port> tokendir=<dir>
+#
 # DD (DerivedData) and TIMEOUT override the defaults. The app quits itself
 # at the end of every mode but demo.
 set -uo pipefail

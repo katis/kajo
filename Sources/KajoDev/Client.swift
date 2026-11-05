@@ -5,7 +5,8 @@ import Foundation
 // session with the token, send requests and wait (bounded) for their
 // replies, keep the events. The `kajo` CLI, the MCP server and the tests
 // speak through it; the developer UI (9c) will speak the same protocol from
-// Smalltalk.
+// Smalltalk. Module 9d: over any transport (`openStream`: a Unix socket,
+// TCP, a Bonjour name), the same code the image's `ClientHost` uses.
 
 public struct ProtocolError: Error, CustomStringConvertible, Sendable {
     public let description: String
@@ -22,6 +23,7 @@ public final class ProtocolClient: @unchecked Sendable {
     private var closed = false  // under changed
     private var closing = false  // under changed: close() was called
     private var nextId = 1  // under lock
+    private var fdClosed = false  // under lock
     private var reader: Thread?
     private var eventHandler: (@Sendable (JSONValue) -> Void)?  // under changed
     /// Called on the reading thread for every event (not replies).
@@ -38,21 +40,15 @@ public final class ProtocolClient: @unchecked Sendable {
         }
     }
 
-    public init(path: String) throws {
-        let s = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard s >= 0 else { throw ProtocolError("socket: \(errnoText())") }
-        var one: Int32 = 1
-        unsafe setsockopt(s, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        var addr = ProtocolServer.address(path)
-        let r = withUnsafePointer(to: &addr) {
-            unsafe $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { unsafe connect(s, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
-        }
-        guard r == 0 else {
-            let e = errnoText()
-            Darwin.close(s)
-            throw ProtocolError("connect \(path): \(e)")
-        }
-        fd = s
+    /// Connect to a target at `path`: a socket path or, since module 9d,
+    /// any `TargetAddress` form (`tcp://host:port`, `bonjour:<name>`).
+    public convenience init(path: String, timeout: Double = 10) throws {
+        guard let address = TargetAddress.parse(path) else { throw ProtocolError("not a target address: \(path)") }
+        try self.init(address: address, timeout: timeout)
+    }
+
+    public init(address: TargetAddress, timeout: Double = 10) throws {
+        fd = try openStream(address, timeout: timeout)
         let t = Thread { [self] in readLoop() }
         t.name = "kajo-client"
         reader = t
@@ -196,6 +192,16 @@ public final class ProtocolClient: @unchecked Sendable {
     }
 
     public func close() {
+        // Once: `deinit` calls this again, and a descriptor shut down or
+        // closed twice may by then be someone else's (module 9d found a
+        // Bonjour resolver's socket closed under it by a client's deinit).
+        lock.lock()
+        if fdClosed {
+            lock.unlock()
+            return
+        }
+        fdClosed = true
+        lock.unlock()
         changed.lock()
         closing = true
         changed.unlock()

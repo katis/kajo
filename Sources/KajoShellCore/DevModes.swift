@@ -86,6 +86,14 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
 /// the change. With `load=storm` the image runs 9a's storm scenario on its
 /// background workers meanwhile. The frames are the display link's across
 /// the whole session; one result line at the end.
+///
+/// Module 9d: `target=<name|address> [targets=<file>] [project=<dir>]
+/// [package=Kernel]` runs the session against another target (the phone)
+/// instead of the image's own socket: the client transport reads the
+/// targets file (the token stays in it) and browses Bonjour; the image
+/// does not serve. The session's dropped link is the shell's: the bench's
+/// transcript line `devsession: drop` closes every client socket as a
+/// link that died would.
 @MainActor public final class DevSessionMode {
     let options: LaunchOptions
     let platform: ShellPlatform
@@ -94,6 +102,8 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
     let typing: Int
     let rate: Int
     let load: String
+    let target: String?
+    let hostBox = HostBox()
     var frameTimes: [Double] = []
     var startTs = 0.0
     var finished = false
@@ -121,6 +131,7 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         typing = options.int("typing", 0)
         rate = max(1, options.int("rate", 20))
         load = options.string("load", "none")
+        target = options["target"]
     }
 
     public func start(resources: ShellResources = .main) {
@@ -137,10 +148,16 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
             finish(2)
         }
         runtime.start()
-        do { server = try runtime.serveProtocol(socket: devSocketPath(options)) } catch {}
-        guard let server else {
-            Output.shared.emit(resultLine("devsession", options, "FAILED=1 error=protocol"))
-            finish(2)
+        hostBox.set(runtime.clientHost)
+        if target == nil {
+            do { server = try runtime.serveProtocol(socket: devSocketPath(options)) } catch {}
+            guard server != nil else {
+                Output.shared.emit(resultLine("devsession", options, "FAILED=1 error=protocol"))
+                finish(2)
+            }
+        } else {
+            runtime.clientHost.readTargetsFile(options.string("targets", NSHomeDirectory() + "/.kajo/targets"))
+            runtime.clientHost.startBrowsing()
         }
         runtime.onTurn = { [unowned self] t, _ in
             self.turns += 1
@@ -168,15 +185,19 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
             if !self.finished && ts >= self.startTs { self.frameTimes.append(ts) }
             self.runtime.tick(timestamp: ts)
         }
-        let selector = typing > 0 ? "startTyping:" : "start:package:"
-        var args: [ShellValue] = [.string(server.path)]
+        var selector = typing > 0 ? "startTyping:" : "start:package:"
+        var args: [ShellValue] = [.string(server?.path ?? "")]
         if typing == 0 { args.append(.string(classes > 0 ? "Generated" : "Tools")) }
+        if let target {
+            selector = "startRemote:package:project:"
+            args = [.string(target), .string(options.string("package", "Kernel")), options["project"].map { .string($0) } ?? .nil]
+        }
         guard let p = runtime.vm.spawn(selector, receiver: "DevSessionBench", arguments: args, main: true, priority: 2) else {
             Output.shared.emit(resultLine("devsession", options, "FAILED=1 error=spawn"))
             finish(2)
         }
         runtime.vm.release(p)
-        platform.showStatus("devsession \(options.summary) protocol \(server.path)")
+        platform.showStatus("devsession \(options.summary) protocol \(server?.path ?? target ?? "-")")
         let timeout = options.double("timeout", 180)
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { MainActor.assumeIsolated { self.end(nil, "timeout") } }
     }
@@ -188,7 +209,11 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
             guard let o = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any],
                   o["kind"] as? String == "transcript", let t = o["text"] as? String else { return }
             Output.shared.emit("transcript: " + t)
-            if t.hasPrefix("devsession: type ") {
+            if t == "devsession: drop" {
+                // The dropped link: every client socket ends now, before
+                // the bench's next request (this runs inside its turn).
+                self.hostBox.get()?.dropConnections()
+            } else if t.hasPrefix("devsession: type ") {
                 let h = Int(t.dropFirst("devsession: type ".count).trimmingCharacters(in: .whitespaces)) ?? 0
                 DispatchQueue.main.async { MainActor.assumeIsolated { self.startTyping(h) } }
             } else if t.hasPrefix("devsession: done ") {
@@ -253,7 +278,7 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         typeTimer?.cancel()
         let nominal = Double(platform.maximumFramesPerSecond)
         let fa = FrameAccount(timestamps: frameTimes.filter { $0 <= endTs }, start: startTs, end: endTs, nominalHz: nominal)
-        var line = "classes=\(options.int("classes", 2000)) load=\(load) workers=\(options.int("workers", 5)) typing=\(typing)"
+        var line = "target=\(target == nil ? "local" : "remote") classes=\(options.int("classes", 2000)) load=\(load) workers=\(options.int("workers", 5)) typing=\(typing)"
         line += " seconds=\(f3(endTs - startTs)) nominal_hz=\(f2(nominal)) frames=\(fa.frames) expected=\(fa.expected) missed=\(fa.missed) drops=\(fa.drops)"
         line += " gap_p99_ms=\(f3(fa.gapP99Ms)) gap_max_ms=\(f3(fa.gapMaxMs)) turns=\(turns) preempted_turns=\(preempted) max_turn_ms=\(f3(Double(maxTurnNs) / 1e6)) view_calls=\(viewCalls)"
         // The longest turn: what stopped it from ending at its budget.
@@ -294,5 +319,21 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         runtime.stopProtocol()
         Output.shared.emit(resultLine("devsession", options, line))
         finish(failure == nil ? 0 : 2)
+    }
+}
+
+/// The client transport, for a sink built before the runtime (module 9d).
+final class HostBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var host: ClientHost?
+    func set(_ h: ClientHost) {
+        lock.lock()
+        host = h
+        lock.unlock()
+    }
+    func get() -> ClientHost? {
+        lock.lock()
+        defer { lock.unlock() }
+        return host
     }
 }

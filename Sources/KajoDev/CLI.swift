@@ -10,7 +10,7 @@ import Foundation
 // 2 on a usage or connection error.
 
 public let clientUsage = """
-       kajo eval    --target <socket> [--token T] [--receiver handle] '<statements>'
+       kajo eval    --target <target> [--token T] [--receiver handle] '<statements>'
        kajo compile --target <socket> <Class> [--side class] [--category c] (--source '<method>' | --file <path>)
        kajo browse  --target <socket> [<Class> [<selector>]] [--side class]
        kajo debug   --target <socket> list | frames P | proceed P | restart P F | retry P | step P into|over|out [F]
@@ -18,7 +18,8 @@ public let clientUsage = """
        kajo test    --target <socket> [--filter pattern] [--tag tag]
        kajo request --target <socket> <kind> ['{"argument": value, ...}']
        kajo mcp     --target <socket> [--token T] [--client agent:<name>] [--project dir] [--package P]
-         (every one: [--token T] [--client developer|agent:<name>] [--package P] [--project dir] [--timeout s])
+         (<target>: a socket path, tcp://host:port, bonjour:<name>, or a name in ~/.kajo/targets;
+          every one: [--token T] [--client developer|agent:<name>] [--package P] [--project dir] [--timeout s])
 """
 
 public struct ClientOptions {
@@ -55,10 +56,21 @@ public struct ClientOptions {
         }
     }
 
+    /// Module 9d: `--target` is a socket path, `tcp://host:port`,
+    /// `bonjour:<name>`, or the name of a target in `~/.kajo/targets`
+    /// (`KAJO_TARGETS` names another file) or a phone the network shows;
+    /// the token is `--token`, `KAJO_TOKEN`, or the targets file's.
     public func connect() throws -> ProtocolClient {
-        guard let target else { throw ProtocolError("--target <socket> is needed") }
-        guard let token else { throw ProtocolError("the token is needed: --token or KAJO_TOKEN") }
-        let c = try ProtocolClient(path: target)
+        guard let target else { throw ProtocolError("--target <socket|tcp://host:port|bonjour:name|name> is needed") }
+        let host = ClientHost()
+        host.readTargetsFile(ProcessInfo.processInfo.environment["KAJO_TARGETS"] ?? NSHomeDirectory() + "/.kajo/targets")
+        var resolved = host.resolve(target)
+        if resolved == nil, TargetAddress.isServiceName(target), !target.contains("/") {
+            resolved = (.bonjour(target), host.resolve("bonjour:" + target)?.token)
+        }
+        guard let (address, held) = resolved else { throw ProtocolError("not a target: \(target)") }
+        guard let token = token ?? held else { throw ProtocolError("the token is needed: --token, KAJO_TOKEN or the targets file") }
+        let c = try ProtocolClient(address: address, timeout: min(timeout, 30))
         try c.open(token: token, client: client, package: package, timeout: timeout)
         return c
     }

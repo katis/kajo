@@ -107,7 +107,7 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
             let t = TestsMode(o, platform: platform)
             tests = t
             t.start()
-        case "scenario":
+        case "scenario", "serve":
             let s = ScenarioMode(o, platform: platform)
             scenario = s
             s.start()

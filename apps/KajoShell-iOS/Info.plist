@@ -24,6 +24,12 @@
 	<string>1</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_kajo-dev._tcp</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Kajo serves the development protocol to the Mac's developer tools on the local network.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

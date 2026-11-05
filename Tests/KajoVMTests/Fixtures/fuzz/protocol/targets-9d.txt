@@ -1,0 +1,5 @@
+tcp://192.168.1.10:51234
+bonjour:Joni’s iPhone
+/tmp/kajo.sock
+phone	bonjour:Joni’s iPhone	abcdefghijkmnpqrstuv
+mac tcp://[fe80::1%en0]:9000 tok

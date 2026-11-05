@@ -54,6 +54,14 @@ final class FlippedView: NSView {
 
     func showStatus(_ line: String) { statusLabel.stringValue = String(line.prefix(600)) }
 
+    /// Module 9d: the Mac serving over TCP shows how to pair in its status
+    /// line (its token is shown there as 9b's socket's is); no button.
+    var onNewToken: (() -> Void)?
+    func showPairing(_ info: PairingInfo?) {
+        guard let i = info else { return }
+        showStatus("serving tcp \(i.name) port \(i.port) \(i.addresses.joined(separator: " ")) token \(i.token) \(i.status)")
+    }
+
     var displayAssertion: IOPMAssertionID = 0
 
     func startDisplayLink(_ tick: @escaping @MainActor (Double, Double) -> Void) {
