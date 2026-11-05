@@ -62,6 +62,14 @@ struct ObjectMemoryConfig: Sendable {
     /// memory beyond the blocks, and only stop-the-world scavenges collect
     /// them. A multiple of the block size.
     var nurseryRegionBytes = 0
+    /// Module 10 (vm-teardown's first follow-up): blocks after the promotion
+    /// reserve that only the VM's final collection may take, so the
+    /// promote-all at the VM's end grows old space instead of trapping when
+    /// the soft limit and the reserve are full. nil: as large as the
+    /// promotion reserve (which `NurseryConfig.reserveBytes` sizes to twice
+    /// what the nurseries hold). Address space only until used; clamped so
+    /// the reservation stays within 4 GiB. A multiple of the block size.
+    var endGrowthBytes: Int? = nil
     /// Entries reserved; the table never grows in module 1.
     var entryCapacity = 1 << 22
     /// Entries per refill of an allocation context.
@@ -76,7 +84,7 @@ struct ObjectMemoryConfig: Sendable {
     /// The configuration after the stress flags are applied.
     var effective: ObjectMemoryConfig {
         var c = self
-        if stress.contains(.oneBlockHeap) { c.heapBytes = BlockHeap.blockBytes; c.reserveBytes = 0 }
+        if stress.contains(.oneBlockHeap) { c.heapBytes = BlockHeap.blockBytes; c.reserveBytes = 0; c.endGrowthBytes = 0 }
         if stress.contains(.tinyEntryChunks) { c.entryChunk = 2 }
         return c
     }
@@ -105,4 +113,27 @@ struct TestSwitches: Sendable {
     var noBoundaryCheck = false
     /// The frame-pin walk skips the frame's Context word.
     var pinWalkSkipsContext = false
+    /// Module 10: one reader of a body treats a run of blocks as ordinary
+    /// blocks, as module 1 did, so its test shows the run rule matters.
+    var runBlind: RunReader? = nil
+}
+
+/// Module 10: the readers of a body that know runs, each with a broken
+/// variant (`TestSwitches.runBlind`).
+enum RunReader: Sendable, Equatable {
+    /// The eager sweep frees a run's continuations with no live body.
+    case sweep
+    /// The lazy sweep's apply does the same.
+    case lazySweep
+    /// Compaction treats a live run's blocks as sources and destinations.
+    case compaction
+    /// The heap verifier walks a head only to one block and accepts an
+    /// entry into a continuation.
+    case verifier
+    /// The block pool's rebuild offers run blocks to allocators.
+    case pool
+    /// The relocator may select a run's head.
+    case relocation
+    /// The snapshot writer drops the side table (every block ordinary).
+    case snapshot
 }

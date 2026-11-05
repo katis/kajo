@@ -123,10 +123,10 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
 
     @Test func theImageRoundTripsThroughLoadAndSave() throws {
         let first = try Image.load(image: kernelImage)
-        let again = first.saveImage()
+        let again = try first.saveImage()
         first.destroy()
         let second = try Image.load(image: again)
-        let third = second.saveImage()
+        let third = try second.saveImage()
         second.destroy()
         #expect(again == third)  // a loaded and saved image saves the same bytes
         let (result, lines) = runKernelTests(again, ["--filter", "ReflectionTest"])

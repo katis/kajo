@@ -154,6 +154,7 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     unsafe log.pointee.counters.finalMarkNs &+= t5 &- t0
     unsafe log.pointee.counters.markedObjects &+= m.pointee.markedObjects
     unsafe log.pointee.counters.markedBytes &+= m.pointee.markedBytes
+    unsafe log.pointee.counters.chunksSplit &+= m.pointee.chunksSplit
     unsafe log.pointee.counters.markerCpuNs &+= m.pointee.markCpuNs
     unsafe log.pointee.counters.remFiltered &+= filtered
     unsafe log.pointee.counters.ephemeronsQueued &+= queued

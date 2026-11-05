@@ -68,11 +68,12 @@ extension Machine {
     }
 
     /// A new String of `n` bytes, zeroed (the caller fills it with valid
-    /// UTF-8 before anything else can see it).
+    /// UTF-8 before anything else can see it). Module 10: up to the count
+    /// field (16 MiB); past a block it is a large object.
     @inline(__always)
     func newString(count n: Int) -> Oop {
-        guard n <= Header.maxBytes else { return .none }
-        return allocateBytes(WellKnown.string, count: n)
+        guard n <= Header.maxLargeCount else { return .none }
+        return allocateAny(WellKnown.string, count: n, bytes: true)
     }
 
     /// Copy `n` bytes of `src` from `i` into the fresh `dst` at `j`.

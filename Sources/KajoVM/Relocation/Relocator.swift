@@ -74,6 +74,8 @@ func relocationAtFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64)
     for b in unsafe 0..<st.pointee.blockCount {
         let live = unsafe UInt64(st.pointee.blockLive[b])
         if live == 0 || !heap.isInUse(b) { continue }
+        // Module 10: a run is never relocated (large objects never move).
+        if heap.isRun(b) && !om.isRunBlind(.relocation) { continue }
         // Taken by an allocator since the snapshot: it holds bodies that
         // are not snapshot entries, and may be a context's current block.
         if om.blockStampAtPause(b) == stamp { continue }

@@ -84,10 +84,25 @@ extension ObjectMemory {
 
         var seen = RawArray<UInt8>(repeating: 0, count: Int(hw))
         defer { seen.free() }
-        for b in 0..<h.blockCount {
+        // Module 10: a run is walked as its one body (`verifyRun`); a
+        // continuation outside a run, a free block with a kind, an entry
+        // into a continuation are refused.
+        let runBlind = isRunBlind(.verifier)
+        var b = 0
+        while b < h.blockCount {
+            defer { b += 1 }
             let used = h.usedBytes(b)
             if !h.isInUse(b) {
                 if used != 0 { out.fail("free block \(b) has \(used) used bytes") }
+                if h.kind(b) != BlockKind.ordinary && !runBlind { out.fail("free block \(b) has kind \(h.kind(b))") }
+                continue
+            }
+            if !runBlind && h.kind(b) != BlockKind.ordinary {
+                if h.kind(b) != BlockKind.head {
+                    out.fail("block \(b) is a continuation of no run")
+                    continue
+                }
+                b += verifyRun(head: b, highWater: hw, seen: &seen, &out) - 1
                 continue
             }
             if used > blockBytes || used & 7 != 0 {
@@ -176,6 +191,18 @@ extension ObjectMemory {
             if s >= heapBytes { out.fail("entry \(e): body offset \(s) is outside the heap"); continue }
             let b = BlockHeap.block(ofOffset: s)
             if !h.isInUse(b) { out.fail("entry \(e): body in block \(b), which is not in use"); continue }
+            if !runBlind {
+                // Module 10: a large body starts a run, an ordinary one an
+                // ordinary block; nothing points into a continuation.
+                if h.kind(b) == BlockKind.continuation {
+                    out.fail("entry \(e): body at \(s) points into a continuation of a run (block \(b))")
+                    continue
+                }
+                if hd.isLarge != (h.kind(b) == BlockKind.head) {
+                    out.fail("entry \(e): a body of \(hd.bodyBytes) bytes in a block of kind \(h.kind(b))")
+                    continue
+                }
+            }
             if !isRegisteredClass(hd.classIndex) { out.fail("entry \(e): class index \(hd.classIndex) is not registered") }
             if s &+ hd.bodyBytes > BlockHeap.start(ofBlock: b) &+ h.usedBytes(b) {
                 out.fail("entry \(e): body at \(s) of \(hd.bodyBytes) bytes is outside block \(b)'s used bytes")
@@ -198,6 +225,42 @@ extension ObjectMemory {
             }
         }
         return out.list
+    }
+
+    /// Module 10: the run whose head is `b`: its `used` a large body's
+    /// bytes, each later block of it in use, a continuation with `used` 0,
+    /// inside the heap; one body exactly as long as `used`, starting at the
+    /// head. Answers the run's blocks (1 when it is too broken to walk).
+    private func verifyRun(head b: Int, highWater hw: UInt64, seen: inout RawArray<UInt8>, _ out: inout Issues) -> Int {
+        let h = heap
+        let used = h.usedBytes(b)
+        if used <= UInt64(BlockHeap.blockBytes) || used & 7 != 0 {
+            out.fail("run at block \(b) has an invalid used count \(used)")
+            return 1
+        }
+        let k = h.runLength(head: b)
+        if b &+ k > h.blockCount {
+            out.fail("run at block \(b) of \(k) blocks runs past the heap")
+            return 1
+        }
+        for r in (b &+ 1)..<(b &+ k) {
+            if !h.isInUse(r) || h.kind(r) != BlockKind.continuation || h.usedBytes(r) != 0 {
+                out.fail("run at block \(b): block \(r) is not a continuation in use with no used bytes")
+                return 1
+            }
+        }
+        if b &+ k < h.blockCount && h.isInUse(b &+ k) && h.kind(b &+ k) == BlockKind.continuation {
+            out.fail("run at block \(b): block \(b &+ k) continues past the run's \(k) blocks")
+        }
+        let start = BlockHeap.start(ofBlock: b)
+        let w = h.word(atOffset: start)
+        if BackRef.words(w) &<< 3 != used {
+            out.fail("run at block \(b): its body of \(BackRef.words(w)) words is not its used \(used)")
+            return k
+        }
+        let idx = BackRef.entryIndex(w)
+        if idx != 0, idx < hw, stateWord(idx &<< 4) == start { seen[Int(idx)] &+= 1 }
+        return k
     }
 
     // MARK: - free lists and the block pool
@@ -275,6 +338,10 @@ extension ObjectMemory {
             if b >= h.blockCount { out.fail("pool holds block \(b) beyond the heap"); continue }
             if inPool[b] != 0 { out.fail("block \(b) is twice in the pool") }
             inPool[b] = 1
+            if h.isRun(b) {
+                out.fail("block \(b) of a run is in the pool")
+                continue
+            }
             if h.isInUse(b) && UInt64(BlockHeap.blockBytes) &- h.usedBytes(b) < ObjectMemory.minimumTail {
                 out.fail("block \(b) is in the pool, in use with no tail")
             }

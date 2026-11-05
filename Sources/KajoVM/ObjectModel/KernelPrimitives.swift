@@ -140,7 +140,8 @@ extension Machine {
 
     /// A new String holding `bytes` (valid UTF-8), `.none` when the heap is full.
     func newString(_ bytes: [UInt8]) -> Oop {
-        let s = allocateBytes(WellKnown.string, count: bytes.count)
+        guard bytes.count <= Header.maxLargeCount else { return .none }
+        let s = allocateAny(WellKnown.string, count: bytes.count, bytes: true)
         if s == .none { return .none }
         for (i, b) in bytes.enumerated() { om.storeByte(s, i, b) }
         return s

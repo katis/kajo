@@ -196,7 +196,7 @@ public enum FuzzEntry {
           block_return
         end
         """)])
-        return image.saveImage()
+        return try! image.saveImage()
     }
 
     /// A valid snapshot to seed the snapshot corpus with: an image with a

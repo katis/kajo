@@ -90,7 +90,7 @@ private func run(_ img: Image, _ n: Int64) throws -> Int64 {
 @Test func anImageRoundTripsAndRunsAfterVerification() throws {
     let img = try builtImage()
     #expect(try run(img, 100) == 5050 + 2)
-    let bytes = img.saveImage()
+    let bytes = try img.saveImage()
     img.destroy()
     let loaded = try Image.load(image: bytes, config: imageConfig())
     defer { loaded.destroy() }
@@ -102,7 +102,7 @@ private func run(_ img: Image, _ n: Int64) throws -> Int64 {
 }
 
 private enum Corruption: String, CaseIterable {
-    case badMagic, badVersion, aVersion2Image, unknownFlags, truncated, methodMissingFromTable, extraTableEntry
+    case badMagic, badVersion, aVersion2Image, aVersion4Image, unknownFlags, truncated, methodMissingFromTable, extraTableEntry
     case badOpcode, jumpIntoAnOperand, maxStackTooSmall, literalNotASelector, ivarOutsideTheClass, methodOfAnotherClass
     case methodNotPinned, liveContext, aProcess, closureOfTheWrongSize, badClassFormatForInstance
     case misplacedSymbol, specialSelectorChanged, wellKnownClassRenamed, dictionaryOfAnotherClass, methodClassCycle
@@ -168,13 +168,16 @@ private func corrupt(_ c: Corruption) throws -> [UInt8] {
         om.store(om.classOop(acc), ClassLayout.superclass, om.classOop(acc))
     default: break
     }
-    var b = img.saveImage()
+    // Module 10: the host's save refuses a live Process; the loader's own
+    // refusal is what this case tests, so it encodes the image itself.
+    var b = c == .aProcess ? img.encodedImage(snapshot: om.snapshot()) : try img.saveImage()
     func put(_ i: Int, _ v: UInt64) { for k in 0..<8 { b[8 * i + k] = UInt8(truncatingIfNeeded: v >> (8 * UInt64(k))) } }
     switch c {
     case .badMagic: b[0] ^= 1
-    case .badVersion: put(1, 5)
+    case .badVersion: put(1, 6)
     // module 8d: 8c's images (version 2) are refused, their Metaclass objects a slot short
     case .aVersion2Image: put(1, 2)
+    case .aVersion4Image: put(1, 4)  // module 9b's, before module 10's runs
     case .unknownFlags: put(5, 2)
     case .truncated: b.removeLast(9)
     case .methodMissingFromTable:
@@ -207,7 +210,7 @@ private func theImageLoaderRejects(_ c: Corruption) throws {
 /// Seeded mutations of a valid image: each loads cleanly (and passes every
 /// verifier) or is refused; nothing traps.
 @Test func mutatedImagesLoadCleanOrAreRejected() throws {
-    let seed = try { let i = try builtImage(); defer { i.destroy() }; return i.saveImage() }()
+    let seed = try { let i = try builtImage(); defer { i.destroy() }; return try i.saveImage() }()
     // The snapshot fuzzer's image seed (`Fixtures/fuzz/snapshot/image.img`);
     // `KAJO_WRITE_FUZZ_SEEDS=1` writes it (module 8d: version 3).
     if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil {
@@ -219,6 +222,52 @@ private func theImageLoaderRejects(_ c: Corruption) throws {
         var b = seed
         for _ in 0..<(1 + Int(g.next() % 3)) {
             let k = Int(g.next() % UInt64(b.count))
+            b[k] ^= UInt8(truncatingIfNeeded: 1 << (g.next() % 8))
+        }
+        if FuzzEntry.image(b) { loaded += 1 } else { rejected += 1 }
+    }
+    #expect(rejected > 0 && loaded + rejected == 300)
+}
+
+/// Module 10: an image with large objects (runs of blocks) round-trips,
+/// and seeded mutations of it load cleanly or are refused. The snapshot
+/// fuzzer's run seed (`Fixtures/fuzz/snapshot/large-objects.img`);
+/// `KAJO_WRITE_FUZZ_SEEDS=1` writes it.
+@Test func mutatedImagesWithRunsLoadCleanOrAreRejected() throws {
+    let seed = try {
+        let i = try builtImage()
+        defer { i.destroy() }
+        let ctx = i.om.makeContext()
+        defer { i.om.destroyContext(ctx) }
+        let a = i.om.tryAllocateAny(ctx, classIndex: WellKnown.array, count: 9_000, isBytes: false, fill: i.nilObject)
+        let b = i.om.tryAllocateAny(ctx, classIndex: WellKnown.byteArray, count: 40_000, isBytes: true, fill: i.nilObject)
+        #expect(a != .none && b != .none)
+        i.om.store(a, 8_999, b)
+        i.om.store(a, 0, Oop(smallInteger: 7))
+        i.om.storeByte(b, 39_999, 5)
+        i.om.store(i.globals, Image.globalCount - 1, a)
+        return try i.saveImage()
+    }()
+    let back = try Image.load(image: seed, config: imageConfig())
+    let a = back.om.load(back.globals, Image.globalCount - 1)
+    #expect(back.om.count(of: a) == 9_000 && back.om.load(a, 0) == Oop(smallInteger: 7))
+    #expect(back.om.loadByte(back.om.load(a, 8_999), 39_999) == 5)
+    #expect(back.om.heap.kind(back.om.blockIndex(of: a)) == BlockKind.head)
+    back.destroy()
+    if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil {
+        try Data(seed).write(to: URL(fileURLWithPath: "\(fixturesDir)/fuzz/snapshot/large-objects.img"))
+    }
+    #expect(FuzzEntry.image(seed))
+    // Half the flips land in the snapshot's block table, where the kinds are.
+    let methods = (0..<8).reduce(0) { $0 | Int(seed[24 + $1]) << (8 * $1) }
+    let snapAt = 8 * (ImageFile.headerWords + methods)
+    let L = try SnapshotLayout(parsing: Array(seed[snapAt...]))
+    var g = SplitMix(seed: 12)
+    var loaded = 0, rejected = 0
+    for _ in 0..<300 {
+        var b = seed
+        for _ in 0..<(1 + Int(g.next() % 3)) {
+            let k = g.next() % 2 == 0 ? snapAt + L.usedAt + Int(g.next() % UInt64(8 * L.blockCount)) : Int(g.next() % UInt64(b.count))
             b[k] ^= UInt8(truncatingIfNeeded: 1 << (g.next() % 8))
         }
         if FuzzEntry.image(b) { loaded += 1 } else { rejected += 1 }

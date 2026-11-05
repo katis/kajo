@@ -123,7 +123,7 @@ func temporaryDirectory(_ name: String) throws -> URL {
         let rewritten = try smalltalkStrings(b, "readTonelAll:", written)
         #expect(rewritten == written)
         // and its methods, saved and loaded with every check
-        let saved = b.saveImage()
+        let saved = try b.saveImage()
         let c = try Image.load(image: saved)
         defer { c.destroy() }
         let methodsB = try smalltalkStrings(c, "methodListsOf:", ["TonelFixture"])

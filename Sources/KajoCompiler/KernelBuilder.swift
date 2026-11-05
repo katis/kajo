@@ -97,7 +97,9 @@ public struct KernelBuild: Sendable {
             }
         }
         if options.release { image.seal() }
-        return Result(image: image.imageBytes(), classes: plan.classes.count, methods: plan.compiled.count, warnings: plan.warnings)
+        let bytes: [UInt8]
+        do { bytes = try image.imageBytes() } catch { throw CompileError("saving the image: \(error)") }
+        return Result(image: bytes, classes: plan.classes.count, methods: plan.compiled.count, warnings: plan.warnings)
     }
 }
 

@@ -26,6 +26,7 @@ func verifyRelocation(_ vm: VMPointer, _ r: RelocationPointer) -> [String] {
     var inPool = [UInt8](repeating: 0, count: h.blockCount)
     for b in om.poolBlocks {
         if inPool[b] != 0 { out.fail("block \(b) is twice in the pool") }
+        if h.isRun(b) { out.fail("block \(b) of a run is in the pool") }
         inPool[b] = 1
     }
     if unsafe st.pointee.pendingBlocks.count != 0 {
@@ -34,6 +35,7 @@ func verifyRelocation(_ vm: VMPointer, _ r: RelocationPointer) -> [String] {
     for i in unsafe st.pointee.cursor..<st.pointee.selected.count {
         let b = unsafe Int(st.pointee.selected[i])
         if inPool[b] != 0 { out.fail("block \(b) of the relocation set is in the pool") }
+        if h.isRun(b) { out.fail("block \(b) of the relocation set is part of a run") }
     }
     var e: UInt64 = 1
     while e < hw {

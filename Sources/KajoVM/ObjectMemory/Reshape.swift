@@ -6,7 +6,8 @@ enum ReshapeError: Error, Equatable {
     /// A layout index is not below `namedSlots`, or an instance has fewer
     /// slots than `namedSlots`.
     case layoutOutOfRange
-    /// A reshaped instance would not fit in a block.
+    /// A reshaped instance would pass the count field (module 10: no
+    /// longer one block; a larger body takes a run).
     case tooLarge
     /// No room for the new bodies; nothing was changed. Collect and retry.
     case heapFull
@@ -72,7 +73,7 @@ extension ObjectMemory {
                 if h.isFramePinned || h.isPinnedForGood && !allowPinned { throw .pinnedInstance }
                 if h.isReadOnly { throw .readOnlyInstance }
                 if h.count < UInt64(r.namedSlots) { throw .layoutOutOfRange }
-                if UInt64(r.layout.count) &+ h.count &- UInt64(r.namedSlots) > UInt64(Header.maxSlots) { throw .tooLarge }
+                if UInt64(r.layout.count) &+ h.count &- UInt64(r.namedSlots) > UInt64(Header.maxLargeCount) { throw .tooLarge }
             }
             objects.append(objs)
         }
@@ -82,7 +83,10 @@ extension ObjectMemory {
         for (k, r) in requests.enumerated() {
             for o in objects[k] {
                 let words = UInt64(r.layout.count) &+ header(o).count &- UInt64(r.namedSlots) &+ 1
-                guard let off = allocateBody(ctx, bytes: words &<< 3) else {
+                // Module 10: a body past a block takes a run (old is where
+                // it goes anyway: the reshape runs after a promote-all).
+                let large = words &<< 3 > UInt64(BlockHeap.blockBytes)
+                guard let off = large ? takeRun(bytes: words &<< 3, reserve: true) : allocateBody(ctx, bytes: words &<< 3) else {
                     // The bodies taken so far name their entries but no entry
                     // names them: dead, and walkable, until the next sweep.
                     retire(ctx)

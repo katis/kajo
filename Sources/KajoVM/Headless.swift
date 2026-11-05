@@ -171,7 +171,7 @@ public enum Headless {
         do { image = try Image.load(image: bytes, config: config) } catch { return .failure(.load("\(error)")) }
         defer { image.destroy() }
         image.seal()
-        return .success(image.saveImage())
+        do { return .success(try image.saveImage()) } catch { return .failure(.load("\(error)")) }
     }
 
     /// Module 8b: `kajo test`. Load an image, send its entry point `test:`

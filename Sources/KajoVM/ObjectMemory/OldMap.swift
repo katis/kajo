@@ -155,17 +155,21 @@ extension ObjectMemory {
     /// Free every in-use block with no live body (`live[b] == 0`) that no
     /// allocator took after the snapshot stamped `stamp`. Contexts retired;
     /// `rebuildBlockPool` after. World stopped. Answers the blocks freed.
+    /// Module 10: a run goes with its head (`live` counts a body in the
+    /// block it starts in), never a continuation alone; a run taken after
+    /// the snapshot carries the stamp in every block.
     func freeDeadBlocks(live: RawArray<UInt8>, stamp: UInt32) -> Int {
-        lockPools()
-        defer { unlockPools() }
         let h = heap
+        let blind = isRunBlind(.lazySweep)
+        var runs: UInt64 = 0
+        lockPools()
         var freed = 0
         for b in 0..<Swift.min(h.blockCount, live.count) where h.isInUse(b) && live[b] == 0 {
             if unsafe pools.pointee.blockStamps[b] == stamp { continue }
-            h.setInUse(b, false)
-            h.setUsed(b, 0)
-            freed &+= 1
+            freed &+= freeBlockWithoutLiveBody(b, blind: blind, runs: &runs)
         }
+        unsafe pools.pointee.runsFreed &+= runs
+        unlockPools()
         return freed
     }
 

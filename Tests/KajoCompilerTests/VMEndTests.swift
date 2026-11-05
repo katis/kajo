@@ -68,10 +68,11 @@ func vmEndMemory(workers: Int, heapMiB: Int = 64) -> ObjectMemoryConfig {
 /// The VM is ended (shutdown, destroy) and its end report answered.
 @discardableResult
 func runKeep(_ image: Image, mode: YoungMode, workers: Int, _ selector: String, _ arguments: [Int],
-             processes: Int = 1, indexed: Bool = false) throws -> (answers: [Int64], end: VMEndReport) {
+             processes: Int = 1, indexed: Bool = false, reserveBlocks: Int? = nil) throws -> (answers: [Int64], end: VMEndReport) {
     var vc = VMConfig()
     vc.backgroundWorkers = workers
     vc.young.mode = mode
+    vc.nursery.testSwitches.promotionReserveBlocks = reserveBlocks
     let vm = VM(image: image, config: vc)
     #expect(vm.hasNursery)
     #expect(vm.youngMode == mode)
@@ -117,7 +118,7 @@ func runKeep(_ image: Image, mode: YoungMode, workers: Int, _ selector: String, 
         #expect(try runKeep(image, mode: mode, workers: workers, "total", []).answers == [expected])
         // The host saves it; the saved image loads (every loader rule),
         // verifies and runs, and the class still holds the objects.
-        let saved = image.saveImage()
+        let saved = try image.saveImage()
         let again = try Image.load(image: saved, config: vmEndMemory(workers: workers))
         defer { again.destroy() }
         let om = again.om
@@ -135,6 +136,79 @@ func runKeep(_ image: Image, mode: YoungMode, workers: Int, _ selector: String, 
             }
         }
         #expect(try runKeep(again, mode: mode, workers: workers, "total", []).answers == [expected])
+    }
+
+    /// Module 10, vm-teardown's first follow-up: old space grows for the
+    /// final collection. Old space is filled to its soft limit with live
+    /// large objects (old at birth) from the host, the promotion reserve is
+    /// two blocks, and a VM leaves 8000 live young Arrays in its
+    /// eden: the promote-all at its end needs more than the reserve, takes
+    /// the growth past it, and the image is whole (it traps without the
+    /// growth: `endGrowthBytes = 0`, run by hand, docs/modules/large-objects.md).
+    @Test func oldSpaceGrowsForTheFinalCollection() throws {
+        let vc = VMConfig()
+        var c = ObjectMemoryConfig()
+        c.heapBytes = 16 << 20
+        c.reserveBytes = 2 * BlockHeap.blockBytes
+        c.nurseryRegionBytes = vc.nursery.regionBytes(workers: 3)
+        // What `kajo run` reserves for promotion: twice the young generation.
+        c.endGrowthBytes = vc.nursery.reserveBytes(workers: 3)
+        let image = try Image.load(image: vmEndImage, config: c)
+        defer { image.destroy() }
+        try runKeep(image, mode: .stw, workers: 1, "slots:", [1], reserveBlocks: 1)
+        // The host fills old space up to the soft limit the VM will set
+        // (the hard limit less the one reserve block) with large objects.
+        let om = image.om
+        let ctx = om.makeContext()
+        var bigs: [RootHandle] = []
+        let soft = om.hardLimitBlocks - 1
+        while om.blocksInUse + 2 <= soft {
+            let a = om.tryAllocateAny(ctx, classIndex: WellKnown.array, count: 5_000, isBytes: false, fill: image.nilObject)
+            if a == .none { break }
+            bigs.append(om.addRoot(a))
+        }
+        om.destroyContext(ctx)
+        #expect(bigs.count > 100)
+        // 4000 (an Array of one block: old space has no room for a run).
+        let n = 4_000
+        let r = try runKeep(image, mode: .stw, workers: 1, "fill:count:", [n], processes: 1, indexed: true, reserveBlocks: 1)
+        #expect(r.answers == [1])
+        #expect(r.end.ran)
+        #expect(r.end.promotedObjects >= UInt64(2 * n))
+        #expect(r.end.grownBlocks > 0)
+        #expect(om.blocksInUse > om.hardLimitBlocks)
+        #expect(om.verifyHeap().isEmpty && om.verifyFreeLists().isEmpty)
+        // The image is whole: saved by the host, loaded with every rule.
+        let expected = Int64(n * (n + 1))
+        let saved = try image.saveImage()
+        let again = try Image.load(image: saved, config: c)
+        defer { again.destroy() }
+        #expect(again.om.verifyHeap().isEmpty)
+        #expect(try runKeep(again, mode: .stw, workers: 1, "total", [], reserveBlocks: 1).answers == [expected])
+    }
+
+    /// Module 10, vm-teardown's second follow-up: the host's save refuses
+    /// while a Process has frames (a VM ended while it waited), naming the
+    /// VM's own save; with none it saves.
+    @Test func theHostSaveRefusesWhileAProcessHasFrames() throws {
+        let image = try Image.load(image: vmEndImage, config: vmEndMemory(workers: 1))
+        defer { image.destroy() }
+        try runKeep(image, mode: .stw, workers: 1, "slots:", [1])
+        #expect(image.processesWithFrames() == 0)
+        let clean = try image.saveImage()
+        #expect(try Image.load(image: clean, config: vmEndMemory(workers: 1)).destroy() == ())
+        // A Process ready to run when the VM ends (the VM never started).
+        var vc = VMConfig()
+        vc.backgroundWorkers = 1
+        let vm = VM(image: image, config: vc)
+        let cls = image.om.classOop(try #require(image.classIndex(named: "Keep")))
+        let p = try #require(vm.spawn(receiver: cls, selector: "total", arguments: []))
+        #expect(vm.state(of: p) == .ready)
+        vm.shutdown()
+        vm.destroy()
+        #expect(image.processesWithFrames() == 1)
+        #expect(throws: ImageError.processesHaveFrames(1)) { try image.saveImage() }
+        do { _ = try image.saveImage() } catch { #expect("\(error)".contains("Smalltalk snapshot:")) }
     }
 
     /// The final collection's cost at the VM's end, reported (AGENTS.md:

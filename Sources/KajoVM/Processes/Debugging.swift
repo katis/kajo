@@ -75,7 +75,7 @@ func debuggingPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         unsafe schedLock(vm)
         let n = unsafe vm.pointee.sched.pointee.recordHighWater
         unsafe schedUnlock(vm)
-        let a = m.allocate(WellKnown.array, slots: n)
+        let a = m.allocateAny(WellKnown.array, count: n, bytes: false)
         if a == .none { return .none }
         unsafe schedLock(vm)
         var k = 0

@@ -151,8 +151,9 @@ import Testing
     ("push_lit @ByteArray\n push_int 3\n send new: 1\n push_int 1\n push_lit 256\n send at:put: 2", "byte out of range"),
     ("push_lit @ByteArray\n push_int 3\n send new: 1\n push_int 1\n push_nil\n send at:put: 2", "byte not an integer"),
     ("push_lit @Array\n push_int -1\n send new: 1", "negative size"),
-    ("push_lit @Array\n push_lit 4096\n send new: 1", "larger than a block"),
-    ("push_lit @ByteArray\n push_lit 32761\n send new: 1", "bytes larger than a block"),
+    // Module 10: past a block is a large object; past the count field fails.
+    ("push_lit @Array\n push_lit 16777216\n send new: 1", "larger than the count field"),
+    ("push_lit @ByteArray\n push_lit 16777216\n send new: 1", "bytes larger than the count field"),
     ("push_lit @Array\n push_nil\n send new: 1", "size not an integer"),
     ("push_int 3\n send basicNew 0", "basicNew to a non-class"),
     ("push_lit @SmallInteger\n send basicNew 0", "an immediate class"),

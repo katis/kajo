@@ -159,6 +159,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     unsafe dropMarkerWork(mk)
     unsafe m.pointee.markedObjects = 0
     unsafe m.pointee.markedBytes = 0
+    unsafe m.pointee.chunksSplit = 0
     unsafe m.pointee.markCpuNs = 0
     unsafe m.pointee.markWallNs = 0
     unsafe m.pointee.sweepNs = 0

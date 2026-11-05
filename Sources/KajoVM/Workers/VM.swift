@@ -365,7 +365,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     func newStringArray(_ strings: [String]) -> Oop {
         unsafe host { w in
             let m = unsafe machine(w)
-            let a = m.allocate(WellKnown.array, slots: strings.count)
+            let a = m.allocateAny(WellKnown.array, count: strings.count, bytes: false)
             precondition(a != .none, "heap full")
             let h = image.om.addRoot(a)
             for (i, s) in strings.enumerated() {
@@ -393,7 +393,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     /// A new Array of nils, rooted for the host.
     func newArray(_ n: Int) -> Oop {
         unsafe host { w in
-            let a = unsafe machine(w).allocate(WellKnown.array, slots: n)
+            let a = unsafe machine(w).allocateAny(WellKnown.array, count: n, bytes: false)
             precondition(a != .none, "heap full")
             keep(a)
             return a

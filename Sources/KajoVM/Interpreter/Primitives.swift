@@ -120,12 +120,15 @@ private func primBasicNew(_ m: Machine, _ cls: Oop, size: Oop) -> Oop {
         guard n == 0 else { return .none }
         return m.allocate(ci, slots: f.namedSlots)
     case .variable:
+        // Module 10: past a block is a large object, up to the count field.
         let total = Int64(f.namedSlots) + n
-        guard total <= Int64(Header.maxSlots) else { return .none }
+        guard total <= Int64(Header.maxLargeCount) else { return .none }
+        if total > Int64(Header.maxSlots) { return m.allocateLarge(ci, count: Int(total), bytes: false) }
         return m.allocate(ci, slots: Int(total))
     default:
         let bytes = n * Int64(f.kind.elementBytes)
-        guard n <= Int64(Header.maxBytes), bytes <= Int64(Header.maxBytes) else { return .none }
+        guard n <= Int64(Header.maxLargeCount), bytes <= Int64(Header.maxLargeCount) else { return .none }
+        if bytes > Int64(Header.maxBytes) { return m.allocateLarge(ci, count: Int(bytes), bytes: true) }
         return m.allocateBytes(ci, count: Int(bytes))
     }
 }

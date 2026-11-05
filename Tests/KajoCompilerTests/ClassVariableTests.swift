@@ -101,7 +101,7 @@ U >> seen [ ^ Count ]
         #expect(image.runToCompletion(className: "T", selector: "reset") == nil)
         // Count becomes 2 through the instance side, then a save and a load
         #expect(image.runToCompletion(className: "U", selector: "twiceBumped") == nil)
-        let saved = image.saveImage()
+        let saved = try image.saveImage()
         image.destroy()
         // A snapshot fuzzer seed with class pools (`KAJO_WRITE_FUZZ_SEEDS=1`).
         if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil {

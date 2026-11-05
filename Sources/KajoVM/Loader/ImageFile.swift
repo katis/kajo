@@ -6,17 +6,18 @@
 // broken, and nothing is kept.
 //
 //     word 0   magic "KAJOIMG\0"
-//     word 1   version (4, module 9b: two more VM selectors, holes in
-//              the class table, the source-map method flag; 3 since 8d:
-//              the Metaclass layout gained the class pool and the header
-//              the flags word; versions 1 to 3 are refused, images are
-//              rebuilt from their sources)
+//     word 1   version (5, module 10: large objects, runs of blocks in
+//              the snapshot's block table; 4 since 9b: two more VM
+//              selectors, holes in the class table, the source-map method
+//              flag; 3 since 8d: the Metaclass layout gained the class
+//              pool and the header the flags word; versions 1 to 4 are
+//              refused, images are rebuilt from their sources)
 //     word 2   the special-objects Array (`SpecialObjects`), a root
 //     word 3   method count M
 //     word 4   snapshot length L in bytes
 //     word 5   flags: bit 0 a release image (module 8d), every other bit 0
 //     M words  the method table: every CompiledMethod in the heap
-//     L bytes  module 1's snapshot (version 3)
+//     L bytes  module 1's snapshot (version 4)
 //
 // Rules checked after module 1's (`verifyImage`):
 //  - the special objects: nil, true, false of their classes; the globals
@@ -52,23 +53,30 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
     case malformed(String)
     case snapshot(SnapshotError)
     case rule(String)
+    /// Module 10 (vm-teardown's second follow-up): the host's save refuses
+    /// an image in which Processes still have frames (a VM ended while
+    /// they lived; their stacks are gone with it).
+    case processesHaveFrames(Int)
 
     var description: String {
         switch self {
         case .badMagic: "not a Kajo image (bad magic)"
-        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before module 9b's: rebuild it from its sources)" : "")
+        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before module 10's large objects: rebuild it from its sources)" : "")
         case .malformed(let s): "malformed image: \(s)"
         case .snapshot(let e): "image snapshot: \(e)"
         case .rule(let s): "image rejected: \(s)"
+        case .processesHaveFrames(let n):
+            "the host cannot save this image: \(n) Process\(n == 1 ? " has" : "es have") frames, which ended with the VM; "
+                + "save it from Smalltalk with Smalltalk snapshot: (the VM's own save keeps Processes), or let them end first"
         }
     }
 }
 
 enum ImageFile {
     static let magic: UInt64 = 0x0047_4D49_4F4A_414B  // "KAJOIMG\0"
-    /// Module 8d: 3 (Metaclass objects hold the class pool; the header
-    /// has the flags word). Module 8c's 2 and 8b's 1 are refused.
-    static let version: UInt64 = 4
+    /// Module 10: 5 (runs of blocks for large objects; module 1's snapshot
+    /// version 4). 9b's 4, 8d's 3, 8c's 2 and 8b's 1 are refused.
+    static let version: UInt64 = 5
     static let headerWords = 6
     /// Flags word bits.
     static let releaseFlag: UInt64 = 1
@@ -77,13 +85,47 @@ enum ImageFile {
 extension Image {
     /// The image as bytes: the method table and module 1's snapshot (which
     /// promotes, retires the contexts and drops frame pins). No VM may run
-    /// over the image meanwhile.
-    func saveImage() -> [UInt8] {
+    /// over the image meanwhile. Module 10: refused while any Process in
+    /// the heap has frames (live, not terminated, and not one the VM's own
+    /// save described in special object 8): its stack ended with the VM,
+    /// and the loader would refuse the image (vm-teardown's open question
+    /// 2, the owner's answer of 2026-11-04).
+    func saveImage() throws(ImageError) -> [UInt8] {
         // A collection first: garbage stays out of the image, and the free
         // entries of destroyed allocation contexts (interpreters that ran on
         // this image) return to the pool's runs.
         om.collect()
+        let live = processesWithFrames()
+        if live > 0 { throw .processesHaveFrames(live) }
         return encodedImage(snapshot: om.snapshot())
+    }
+
+    /// Module 10: Processes in the heap that are neither terminated nor
+    /// saved by the VM's own save (special object 8's list): a VM ended
+    /// while they had frames. No VM runs.
+    func processesWithFrames() -> Int {
+        let nilObj = nilObject
+        var saved = Set<Oop>()
+        if om.count(of: specialObjects) > UInt64(SpecialObjects.scheduler) {
+            let state = om.load(specialObjects, SpecialObjects.scheduler)
+            if state != nilObj, om.classIndex(of: state) == WellKnown.array, om.count(of: state) == UInt64(SavedScheduler.size) {
+                let chunks = om.load(state, SavedScheduler.processes)
+                if chunks.isObject, om.classIndex(of: chunks) == WellKnown.array {
+                    for c in 0..<Int(om.count(of: chunks)) {
+                        let chunk = om.load(chunks, c)
+                        guard chunk.isObject, om.classIndex(of: chunk) == WellKnown.array else { continue }
+                        for k in 0..<Int(om.count(of: chunk) / 2) { saved.insert(om.load(chunk, 2 * k)) }
+                    }
+                }
+            }
+        }
+        var n = 0
+        for p in om.allInstances(of: WellKnown.process) where !saved.contains(p) {
+            guard om.count(of: p) > UInt64(ProcessLayout.state) else { continue }
+            let st = om.load(p, ProcessLayout.state)
+            if st != Oop(smallInteger: Int64(ProcessState.terminated.rawValue)) { n += 1 }
+        }
+        return n
     }
 
     /// Module 1's snapshot bytes with the image header and method table

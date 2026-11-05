@@ -77,14 +77,14 @@ private func om_collect(_ h: Harness, keeping o: Oop) {
     _ = try h.run("make").get()
     h.om.collect()  // leaves a tombstone
     let count = h.om.symbolCount(h.image.symbolTable)
-    let bytes = h.image.saveImage()
+    let bytes = try h.image.saveImage()
     let loaded = try Image.load(image: bytes)
     defer { loaded.destroy() }
     #expect(loaded.om.symbolCount(loaded.symbolTable) == count)
     #expect(loaded.symbol("zzWeakSymbol") == nil)
     #expect(loaded.symbol("doesNotUnderstand:") != nil)
     // and through a second round trip, with the Symbol interned again
-    let again = try Image.load(image: loaded.saveImage())
+    let again = try Image.load(image: try loaded.saveImage())
     defer { again.destroy() }
     #expect(again.om.symbolCount(again.symbolTable) == count)
 }

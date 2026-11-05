@@ -35,8 +35,25 @@ func isUnmarkedSnapshotEntry(_ mk: MarkingPointer, _ om: ObjectMemory, _ v: UInt
 /// atomic loads: mutators store concurrently), the named slots of a weak
 /// one (listed for the final mark), an unfired ephemeron only once its key
 /// is marked (else listed). Its header is stable: old, a snapshot entry.
-@inline(__always)
-func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ o: UInt64) {
+///
+/// Module 10: a large object's slots are scanned `traceChunkSlots` at a
+/// time. The rest goes back on the stack as one item: the oop with the
+/// next chunk's number in bits 40..63 (an oop, an entry offset, is below
+/// 2^36), so the marker polls between chunks as between objects and a
+/// 128 MiB Array costs a stop no more than any 128 objects do. SATB keeps
+/// the split sound: a slot overwritten before its chunk is scanned is
+/// recorded by the barrier, and a large object never moves.
+/// Answers the work done in units of an ordinary object: a chunk counts
+/// as `MarkChunk.weight`, so the marker's poll every 128 units comes after
+/// at most four chunks.
+@inline(__always) @discardableResult
+func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ item: UInt64) -> Int {
+    let o = item & MarkChunk.oopMask
+    let chunk = Int(truncatingIfNeeded: item &>> MarkChunk.shift)
+    if _slowPath(chunk != 0) {
+        unsafe traceChunk(mk, om, m, o, from: chunk &* MarkChunk.slots)
+        return MarkChunk.weight
+    }
     let h = om.headerWord(o)
     let s = om.stateWord(o)
     let bytes = Header(raw: h).bodyBytes
@@ -47,7 +64,7 @@ func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePoi
         let b = BlockHeap.block(ofOffset: s)
         if unsafe b < m.pointee.blockLiveCount { unsafe live[b] &+= UInt32(truncatingIfNeeded: bytes) }
     }
-    if h & Header.bytesBit != 0 { return }
+    if h & Header.bytesBit != 0 { return 1 }
     var n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
     let f = om.classFormat(h & Header.classMask)
     if _slowPath(f.isSpecial) {
@@ -57,12 +74,45 @@ func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePoi
         } else if h & Header.firedBit == 0 && n > 0 {
             if unsafe isUnmarkedSnapshotEntry(mk, om, om.loadAtomic(bodyOffset: s, 0)) {
                 unsafe m.pointee.ephemerons.append(o)
-                return
+                return 1
             }
         }
     }
+    if _slowPath(n > MarkChunk.slots) {
+        unsafe traceChunk(mk, om, m, o, from: 0)
+        return MarkChunk.weight
+    }
     var i = 0
     while i < n {
+        unsafe greyIfCandidate(mk, om, m, om.loadAtomic(bodyOffset: s, i))
+        i &+= 1
+    }
+    return 1
+}
+
+/// Module 10: where a large object's scan is split (`traceObject`).
+enum MarkChunk {
+    static let slots = 4096
+    /// A chunk's share of the marker's poll interval (128 units).
+    static let weight = 32
+    static let shift: UInt64 = 40
+    static let oopMask: UInt64 = (1 << 40) - 1
+}
+
+/// One chunk of a large object's slots, from slot `from`; the next chunk
+/// goes back on the stack first (its children are traced before it).
+@inline(never)
+func traceChunk(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>, _ o: UInt64, from: Int) {
+    let h = om.headerWord(o)
+    let s = om.stateWord(o)
+    let n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
+    let end = Swift.min(n, from &+ MarkChunk.slots)
+    if end < n {
+        unsafe m.pointee.stack.append(o | UInt64(truncatingIfNeeded: end / MarkChunk.slots) &<< MarkChunk.shift)
+        unsafe m.pointee.chunksSplit &+= 1
+    }
+    var i = from
+    while i < end {
         unsafe greyIfCandidate(mk, om, m, om.loadAtomic(bodyOffset: s, i))
         i &+= 1
     }
@@ -143,13 +193,19 @@ func markSome(_ vm: VMPointer, _ mk: MarkingPointer, limit: Int) -> MarkOutcome 
     let cycle = unsafe mk.cycleNow
     if unsafe mk.phaseNow != .marking { return .done }
     var n = 0
+    // Module 10: work since the last poll, in objects; a large object's
+    // chunk counts 32 (`MarkChunk.weight`).
+    var work = 0
     while true {
         if let o = unsafe m.pointee.stack.popLast() {
-            unsafe traceObject(mk, om, m, o)
+            work &+= unsafe traceObject(mk, om, m, o)
             n &+= 1
-            if n & 127 == 0, unsafe !markerPoll(vm, mk, cycle: cycle, phase: .marking) {
-                unsafe dropMarkerWork(mk)
-                return .abandoned
+            if work >= 128 {
+                work = 0
+                if unsafe !markerPoll(vm, mk, cycle: cycle, phase: .marking) {
+                    unsafe dropMarkerWork(mk)
+                    return .abandoned
+                }
             }
             if n >= limit { return .limit }
             continue

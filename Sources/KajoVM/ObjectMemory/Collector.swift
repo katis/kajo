@@ -29,19 +29,24 @@ extension ObjectMemory {
     /// first, then compaction. `nil` when the heap is full of live objects.
     /// Only for a caller that is the only thread in the object memory;
     /// module 3 replaces the collection here with a safepoint request.
+    ///
+    /// Module 10: an object larger than a block takes a run of blocks
+    /// (`tryAllocateAny`), under the same policy: the full collection, then
+    /// compaction (which consolidates the ordinary blocks around runs),
+    /// then nil.
     func allocate(_ ctx: AllocContext, classIndex: UInt64, slots: Int, fill: Oop, extraRoots: [Oop] = []) -> Oop? {
         if config.stress.contains(.collectAtEveryAllocation) {
             unsafe gc.pointee.counters.stressCollections &+= 1
             collect(extraRoots: extraRoots + [fill])
         }
-        var o = tryAllocate(ctx, classIndex: classIndex, slots: slots, fill: fill)
+        var o = tryAllocateAny(ctx, classIndex: classIndex, count: slots, isBytes: false, fill: fill)
         if o == .none {
             collect(extraRoots: extraRoots + [fill])
-            o = tryAllocate(ctx, classIndex: classIndex, slots: slots, fill: fill)
+            o = tryAllocateAny(ctx, classIndex: classIndex, count: slots, isBytes: false, fill: fill)
         }
         if o == .none {
             compact(extraRoots: extraRoots + [fill])
-            o = tryAllocate(ctx, classIndex: classIndex, slots: slots, fill: fill)
+            o = tryAllocateAny(ctx, classIndex: classIndex, count: slots, isBytes: false, fill: fill)
         }
         return o == .none ? nil : o
     }
@@ -52,14 +57,14 @@ extension ObjectMemory {
             unsafe gc.pointee.counters.stressCollections &+= 1
             collect(extraRoots: extraRoots)
         }
-        var o = tryAllocateBytes(ctx, classIndex: classIndex, count: count)
+        var o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0))
         if o == .none {
             collect(extraRoots: extraRoots)
-            o = tryAllocateBytes(ctx, classIndex: classIndex, count: count)
+            o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0))
         }
         if o == .none {
             compact(extraRoots: extraRoots)
-            o = tryAllocateBytes(ctx, classIndex: classIndex, count: count)
+            o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0))
         }
         return o == .none ? nil : o
     }
@@ -223,17 +228,20 @@ extension ObjectMemory {
     /// Free every used, unmarked entry; clear the marks; free every block
     /// without a live body; rebuild the entry runs and the block pool.
     /// Contexts' private entry lists are discarded (their entries are still
-    /// free in the table and land in the new runs).
+    /// free in the table and land in the new runs). Module 10: a run is
+    /// freed whole when its head has no live body, and its continuations
+    /// (where no body starts) only with it.
     func sweep() {
         let h = heap
         var live = sweepEntries()
         defer { live.free() }
         var freed: UInt64 = 0
+        let blind = isRunBlind(.sweep)
+        var runs: UInt64 = 0
         for b in 0..<h.blockCount where h.isInUse(b) && !live[b] {
-            h.setInUse(b, false)
-            h.setUsed(b, 0)
-            freed &+= 1
+            freed &+= UInt64(freeBlockWithoutLiveBody(b, blind: blind, runs: &runs))
         }
+        noteRunsFreed(runs)
         rebuildBlockPool()
         unsafe gc.pointee.counters.blocksFreed &+= freed
         if let h = unsafe gc.pointee.afterOldSpaceSweep { h() }
@@ -299,9 +307,12 @@ extension ObjectMemory {
     }
 
     /// Every free block, and every in-use block with at least a minimum
-    /// tail, lowest index on top. Contexts must be retired.
+    /// tail, lowest index on top. Contexts must be retired. Module 10: a
+    /// run's blocks are never offered (a continuation's `used` is 0, a
+    /// head's is past the block).
     func rebuildBlockPool() {
         let h = heap
+        let blind = isRunBlind(.pool)
         lockPools()
         defer { unlockPools() }
         unsafe pools.pointee.freeBlocks.removeAll()
@@ -309,6 +320,10 @@ extension ObjectMemory {
         var b = h.blockCount - 1
         while b >= 0 {
             if h.isInUse(b) { inUse += 1 }
+            if h.isInUse(b) && h.isRun(b) && !blind {
+                b -= 1
+                continue
+            }
             if !h.isInUse(b) || UInt64(BlockHeap.blockBytes) &- h.usedBytes(b) >= ObjectMemory.minimumTail {
                 unsafe pools.pointee.freeBlocks.append(UInt32(b))
             }

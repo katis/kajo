@@ -72,8 +72,10 @@ private func instances(_ w: World, _ cls: UInt64, _ n: Int, slots: Int = 2) -> (
     #expect(throws: ReshapeError.pinnedInstance) { try om.reshape(classIndex: 7, namedSlots: 1, layout: [nil], fill: w.nilObj) }
     #expect(throws: ReshapeError.layoutOutOfRange) { try om.reshape(classIndex: 8, namedSlots: 1, layout: [1], fill: w.nilObj) }
     #expect(throws: ReshapeError.layoutOutOfRange) { try om.reshape(classIndex: 8, namedSlots: 2, layout: [0], fill: w.nilObj) }
+    // Module 10: past one block is a large object; past the count field
+    // is too large.
     #expect(throws: ReshapeError.tooLarge) {
-        try om.reshape(classIndex: 8, namedSlots: 1, layout: Array(repeating: nil, count: Header.maxSlots + 1), fill: w.nilObj)
+        try om.reshape(classIndex: 8, namedSlots: 1, layout: Array(repeating: nil, count: Header.maxLargeCount + 1), fill: w.nilObj)
     }
 }
 

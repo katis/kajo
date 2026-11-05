@@ -202,6 +202,12 @@ extension ObjectMemory {
                 // next rebuild).
                 break
             }
+            if unsafe !wasInUse && reserve && pools.pointee.blocksInUse >= pools.pointee.hardLimitBlocks
+                && !pools.pointee.endGrowth {
+                // Module 10: past the reserve lies the final collection's
+                // growth, for the VM's end only.
+                break
+            }
             _ = unsafe pools.pointee.freeBlocks.popLast()
             heap.setInUse(b, true)
             unsafe pools.pointee.blockStamps[b] = pools.pointee.stampNow
@@ -218,7 +224,7 @@ extension ObjectMemory {
         return false
     }
 
-    private func refillEntries(_ ctx: AllocContext) -> Bool {
+    func refillEntries(_ ctx: AllocContext) -> Bool {
         let c = unsafe ctx.state
         lockPools()
         defer { unlockPools() }

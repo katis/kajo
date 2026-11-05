@@ -190,6 +190,22 @@ extension ObjectMemory {
         }
     }
 
+    /// Module 10: blocks a promotion may hold; past them lies the final
+    /// collection's growth.
+    var hardLimitBlocks: Int {
+        lockPools()
+        defer { unlockPools() }
+        return unsafe pools.pointee.hardLimitBlocks
+    }
+
+    /// Module 10: the VM's final collection may take every block of the
+    /// reservation (vm-teardown's first follow-up). World stopped.
+    func setEndGrowth(_ on: Bool) {
+        lockPools()
+        unsafe pools.pointee.endGrowth = on
+        unlockPools()
+    }
+
     /// Old space is past its soft limit: a full collection is due.
     var isOverSoftLimit: Bool {
         lockPools()
@@ -228,7 +244,7 @@ extension ObjectMemory {
         lockPools()
         defer { unlockPools() }
         let p = unsafe pools.pointee
-        let free = heap.blockCount - Swift.max(p.blocksInUse, p.softLimitBlocks) - p.promotionReserved
+        let free = p.hardLimitBlocks - Swift.max(p.blocksInUse, p.softLimitBlocks) - p.promotionReserved
         if blocks > free { return false }
         unsafe pools.pointee.promotionReserved += blocks
         return true

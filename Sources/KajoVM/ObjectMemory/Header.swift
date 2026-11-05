@@ -76,10 +76,16 @@ struct Header: Hashable, Sendable {
 
     static let maxClassIndex: UInt64 = classMask
     static let maxCount: UInt64 = (1 << countBits) - 1
-    /// A body never spans a block: one word for the back reference, the rest
-    /// for slots or bytes.
+    /// The largest ordinary body, one block: one word for the back
+    /// reference, the rest for slots or bytes. Larger objects (module 10)
+    /// are runs of blocks, old at birth; these two are still the limit of
+    /// everything that must fit one block (methods, literal frames, the
+    /// bytecodes' operands, Contexts, eden allocation).
     static let maxSlots: Int = BlockHeap.blockBytes / 8 - 1
     static let maxBytes: Int = maxSlots * 8
+    /// Module 10: the largest object at all, by the count field: 16 777 215
+    /// slots (128 MiB) or bytes (16 MiB).
+    static let maxLargeCount: Int = Int(maxCount)
 
     init(classIndex: UInt64, count: UInt64, isBytes: Bool) {
         precondition(classIndex <= Header.maxClassIndex && count <= Header.maxCount)
@@ -137,4 +143,8 @@ struct Header: Hashable, Sendable {
     }
 
     var bodyBytes: UInt64 { bodyWords &<< 3 }
+
+    /// Module 10: the body does not fit one block, so it is a run of blocks
+    /// (the count test; no header bit marks it, since no hot path asks).
+    var isLarge: Bool { bodyBytes > UInt64(BlockHeap.blockBytes) }
 }

@@ -832,7 +832,7 @@ extension Image {
     package var hasSavedProcesses: Bool { savedScheduler != nilObject }
 
     /// The image as bytes (module 8a's format).
-    package func imageBytes() -> [UInt8] { saveImage() }
+    package func imageBytes() throws -> [UInt8] { try saveImage() }
 
     /// Whether `name` is a class of the image.
     package func hasClass(_ name: String) -> Bool { classesByName[name] != nil }

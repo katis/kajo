@@ -61,9 +61,11 @@ extension Machine {
         guard let vm = unsafe w.pointee.vm, let n = unsafe vm.pointee.nursery, let a = unsafe state.pointee.young else {
             return allocateOld(cls, count: count, bytes: isBytes, keeping: extra)
         }
-        precondition(count >= 0 && count <= (isBytes ? Header.maxBytes : Header.maxSlots), "object larger than a block")
+        precondition(count >= 0 && count <= Header.maxLargeCount, "object larger than the count field")
         let c = UInt64(count)
         let size = isBytes ? (c &+ 7) & ~7 &+ 8 : c &<< 3 &+ 8
+        // Large for eden (module 4's `largeLimit`), or past a block (module
+        // 10's runs): allocated old.
         if unsafe size > n.pointee.largeLimit {
             unsafe a.pointee.largeAllocations &+= 1
             return allocateOld(cls, count: count, bytes: isBytes, keeping: extra)
@@ -219,7 +221,9 @@ extension NurseryShared {
         unsafe vm.pointee.nursery = n
         for i in 0..<count { unsafe vm.worker(i).pointee.interp.young = n.alloc(i) }
         let needed = config.testSwitches.promotionReserveBlocks ?? config.reserveBytes(workers: count) / BlockHeap.blockBytes
-        let blocks = om.heap.blockCount
+        // Module 10: the blocks past the hard limit are the final
+        // collection's growth, not old space a nursery may count on.
+        let blocks = om.hardLimitBlocks
         let soft = config.testSwitches.promotionReserveBlocks != nil ? blocks - needed
             : Swift.min(om.config.heapBytes / BlockHeap.blockBytes, blocks - needed)
         precondition(soft >= 1, "nursery: a heap of \(blocks) blocks cannot keep a promotion reserve of \(needed); "
@@ -255,16 +259,22 @@ struct VMEndReport: Sendable {
     /// kept objects).
     var stopNs: UInt64 = 0
     var workNs: UInt64 = 0
+    /// Module 10: blocks old space grew past the promotion reserve's limit
+    /// into the final collection's growth (`ObjectMemoryConfig.endGrowthBytes`).
+    var grownBlocks = 0
 }
 
 /// The VM's end (docs/modules/vm-teardown.md): every thread has joined;
 /// one stop runs module 1's promote-all hook with the stop's roots, so a
 /// marking cycle is abandoned or its sweep finished and applied, pending
 /// blocks are freed, deferred entry frees released, and every live young
-/// object is promoted. Nothing young is left (a heap whose old space cannot
-/// take the young objects even after the hook's collection and compaction
-/// traps: the image could not be whole). `NurseryShared.destroy` then hands
-/// every stash's entries back. No-op without a nursery.
+/// object is promoted. Module 10 (vm-teardown's first follow-up, the
+/// owner's answer): old space grows for this collection: the promotion may
+/// take the blocks past the reserve (`endGrowthBytes`, reserved with the
+/// heap, as large as the promotion reserve unless configured), so a full
+/// old space no longer traps. Only a growth too small for the young
+/// objects still traps (the image could not be whole). `NurseryShared.destroy`
+/// then hands every stash's entries back. No-op without a nursery.
 func endYoungGeneration(_ vm: VMPointer, _ w: WorkerPointer) -> VMEndReport {
     guard let n = unsafe vm.pointee.nursery else { return VMEndReport() }
     var r = VMEndReport()
@@ -273,15 +283,20 @@ func endYoungGeneration(_ vm: VMPointer, _ w: WorkerPointer) -> VMEndReport {
     let t0 = nanoseconds()
     unsafe stopWorld(vm, w, retry: true) { _ in
         let before = unsafe n.pointee.state.pointee.counters
+        let om = unsafe vm.pointee.om
         let t1 = nanoseconds()
-        left = unsafe vm.pointee.om.prepareOldSpaceOperation(nil).count
+        om.setEndGrowth(true)
+        left = om.prepareOldSpaceOperation(nil).count
+        om.setEndGrowth(false)
         r.workNs = nanoseconds() &- t1
+        r.grownBlocks = Swift.max(0, om.blocksInUse - om.hardLimitBlocks)
         let after = unsafe n.pointee.state.pointee.counters
         r.promotedObjects = after.promotedObjects &- before.promotedObjects
         r.promotedBytes = after.promotedBytes &- before.promotedBytes
     }
     r.stopNs = nanoseconds() &- t0
-    precondition(left == 0, "kajo: \(left) young objects found no room in old space at the VM's end; the image is not whole")
+    precondition(left == 0, "kajo: \(left) young objects found no room in old space at the VM's end, its growth included "
+                 + "(ObjectMemoryConfig.endGrowthBytes); the image is not whole")
     return r
 }
 

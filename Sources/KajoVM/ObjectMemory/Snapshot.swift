@@ -1,10 +1,11 @@
 import Darwin
 import Foundation
 
-/// Snapshot format, version 3 (module 4 added the class formats, the
+/// Snapshot format, version 4 (module 4 added the class formats, the
 /// finalization queue and the nil object; module 8 the format word's kind,
 /// sealed and behaviors fields and the immediates SmallFloat and Character
-/// in slots; versions 1 and 2 are refused).
+/// in slots; module 10 the block kinds of large objects' runs; versions 1
+/// to 3 are refused).
 /// Little-endian 64-bit words, then raw heap and table bytes (the hosts are
 /// little-endian):
 ///
@@ -21,8 +22,12 @@ import Foundation
 ///     C words  class formats (`ClassFormat`)
 ///     R words  root registry
 ///     Q words  finalization queue
-///     B words  used bytes per block (0 = free)
-///     ...      the used bytes of every block, in block order
+///     B words  per block: bits 0..55 used bytes (0 = free, or a
+///              continuation), bits 56..63 the block's kind (module 10:
+///              0 ordinary, 1 the head of a run, 2 a continuation); a
+///              head's used bytes are its large body's, past the block
+///     ...      the used bytes of every block, in block order (a head's
+///              are the whole run's body, contiguous in the heap)
 ///     H x 16   entry table [0, H)
 ///
 /// Oops are entry offsets, so a snapshot loads at any base with no
@@ -55,7 +60,10 @@ enum SnapshotError: Error, Equatable, CustomStringConvertible {
 /// touches only the bytes given, with bounds checks: no unsafe code.
 struct SnapshotLayout {
     static let magic: UInt64 = 0x0000_4D4F_4F4A_414B // "KAJOOM\0\0"
-    static let version: UInt64 = 3
+    static let version: UInt64 = 4
+    /// Module 10: where a block's kind sits in its used word.
+    static let kindShift: UInt64 = 56
+    static let usedMask: UInt64 = (1 << 56) - 1
     static let headerWords = 9
 
     let blockCount: Int
@@ -70,6 +78,8 @@ struct SnapshotLayout {
     let queueAt: Int
     let usedAt: Int
     let used: [UInt64]
+    /// Module 10: each block's kind (`BlockKind`).
+    let kinds: [UInt8]
     /// File position of each block's bytes.
     let blockAt: [Int]
     let tableAt: Int
@@ -107,25 +117,52 @@ struct SnapshotLayout {
         let heapAt = usedAt + blockCount * 8
         guard heapAt <= b.count else { throw .malformed("length \(b.count) is shorter than the sections") }
         var used: [UInt64] = []
+        var kinds: [UInt8] = []
         var blockAt: [Int] = []
         var at = heapAt
+        // Module 10: a head's run of continuations, counted down.
+        var continuations = 0
         for i in 0..<blockCount {
-            let u = SnapshotLayout.word(b, usedAt + i * 8)
-            guard u <= UInt64(BlockHeap.blockBytes), u & 7 == 0 else { throw .malformed("block \(i) used \(u)") }
+            let w = SnapshotLayout.word(b, usedAt + i * 8)
+            let u = w & SnapshotLayout.usedMask
+            let kind = w &>> SnapshotLayout.kindShift
+            guard u & 7 == 0 else { throw .malformed("block \(i) used \(u)") }
+            switch kind {
+            case UInt64(BlockKind.ordinary):
+                guard continuations == 0 else { throw .malformed("block \(i) is not a continuation of the run before it") }
+                guard u <= UInt64(BlockHeap.blockBytes) else { throw .malformed("block \(i) used \(u)") }
+            case UInt64(BlockKind.head):
+                guard continuations == 0 else { throw .malformed("block \(i) is not a continuation of the run before it") }
+                let k = UInt64(blockCount - i)
+                guard u > UInt64(BlockHeap.blockBytes), u <= k &* UInt64(BlockHeap.blockBytes),
+                      u <= UInt64(b.count) else { throw .malformed("run at block \(i) used \(u)") }
+                continuations = BlockHeap.runBlocks(bytes: u) - 1
+            case UInt64(BlockKind.continuation):
+                guard continuations > 0, u == 0 else { throw .malformed("block \(i) is a continuation of no run") }
+                continuations -= 1
+            default:
+                throw .malformed("block \(i) has kind \(kind)")
+            }
             used.append(u)
+            kinds.append(UInt8(kind))
             blockAt.append(at)
             at += Int(u)
+            guard at <= b.count else { throw .malformed("length \(b.count) is shorter than block \(i)'s bytes") }
         }
+        guard continuations == 0 else { throw .malformed("the last run is cut short") }
         self.used = used
+        self.kinds = kinds
         self.blockAt = blockAt
         tableAt = at
         let expected = UInt64(at) + highWater * 16
         guard expected == UInt64(b.count) else { throw .malformed("length \(b.count), sections need \(expected)") }
     }
 
-    /// File position of a heap offset inside a saved block.
+    /// File position of a heap offset inside a saved block (module 10: an
+    /// offset in a continuation is in its head's bytes).
     func heapAt(offset: UInt64) -> Int {
-        let b = BlockHeap.block(ofOffset: offset)
+        var b = BlockHeap.block(ofOffset: offset)
+        while b > 0 && kinds[b] == BlockKind.continuation { b -= 1 }
         return blockAt[b] + Int(offset - BlockHeap.start(ofBlock: b))
     }
 }
@@ -173,7 +210,8 @@ extension ObjectMemory {
         for v in formats { put(v) }
         for v in roots { put(v) }
         for v in queue { put(v) }
-        for b in 0..<blockCount { put(h.usedBytes(b)) }
+        let kinds = !isRunBlind(.snapshot)
+        for b in 0..<blockCount { put(h.usedBytes(b) | (kinds ? UInt64(h.kind(b)) &<< SnapshotLayout.kindShift : 0)) }
         out.withUnsafeMutableBytes { dst in
             for b in 0..<blockCount {
                 let n = Int(h.usedBytes(b))
@@ -221,15 +259,18 @@ extension ObjectMemory {
     static func load(snapshot b: [UInt8], config: ObjectMemoryConfig = .init()) throws(SnapshotError) -> ObjectMemory {
         let L = try SnapshotLayout(parsing: b)
         let c = config.effective
-        guard L.blockCount * BlockHeap.blockBytes <= c.heapBytes + c.reserveBytes else {
-            throw .doesNotFit("\(L.blockCount) blocks, heap of \((c.heapBytes + c.reserveBytes) / BlockHeap.blockBytes)")
-        }
         guard L.highWater <= UInt64(c.entryCapacity) else {
             throw .doesNotFit("high water \(L.highWater), table of \(c.entryCapacity)")
         }
         guard L.classCount - 1 <= Int(Header.maxClassIndex) else { throw .malformed("class table length \(L.classCount)") }
         let om: ObjectMemory
         do { om = try ObjectMemory(config) } catch { throw .doesNotFit("\(error)") }
+        // Module 10: the reservation's blocks, the final collection's
+        // growth included (an image saved after the VM's end may use it).
+        guard L.blockCount <= om.heap.blockCount else {
+            om.destroy()
+            throw .doesNotFit("\(L.blockCount) blocks, heap of \(om.heap.blockCount)")
+        }
         do {
             try om.fill(from: b, L)
         } catch {
@@ -271,11 +312,14 @@ extension ObjectMemory {
         unsafe pools.pointee.highWater = L.highWater
         unlockPools()
         b.withUnsafeBytes { src in
-            for i in 0..<L.blockCount where L.used[i] > 0 {
+            for i in 0..<L.blockCount where L.used[i] > 0 || L.kinds[i] != BlockKind.ordinary {
+                // A head's bytes are its whole run (the layout checked that
+                // the run's blocks follow it inside the snapshot's blocks).
                 unsafe memcpy(heapBase + Int(BlockHeap.start(ofBlock: i)), src.baseAddress.unsafelyUnwrapped + L.blockAt[i],
                               Int(L.used[i]))
                 h.setUsed(i, L.used[i])
                 h.setInUse(i, true)
+                h.setKind(i, L.kinds[i])
             }
             unsafe memcpy(table, src.baseAddress.unsafelyUnwrapped + L.tableAt, Int(L.highWater) * 16)
         }

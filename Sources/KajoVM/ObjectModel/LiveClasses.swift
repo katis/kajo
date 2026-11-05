@@ -839,7 +839,7 @@ private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         unsafe m.state.pointee.counters.filesWritten &+= 1
         return m.trueObject
     }
-    guard c.argc == 1, let resolved = named.resolved, let bytes = readFile(resolved), bytes.count <= Header.maxBytes, String(validating: bytes, as: UTF8.self) != nil else {
+    guard c.argc == 1, let resolved = named.resolved, let bytes = readFile(resolved), bytes.count <= Header.maxLargeCount, String(validating: bytes, as: UTF8.self) != nil else {
         return .none
     }
     unsafe m.state.pointee.counters.filesRead &+= 1
@@ -875,7 +875,8 @@ private func readFile(_ path: String) -> [UInt8]? {
         if k < 0 { return nil }
         if k == 0 { break }
         out += buf[0..<k]
-        if out.count > Header.maxBytes { return nil }
+        // Module 10: a String up to the count field (16 MiB).
+        if out.count > Header.maxLargeCount { return nil }
     }
     return out
 }

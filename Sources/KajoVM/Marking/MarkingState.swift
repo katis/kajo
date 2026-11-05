@@ -82,6 +82,8 @@ enum CycleTrigger: UInt8, Sendable {
     /// This cycle's work so far.
     var markedObjects: UInt64 = 0
     var markedBytes: UInt64 = 0
+    /// Module 10: chunks of large objects put back on the stack.
+    var chunksSplit: UInt64 = 0
     var markCpuNs: UInt64 = 0
     var markWallNs: UInt64 = 0
     var markStartNs: UInt64 = 0
@@ -163,6 +165,9 @@ struct MarkingCounters: Sendable {
     var applyNs: UInt64 = 0
     var markedObjects: UInt64 = 0
     var markedBytes: UInt64 = 0
+    /// Module 10: chunks of large objects the marker put back on its stack
+    /// (a large object's scan split at `MarkChunk.slots`).
+    var chunksSplit: UInt64 = 0
     var markerCpuNs: UInt64 = 0
     var sweepNs: UInt64 = 0
     var entriesFreed: UInt64 = 0

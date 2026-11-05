@@ -10,7 +10,8 @@ struct CompactionMove {
 /// Where every live body goes. Sliding, block-respecting: live bodies
 /// slide to the lowest free address in block order and never span a
 /// block. A block holding a pinned live body is neither a source nor a
-/// destination: everything in it stays.
+/// destination: everything in it stays; so are the blocks of a live run
+/// (module 10: large objects never move).
 struct CompactionPlan {
     var moves = RawArray<CompactionMove>()
     /// Per block: used bytes after the compaction, for every block that is
@@ -18,6 +19,8 @@ struct CompactionPlan {
     var newUsed: RawArray<UInt32>
     var pinnedBlocks: RawArray<Bool>
     var pinnedObjects: UInt64 = 0
+    /// Module 10: live runs left where they are.
+    var runsKept: UInt64 = 0
     var bytesMoved: UInt64 = 0
 
     init(blockCount: Int) {
@@ -103,6 +106,25 @@ extension ObjectMemory {
                 e &+= 1
             }
         }
+        // Module 10: a live run stays whole, never a source or a
+        // destination (large objects are never moved); a dead run's blocks
+        // are ordinary free space to the plan.
+        if !isRunBlind(.compaction) {
+            var b = 0
+            while b < h.blockCount {
+                if h.isInUse(b) && h.kind(b) == BlockKind.head {
+                    let k = h.runLength(head: b)
+                    let br = h.word(atOffset: BlockHeap.start(ofBlock: b))
+                    if isLiveBody(br, at: BlockHeap.start(ofBlock: b), highWater: hw) {
+                        for r in b..<Swift.min(b &+ k, h.blockCount) { plan.pinnedBlocks[r] = true }
+                        plan.runsKept &+= 1
+                    }
+                    b &+= k
+                    continue
+                }
+                b &+= 1
+            }
+        }
         let blockBytes = UInt64(BlockHeap.blockBytes)
         var db = -1                 // destination block, -1 before the first
         var dtop: UInt64 = 0        // offset within it
@@ -146,10 +168,13 @@ extension ObjectMemory {
             setStateWord(m.entry, m.to)
         }
         let h = heap
+        let blind = isRunBlind(.compaction)
         for b in 0..<h.blockCount where !plan.pinnedBlocks[b] {
             let used = UInt64(plan.newUsed[b])
             h.setUsed(b, used)
             h.setInUse(b, used != 0)
+            // Module 10: a dead run's blocks are ordinary again.
+            if !blind { h.setKind(b, BlockKind.ordinary) }
         }
     }
 

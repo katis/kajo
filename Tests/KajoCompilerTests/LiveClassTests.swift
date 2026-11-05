@@ -96,7 +96,7 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         #expect(try answerOf(image, "T", "step1") == 1)
         #expect(try answerOf(image, "T", "step2") == 1)
         #expect(try answerOf(image, "T", "step3") == 1)
-        let saved = image.saveImage()
+        let saved = try image.saveImage()
         image.destroy()
         // A snapshot fuzzer seed with a class made and reshaped at run time.
         if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil {

@@ -179,12 +179,13 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard !m.om.isSealed(ci) else { return .none }
     let n = Int(m.om.count(of: c.receiver))
     if m.om.isBytes(c.receiver) {
-        let o = m.allocateBytes(ci, count: n)
+        let o = m.allocateAny(ci, count: n, bytes: true, keeping: c.receiver)
         if o == .none { return .none }
         for i in 0..<n { m.om.storeByte(o, i, m.om.loadByte(c.receiver, i)) }
         return o
     }
-    let o = m.allocate(ci, slots: n, keeping: c.receiver)
+    // Module 10: a large receiver's copy is large too (old at birth).
+    let o = m.allocateAny(ci, count: n, bytes: false, keeping: c.receiver)
     if o == .none { return .none }
     for i in 0..<n { m.store(o, i, m.om.load(c.receiver, i), .instVarAtPut) }
     return o

@@ -220,10 +220,37 @@ struct CacheEntry {
         return allocateOld(cls, count: count, bytes: bytes, keeping: extra)
     }
 
+    /// An object of any size the count field holds (module 10): the fast
+    /// path for one that fits a block, a run of blocks otherwise
+    /// (`allocateLarge`). For primitives whose size comes from Smalltalk or
+    /// from another object (`basicNew:`, copies, concatenation, the host's
+    /// strings); the interpreter's own allocations fit a block by the
+    /// bytecode verifier and keep `allocate`.
+    @inline(__always)
+    func allocateAny(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop = .none) -> Oop {
+        if count <= (bytes ? Header.maxBytes : Header.maxSlots) {
+            return bytes ? allocateBytes(cls, count: count) : allocate(cls, slots: count, keeping: extra)
+        }
+        return allocateLarge(cls, count: count, bytes: bytes, keeping: extra)
+    }
+
+    /// Module 10: a large object, old at birth: a run of blocks, else a
+    /// stop that collects and compacts and tries once more. `.none` when
+    /// the heap has no run for it or the count passes the count field:
+    /// the primitive fails and the kernel reports it, never a VM error
+    /// (a program asking for 100 MB in a 64 MB heap is not out of memory
+    /// for everything else).
+    @inline(never)
+    func allocateLarge(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop = .none) -> Oop {
+        guard count >= 0, count <= Header.maxLargeCount else { return .none }
+        return allocateOld(cls, count: count, bytes: bytes, keeping: extra, softFailure: true)
+    }
+
     /// An old object (no nursery, or one too large for eden): the context's
     /// block, else a stop that collects (module 1's policy; module 4's hook
-    /// promotes everything first).
-    func allocateOld(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop) -> Oop {
+    /// promotes everything first). Module 10: any size (`tryAllocateAny`);
+    /// `softFailure` answers `.none` without recording an error.
+    func allocateOld(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop, softFailure: Bool = false) -> Oop {
         let ctx = unsafe state.pointee.context
         if let vm = unsafe workerOf(state).pointee.vm {
             // Module 3: another worker may be stopping the world already;
@@ -232,8 +259,7 @@ struct CacheEntry {
             let keep = extra == .none ? [nilObject] : [nilObject, extra]
             while true {
                 if unsafe !state.pointee.collectAtEveryAllocation {
-                    let o = bytes ? om.tryAllocateBytes(ctx, classIndex: cls, count: count)
-                                  : om.tryAllocate(ctx, classIndex: cls, slots: count, fill: nilObject)
+                    let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject)
                     if o != .none { return o }
                 }
                 var result: Oop? = nil
@@ -246,7 +272,7 @@ struct CacheEntry {
                 if !stopped { continue }
                 unsafe state.pointee.counters.collectionsTriggered &+= pauseCount() &- before
                 guard let o = result else {
-                    fail(.outOfMemory)
+                    if !softFailure { fail(.outOfMemory) }
                     return .none
                 }
                 return o
@@ -259,7 +285,7 @@ struct CacheEntry {
                       : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
         afterPause(collections: pauseCount() &- before)
         guard let o else {
-            fail(.outOfMemory)
+            if !softFailure { fail(.outOfMemory) }
             return .none
         }
         return o

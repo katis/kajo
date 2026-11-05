@@ -353,7 +353,10 @@ struct LiveMethodHeap: MethodHeap {
     }
 
     mutating func bytes(_ cls: UInt64, _ b: [UInt8]) throws(LoadError) -> Oop {
-        guard b.count <= Header.maxBytes,
+        // Module 10: a literal String or ByteArray may be a large object
+        // (old, never moved); the bytecodes are bounded by the loader's
+        // limits before they get here.
+        guard b.count <= Header.maxLargeCount,
               let o = om.allocateBytes(unsafe m.state.pointee.context, classIndex: cls, count: b.count, extraRoots: roots)
         else { throw LoadError(.heapFull, "the heap has no room for the method") }
         for (i, x) in b.enumerated() { om.storeByte(o, i, x) }

@@ -23,14 +23,19 @@ import Synchronization
         guard config.heapBytes > 0, config.heapBytes % BlockHeap.blockBytes == 0,
               config.reserveBytes >= 0, config.reserveBytes % BlockHeap.blockBytes == 0,
               config.nurseryRegionBytes >= 0, config.nurseryRegionBytes % BlockHeap.blockBytes == 0,
+              (config.endGrowthBytes ?? 0) >= 0, (config.endGrowthBytes ?? 0) % BlockHeap.blockBytes == 0,
               UInt64(config.heapBytes + config.reserveBytes + config.nurseryRegionBytes) <= VirtualMemory.aliasDistance else {
-            throw .invalidConfig("heapBytes, reserveBytes and nurseryRegionBytes must be multiples of \(BlockHeap.blockBytes), at most 4 GiB together")
+            throw .invalidConfig("heapBytes, reserveBytes, endGrowthBytes and nurseryRegionBytes must be multiples of \(BlockHeap.blockBytes), at most 4 GiB together")
         }
+        // Module 10: the final collection's growth, address space only
+        // until the VM's end takes it; clamped to what 4 GiB leaves.
+        let room = Int(VirtualMemory.aliasDistance) - config.heapBytes - config.reserveBytes - config.nurseryRegionBytes
+        let growth = Swift.min(config.endGrowthBytes ?? config.reserveBytes, room) / BlockHeap.blockBytes * BlockHeap.blockBytes
         guard config.entryCapacity >= 2, UInt64(config.entryCapacity) <= 1 << 32 else {
             throw .invalidConfig("entryCapacity must be in 2...2^32")
         }
         guard config.entryChunk >= 1 else { throw .invalidConfig("entryChunk must be positive") }
-        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes, extraBytes: config.nurseryRegionBytes)
+        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes + growth, extraBytes: config.nurseryRegionBytes)
         let tableBytes = config.entryCapacity * 16
         let table: UnsafeMutableRawPointer
         let marks: UnsafeMutableRawPointer
@@ -46,7 +51,8 @@ import Synchronization
         let poolLock = os_unfair_lock_t.allocate(capacity: 1)
         unsafe poolLock.initialize(to: os_unfair_lock())
         let pools = UnsafeMutablePointer<Pools>.allocate(capacity: 1)
-        unsafe pools.initialize(to: Pools(blockCount: heap.blockCount, softLimit: config.heapBytes / BlockHeap.blockBytes))
+        unsafe pools.initialize(to: Pools(blockCount: heap.blockCount, softLimit: config.heapBytes / BlockHeap.blockBytes,
+                                          hardLimit: (config.heapBytes + config.reserveBytes) / BlockHeap.blockBytes))
         let gc = UnsafeMutablePointer<CollectorState>.allocate(capacity: 1)
         unsafe gc.initialize(to: CollectorState())
         let fin = UnsafeMutablePointer<RawArray<UInt64>>.allocate(capacity: 1)
@@ -399,6 +405,19 @@ extension ObjectMemory: @unchecked Sendable {}
     var softLimitBlocks: Int
     /// Promotion refills that found no block (the reserve was too small).
     var reserveExhausted: UInt64 = 0
+    /// Module 10: blocks a promotion may hold (the soft limit and the
+    /// promotion reserve); the rest of the reservation is the final
+    /// collection's growth, taken only while `endGrowth` is set.
+    var hardLimitBlocks: Int
+    /// Module 10: the VM's final collection runs: promotion may take every
+    /// block of the reservation.
+    var endGrowth = false
+    /// Module 10: large objects (runs) allocated and their bytes, runs
+    /// freed, and large requests that found no run.
+    var largeAllocations: UInt64 = 0
+    var largeBytes: UInt64 = 0
+    var runsFreed: UInt64 = 0
+    var largeFailures: UInt64 = 0
     /// Module 7 under the reserve's rule: blocks promised to young
     /// collections in flight (`reservePromotion`).
     var promotionReserved = 0
@@ -409,10 +428,11 @@ extension ObjectMemory: @unchecked Sendable {}
     var blockStamps: UnsafeMutablePointer<UInt32>
     var stampNow: UInt32 = 0
 
-    init(blockCount: Int, softLimit: Int) {
+    init(blockCount: Int, softLimit: Int, hardLimit: Int) {
         unsafe blockStamps = .allocate(capacity: blockCount)
         unsafe blockStamps.initialize(repeating: 0, count: blockCount)
         softLimitBlocks = Swift.min(softLimit, blockCount)
+        hardLimitBlocks = Swift.min(Swift.max(hardLimit, softLimitBlocks), blockCount)
         var b = blockCount - 1
         while b >= 0 { freeBlocks.append(UInt32(b)); b -= 1 }
     }

@@ -23,7 +23,7 @@ import Testing
         let img = try Image.load(image: sealed)
         #expect(img.isRelease)
         // sealing survives a load and a save, and nothing clears it
-        let again = img.saveImage()
+        let again = try img.saveImage()
         img.destroy()
         #expect(Headless.isReleaseImage(again) == true)
         let (sr, slines) = runKernelTests(sealed, ["--filter", "LiveCompileTest>>testTheReleaseFlag"])
