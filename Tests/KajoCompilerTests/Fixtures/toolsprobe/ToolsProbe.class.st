@@ -227,3 +227,14 @@ ToolsProbe class >> remoteProcess [
 ToolsProbe class >> remoteReconnects [
 	^ self remote reconnects
 ]
+
+{ #category : #remote }
+ToolsProbe class >> pair: aTarget [
+	"Module 9d: ask the host for aTarget's token in its own secure field; the token never comes here. Answers whether the host held one already."
+	^ ClientTransport pair: aTarget
+]
+
+{ #category : #remote }
+ToolsProbe class >> holdsTokenFor: anAddress [
+	^ ClientTransport targets anySatisfy: [:t | (t at: 2) = anAddress and: [t at: 3]]
+]

@@ -57,6 +57,21 @@ final class FlippedView: NSView {
     /// Module 9d: the Mac serving over TCP shows how to pair in its status
     /// line (its token is shown there as 9b's socket's is); no button.
     var onNewToken: (() -> Void)?
+
+    /// Module 9d: a target's pairing token, typed into a secure field of
+    /// the shell's own (it goes to the client transport, never the image).
+    func askSecret(_ prompt: String, _ done: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Pair a target"
+        alert.informativeText = prompt
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Pair")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        let answer = alert.runModal()
+        done(answer == .alertFirstButtonReturn ? field.stringValue : nil)
+    }
     func showPairing(_ info: PairingInfo?) {
         guard let i = info else { return }
         showStatus("serving tcp \(i.name) port \(i.port) \(i.addresses.joined(separator: " ")) token \(i.token) \(i.status)")

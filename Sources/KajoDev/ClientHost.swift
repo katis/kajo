@@ -11,10 +11,13 @@ import KajoVM
 //   targets                         the known targets, one "name<TAB>path<TAB>token?" line each
 //                                   (token? is 1 when the host holds one; the token itself never
 //                                   enters the image)
-//   connect  path client package token project
+//   connect  target client package project
 //                                   a new connection (its handle at once); the connect and the
-//                                   session.open (with the token given, else the one the host
-//                                   holds for the path) happen on a thread of its own
+//                                   session.open (with the token the host holds for the target)
+//                                   happen on a thread of its own
+//   pairing  target                 (module 9d) the host asks the developer for the target's token
+//                                   in a secure field of its own and keeps it; answers whether it
+//                                   holds one now, and posts a `targets` event once answered
 //   send     conn line              one request line, written in order on the connection's queue
 //   close    conn
 //   timer    ms token               a `timer` event (target: token) after ms milliseconds
@@ -35,8 +38,10 @@ import KajoVM
 // `_kajo-dev._tcp` services a Bonjour browser sees (`startBrowsing`), and a
 // change of that list is a `targets` event. The host keeps every token:
 // those of `~/.kajo/targets` (whose lines may name any address form), its
-// own transport's, and one the developer typed (remembered for the
-// address, so a reconnect needs no second typing; never handed back).
+// own transport's, and one the developer typed into the host's own secure
+// field (`pairing`: the owner's decision of 2026-11-05, no token passes
+// through the image, not even a typed one), kept in memory for the
+// target's address.
 
 public final class ClientHost: @unchecked Sendable, CustomReflectable {
     /// Reflection never shows the tokens the host holds.
@@ -63,7 +68,22 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     private var connections: [Int: ClientConnection] = [:]  // under lock
     private var next = 1  // under lock
     private var closedAll = false  // under lock
-    private var typedTokens: [String: String] = [:]  // under lock: address -> a token given at connect
+    private var typedTokens: [String: String] = [:]  // under lock: address -> a token typed into the host's secure field
+    private var prompt: (@Sendable (String, @escaping @Sendable (String?) -> Void) -> Void)?  // under lock
+
+    /// Module 9d: how the host asks for a target's token (the shell's
+    /// secure text field; a test's fake): the prompt's text and where the
+    /// answer goes (nil: cancelled). Never the image's.
+    public func setSecretPrompt(_ p: @escaping @Sendable (String, @escaping @Sendable (String?) -> Void) -> Void) {
+        lock.lock()
+        prompt = p
+        lock.unlock()
+    }
+
+    /// A pairing token as a person types it: letters and digits, 1 to 128.
+    static func isToken(_ t: String) -> Bool {
+        !t.isEmpty && t.utf8.count <= 128 && t.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }
+    }
     private var browser: BonjourBrowser?  // under lock
     /// Lines received and malformed lines (for tests).
     private var lines = 0  // under lock
@@ -223,18 +243,14 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
             let lines = all.map { "\($0.name)\t\($0.path)\t\($0.token == nil && typed[$0.path] == nil ? 0 : 1)" }
             return .string(lines.joined(separator: "\n"))
         case "connect":
-            guard a.count == 5, let named = a[0].string, let client = a[1].string,
-                  let (address, held) = resolve(named) else { return nil }
-            let package = a[2].string, project = a[4].string
-            let token = a[3].string ?? held
+            guard a.count == 4, let named = a[0].string, let client = a[1].string,
+                  let (address, token) = resolve(named) else { return nil }
+            let package = a[2].string, project = a[3].string
             lock.lock()
             if closedAll {
                 lock.unlock()
                 return nil
             }
-            // A token typed by hand is kept for the address (in memory):
-            // a reconnect after a dropped link opens the session with it.
-            if let typed = a[3].string { typedTokens[address.description] = typed }
             let id = next
             next += 1
             let c = ClientConnection(id: id, address: address, project: project)
@@ -244,6 +260,21 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
             t.name = "kajo-client-\(id)"
             t.start()
             return .int(Int64(id))
+        case "pairing":
+            guard a.count == 1, let named = a[0].string, let (address, held) = resolve(named) else { return nil }
+            lock.lock()
+            let p = prompt
+            lock.unlock()
+            guard let p else { return nil }
+            let key = address.description
+            p("The pairing token \(named) shows") { [weak self] typed in
+                guard let self, let t = typed?.trimmingCharacters(in: .whitespaces), ClientHost.isToken(t) else { return }
+                self.lock.lock()
+                self.typedTokens[key] = t
+                self.lock.unlock()
+                self.post(ShellEvent(kind: .targets, value: .string(named), timeNs: ShellVM.now()))
+            }
+            return .bool(held != nil)
         case "send":
             guard a.count == 1, let line = a[0].string, !line.utf8.contains(10), let c = connection(call.handle) else { return nil }
             return .bool(c.send(Array(line.utf8)))

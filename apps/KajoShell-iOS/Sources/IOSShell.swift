@@ -119,6 +119,16 @@ import UIKit
 
     @objc func newToken() { onNewToken?() }
 
+    /// Module 9d: a secret in a secure field of the shell's own (the iOS
+    /// shell does not pair with targets itself; this is the platform's half).
+    func askSecret(_ prompt: String, _ done: @escaping (String?) -> Void) {
+        let a = UIAlertController(title: "Pair a target", message: prompt, preferredStyle: .alert)
+        a.addTextField { $0.isSecureTextEntry = true }
+        a.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in done(nil) })
+        a.addAction(UIAlertAction(title: "Pair", style: .default) { [weak a] _ in done(a?.textFields?.first?.text) })
+        root.window?.rootViewController?.present(a, animated: true)
+    }
+
     func startDisplayLink(_ tick: @escaping @MainActor (Double, Double) -> Void) {
         tickHandler = tick
         let l = CADisplayLink(target: self, selector: #selector(frame(_:)))

@@ -161,7 +161,7 @@ final class TestClock: Sendable {
         defer { unlink(file) }
         FileManager.default.createFile(atPath: file, contents: Data("# a phone\n\(name)\tbonjour:\(name)\t\(t.target.server.token)\n".utf8))
         #expect(host.readTargetsFile(file) == 1)
-        let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(name), .string("developer"), .nil, .nil, .nil]))?.int)
+        let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(name), .string("developer"), .nil, .nil]))?.int)
         let end2 = ShellVM.now() + 60_000_000_000
         while ShellVM.now() < end2 && !events.withLock({ $0.contains { ($0.kind == .line || $0.kind == .lost) && $0.target == Int(conn) } }) { usleep(2000) }
         let reply = events.withLock { $0.first { ($0.kind == .line || $0.kind == .lost) && $0.target == Int(conn) } }?.value.string ?? ""
@@ -199,6 +199,33 @@ final class TestClock: Sendable {
         #expect(TXTRecord.decode([3, 97, 98, 99, 4, 107, 61, 1, 2]).isEmpty)
         #expect(TXTRecord.decode([34] + Array(repeating: 97, count: 33) + [61]).isEmpty)
         #expect(TXTRecord.decode([5, 107, 61, 0xFF, 0xFE, 0x41]).isEmpty)
+    }
+
+    @Test func aTokenIsPairedInTheHostNeverInTheImage() throws {
+        // The owner's rule (2026-11-05): no token passes through the image,
+        // not even a typed one. The tools ask the host to pair a target; the
+        // host's secure field (here a fake that types the token the target
+        // shows) keeps it; the tools then connect with it, by name.
+        let remote = try TCPTarget()
+        defer { remote.close() }
+        let t = try LocalTools()
+        defer { t.close() }
+        let token = remote.target.server.token
+        let asked = Mutex<[String]>([])
+        t.host.setSecretPrompt { prompt, done in
+            asked.withLock { $0.append(prompt) }
+            done(token)
+        }
+        t.host.addTarget(ClientHost.Target(name: "phone", path: remote.address, token: nil))
+        #expect(try t.probe("holdsTokenFor:", [.string(remote.address)]) == .bool(false))
+        #expect(try t.probe("pair:", [.string("phone")]) == .bool(false))
+        #expect(t.until("holdsTokenFor:", [.string(remote.address)]))
+        #expect(asked.withLock { $0.count } == 1 && !asked.withLock { $0[0] }.contains(token))
+        #expect(try t.probe("openRemote:", [.string("phone")]) == .bool(true))
+        #expect(t.until("remoteReady"))
+        // A connect never takes a token from the image: primitive 164's
+        // connect has four arguments, none of them a token.
+        #expect(t.host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string("phone"), .string("developer"), .nil, .string(token), .nil])) == nil)
     }
 
     @Test func theToolsReconnectAfterADroppedLink() throws {

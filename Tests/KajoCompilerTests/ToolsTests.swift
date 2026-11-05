@@ -213,7 +213,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         host.addTarget(ClientHost.Target(name: "bad", path: path, token: "t"))
         let listener = try FakeTarget(path: path, lines: ["{\"v\":1,\"kind\":", "[1,2]", "\u{1}", "{\"v\":1,\"kind\":\"transcript\",\"text\":\"ok\"}"])
         defer { listener.stop() }
-        let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path), .string("developer"), .nil, .nil, .nil]))?.int)
+        let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path), .string("developer"), .nil, .nil]))?.int)
         let end = ShellVM.now() + 30_000_000_000
         while ShellVM.now() < end && !events.withLock({ $0.contains { $0.kind == .lost } }) { usleep(2000) }
         let got = events.withLock { $0 }
@@ -230,7 +230,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         #expect(host.callback(ViewCall(op: "send", handle: Int(conn), arguments: [.string("{}\n{}")])) == nil)
         #expect(host.callback(ViewCall(op: "send", handle: 9999, arguments: [.string("{}")])) == nil)
         // no token known: the connection ends at once
-        let c2 = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path + "x"), .string("developer"), .nil, .nil, .nil]))?.int)
+        let c2 = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path + "x"), .string("developer"), .nil, .nil]))?.int)
         while ShellVM.now() < end && !events.withLock({ $0.contains { $0.kind == .lost && $0.target == Int(c2) } }) { usleep(2000) }
         #expect(events.withLock { $0.last?.value.string?.contains("no token") == true })
         host.closeAll()

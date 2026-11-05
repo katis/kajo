@@ -26,18 +26,18 @@ DevTools class >> clients [
 ]
 
 { #category : #clients }
-DevTools class >> connect: aPath name: aName token: aTokenOrNil [
-	"A client of a target, opening its session as the developer in package Tools when it is the local target; its stops open debuggers, its transcript joins the transcript's."
-	^ self connect: aPath name: aName token: aTokenOrNil project: (aName = 'local' ifTrue: [project] ifFalse: [nil])
+DevTools class >> connect: aPath name: aName [
+	"A client of a target, opening its session as the developer in package Tools when it is the local target (with the token the host holds); its stops open debuggers, its transcript joins the transcript's."
+	^ self connect: aPath name: aName project: (aName = 'local' ifTrue: [project] ifFalse: [nil])
 ]
 
 { #category : #clients }
-DevTools class >> connect: aTarget name: aName token: aTokenOrNil project: aDirectoryOrNil [
+DevTools class >> connect: aTarget name: aName project: aDirectoryOrNil [
 	"A client of aTarget (a socket path, an address, or a target's name: module 9d's phone), the changes it makes written into aDirectoryOrNil."
 	| c |
 	(self clientNamed: aName) ifNotNil: [:old | old isOpen ifTrue: [^ old]].
 	c := DevClient connect: aTarget name: aName client: 'developer' package: (aName = 'local' ifTrue: ['Tools'] ifFalse: [nil])
-		token: aTokenOrNil project: aDirectoryOrNil.
+		project: aDirectoryOrNil.
 	c isNil ifTrue: [^ nil].
 	self register: c.
 	^ c
@@ -153,7 +153,7 @@ DevTools class >> openLocal: aSocketPath project: aDirectoryOrNil [
 	| c |
 	project := aDirectoryOrNil.
 	UIEventLoop start.
-	c := self connect: aSocketPath name: 'local' token: nil.
+	c := self connect: aSocketPath name: 'local'.
 	c isNil ifTrue: [^ nil].
 	self installMenu.
 	self openTranscript.
@@ -168,7 +168,7 @@ DevTools class >> openTarget: aTarget name: aName project: aDirectoryOrNil [
 	| c |
 	project := aDirectoryOrNil.
 	UIEventLoop start.
-	c := self connect: aTarget name: aName token: nil project: aDirectoryOrNil.
+	c := self connect: aTarget name: aName project: aDirectoryOrNil.
 	c isNil ifTrue: [^ nil].
 	self installMenu.
 	self openTranscript.
@@ -181,7 +181,7 @@ DevTools class >> openTarget: aTarget name: aName project: aDirectoryOrNil [
 DevTools class >> openTargets [
 	| m |
 	m := TargetPickerModel new.
-	m connectAction: [:name :path :token | self connect: path name: name token: token].
+	m connectAction: [:name :path | self connect: path name: name].
 	(TargetPickerWindow on: m) open.
 	m refresh.
 	targetsWatched == true ifFalse: [

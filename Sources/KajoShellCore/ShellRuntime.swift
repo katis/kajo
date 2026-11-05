@@ -33,6 +33,11 @@ import Synchronization
     /// hides it), and the action of the "new token" button.
     func showPairing(_ info: PairingInfo?)
     var onNewToken: (() -> Void)? { get set }
+    /// Module 9d: ask the developer for a secret (a target's pairing token,
+    /// read off the phone's screen) in a secure text field of the
+    /// platform's own; `done` gets the text, or nil when cancelled. The
+    /// text goes to the client transport, never to the image.
+    func askSecret(_ prompt: String, _ done: @escaping (String?) -> Void)
 }
 
 /// Where a turn came from.
@@ -104,9 +109,19 @@ final class RuntimeLink: @unchecked Sendable {
         vm = try ShellVM(imageAt: imagePath, options: options, callbacks: ShellRuntime.callbacks(link))
         let shell = vm
         link.client.setSink { e in shell.post(e) }
+        link.client.setSecretPrompt(ShellRuntime.secretPrompt(link))
         Telemetry.noteImage(release: vm.isReleaseImage)
         link.runtime = self
         platform.eventHandler = { [weak self] e in self?.deliver(e) }
+    }
+
+    /// The host's secure field for a pairing token (module 9d), built
+    /// outside main-actor context: the platform asks on the main thread, after
+    /// the turn that asked has ended.
+    nonisolated static func secretPrompt(_ link: RuntimeLink) -> @Sendable (String, @escaping @Sendable (String?) -> Void) -> Void {
+        { prompt, done in
+            DispatchQueue.main.async { MainActor.assumeIsolated { link.runtime?.platform.askSecret(prompt) { done($0) } } }
+        }
     }
 
     /// The callbacks, built outside main-actor context (AGENTS.md).

@@ -490,7 +490,7 @@ DevClient >> lineFor: aKind id: anId args: aJsonObject [
 { #category : #sending }
 DevClient >> openConnection [
 	"A new connection to the same target (tests give their own): its handle, or nil."
-	^ ClientTransport connect: path client: clientName package: package token: nil project: project
+	^ ClientTransport connect: path client: clientName package: package project: project
 ]
 
 { #category : #sending }
@@ -531,11 +531,11 @@ DevClient class >> at: aConnection [
 ]
 
 { #category : #connections }
-DevClient class >> connect: aPath name: aName client: aClient package: aPackageOrNil token: aTokenOrNil project: aDirectoryOrNil [
-	"A client of the target at aPath (its socket), opening its session as aClient with the token the host holds (or aTokenOrNil); changes go to aPackageOrNil and their files into aDirectoryOrNil. The client is #connecting until its session is open (the event connection.open). nil when the image has no transport host."
+DevClient class >> connect: aPath name: aName client: aClient package: aPackageOrNil project: aDirectoryOrNil [
+	"A client of the target at aPath (its socket, address or name), opening its session as aClient with the token the host holds (the image never holds one); changes go to aPackageOrNil and their files into aDirectoryOrNil. The client is #connecting until its session is open (the event connection.open). nil when the image has no transport host."
 	| h c |
 	self install.
-	h := ClientTransport connect: aPath client: aClient package: aPackageOrNil token: aTokenOrNil project: aDirectoryOrNil.
+	h := ClientTransport connect: aPath client: aClient package: aPackageOrNil project: aDirectoryOrNil.
 	h isNil ifTrue: [^ nil].
 	c := self new setName: aName path: aPath connection: h.
 	c setClient: aClient package: aPackageOrNil project: aDirectoryOrNil.
