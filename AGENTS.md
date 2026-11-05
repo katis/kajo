@@ -281,7 +281,12 @@ Safety:
    0011) is a trust boundary of the same kind: every request is parsed and
    checked in the target, a malformed request is a reply, a release image
    does not serve, and the pairing token is never written to a file. The
-   primitive is the trust boundary, not the compiler.
+   image's client side (9c, primitive 164, `KajoDev.ClientHost`) is the
+   same boundary from the other side: the host owns the sockets and the
+   token never enters the image, the image sees five transport operations
+   (targets, connect, send, close, timer), every received line is checked
+   and a bad one is a `client.error` event, never a trap. The primitive is
+   the trust boundary, not the compiler.
  - A stress mode that preempts at every poll livelocks: a Process preempted
    at a send is resumed at that send and preempted again. Every slice must
    execute at least one instruction; the stress flag lets the first poll of
@@ -619,6 +624,24 @@ Safety:
  - Closing one escape, look beside it for the same shape. The read
    primitive followed a link in the last path component; the write's
    temporary file, opened with `O_TRUNC` next to it, followed one too.
+ - A limit no input has reached is a limit no test has reached. No object
+   passes one 32 KiB heap block, so the kernel's growable collections
+   capped at 2048 elements and a protocol reply over a block could not be
+   written; nothing noticed until 9c built an image of 2000 classes.
+   `LargeArray` behind the collections, a merge sort in place of the
+   insertion sort that cost 5.3 s for 5000 items, and JSON lines carried
+   in pieces both ways answer it in the kernel; a large-object space in
+   the VM is an open question. When a module's first big input is its
+   gate, build the big input first.
+ - A counter bumped after its lock is let go is read with a bounded wait,
+   never once. The Process tests read `terminations` the instant the last
+   Process read as terminated; the count landed after, a race as old as
+   module 3 that 9c's release gate was the first to lose.
+ - A measurement on an idle machine is not the easy case. Typing missed
+   up to 170 frames of 1258 idle and 1 to 18 under the storm load, with
+   the VM's longest turn 13 to 15 ms either way; the misses are not the
+   VM's and are not explained yet. Measure idle and loaded both, and do
+   not take the loaded number as the worst.
 
 ## Verification
 
@@ -747,6 +770,32 @@ the CLI gains `eval`, `compile`, `browse`, `debug`, `test --target` and
 classes are freed into class-table holes by `Smalltalk garbageCollect`
 (image version 4); the Mac shell kept 1200 of 1200 frames while its event
 loop's Process sat stopped for 10 s; a libFuzzer target for requests;
+its five open questions await the owner; the developer UI built in
+module 9c, `docs/modules/developer-ui.md`, as a Smalltalk package `tools/`
+(27 classes: `DevClient`, a model and a window each for the browser,
+workspace, inspector, debugger, test runner, transcript and target picker,
+tested against a fake client) compiled into a development image by `kajo
+build-image --with tools` (`just dev-image`, `just tools`; ADR 0013,
+proposed), speaking the protocol even to its own image through primitive
+164 and `KajoDev.ClientHost` (the host owns the sockets and the token,
+replies and the connection's end arrive as events on 9a's queue, timeouts
+as timer events); while the protocol serves, an error in a tool hands the
+event loop to a new Process and the stopped one opens a debugger
+(define-and-proceed tested end to end); the second round of wrappers
+(text view with selection, styles, bound keys and change events; outline,
+table, split, scroll, toolbar, menus, window frame) on AppKit, the text
+view's new features only on iOS; the tools push items to the views, the
+on-demand form is built and measured (ADR 0010's Built (9c) note); a view
+call past the turn's deadline makes the next poll check the budget
+(longest turn 40 to 13 ms); no object passes one heap block, so
+`LargeArray`, a merge sort and pieced JSON lines went into the kernel and
+an oversize request is refused with a reply; on the Mac mini's display at
+120 Hz a scripted session over 2009 classes and 22 284 methods ran in 3.7
+to 3.9 s missing 26 to 32 frames of about 450, mostly AppKit opening the
+first windows, typing under load p50 2.3 ms and p99 2.9 ms, idle p50 5.5
+ms with unexplained frame misses, `class.hierarchy` 0.33 s and
+`package.selectors` 0.7 s round trips, bench A/B within noise and
+`interpret` unchanged; the kernel has 200 SUnit tests and `tools/` 25;
 its five open questions await the owner; the stop-the-world scavenge trapped when its promotion
 reserve ran out, the ring at 600 MiB, fixed in the reserve-and-depth
 follow-up, `docs/modules/reserve-and-depth.md`: the cause was the fallback,
@@ -863,7 +912,9 @@ cover.
    `docs/modules/development-protocol.md`) the development protocol's host
    side: bounded JSON, the Unix-socket server and token, the headless
    `DevTarget`, the client, the MCP server and the CLI's development
-   commands; `Sources/KajoVM/Processes/Debugging.swift` the stop, step and
+   commands, and since 9c `ClientHost`, the image's client transport
+   (primitive 164: targets, connect, send, close, timer; the token stays in
+   the host); `Sources/KajoVM/Processes/Debugging.swift` the stop, step and
    interrupt machinery; primitives 159 to 161 carry requests and replies.
    The kernel's `DevSession` holds the requests as `<devProtocol>` methods. `scripts/`:
    `check-hot-path-arc.sh` (`just arc-check`) greps the release disassembly
@@ -875,11 +926,22 @@ cover.
    both shells with xcodebuild from clean, 0 warnings or fail; `device.sh`
    (`just device`) builds, signs, installs and runs the iOS shell on the
    attached iPhone through `devicectl`; `mac-shell.sh`, `shell-matrix.sh`
-   and `shell-report.py` run the scenario matrix and make its tables.
+   and `shell-report.py` run the scenario matrix and make its tables;
+   `canonical-tonel.sh` rewrites a package in the image's canonical form.
+ * `tools/` the developer UI (module 9c, `docs/modules/developer-ui.md`,
+   ADR 0013): 27 Tonel class files, `DevClient` over primitive 164, the
+   models and windows of the browser, workspace, inspector, debugger, test
+   runner, transcript and target picker, `FakeDevClient` and the SUnit
+   tests; compiled into a development image by `kajo build-image --with
+   tools` (`just dev-image`), opened on its own socket by `just tools`
+   (the Mac shell's `mode=dev`; `mode=devsession` runs the scripted
+   session and the typing measurement). Changes made through the tools are
+   written back here.
  * `kernel/` Smalltalk sources the image is built from (module 8b: the
    kernel of `docs/modules/kernel.md` as built in
    `docs/modules/kernel-image.md`, with its SUnit tests beside the classes;
-   152 Tonel class files since module 8e, in the canonical form the image
+   172 Tonel class files since module 9c (`LargeArray` and a merge sort
+   since 9c), in the canonical form the image
    itself writes (`Smalltalk writeTonel:`); `just build-image`, `just
    kernel-test`). The image is never committed.
    Its compiler in Smalltalk compiles every method and is compared with the
@@ -896,7 +958,9 @@ cover.
    primitives share); `kajo run --sources <dir>` and `kajo test --sources
    <dir>` open the file primitives on one directory.
    Module 9a added the view wrappers (View, Window, Label, Button, TextView,
-   Slider, UIEvent, UIEventLoop; ADR 0010).
+   Slider, UIEvent, UIEventLoop; ADR 0010); module 9c the second round
+   (TextView's selection, styles, keys and change events, OutlineView,
+   TableView, SplitView, ScrollView, Toolbar, Menu, the window frame).
  * `apps/` the shells (module 9a, built): `KajoShell-macOS` (AppKit) and
    `KajoShell-iOS` (UIKit), Xcode projects generated by xcodegen from their
    committed specs (both committed; `xcodegen` is a Homebrew install), over
