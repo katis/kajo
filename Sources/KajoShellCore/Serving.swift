@@ -62,11 +62,12 @@ public struct PairingTokenStore: Sendable, CustomReflectable {
 
 extension ShellRuntime {
     /// Serve over TCP on `port` (0: the system picks), advertised with
-    /// Bonjour unless `advertise` is false, with the token `store` keeps
+    /// Bonjour (as `serviceName`, or the device's name) unless `advertise`
+    /// is false, with the token `store` keeps
     /// (or one in memory); the pairing screen shows it. Nil in a release
     /// image (no transport opens).
     public func serveTCP(port: Int, loopbackOnly: Bool = false, advertise: Bool = true, store: PairingTokenStore?,
-                         imageName: String) throws -> ProtocolServer? {
+                         imageName: String, serviceName: String? = nil) throws -> ProtocolServer? {
         if vm.isReleaseImage { return nil }
         let shell = vm
         let token = store?.load() ?? ProtocolServer.makeToken()
@@ -84,7 +85,7 @@ extension ShellRuntime {
         guard startServing(server) != nil else { return nil }
         if advertise {
             let txt = [("image", imageName), ("protocol", "1"), ("kernel", KajoVM.version)]
-            let a = try? BonjourAdvertiser(name: nil, port: server.port ?? 0, txt: txt, loopbackOnly: loopbackOnly) { name, error in
+            let a = try? BonjourAdvertiser(name: serviceName, port: server.port ?? 0, txt: txt, loopbackOnly: loopbackOnly) { name, error in
                 pairing.update { $0.name = name ?? "(Bonjour: error \(error))" }
                 show()
             }

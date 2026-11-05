@@ -37,6 +37,7 @@ DevClientTest >> testADroppedLinkReconnectsAndSendsAgainWhatMayBe [
 	self assert: (c sent last: 2) first first equals: 'class.list'.
 	c answer: listId with: #('Object').
 	self assert: got equals: #('Object').
+	self assert: c latencies last first equals: 'class.list (retried)'.
 	self assert: c outages size equals: 1.
 	self assert: c backoffMs equals: 1000
 ]

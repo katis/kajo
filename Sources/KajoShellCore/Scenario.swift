@@ -126,7 +126,8 @@ import KajoVM
         }
         if let port = servePort {
             do {
-                tcpServer = try runtime.serveTCP(port: port, store: pairingTokenStore(options), imageName: "shell.img")
+                tcpServer = try runtime.serveTCP(port: port, store: pairingTokenStore(options), imageName: "shell.img",
+                                                 serviceName: options["bonjour"])
             } catch {
                 Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=protocol_\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
                 finish(2)

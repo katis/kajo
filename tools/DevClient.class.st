@@ -25,7 +25,8 @@ Class {
 		'reconnectTimer',
 		'lostAt',
 		'outages',
-		'retried'
+		'retried',
+		'retriedIds'
 	],
 	#classInstVars : [
 		'connections',
@@ -58,7 +59,7 @@ DevClient >> isOpen [
 
 { #category : #accessing }
 DevClient >> latencies [
-	"{kind. microseconds} of every reply, from the send to its dispatch in the event loop."
+	"{kind. microseconds} of every reply, from the send to its dispatch in the event loop ('kind (retried)' for a request sent again after a dropped link, counted from its first send)."
 	^ latencies
 ]
 
@@ -154,7 +155,8 @@ DevClient >> initialize [
 	reconnects := 0.
 	retried := 0.
 	backoffMs := 1000.
-	outages := OrderedCollection new
+	outages := OrderedCollection new.
+	retriedIds := Set new
 ]
 
 { #category : #initialization }
@@ -239,7 +241,9 @@ DevClient >> receive: aJsonObject [
 		^ self emit: 'connection.refused' with: (aJsonObject at: 'error')].
 	entry := pending removeKey: id ifAbsent: [^ nil].
 	(entry at: 5) ifNotNil: [:t | UIEventLoop cancelTimer: t].
-	latencies add: {entry at: 1. Smalltalk microsecondClock - (entry at: 2)}.
+	"A request sent again after a dropped link is kept apart: its round trip counts from its first send, the outage included."
+	latencies add: {(retriedIds remove: id ifAbsent: [nil]) isNil ifTrue: [entry at: 1] ifFalse: [(entry at: 1) , ' (retried)'].
+		Smalltalk microsecondClock - (entry at: 2)}.
 	(aJsonObject at: 'ok') == true
 		ifTrue: [(entry at: 3) ifNotNil: [:b | b cull: (aJsonObject at: 'result')]]
 		ifFalse: [self fail: entry with: ((aJsonObject at: 'error') ifNil: ['an error without a message'])]
@@ -288,6 +292,7 @@ DevClient >> reopened [
 		(state == #open and: [pending includesKey: id]) ifTrue: [ | e |
 			e := pending at: id.
 			retried := retried + 1.
+			retriedIds add: id.
 			self transmit: (e at: 6) kind: (e at: 1) id: id args: nil]]
 ]
 
