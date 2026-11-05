@@ -339,7 +339,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
         let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
-        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks : 256,
+        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2 : 256,
                            reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
                            configure: { c in
                                // Programs allocate tens of KiB: 512 KiB
@@ -404,9 +404,11 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
 
 /// The exhausted-reserve configurations' whole heap (the image takes one
 /// block): every program's live data fits, its garbage does not.
-/// Module 10: plus two per task (`runtime`), since each task may hold a
-/// large Array (a run of two blocks) at once in its large-object step;
-/// their garbage still does not fit.
+/// Module 10: plus two per task and two more (`runtime`), since each task
+/// may hold a large Array (a run of two blocks) at once in its large-object
+/// step and a run needs two free blocks side by side (the gate's soak saw
+/// one seed in 1000 find none with two per task only); their garbage still
+/// does not fit.
 let exhaustedHeapBlocks = Int(ProcessInfo.processInfo.environment["KAJO_EXHAUSTED_BLOCKS"] ?? "") ?? 3
 
 /// Even tasks forked with main affinity (`offloadCollection`): the main
