@@ -8,13 +8,13 @@ import Testing
 
 /// A memory with `blocks` blocks, recording verifier failures, with one
 /// reader's run rule switched off when `blind` is given.
-private func largeMemory(blocks: Int = 256, blind: RunReader? = nil, reserveBlocks: Int = 0) throws -> ObjectMemory {
+private func largeMemory(blocks: Int = 256, blind: RunReader? = nil, reserveBlocks: Int = 0, verify: Bool = true) throws -> ObjectMemory {
     var c = ObjectMemoryConfig()
     c.heapBytes = blocks * BlockHeap.blockBytes
     c.reserveBytes = reserveBlocks * BlockHeap.blockBytes
     c.entryCapacity = 1 << 16
     c.entryChunk = 256
-    c.verify = true
+    c.verify = verify
     c.onVerifyFailure = .record
     c.testSwitches.runBlind = blind
     return try ObjectMemory(c)
@@ -398,7 +398,10 @@ private func summary(_ xs: [UInt64]) -> String {
 /// case: printed, asserted only on the work (AGENTS.md).
 @Test func largeObjectMeasurements() throws {
     guard ProcessInfo.processInfo.environment["KAJO_MEASURE_LARGE"] != nil else { return }
-    let om = try largeMemory(blocks: 8192) // 256 MiB
+    // The verifiers off: they walk every slot of every used entry at each
+    // pause, a dead large object's too (on, the collection freeing a 16 MiB
+    // Array took 2 ms, all of it the verifier's).
+    let om = try largeMemory(blocks: 8192, verify: false) // 256 MiB
     defer { om.destroy() }
     let w = World(om)
     for (label, count, bytes) in [("1 MiB Array (131 071 slots)", 131_071, false), ("16 MiB ByteArray", Header.maxLargeCount, true),

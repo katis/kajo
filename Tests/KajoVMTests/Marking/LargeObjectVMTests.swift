@@ -1,3 +1,4 @@
+import Foundation
 // Module 10: large objects in a running VM (docs/modules/large-objects.md):
 // allocated old from Smalltalk past a nursery, kept and freed whole by the
 // concurrent marking cycle's lazy sweep, never selected by the relocator,
@@ -177,4 +178,35 @@ private func relocationScenario(_ blind: RunReader?) throws -> (selectedRun: Boo
     #expect(rt.runInt("lastOf:", 8) == 1_000_007)
     rt.noFailures()
     rt.stop()
+}
+
+/// Measurement (KAJO_MEASURE_LARGE=1, release): the marker over a 1M-slot
+/// Array, traced four chunks at a time (128 units, one poll interval):
+/// the longest stretch between two polls, and the whole Array's time.
+@Test func markingAMillionSlotArrayMeasured() throws {
+    guard ProcessInfo.processInfo.environment["KAJO_MEASURE_LARGE"] != nil else { return }
+    for round in 0..<5 {
+        let rt = try largeRuntime()
+        #expect(rt.runInt("mkLarge:at:", args: [int(1_000_000), int(8)]) == 0)
+        rt.scavenge()
+        rt.vm.startCycle()
+        var steps: [UInt64] = []
+        var total: UInt64 = 0
+        while steps.count < 100_000 {
+            let t = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
+            let done = rt.vm.markStepDone(4)
+            let d = clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t
+            steps.append(d)
+            total += d
+            if done { break }
+        }
+        rt.vm.finalMark()
+        let s = steps.sorted()
+        print("marking 1M-slot Array round \(round): \(steps.count) steps of 4 items, longest \(String(format: "%.3f", Double(s.last ?? 0) / 1e6)) ms, "
+              + "p50 \(String(format: "%.3f", Double(s[s.count / 2]) / 1e6)) ms, total \(String(format: "%.2f", Double(total) / 1e6)) ms, chunks \(rt.vm.markingCounters.chunksSplit)")
+        rt.vm.sweep()
+        rt.scavenge()
+        rt.noFailures()
+        rt.stop()
+    }
 }

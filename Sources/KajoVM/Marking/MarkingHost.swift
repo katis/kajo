@@ -166,6 +166,18 @@ extension VM {
         return n
     }
 
+    /// Manual mode: trace up to `objects` items (objects, or chunks of a
+    /// large one) on this thread as the marker; true when the marker's work
+    /// ran out (module 10's measurement).
+    func markStepDone(_ objects: Int) -> Bool {
+        let mk = unsafe manualMarker()
+        let mw = unsafe mk.pointee.markerWorker
+        unsafe enterVM(state, mw)
+        let outcome = unsafe markSome(state, mk, limit: objects)
+        unsafe leaveVM(state, mw)
+        return outcome == .done
+    }
+
     /// Manual mode: the final mark, requested as the marker would.
     func finalMark() {
         let mk = unsafe manualMarker()
