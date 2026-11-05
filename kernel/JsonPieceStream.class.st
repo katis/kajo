@@ -1,4 +1,4 @@
-"Where Json class>>writePieces: writes (module 9c): bytes into ByteArrays of 16 KiB, a new one when the last is full, so the text of a value may be longer than one object can be."
+"Where Json class>>writePieces: writes (module 9c): bytes into ByteArrays of 16 KiB, a new one when the last is full, for the transport, which writes a long line in pieces (module 10 lets Json class>>write: answer one ByteArray of any size)."
 Class {
 	#name : #JsonPieceStream,
 	#superclass : #Object,

@@ -165,7 +165,12 @@ Behavior >> basicNew [
 
 { #category : #'instance creation' }
 Behavior >> basicNew: size [
+	"Module 10: past 4095 slots (32 760 bytes) the instance is a large object, old at birth; the count field holds at most 16777215 slots or bytes."
 	<primitive: 3>
+	(size isInteger and: [size > 16777215]) ifTrue: [
+		^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots: the largest object has 16777215'].
+	(size isInteger and: [size > 4095]) ifTrue: [
+		^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots: no room in the heap for a large object of that size'].
 	^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots'
 ]
 

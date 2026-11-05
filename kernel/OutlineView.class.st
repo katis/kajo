@@ -35,7 +35,7 @@ OutlineView >> onSelect: aBlock [
 
 { #category : #items }
 OutlineView >> children: anArray of: aParentId [
-	"The children of aParentId (0: the roots) are anArray of {id. title. hasChildren} triples, replacing any it had: one view call per 1300 children (an Array argument holds at most 4095 values)."
+	"The children of aParentId (0: the roots) are anArray of {id. title. hasChildren} triples, replacing any it had: one view call per 1300 children (module 9c's batches, from when an Array held at most 4095 values)."
 	self send: 'setChildren' then: 'addChildren' head: {aParentId} triples: anArray
 ]
 

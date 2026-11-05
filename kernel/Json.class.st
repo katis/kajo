@@ -203,7 +203,7 @@ Json class >> write: anObject on: aStream depth: n [
 			aStream nextPut: 58.
 			self write: (anObject at: k) on: aStream depth: n + 1].
 		^ aStream nextPut: 125].
-	((anObject isKindOf: Array) or: [(anObject isKindOf: OrderedCollection) or: [anObject isKindOf: LargeArray]]) ifTrue: [
+	((anObject isKindOf: Array) or: [anObject isKindOf: OrderedCollection]) ifTrue: [
 		aStream nextPut: 91.
 		anObject doWithIndex: [:x :i |
 			i > 1 ifTrue: [aStream nextPut: 44].

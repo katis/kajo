@@ -1,4 +1,4 @@
-"The text of one JSON value in pieces (module 9c): no object is larger than one heap block (32 KiB), so a reply or an event longer than that is written by Json class>>writePieces: as ByteArrays of at most 16 KiB, which the host's transport joins into its one line, and a line the client's transport received is handed to the image in Strings of at most 16 KiB, which Json class>>read: reads through this: byteAt:, byteSize and copyFrom:to: across the pieces, as the reader asks a String."
+"The text of one JSON value in pieces (module 9c, when no object was larger than one heap block; module 10 keeps the pieces for the transport, though one String may now hold a line): a reply or an event longer than that is written by Json class>>writePieces: as ByteArrays of at most 16 KiB, which the host's transport joins into its one line, and a line the client's transport received is handed to the image in Strings of at most 16 KiB, which Json class>>read: reads through this: byteAt:, byteSize and copyFrom:to: across the pieces, as the reader asks a String."
 Class {
 	#name : #JsonText,
 	#superclass : #Object,

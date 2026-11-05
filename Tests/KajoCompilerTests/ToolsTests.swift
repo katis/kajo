@@ -236,17 +236,21 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         host.closeAll()
     }
 
-    @Test func aRequestTooLongForTheImageIsRefusedNotDropped() throws {
+    @Test func aRequestLongerThanOneHeapBlockReachesTheImage() throws {
         let t = try LocalTools()
         defer { t.close() }
         let c = try ProtocolClient(path: t.path)
         defer { c.close() }
         let token = t.server.token
         try c.open(token: token, client: "developer", timeout: 60)
-        let long = "^ '" + String(repeating: "x", count: 40_000) + "'"
+        // Module 10: 9c refused a request over one heap block; the image
+        // now takes it as one String (a large object).
+        let long = "^ '" + String(repeating: "x", count: 40_000) + "' byteSize"
         let r = try c.send("evaluate", [("source", .string(long))], timeout: 60)
-        #expect(r["ok"] == .bool(false))
-        #expect(r["error"]?.string?.contains("one heap block") == true)
+        #expect(r["ok"] == .bool(true))
+        #expect(r["result"]?["value"] == .string("40000"), "\(r)")
+        // Past the line limit a request is still refused with a reply.
+        #expect(RequestLimits.imageBytes == (1 << 24) - 1)
         // A reply longer than one heap block comes back whole (written in
         // pieces in the target, joined by its transport).
         let methods = try c.request("package.selectors", [("name", .string("Kernel"))], timeout: 60)

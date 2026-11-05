@@ -64,7 +64,7 @@ TableView >> rowCount: anInteger [
 
 { #category : #rows }
 TableView >> rows: anArray [
-	"Every row at once: anArray of Arrays of Strings, as many as there are columns; one view call per 4000 cells (an Array argument holds at most 4095 values)."
+	"Every row at once: anArray of Arrays of Strings, as many as there are columns; one view call per 4000 cells (module 9c's batches, from when an Array held at most 4095 values)."
 	self send: 'setRows' then: 'addRows' head: nil rows: anArray
 ]
 

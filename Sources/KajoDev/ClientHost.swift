@@ -27,8 +27,9 @@ import KajoVM
 // the writer makes of it (a `line` event, target the connection); a line
 // that is not JSON is a `line` event of kind `client.error` naming why,
 // never a trap. A line longer than 16 KiB arrives in pieces (`linePart`
-// events, then the `line` with the last): no object of the image can hold
-// more than one heap block. When the connection was opened with a project directory,
+// events, then the `line` with the last): 9c's answer to objects of one
+// heap block, kept by module 10 although one String may now hold a line
+// (an open question for the owner). When the connection was opened with a project directory,
 // the `files` of every reply are written there (9b's `ProjectWriter`: file
 // names only). The end of a connection is a `lost` event.
 //

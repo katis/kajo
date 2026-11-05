@@ -54,7 +54,7 @@ HashedCollection >> postCopy [
 HashedCollection >> rehashTo: newSize [
 	| old |
 	old := array.
-	array := Array large: newSize.
+	array := Array new: newSize.
 	old do: [:e | e == nil ifFalse: [array at: (self indexFor: (self keyOf: e)) put: e]]
 ]
 
@@ -82,7 +82,7 @@ HashedCollection >> setCapacity: n [
 	| c |
 	c := 8.
 	[c * 3 < (n * 4)] whileTrue: [c := c * 2].
-	array := Array large: c.
+	array := Array new: c.
 	tally := 0
 ]
 

@@ -219,9 +219,9 @@ SequenceableCollection >> sort: aBlock [
 	n := self size.
 	1 to: n by: 8 do: [:lo | self insertionSortFrom: lo to: (lo + 7 min: n) by: aBlock].
 	n <= 8 ifTrue: [^ self].
-	src := Array large: n.
+	src := Array new: n.
 	1 to: n do: [:i | src at: i put: (self at: i)].
-	dst := Array large: n.
+	dst := Array new: n.
 	width := 8.
 	[width < n] whileTrue: [ | t |
 		1 to: n by: width * 2 do: [:lo |

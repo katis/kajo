@@ -334,11 +334,12 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
             conn.send(errorReply(id: request.id, "\(request.kind) is the transport's"))
             return true
         }
-        // Module 9c: the image takes a request as one String, which cannot
-        // pass one heap block; a longer one is refused here, not dropped.
+        // The image takes a request as one String (module 10: a large
+        // object up to 16 MiB - 1 bytes, 9c's one heap block lifted); a
+        // longer one is refused here, not dropped.
         let canonical = request.canonical
         guard canonical.count <= RequestLimits.imageBytes else {
-            conn.send(errorReply(id: request.id, "a request longer than \(RequestLimits.imageBytes) bytes: the image takes a request as one String of at most one heap block"))
+            conn.send(errorReply(id: request.id, "a request longer than \(RequestLimits.imageBytes) bytes: the image takes a request as one String"))
             return true
         }
         stats.add(\.requests)

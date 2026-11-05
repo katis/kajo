@@ -33,9 +33,3 @@ Array >> replaceFrom: start to: stop with: aCollection startingAt: from [
 	<primitive: 38>
 	^ super replaceFrom: start to: stop with: aCollection startingAt: from
 ]
-
-{ #category : #'instance creation' }
-Array class >> large: n [
-	"n nils: an Array when they fit one object (4095 slots), else a LargeArray (module 9c)."
-	^ n <= 4095 ifTrue: [self new: n] ifFalse: [LargeArray new: n]
-]

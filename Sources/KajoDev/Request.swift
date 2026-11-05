@@ -39,14 +39,17 @@ public struct RequestRefusal: Error, Sendable, CustomStringConvertible {
 }
 
 public enum RequestLimits {
-    public static let lineBytes = 1 << 20
+    /// Module 10: a request line up to what one String of the image holds
+    /// (16 MiB, the header's count field); 9b's was 1 MiB.
+    public static let lineBytes = 1 << 24
     public static let kindBytes = 64
     public static let idBytes = 256
     public static let arguments = 32
     public static let nameBytes = 64
-    /// Module 9c: what the image can take as one request: its canonical
-    /// text is one String, and no object is larger than one heap block.
-    public static let imageBytes = 32 * 1024 - 64
+    /// What the image can take as one request: its canonical text is one
+    /// String. Module 9c: one heap block (32 704 bytes); module 10: a
+    /// String is a large object up to the header's count field, 16 MiB - 1.
+    public static let imageBytes = (1 << 24) - 1
 }
 
 /// A lower-camel identifier: a lowercase ASCII letter, then letters and digits.
@@ -67,7 +70,10 @@ public func parseRequest(_ line: [UInt8]) -> Result<DevRequest, RequestRefusal> 
     }
     guard line.count <= RequestLimits.lineBytes else { return refuse("longer than \(RequestLimits.lineBytes) bytes") }
     let value: JSONValue
-    switch parseJSON(line) {
+    var limits = JSONLimits()
+    limits.bytes = RequestLimits.lineBytes
+    limits.stringBytes = RequestLimits.lineBytes
+    switch parseJSON(line, limits: limits) {
     case .success(let v): value = v
     case .failure(let e): return refuse("\(e)")
     }
