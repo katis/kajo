@@ -43,7 +43,10 @@ build() {
 # The development objects and the shell and compiler modules, by mangled
 # module name in the symbol table.
 symbols() { for m in KajoDev KajoAppDevelopment KajoCompiler KajoShellCore; do print -n "$m=$(nm $1 2>/dev/null | grep -c "[0-9]$m") "; done }
-strs() { for s in _kajo-dev._tcp kajo-pairing-token DNSServiceRegister; do print -n "$s=$(strings -a $1 | grep -c -- $s) "; done }
+strs() {
+  for s in _kajo-dev._tcp kajo-pairing-token; do print -n "$s=$(strings -a $1 | grep -c -- $s) "; done
+  print -n "DNSServiceRegister=$(nm -u $1 2>/dev/null | grep -c _DNSServiceRegister) "
+}
 plistkeys() { plutil -p $1 | grep -cE "NSBonjourServices|NSLocalNetworkUsageDescription" }
 refuses() {
   local sock=$work/check-$$.sock
@@ -60,7 +63,7 @@ check() {
     [[ $sy == *"KajoDev=0 KajoAppDevelopment=0 KajoCompiler=0 KajoShellCore=0 "* && $st == "_kajo-dev._tcp=0 kajo-pairing-token=0 DNSServiceRegister=0 " && $pk == 0 && $rf == 1 ]] \
       || { print "$tag: FAILED the release checks"; fail=1; }
   else
-    [[ $sy != *"KajoDev=0 "* && $sy != *"KajoAppDevelopment=0 "* && $sy == *"KajoCompiler=0 KajoShellCore=0 "* && $pk == 2 && $rf == 0 ]] \
+    [[ $sy != *"KajoDev=0 "* && $sy != *"KajoAppDevelopment=0 "* && $sy == *"KajoCompiler=0 KajoShellCore=0 "* && $st != *"DNSServiceRegister=0 "* && $pk == 2 && $rf == 0 ]] \
       || { print "$tag: FAILED the debug checks"; fail=1; }
   fi
 }

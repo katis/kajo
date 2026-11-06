@@ -70,7 +70,7 @@ case $host in
     token_file="$HOME/Library/Application Support/dev.katajamaki.kajo.sample/kajo-pairing-token"
     gettoken() {
       [[ -s $token_file ]] || return 1
-      (umask 077; printf 'app\tbonjour:%s\t%s\n' "$1" "$(cat $token_file)" > $targets)
+      (umask 077; printf 'app\t%s\t%s\n' "$1" "$(cat $token_file)" > $targets)
     }
     ;;
   device)
@@ -89,8 +89,8 @@ case $host in
       cp $out/lines-$tag-console.log $out/console-$tag.log 2>/dev/null
     }
     gettoken() {
-      $root/scripts/device.sh token $tok/t "$1" > /dev/null || return 1
-      (umask 077; awk -F'\t' '{printf "app\t%s\t%s\n", $2, $3}' $tok/t > $targets)
+      $root/scripts/device.sh token $tok/t by-address > /dev/null || return 1
+      (umask 077; awk -F'\t' -v a="$1" '{printf "app\t%s\t%s\n", a, $3}' $tok/t > $targets)
       rm -f $tok/t
     }
     ;;
@@ -132,10 +132,22 @@ lpid=$!
 for i in {1..150}; do grep -q "^serving=tcp" $out/console-debug-live.log $out/lines-debug-live-console.log 2>/dev/null && break; sleep 0.2; done
 name=$(service "Sample on")
 note "service host=$host name=${name// /_}"
-if [[ -z $name ]]; then
-  note "FAILED host=$host step=bonjour (no Sample service seen: the local-network prompt on the device waits for the owner?)"
+addr=""
+if [[ -n $name ]]; then
+  addr="bonjour:$name"
 else
-  gettoken "$name" || note "FAILED host=$host step=token"
+  # No advertisement seen (on a device, iOS's local-network prompt waits
+  # for the owner): by the address on this Mac's network, from the console.
+  note "FAILED host=$host step=bonjour (no Sample service seen; trying the address)"
+  mine=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1)
+  line=$(grep -h "^serving=tcp" $out/console-debug-live.log $out/lines-debug-live-console.log 2>/dev/null | head -1)
+  port=$(print -r -- $line | sed -n 's/.*port=\([0-9]*\).*/\1/p')
+  ip=$(print -r -- $line | sed -n 's/.*addresses=\([^ ]*\).*/\1/p' | tr ',' '\n' | grep -F "${mine%.*}." | head -1)
+  [[ -n $ip && -n $port ]] && addr="tcp://$ip:$port"
+  note "address host=$host addr=$addr"
+fi
+if [[ -n $addr ]]; then
+  gettoken "$addr" || note "FAILED host=$host step=token"
   for k in 1 2 3 4 5; do
     t0=$(now)
     v=$(gtimeout 30 $kajo eval --target app 'SampleApp labelText' 2>&1)
@@ -159,7 +171,8 @@ else
 	\"The button's action: count the press and show the count.\"
 	presses := presses + 1.
 	label text: 'Changed by the tools: ' , presses printString" > $out/source-tools.st
-  TIMEOUT=120 $root/scripts/mac-shell.sh run $out/tools-$host.txt mode=devsession classes=0 target=app targets=$targets \
+  # The shell's own DerivedData (DD names the sample's here).
+  DD=${SHELL_DD:-${TMPDIR:-/tmp}/kajo-shell-mac} TIMEOUT=120 $root/scripts/mac-shell.sh run $out/tools-$host.txt mode=devsession classes=0 target=app targets=$targets \
     session=app package=Sample appclass=SampleApp selector=pressed source=$out/source-tools.st \
     "probe=SampleApp pressed. SampleApp labelText copyFrom: 1 to: 21" "expect=Changed by the tools:" project=$proj/src tag=$host
   tail -1 $out/tools-$host.txt | sed "s/^/tools host=$host /" >> $res

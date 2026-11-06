@@ -123,6 +123,7 @@ import UIKit
     var start = 0.0
     var base = ServerStats.Values()
     let nominal: Double
+    var activity: NSObjectProtocol?
 
     init(seconds: Double, server: ProtocolServer) {
         self.seconds = seconds
@@ -134,6 +135,11 @@ import UIKit
         #endif
         super.init()
         #if os(macOS)
+        // The window is measured as a developer would see it: the display
+        // stays on and App Nap does not throttle the app's display link
+        // while another app (the tools) is in front of it.
+        activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical],
+                                                         reason: "Kajo frame measurement")
         AppKitHost.wakeDisplay()
         guard let l = NSScreen.main?.displayLink(target: self, selector: #selector(frame(_:))) else { return }
         #else
