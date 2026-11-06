@@ -165,7 +165,12 @@ private func primInstVarAt(_ m: Machine, _ c: PrimitiveCall, put: Bool) -> Oop {
           !m.om.isSealed(m.classIndex(of: c.receiver)), !m.om.isBytes(c.receiver) else { return .none }
     let i = c.arg0.smallIntegerValue
     guard i >= 1, i <= Int64(m.om.count(of: c.receiver)) else { return .none }
-    if !put { return m.om.load(c.receiver, Int(i - 1)) }
+    if !put {
+        let v = m.om.load(c.receiver, Int(i - 1))
+        // A weak slot's referent is kept alive while marking (as `at:`).
+        unsafe keepAliveRead(m.state, c.receiver, Int(i - 1), v)
+        return v
+    }
     if m.om.isReadOnly(c.receiver) { return m.refuseReadOnly(c.receiver, at: c.arg0, value: c.arg1) }
     m.store(c.receiver, Int(i - 1), c.arg1, .instVarAtPut)
     return c.arg1
@@ -187,7 +192,14 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     // Module 10: a large receiver's copy is large too (old at birth).
     let o = m.allocateAny(ci, count: n, bytes: false, keeping: c.receiver)
     if o == .none { return .none }
-    for i in 0..<n { m.store(o, i, m.om.load(c.receiver, i), .instVarAtPut) }
+    // A weak receiver's copy is weak and new, so the final mark never nils
+    // its slots: a referent read here must be kept alive while marking.
+    let weak = m.om.classFormat(ci).isWeak
+    for i in 0..<n {
+        let v = m.om.load(c.receiver, i)
+        if weak { unsafe keepAliveRead(m.state, c.receiver, i, v) }
+        m.store(o, i, v, .instVarAtPut)
+    }
     return o
 }
 

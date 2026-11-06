@@ -104,26 +104,41 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     }
     let d = unsafe hazardAcquire(vm, w, 0, rcv)
     let s = unsafe hazardAcquire(vm, w, 1, src)
-    unsafe copySlots(vm, w, om, rcv.raw, d, Int(start - 1), s, Int(from - 1), Int(n))
+    unsafe copySlots(vm, w, om, rcv.raw, d, Int(start - 1), src.raw, s, Int(from - 1), Int(n))
     unsafe hazardRelease(vm, w, 1)
     unsafe hazardRelease(vm, w, 0)
     return rcv
 }
 
-/// The copy loop under the hazard slots: `n` slots from the source body at
-/// `s` (from slot `j`) into the receiver's body at `d` (from slot `i`).
+/// The copy loop under the hazard slots: `n` slots from the source `so`'s
+/// body at `s` (from slot `j`) into the receiver's body at `d` (from slot
+/// `i`).
+///
+/// A weak source's slots are read with the keep-alive barrier while a
+/// cycle is marking (as `at:` reads them): a referent held only weakly at
+/// the snapshot and copied into an object the marker has scanned, or into
+/// a new one it never traces, would otherwise be swept under a live
+/// reference (docs/modules/collectors-review.md, finding 1). The phase
+/// cannot change inside the loop (it never polls), so it is decided once.
 @inline(never)
 func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UInt64, _ d: UInt64, _ i: Int,
-               _ s: UInt64, _ j: Int, _ n: Int) {
+               _ so: UInt64, _ s: UInt64, _ j: Int, _ n: Int) {
     let st = unsafe w.pointer(to: \Worker.interp)!
     let flags = unsafe barrierWord(vm.pointee.flag).pointee.load(ordering: .relaxed)
     let mk = unsafe vm.pointee.marking
     let young = unsafe flags > 1 ? vm.pointee.young : nil
     let ordered = unsafe young?.pointee.config.testSwitches.arrayCopyOrdering ?? true
     let ho = om.headerWord(o)
+    // Source slots from `weakFrom` on are weak and a cycle is marking.
+    var weakFrom = Int.max
+    if flags & 1 != 0, let mk = unsafe mk, unsafe mk.phaseNow == .marking && !mk.pointee.config.testSwitches.noWeakKeepAlive {
+        let f = om.classFormat(om.headerWord(so) & Header.classMask)
+        if f.isWeak { weakFrom = f.namedSlots }
+    }
     var k = 0
     while k < n {
         let v = om.loadAtomic(bodyOffset: s, j &+ k)
+        if _slowPath(j &+ k >= weakFrom) { unsafe copyKeepAlive(vm, w, om, v) }
         if flags & 1 != 0, let mk = unsafe mk {
             // The SATB record of the overwritten value (as `satbRecord`,
             // through the body this primitive holds).
@@ -160,6 +175,15 @@ func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UIn
         }
         k &+= 1
     }
+}
+
+/// The keep-alive read barrier for one slot a copy read from a weak source
+/// while marking (out of line: the copy loop pays one compare).
+@inline(never)
+private func copyKeepAlive(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ v: UInt64) {
+    guard let mk = unsafe vm.pointee.marking, v & Oop.objectTagMask == 0 else { return }
+    unsafe mk.buffer(w.pointee.index).pointee.keepAlive &+= 1
+    unsafe satbPushIfCandidate(mk, om, w, v)
 }
 
 /// The broken variant of the array copy's store (test switch): the

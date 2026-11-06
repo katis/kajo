@@ -47,7 +47,10 @@ func kernelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard c.argc == 1, c.receiver.isObject, !om.isBytes(c.receiver), c.arg0.isSmallInteger else { return .none }
         let i = c.arg0.smallIntegerValue
         guard i >= 1, i <= Int64(om.count(of: c.receiver)) else { return .none }
-        return om.load(c.receiver, Int(i - 1))
+        let v = om.load(c.receiver, Int(i - 1))
+        // A weak slot's referent is kept alive while marking (as `at:`).
+        unsafe keepAliveRead(m.state, c.receiver, Int(i - 1), v)
+        return v
     case 118:
         guard c.argc == 1, c.arg0.isSmallInteger else { return .none }
         let i = c.arg0.smallIntegerValue

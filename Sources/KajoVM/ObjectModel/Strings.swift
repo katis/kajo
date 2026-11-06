@@ -156,8 +156,15 @@ extension Machine {
             guard let size = SymbolTable.grownBucketSize(k),
                   let nb = om.allocate(ctx, classIndex: WellKnown.weakArray, slots: size, fill: nilObject, extraRoots: roots + [sym])
             else { return .none }
-            // the bucket is full (no hole), so every slot holds a Symbol
-            for x in 0..<k { store(nb, x, om.load(old, x), .symbolTable) }
+            // the bucket is full (no hole), so every slot holds a Symbol.
+            // The new bucket is not a snapshot entry, so the final mark
+            // never nils its slots: a Symbol held only by the old bucket
+            // is kept alive while marking (the keep-alive read barrier).
+            for x in 0..<k {
+                let v = om.load(old, x)
+                unsafe keepAliveRead(state, old, x, v)
+                store(nb, x, v, .symbolTable)
+            }
             store(nb, k, sym, .symbolTable)
             store(table, j, nb, .symbolTable)
         }

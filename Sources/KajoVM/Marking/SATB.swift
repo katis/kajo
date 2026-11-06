@@ -89,7 +89,21 @@ func takeBufferLocked(_ q: UnsafeMutablePointer<MarkQueue>) -> UnsafeMutablePoin
 
 // MARK: - the keep-alive read barrier on weak slots
 
-/// `at:` read `v` from slot `i` of `o` while the flag word was set. If `o`
+/// A primitive read `v` from slot `i` of `o`, an object a program could
+/// make weak, and hands it to Smalltalk or stores it elsewhere: the
+/// keep-alive read barrier when the flag word is set (one relaxed load
+/// otherwise). Every such read goes through here or through `copySlots`'
+/// own check (docs/modules/collectors-review.md, finding 1): `at:`,
+/// `instVarAt:`, `slotAt:`, `shallowCopy`, the symbol table's lookups and
+/// its bucket growth.
+@inline(__always)
+func keepAliveRead(_ s: StatePointer, _ o: Oop, _ i: Int, _ v: Oop) {
+    if unsafe barrierWord(s.pointee.safepointFlag).pointee.load(ordering: .relaxed) != 0 {
+        unsafe weakReadBarrier(s, o, i, v)
+    }
+}
+
+/// A slot read `v` from slot `i` of `o` while the flag word was set. If `o`
 /// is weak, `i` one of its weak slots and a cycle is marking, the referent
 /// is recorded like an overwritten value: the marker never traces weak
 /// slots, so a referent read through one and stored elsewhere would
