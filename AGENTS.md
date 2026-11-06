@@ -725,6 +725,28 @@ Safety:
    their neighbours had, which no test of ours was looking for. A pull
    request diffs from the merge base, so a review of existing files needs
    a base branch without them and a head that is the base plus the files.
+ - Xcode builds every Swift package in its Debug configuration `-Onone`
+   with `DEBUG`, whatever the app's settings say, so a development app got
+   a checked, unoptimized VM (fib did not finish in two minutes). Only a
+   package trait reaches a dependency's build, and only a package can set
+   one: a generated app has a local `KajoPin` package that enables
+   `KajoAppBuild`. Xcode's index-while-building refuses whole-module
+   flags, so the Debug VM is still 2.6 to 4.0 times slower than Release.
+   A product's build mode is decided by whoever builds it; read the
+   compile line (`just new-check` does).
+ - Xcode links a package product in every configuration, and dead
+   stripping does not remove an unreferenced Swift module (1224 `KajoDev`
+   symbols stayed in a Release binary). "Not in the release build" is a
+   property of the linked binary, checked on it by symbol, string and
+   import (`just new-check`), never inferred from the source's `#if`.
+ - An `unowned` reference is a lifetime claim every asynchronous path must
+   keep. 9a's runtime scheduled its follow-up turn holding itself strongly
+   while its platform was `unowned`; the shells' hosts live for the
+   process, so the trap waited for 11a's short-lived test hosts under
+   ThreadSanitizer. Work scheduled for later holds its owner weakly.
+ - A measurement launch of a Mac app behind other windows is napped
+   (333 frames missed in one window). Measurement modes hold an activity
+   against App Nap as well as the display-sleep assertion.
 
 ## Verification
 
@@ -983,7 +1005,38 @@ destroys its memory; one `bodyBytes`, one pair of cache-line helpers, one
 `copyBody`; bench within noise and `interpret` identical; the owner kept
 the stop-verifier assertion in every random-program configuration and the
 fuzzer's second run (2026-11-06), and the apps keep 4096 records per log
-until a tool reads them). ADRs
+until a tool reads them); module 11a (the app project, built 2026-11-06,
+`docs/modules/app-project.md`, ADR 0014 proposed): the AppKit and UIKit
+hosts and the runtime are the `KajoApp` library and serving, the token
+store and the pairing screens the `KajoAppDevelopment` library, the
+shells in `apps/` rebuilt on them (54 and 64 lines of Swift of their
+own); `kajo new` (the `KajoGenerator` library, deterministic, every
+refusal a value, its output a byte-for-byte fixture) writes an xcodegen
+project with a Mac and an iOS target over one `src/` of Tonel, one
+17-line `App.swift`, a build phase making a development image in Debug
+and a sealed one in Release, and a local `KajoPin` package that pins Kajo
+and enables the `KajoAppBuild` trait; a Debug build serves over TCP and
+Bonjour from launch as "<app> on <device>" with 9d's per-install token,
+the pairing screen a shake on iOS and the app menu's Pairing… on the Mac;
+a Release binary has 0 symbols of KajoDev, KajoAppDevelopment,
+KajoCompiler and KajoShellCore, no Bonjour import and no local-network
+key (2.1 MB on the Mac, 2.0 on iOS), checked by `just new-check` on every
+run; because Xcode links a package product in every configuration the
+development half is a dependency with `link: false` and Debug's linker
+flags name its three prelinked objects; on the Mac the round trip ran
+whole (generate, build, connect by Bonjour name, change a method live in
+68 to 70 ms from the CLI and 5 to 8 ms from the tools, the change in
+`src/`, rebuilt and there at launch, the Release app not serving), 0 of
+3780 frames missed across 8 sessions and 2 changes, cold launch 213 to
+255 ms Debug and 190 to 235 Release, the Debug VM 2.6 to 4.0 times slower
+than Release, bench within noise and `interpret` identical; a latent 9a
+trap fixed (a follow-up turn outliving its host); the refactored shells
+pass 202 of 202 and miss 0 of 1200 frames in every scenario on both
+devices; the sample app's device rows did not run: `xcodebuild` answers
+"No Accounts" for the new bundle identifier `dev.katajamaki.kajo.sample`
+(the account the owner signed in that morning is no longer seen; the main
+session's own attempt got the same answer), and its six open questions
+await the owner). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -993,8 +1046,10 @@ cover.
 ## Project structure
 
  * `Package.swift` is the root SwiftPM package: `KajoVM` library, `kajo`
-   headless CLI, `KajoCompiler` library, `KajoShellCore` library (what the
-   shells share, module 9a), `KajoVMTests` and `KajoCompilerTests` (Swift
+   headless CLI, `KajoCompiler` library, `KajoApp`, `KajoAppDevelopment`
+   and `KajoGenerator` libraries (module 11a: what a generated app links,
+   its Debug-only serving half, and `kajo new`), `KajoShellCore` library
+   (the shells' modes, module 9a), `KajoVMTests` and `KajoCompilerTests` (Swift
    Testing; `ShellTests` live in the latter).
  * `Sources/KajoVM/` the VM core, one directory per module:
    `ObjectMemory/` (module 1, built; `docs/modules/object-memory.md`;
@@ -1053,9 +1108,15 @@ cover.
    built; `docs/modules/shells.md`: `ShellVM`, `ShellValue`, `ShellEvent`,
    `ShellCallbacks`, primitives 150 to 154: the view hop, `hasShell`,
    release, the event Semaphore, `nextEvent`; no oop crosses it).
-   `Sources/KajoShellCore/` the shells' shared Swift (`ShellRuntime` on the
-   main run loop with the frame account, the tests, golden, scenario and
-   demo modes, telemetry). `Sources/kajo/` the CLI (`kajo run`, `kajo build-image`,
+   `Sources/KajoApp/` (module 11a, `docs/modules/app-project.md`) the
+   runtime (`ShellRuntime` on the main run loop with the frame account),
+   `AppKitHost` and `UIKitHost` with the views, and `KajoApplication.main`;
+   `Sources/KajoAppDevelopment/` serving, the token store, the pairing
+   screens and `Development`, linked by Debug apps and the shells only;
+   `Sources/KajoGenerator/` the app project generator and its templates
+   (fixture under `Tests/KajoCompilerTests/Fixtures/app-project`).
+   `Sources/KajoShellCore/` the shells' modes (tests, golden, scenario,
+   demo, dev, devsession, serve) and telemetry. `Sources/kajo/` the CLI (`kajo run`, `kajo build-image`,
    `kajo test [image] [--filter] [--tag] [--junit]`); `Sources/fuzz-kasm/`,
    `Sources/fuzz-snapshot/`, `Sources/fuzz-syntax/` and
    `Sources/fuzz-protocol/` the libFuzzer targets (`just fuzz
@@ -1086,7 +1147,12 @@ cover.
    `remote-session.sh` and `remote-report.py` (module 9d) run the scripted
    session against a serving target (the phone through `device.sh serve`
    and `device.sh token`, the Mac shell's `mode=serve`, or `kajo run
-   --protocol tcp`) and make its tables.
+   --protocol tcp`) and make its tables; since module 11a `device.sh`
+   takes `PROJECT`, `SCHEME`, `CONFIG`, `PRODUCT` and `BUNDLE` (the shell's
+   or the sample's identifier only), `new-check.sh` (`just new-check`)
+   generates an app, builds its four products from clean and checks the
+   Release binaries and the Debug VM's compile line, and
+   `app-roundtrip.sh mac|device` runs the generated app's live round trip.
  * `tools/` the developer UI (module 9c, `docs/modules/developer-ui.md`,
    ADR 0013): 27 Tonel class files, `DevClient` over primitive 164, the
    models and windows of the browser, workspace, inspector, debugger, test
@@ -1124,8 +1190,10 @@ cover.
  * `apps/` the shells (module 9a, built): `KajoShell-macOS` (AppKit) and
    `KajoShell-iOS` (UIKit), Xcode projects generated by xcodegen from their
    committed specs (both committed; `xcodegen` is a Homebrew install), over
-   the root package; `apps/Shared/smalltalk` the scenario loads and the
-   demo, bundled as images by a build phase that uses the PATH toolchain.
+   the root package; since module 11a their hosts are `KajoApp`'s and each
+   keeps under 70 lines of Swift; `apps/Shared/smalltalk` the scenario
+   loads and the demo, bundled as images by a build phase that uses the
+   PATH toolchain.
  * `experiments/` throwaway spikes with a design brief and results each.
  * `docs/PLAN.md` the module order for building the production core from
    the experiments; `docs/modules/` one brief, later description, per module.
@@ -1142,6 +1210,7 @@ cover.
    in the design. Gitignored; see `references/MANIFEST.md`.
  * `justfile` has the common commands: `just build`, `just test`, `just run`,
    `just bench`, `just ios-check`, `just build-image`, `just kernel-test`,
-   `just fuzz <target> <seconds>`, `just apps`, `just mac-shell`, `just
-   device`, `just shell-matrix`; `kajo run --protocol <socket> --project
+   `just fuzz <target> <seconds>`, `just apps`, `just new-check`, `just
+   mac-shell`, `just device`, `just shell-matrix`; `kajo new <Name>
+   --bundle-id <id> --kajo <path>`; `kajo run --protocol <socket> --project
    <dir>`, `kajo mcp --target <socket>`, `kajo eval|compile|browse|debug`.
