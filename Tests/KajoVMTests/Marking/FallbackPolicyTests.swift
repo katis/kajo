@@ -162,35 +162,55 @@ private func oldRoomWhileSweeping(rule: Bool) throws -> (MarkingCounters, UInt64
     #expect(b.fallbacksOldAllocation >= 1 && b.fallbacksSweeping >= 1 && bfulls >= 1, "\(b)")
 }
 
-/// While a cycle runs, a large allocation decides the QoS policy again:
-/// old space filled by large objects alone (no young collection) raises
-/// the marker once its headroom is low; as module 5 built it, never.
-private func largeRaise(rule: Bool) throws -> Bool {
+/// An old allocation that finds no room while a cycle marks waits for its
+/// final mark (bounded) with the marker raised, then its stop finishes the
+/// sweep: no full collection. The test thread is the marker: it marks once
+/// the policy has been asked to raise it (the waiting allocation asks), on
+/// a VM whose worker runs the churn. With no wait (`allocationWaitMs` 0)
+/// the allocation falls back while marking.
+private func waitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UInt64) {
     let rt = try Runtime(largeSrc, background: 1, heapBlocks: 512, start: false, configure: { c in
         c.nursery.bytes = 1 << 20
         c.marking.enabled = true
         c.marking.markerThread = false
         c.marking.floor = 2
         c.marking.safetyFactor = 0
-        c.marking.testSwitches.qosOnBlocksOnly = !rule
+        c.marking.allocationWaitMs = waitMs
     })
     let soft = rt.image.om.softLimitBlocks
     let before = rt.vm.inspect { $0.blocksInUse }
+    let n = (soft - before) / 2 / 5
+    #expect(rt.runInt("churnLarge:", Int64(n)) == 0)
     rt.vm.startCycle()
-    #expect(!rt.vm.markerWantsRaise)
-    // Into the last fifth of old space, while the cycle is marking.
-    #expect(rt.runInt("churnLarge:", Int64((soft - before) * 4 / 5 / 5)) == 0)
-    let want = rt.vm.markerWantsRaise
-    _ = rt.vm.markStep(10_000_000)
-    rt.vm.finalMark()
-    rt.vm.sweep()
-    rt.scavenge()
+    #expect(rt.phase == .marking && !rt.vm.markerWantsRaise)
+    rt.start()
+    let p = rt.spawn("churnLarge:", [int(Int64(n + 4))])
+    if waitMs > 0 {
+        // The allocation is waiting once it asked for the marker.
+        #expect(eventually(underThreadSanitizer ? 600 : 60) { rt.vm.markerWantsRaise })
+    } else {
+        #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    }
+    if rt.phase == .marking {
+        _ = rt.vm.markStep(10_000_000)
+        rt.vm.finalMark()
+    }
+    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    #expect(rt.result(p) == 0)
+    rt.vm.release(p)
+    let c = rt.marking
+    let fulls = rt.image.om.counters.collections
     rt.noFailures()
     rt.stop()
-    return want
+    return (c, fulls)
 }
 
-@Test func largeAllocationsDecideTheQoSPolicyWhileACycleRuns() throws {
-    #expect(try largeRaise(rule: true))
-    #expect(try !largeRaise(rule: false))
+@Test func anOldAllocationWithoutRoomWhileMarkingWaitsForTheCycle() throws {
+    let (c, fulls) = try waitForTheCycle(waitMs: 60_000)
+    #expect(c.allocationWaits.count >= 1 && c.allocationWaits.timeouts == 0, "\(c.allocationWaits)")
+    #expect(c.sweepsFinishedForOld >= 1, "\(c)")
+    #expect(c.fallbacks == 0 && fulls == 0, "fallbacks \(c.fallbacks), full collections \(fulls)")
+    let (b, bfulls) = try waitForTheCycle(waitMs: 0)
+    #expect(b.allocationWaits.count == 0)
+    #expect(b.fallbacksOldAllocation >= 1 && b.fallbacksMarking >= 1 && bfulls >= 1, "\(b)")
 }

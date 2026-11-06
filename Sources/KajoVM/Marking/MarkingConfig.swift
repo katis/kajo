@@ -24,6 +24,10 @@ struct MarkingConfig: Sendable {
     /// The marker runs at utility QoS and is raised to user-initiated while
     /// old-space headroom (free fraction of the soft limit) is below this.
     var escalateBelow = 0.25
+    /// Large bytes, part 2: an old allocation that finds no room while a
+    /// cycle marks waits this long at most for its final mark (a
+    /// background worker; the main worker never waits). 0: no wait.
+    var allocationWaitMs = 100
     /// The marker thread. Off: nothing marks unless a test drives it
     /// (`VM.markStep`, `finalMark`, `sweep`): the manual mode of the tests.
     var markerThread = true

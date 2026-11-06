@@ -33,6 +33,7 @@ extension MarkingShared {
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
             log: lined(MarkingLog(logCapacity: vm.pointee.config.logCapacity)), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
             wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
+            waits: lined(AllocationWaits()), waitsLock: makeMutex(),
             stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag)))
         if config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOn(mk) }
@@ -61,6 +62,8 @@ extension MarkingShared {
         unsafe unlined(s.cycle)
         unsafe unlined(s.wantUserInitiated)
         unsafe unlined(s.markerWaits)
+        unsafe unlined(s.waits)
+        unsafe freeMutex(s.waitsLock)
         unsafe unlined(s.stopping)
         unsafe unlined(s.thread)
         unsafe unlined(s.machThread)
@@ -111,6 +114,9 @@ extension VM {
             c.qosEscalations = unsafe mk.pointee.marker.pointee.escalations
             c.qosLowerings = unsafe mk.pointee.marker.pointee.lowerings
             c.markerWaits = unsafe mk.pointee.markerWaits.pointee.load(ordering: .relaxed)
+            unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+            c.allocationWaits = unsafe mk.pointee.waits.pointee
+            unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
             return c
         }
     }

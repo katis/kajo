@@ -532,6 +532,8 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("fallbacksOld", "\(c.fallbacksOldAllocation)"), ("fallbackLog", fallbackSummary(vm.fallbackLog)),
         ("sweepsForEntries", "\(c.sweepsFinishedForEntries)"), ("sweepsForOld", "\(c.sweepsFinishedForOld)"),
         ("sweepsInStopMs", ms(c.sweepsFinishedForEntriesNs)),
+        ("allocWaits", "\(c.allocationWaits.count)"), ("allocWaitMs", ms(c.allocationWaits.ns)),
+        ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
     ]

@@ -268,11 +268,20 @@ struct CacheEntry {
             // park for it and try again before stopping it ourselves.
             let w = unsafe workerOf(state)
             let keep = extra == .none ? [nilObject] : [nilObject, extra]
+            var waited = false
             while true {
                 if unsafe !state.pointee.collectAtEveryAllocation {
                     let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
                                               deferZero: deferZero)
                     if o != .none { return o }
+                    // Large bytes, part 2: no room while a cycle marks: wait
+                    // (bounded, parking for stops) for its final mark with
+                    // the marker raised; the stop below then finishes its
+                    // sweep. Once per allocation.
+                    if !waited {
+                        waited = true
+                        if unsafe waitForMarkingCycle(vm, w) { continue }
+                    }
                 }
                 var result: Oop? = nil
                 let before = pauseCount()

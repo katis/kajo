@@ -182,6 +182,40 @@ func markingBeforeOldSpaceOperation(_ vm: VMPointer) {
     }
 }
 
+/// Large bytes, part 2: an old allocation found no room while a cycle is
+/// marking, so the cycle is behind: the policy raises the marker and this
+/// worker waits for the final mark, at most `MarkingConfig.allocationWaitMs`,
+/// polling for stops and module 7's rounds as a primitive's long loop does
+/// (registers saved), never in a stop. The main worker does not wait (a
+/// frame is shorter than the wait). Answers true when the cycle has left
+/// marking (the caller tries again; a stop then finishes the sweep).
+func waitForMarkingCycle(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
+    guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .marking, unsafe w.pointee.index != 0 else { return false }
+    let bound = UInt64(unsafe mk.pointee.config.allocationWaitMs) &* 1_000_000
+    if bound == 0 { return false }
+    unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed)
+    let cycle = unsafe mk.cycleNow
+    let t0 = nanoseconds()
+    let s = unsafe w.pointer(to: \Worker.interp)!
+    var done = false
+    while true {
+        let a = unsafe s.pointee.safepointFlag.pointee.load(ordering: .relaxed)
+        if a & 1 != 0 { unsafe park(vm, w) }
+        if a > 1 { unsafe serviceRounds(vm, w) }
+        if unsafe mk.phaseNow != .marking || mk.cycleNow != cycle { done = true; break }
+        if nanoseconds() &- t0 >= bound { break }
+        usleep(100)
+    }
+    let dt = nanoseconds() &- t0
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    unsafe mk.pointee.waits.pointee.count &+= 1
+    unsafe mk.pointee.waits.pointee.ns &+= dt
+    if unsafe dt > mk.pointee.waits.pointee.maxNs { unsafe mk.pointee.waits.pointee.maxNs = dt }
+    if !done { unsafe mk.pointee.waits.pointee.timeouts &+= 1 }
+    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+    return done
+}
+
 /// Large bytes, part 2 (world stopped): the entry table is empty, or an
 /// old allocation found no room, while a cycle sweeps or has swept; finish
 /// the sweep in this pause and apply it, as module 1's operations do first

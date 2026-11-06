@@ -217,7 +217,19 @@ struct MarkingCounters: Sendable {
     /// full collection; the time of both kinds.
     var sweepsFinishedForEntries: UInt64 = 0
     var sweepsFinishedForOld: UInt64 = 0
+    /// Large bytes, part 2: `AllocationWaits`, copied in on read.
+    var allocationWaits = AllocationWaits()
     var sweepsFinishedForEntriesNs: UInt64 = 0
+}
+
+/// Large bytes, part 2: old allocations that found no room while a cycle
+/// marked and waited for its final mark: how many, their time, the
+/// longest, and those that gave up at the bound.
+struct AllocationWaits: Sendable {
+    var count: UInt64 = 0
+    var ns: UInt64 = 0
+    var maxNs: UInt64 = 0
+    var timeouts: UInt64 = 0
 }
 
 /// Large bytes, part 2: the circumstances of one fallback, taken in its
@@ -354,6 +366,10 @@ struct MarkingLog {
     let cycle: UnsafeMutablePointer<Atomic<UInt64>>
     let wantUserInitiated: UnsafeMutablePointer<Atomic<Bool>>
     let markerWaits: UnsafeMutablePointer<Atomic<UInt64>>
+    /// Large bytes, part 2: old allocations that waited for a marking
+    /// cycle (`waitForMarkingCycle`), under their own lock.
+    let waits: UnsafeMutablePointer<AllocationWaits>
+    let waitsLock: UnsafeMutablePointer<pthread_mutex_t>
     /// The VM is shutting down: the marker abandons its work at its next poll.
     let stopping: UnsafeMutablePointer<Atomic<Bool>>
     /// The marker thread (the host starts and joins it) and its Mach port.

@@ -237,16 +237,8 @@ extension BlockHeap {
 /// stop). The random programs under `cycleEveryScavenge` crashed and
 /// reported missed objects until it was rooted so.
 func startCycleAfterLargeAllocation(_ vm: VMPointer, _ w: WorkerPointer, _ o: Oop) {
-    guard let mk = unsafe vm.pointee.marking else { return }
-    // Large bytes, part 2: while a cycle runs, a large allocation decides
-    // the QoS policy again (old space fills without young collections, so
-    // nothing else would; the devices' large churn ran out of old space
-    // with the marker at utility and the policy never asked).
-    if unsafe mk.phaseNow != .idle {
-        if unsafe !mk.pointee.config.testSwitches.qosOnBlocksOnly { unsafe updateWantedQoS(mk, oldEntries: nil) }
-        return
-    }
-    guard unsafe decideTrigger(mk, rate: 0, oldEntries: nil, record: false) != nil else { return }
+    guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .idle,
+          unsafe decideTrigger(mk, rate: 0, oldEntries: nil, record: false) != nil else { return }
     let h = unsafe registerPending(vm, o)
     if h < 0 {  // the pending table is full: the next young collection decides
         unsafe vm.count(.largeTriggersUnrooted)
