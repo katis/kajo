@@ -142,7 +142,7 @@ func youngPause(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext, full: 
         // sweep here and applying it hands them over; module 1's full
         // collection would do the same first and then mark and sweep the
         // whole heap (41 to 84 ms on the devices). Counted, never hidden.
-        if !stress, unsafe finishSweepForEntries(vm) { return }
+        if !stress, unsafe finishSweepInStop(vm, for: .entries) { return }
         unsafe noteFullCollection(vm, stress ? .other : .entries)
         unsafe fullCollection(vm, stop)
     } else if unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) {

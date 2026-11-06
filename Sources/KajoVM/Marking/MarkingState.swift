@@ -212,9 +212,11 @@ struct MarkingCounters: Sendable {
     var fallbacksSoftLimit: UInt64 = 0
     var fallbacksOldAllocation: UInt64 = 0
     /// Large bytes, part 2: stops in which the young allocation found the
-    /// entry table empty while a cycle swept, and the sweep was finished
-    /// and applied there instead of a full collection; their time.
+    /// entry table empty, or an old allocation found no room, while a cycle
+    /// swept, and the sweep was finished and applied there instead of a
+    /// full collection; the time of both kinds.
     var sweepsFinishedForEntries: UInt64 = 0
+    var sweepsFinishedForOld: UInt64 = 0
     var sweepsFinishedForEntriesNs: UInt64 = 0
 }
 

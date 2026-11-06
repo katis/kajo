@@ -117,3 +117,80 @@ private func raisedDuringTheCycle(rule: Bool) throws -> (Bool, Bool, MarkingCoun
     let (_, broken, _) = try raisedDuringTheCycle(rule: false)
     #expect(!broken)
 }
+
+// MARK: - old allocations (the large churn)
+
+/// Large garbage made old and dead, a cycle marked and its sweep left
+/// pending, then large allocations past the soft limit: the allocation's
+/// stop finishes the sweep and applies it (the dead runs freed) instead of
+/// a full collection. `largeSrc`'s `churnLarge:` makes 160 KiB Arrays (five
+/// blocks each) and drops them.
+private func oldRoomWhileSweeping(rule: Bool) throws -> (MarkingCounters, UInt64, Int, Int) {
+    let rt = try Runtime(largeSrc, background: 1, heapBlocks: 512, start: false, configure: { c in
+        c.nursery.bytes = 1 << 20
+        c.marking.enabled = true
+        c.marking.markerThread = false
+        c.marking.floor = 2
+        c.marking.safetyFactor = 0
+        c.marking.testSwitches.noSweepForEntries = !rule
+    })
+    let soft = rt.image.om.softLimitBlocks
+    let before = rt.vm.inspect { $0.blocksInUse }
+    // Dead runs of half the room, then a cycle that marks them dead.
+    let n = (soft - before) / 2 / 5
+    #expect(rt.runInt("churnLarge:", Int64(n)) == 0)
+    rt.vm.startCycle()
+    _ = rt.vm.markStep(10_000_000)
+    rt.vm.finalMark()
+    #expect(rt.phase == .sweeping)
+    // As much again and a little more: past the soft limit unless the dead
+    // runs are freed.
+    #expect(rt.runInt("churnLarge:", Int64(n + 4)) == 0)
+    let c = rt.marking
+    let fulls = rt.image.om.counters.collections
+    rt.noFailures()
+    rt.stop()
+    return (c, fulls, soft, n)
+}
+
+@Test func anOldAllocationWithoutRoomWhileSweepingFinishesTheSweep() throws {
+    let (c, fulls, soft, n) = try oldRoomWhileSweeping(rule: true)
+    #expect(c.sweepsFinishedForOld >= 1, "soft \(soft), \(n) Arrays: \(c)")
+    #expect(c.fallbacks == 0 && fulls == 0, "fallbacks \(c.fallbacks), full collections \(fulls)")
+    let (b, bfulls, _, _) = try oldRoomWhileSweeping(rule: false)
+    #expect(b.sweepsFinishedForOld == 0)
+    #expect(b.fallbacksOldAllocation >= 1 && b.fallbacksSweeping >= 1 && bfulls >= 1, "\(b)")
+}
+
+/// While a cycle runs, a large allocation decides the QoS policy again:
+/// old space filled by large objects alone (no young collection) raises
+/// the marker once its headroom is low; as module 5 built it, never.
+private func largeRaise(rule: Bool) throws -> Bool {
+    let rt = try Runtime(largeSrc, background: 1, heapBlocks: 512, start: false, configure: { c in
+        c.nursery.bytes = 1 << 20
+        c.marking.enabled = true
+        c.marking.markerThread = false
+        c.marking.floor = 2
+        c.marking.safetyFactor = 0
+        c.marking.testSwitches.qosOnBlocksOnly = !rule
+    })
+    let soft = rt.image.om.softLimitBlocks
+    let before = rt.vm.inspect { $0.blocksInUse }
+    rt.vm.startCycle()
+    #expect(!rt.vm.markerWantsRaise)
+    // Into the last fifth of old space, while the cycle is marking.
+    #expect(rt.runInt("churnLarge:", Int64((soft - before) * 4 / 5 / 5)) == 0)
+    let want = rt.vm.markerWantsRaise
+    _ = rt.vm.markStep(10_000_000)
+    rt.vm.finalMark()
+    rt.vm.sweep()
+    rt.scavenge()
+    rt.noFailures()
+    rt.stop()
+    return want
+}
+
+@Test func largeAllocationsDecideTheQoSPolicyWhileACycleRuns() throws {
+    #expect(try largeRaise(rule: true))
+    #expect(try !largeRaise(rule: false))
+}

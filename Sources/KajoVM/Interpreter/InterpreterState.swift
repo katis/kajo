@@ -272,6 +272,16 @@ struct CacheEntry {
                     // Large bytes, part 2: the record is taken before the
                     // collection, as the pools stood when the request failed.
                     let pre = unsafe fallbackRecord(vm, .oldAllocation)
+                    // Large bytes, part 2: a cycle that has marked holds
+                    // the dead runs until its apply; finishing its sweep
+                    // here frees them, before module 1's full collection.
+                    if unsafe finishSweepInStop(vm, for: .oldAllocation) {
+                        let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject)
+                        if o != .none {
+                            result = o
+                            return
+                        }
+                    }
                     result = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots)
                                    : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
                     // Module 10: a full collection forced by an old (large)

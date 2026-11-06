@@ -182,13 +182,14 @@ func markingBeforeOldSpaceOperation(_ vm: VMPointer) {
     }
 }
 
-/// Large bytes, part 2 (world stopped): the entry table is empty while a
-/// cycle sweeps or has swept; finish the sweep in this pause and apply it,
-/// as module 1's operations do first (`markingBeforeOldSpaceOperation`),
-/// so the entries it freed reach the allocators without a full
-/// collection. Answers false when no sweep was pending (the caller falls
-/// back) or under the test switch that turns the rule off.
-func finishSweepForEntries(_ vm: VMPointer) -> Bool {
+/// Large bytes, part 2 (world stopped): the entry table is empty, or an
+/// old allocation found no room, while a cycle sweeps or has swept; finish
+/// the sweep in this pause and apply it, as module 1's operations do first
+/// (`markingBeforeOldSpaceOperation`), so the entries and blocks it freed
+/// reach the allocators without a full collection. Answers false when no
+/// sweep was pending (the caller falls back) or under the test switch that
+/// turns the rule off.
+func finishSweepInStop(_ vm: VMPointer, for cause: FullCause) -> Bool {
     guard let mk = unsafe vm.pointee.marking, unsafe !mk.pointee.config.testSwitches.noSweepForEntries else { return false }
     let phase = unsafe mk.phaseNow
     guard phase == .sweeping || phase == .swept else { return false }
@@ -199,7 +200,11 @@ func finishSweepForEntries(_ vm: VMPointer) -> Bool {
         unsafe log.pointee.counters.sweepsFinishedInPause &+= 1
     }
     unsafe applyInStop(vm, mk)
-    unsafe log.pointee.counters.sweepsFinishedForEntries &+= 1
+    if cause == .entries {
+        unsafe log.pointee.counters.sweepsFinishedForEntries &+= 1
+    } else {
+        unsafe log.pointee.counters.sweepsFinishedForOld &+= 1
+    }
     unsafe log.pointee.counters.sweepsFinishedForEntriesNs &+= nanoseconds() &- t0
     return true
 }
