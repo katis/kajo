@@ -62,8 +62,14 @@ extension ObjectMemory {
             guard isRegisteredClass(r.classIndex) else { throw .notRegistered }
             for j in r.layout { if let j, j < 0 || j >= r.namedSlots { throw .layoutOutOfRange } }
         }
-        // Instances of every class first: a check that fails leaves the heap
-        // untouched.
+        // Module 4's hook before the instances are listed: its promote-all
+        // scavenge frees the dead young instances and the lazy sweep it
+        // applies frees the dead old ones, so listing first handed the plan
+        // freed entries (collectors review, finding 5). Promoting and
+        // applying a finished sweep change nothing a program can see.
+        if !prepareOldSpaceOperation(nil).isEmpty { throw .heapFull }
+        // Then every class's instances: a check that fails leaves the heap
+        // as a program sees it.
         var objects: [[Oop]] = []
         for r in requests {
             let objs = allInstances(of: r.classIndex)
@@ -77,7 +83,6 @@ extension ObjectMemory {
             }
             objects.append(objs)
         }
-        if !prepareOldSpaceOperation(nil).isEmpty { throw .heapFull }
         retireAllContexts()
         guard let ctx = unsafe gc.pointee.collectorContext else { preconditionFailure("no collector context") }
         for (k, r) in requests.enumerated() {
