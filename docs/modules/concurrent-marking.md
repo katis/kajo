@@ -174,7 +174,12 @@ overwritten values, not loads, so without more the referent would be swept
 under a live reference (a test shows it, below). `primAt` tests the flag
 word after its load; set, it calls `weakReadBarrier`, which records the
 value like an overwritten one when the receiver's format is weak, the slot
-one of its weak slots and a cycle marking. Ephemeron keys need no such
+one of its weak slots and a cycle marking. Since the collectors review
+(`docs/modules/collectors-review.md`, finding 1) every other primitive that
+reads such a slot and hands the value on does the same (`instVarAt:`,
+`slotAt:`, `shallowCopy`, the symbol table's bucket growth, through
+`keepAliveRead`), and the array copy's loop checks its source once per
+call. Ephemeron keys need no such
 barrier: a marked ephemeron's key is always marked by the final mark (fired
 or traced), and every value a mutator can store anywhere is a marked or a
 new object.
@@ -427,7 +432,8 @@ aborts, sweeps finished in a pause, remembered holders filtered, weak slots
 nil'ed, ephemerons queued, verifier runs, missed, floating bytes, QoS
 escalations and lowerings, the marker's wait returns, and the promotion
 rate and predicted time to fill at the last trigger decision.
-`vm.cycleLog`: per cycle the trigger with old space in use, the soft limit,
+`vm.cycleLog` (the last `VMConfig.logCapacity` cycles since the collectors
+review, `vm.cycleTotals` the sums and the dropped count): per cycle the trigger with old space in use, the soft limit,
 the rate and the prediction; the initial mark's split (snapshot copy, root
 scan, survivor scan) and snapshot entries; the final mark's pause and split
 (time to safepoint, drain and entries drained, filter, ephemerons, weak,
@@ -616,7 +622,9 @@ Module 2 (`Interpreter/`):
 
 - `store_ivar` calls `storeWithBarrier` with the flag line it already holds
   (`interpret` 752 to 775 instructions, one jump table).
-- `primAt` tests the flag word and calls `weakReadBarrier`.
+- `primAt` tests the flag word and calls `weakReadBarrier` (since the
+  collectors review through `keepAliveRead`, as the other readers of a
+  weak slot do).
 - The standalone `Interpreter` allocates the flag line (`makeFlagLine`).
 
 Module 3 (`Workers/`, `Processes/`):

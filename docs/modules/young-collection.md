@@ -414,7 +414,9 @@ Module 3's `perturb` reaches the collector (every service point: between
 H1, 3 after T1's work, 2 after the sweep). `VM.setCopyWindow` and module 6's
 `VM.setEnterWindow` are the two windows.
 
-Counters (`vm.youngCounters`, `vm.youngLog`, `vm.roundLog`,
+Counters (`vm.youngCounters`, `vm.youngLog`, `vm.roundLog` (the last
+`VMConfig.logCapacity` of each since the collectors review; `vm.youngTotals`
+the sums, maxima and dropped counts),
 `vm.youngWorkerCounters(i)`, `kajo run`'s young and main lines):
 collections by mode (local, offloaded, offloaded but run by the owner),
 rounds per collection and every round's latency with its last acknowledger,

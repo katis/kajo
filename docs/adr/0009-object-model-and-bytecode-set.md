@@ -78,7 +78,9 @@ value survive the cycle; then every listed weak object's weak slots naming
 an unmarked snapshot entry become nil. Survivors (young at the snapshot)
 are scanned as roots with their weak and ephemeron slots strong. Because
 the marker runs while mutators do, `at:` on a weak slot records its
-referent while a cycle marks (a keep-alive read barrier): otherwise a
+referent while a cycle marks (a keep-alive read barrier; since the
+collectors review every primitive that reads a weak slot and hands the
+value on, the array copy included): otherwise a
 referent read through a weak slot and stored elsewhere would be freed under
 a live reference. Ephemeron keys need no such barrier: a marked
 ephemeron's key is marked by the final mark either way. One consequence: an

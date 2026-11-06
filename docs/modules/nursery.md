@@ -233,8 +233,8 @@ to a mutex-guarded pool of 64 if another participant is idle and the pool
 is empty; a participant out of tasks takes packets, and an idle one re-enters
 `inCopy` (only from a nonzero count) before taking one, so `inCopy == 0`
 means no packet is left and no copy is in flight. Copy rate per participant
-is reported (`ScavengeRecord.copiedBytesPerParticipant`, `busyNsPerParticipant`;
-`kajo run` prints `copyMBsPerParticipant`).
+is reported (`ScavengeRecord.copiedBytes`, `busyNs`, the participants'
+sums since the collectors review; `kajo run` prints `copyMBsPerParticipant`).
 
 **Weak slots**: not traced by the scavenge. After the join the stopper
 looks at every weak object scanned this scavenge (young survivors and
@@ -347,10 +347,12 @@ and overflow objects and bytes, young bytes scavenged, remembered holders
 and slots scanned, entries swept and freed, weak slots nil'ed, full
 collections requested and run, verifier runs, scavenge time, young and
 large allocations, barrier slow-path calls and young holders, stash refills.
-`vm.scavengeLog`: per scavenge prep, copy wall, sweep wall, finish, verify
-and work time, participants, the slowest participant (longest busy time)
-with its roots and remembered split, the longest sweep, bytes and busy time
-per participant, packets. Module 3's stop records gained a kind (scavenge,
+`vm.scavengeLog` (the last `VMConfig.logCapacity` scavenges since the
+collectors review, `vm.scavengeTotals` the sums and the dropped count): per
+scavenge prep, copy wall, sweep wall, finish, verify and work time,
+participants, the slowest participant (longest busy time) with its roots and
+remembered split, the longest sweep, bytes and busy time summed over the
+participants, packets. Module 3's stop records gained a kind (scavenge,
 full, other), so pause p50, p99 and max per kind come from the stops (time
 to safepoint included). Module 1's counters gained `weakSlotsNiled` and
 `ephemeronsQueued`; `reserveExhaustions` counts promotion refills that found

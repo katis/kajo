@@ -748,8 +748,9 @@ has no warning.
 (205), `copySlots` (110; `rememberSlow`, `handOver`), `epochEnter` (29, no
 call), `addPending` (88), `tryFreePending` (237; the pool lock), the pass
 `relocatePass` (471; `markerPoll`, `addPending`, `tryFreePending`,
-`copyBody`, the pool lock) and its copy loop `copyBody` (11 instructions,
-no call): zero `swift_retain`/`swift_release` in every one; `interpret` one
+`copyBody`, the pool lock) and its copy loop (`relocCopy` then, 11
+instructions, no call; since the collectors review the shared `copyBody`,
+10): zero `swift_retain`/`swift_release` in every one; `interpret` one
 indirect branch, one jump table, and the post-store check printed from its
 `store_ivar` (the sequence under "Post-store check").
 
