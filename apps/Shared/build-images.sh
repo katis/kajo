@@ -23,7 +23,18 @@ $clean swift build --package-path $root --scratch-path $scratch --product kajo >
 kajo=$($clean swift build --package-path $root --scratch-path $scratch --product kajo --show-bin-path)/kajo
 cd $root
 $kajo build-image -o $dst/kernel.img kernel > /dev/null
-$kajo build-image -o $dst/shell.img kernel apps/Shared/smalltalk > /dev/null
+if [[ -n ${KAJO_SHELL_CLASSES:-} ]]; then
+  # The devices investigation (2026-11-06): KAJO_SHELL_CLASSES=1806 in the
+  # environment of the build makes shell.img the scenario image plus that
+  # many generated classes of 11 methods (dev2000.img's classes without the
+  # tools), so a device serves a 2000-class image. Unset: the plain image.
+  gen=$scratch/gen-shell
+  rm -rf $gen
+  /usr/bin/python3 scripts/gen-classes.py $gen $KAJO_SHELL_CLASSES 11
+  $kajo build-image -o $dst/shell.img kernel --with apps/Shared/smalltalk --with $gen > /dev/null
+else
+  $kajo build-image -o $dst/shell.img kernel apps/Shared/smalltalk > /dev/null
+fi
 for k in sends ivars closures; do
   $kajo build-image -o $dst/st-$k.img kernel Tests/KajoVMTests/Fixtures/smalltalk/$k > /dev/null
 done

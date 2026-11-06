@@ -65,7 +65,16 @@ import KajoVM
     var eventsPosted = 0
     var eventsStartNs: UInt64 = 0
     var stamps: [UInt64] = []
+    /// When the timer's handler posted each event (the uptime clock).
+    var posted: [UInt64] = []
     var latencies: [Double] = []
+    /// Each measured event's due stamp, handler time and view time: where
+    /// the latency goes (the timer, the turn it waited behind, the turn
+    /// that handled it).
+    var eventTimes: [(due: UInt64, posted: UInt64, shown: UInt64)] = []
+    /// The main thread's turns in the window: start, end (uptime ns), kind.
+    var turnSpans: [(start: UInt64, end: UInt64, kind: TurnKind)] = []
+    var usageBase = ProcessUsage()
     var latencyLabel = 0
     var labelUpdates = 0
 
@@ -84,6 +93,7 @@ import KajoVM
     var mainTid: UInt64 = 0
     var pauseBase = 0
     var thermalStart = ""
+    var mainQoS = "-"
     var startNs: UInt64 = 0
 
     let pairing: PairingPresenter?
@@ -114,6 +124,7 @@ import KajoVM
         o.relocation = options.string("reloc", "on")
         thermalStart = Telemetry.thermal()
         mainTid = Telemetry.threadID()
+        mainQoS = Telemetry.qosName(qos_class_self().rawValue)
         do {
             runtime = try makeShellRuntime(imagePath: resources.shellImage, options: o, platform: platform,
                                        events: transcriptSink(), pairing: pairing)
@@ -206,6 +217,8 @@ import KajoVM
     func noteTurn(_ t: ShellTurn, _ k: TurnKind) {
         guard measuring else { return }
         turns += 1
+        let now = ShellVM.now()
+        if turnSpans.count < 200_000 { turnSpans.append((now &- t.ns, now, k)) }
         slices += t.slices
         if t.preempted { preempted += 1 }
         vmNs &+= t.ns; cpuNs &+= t.cpuNs; parkNs &+= t.parkNs; stopNs &+= t.stopNs
@@ -218,7 +231,11 @@ import KajoVM
               c.arguments[0] == .string("text"), let s = c.arguments[1].string, let seq = Int(s),
               seq >= 0, seq < stamps.count else { return }
         labelUpdates += 1
-        if measuring { latencies.append(Double(ShellVM.now() &- stamps[seq]) / 1e6) }
+        if measuring {
+            let now = ShellVM.now()
+            latencies.append(Double(now &- stamps[seq]) / 1e6)
+            eventTimes.append((stamps[seq], posted[seq], now))
+        }
     }
 
     func noteStuck(_ r: StuckReport) {
@@ -238,11 +255,13 @@ import KajoVM
         let interval = UInt64(1_000_000_000 / eventRate)
         t.setEventHandler { [unowned self] in
             MainActor.assumeIsolated {
-                let due = Int((ShellVM.now() - self.eventsStartNs) / interval)
+                let fired = ShellVM.now()
+                let due = Int((fired - self.eventsStartNs) / interval)
                 var n = 0
                 while self.eventsPosted < due && n < 10_000 {
                     let stamp = self.eventsStartNs + UInt64(self.eventsPosted + 1) * interval
                     self.stamps.append(stamp)
+                    self.posted.append(fired)
                     self.vm.post(ShellEvent(kind: .synthetic, value: .int(Int64(self.eventsPosted)), timeNs: stamp))
                     self.eventsPosted += 1
                     n += 1
@@ -264,6 +283,9 @@ import KajoVM
         pauseBase = vm.pauses.count
         servedBase = tcpServer?.stats.values ?? ServerStats.Values()
         latencies = []
+        eventTimes = []
+        turnSpans = []
+        usageBase = ProcessUsage.now()
         beginNs = ShellVM.now()
         beginLateMs = (Double(beginNs) / 1e9 - measureStart) * 1000
         if hog {
@@ -313,7 +335,9 @@ import KajoVM
         if eventRate > 0 {
             line += " events_posted=\(eventsPosted) label_updates=\(labelUpdates) ev_n=\(latencies.count)"
             line += " ev_lat_p50_ms=\(f3(percentile(latencies, 0.5))) ev_lat_p99_ms=\(f3(percentile(latencies, 0.99))) ev_lat_max_ms=\(f3(latencies.max() ?? 0))"
+            line += eventBreakdown()
         }
+        line += turnBreakdown(counted)
         if hog {
             line += " stuck_ms=\(stuckMs.map(f1) ?? "-") stuck_method=\(stuckMethod)"
         }
@@ -325,6 +349,7 @@ import KajoVM
             runtime.stopProtocol()
         }
         if let s = tcpServer {
+            line += requestRecords(s)
             // What the server did in the window (sessions, requests, bytes
             // written; the longest a VM thread spent handing it a line).
             let v = s.stats.values, b = servedBase
@@ -344,14 +369,26 @@ import KajoVM
         for (t, base) in threadBase {
             let c = ThreadCounts.of(t.threadID).since(base)
             if t.role.hasPrefix("worker") {
-                workers = ThreadCounts(ok: workers.ok && c.ok, pCpuNs: workers.pCpuNs &+ c.pCpuNs, eCpuNs: workers.eCpuNs &+ c.eCpuNs,
-                                       pEnergyNj: workers.pEnergyNj &+ c.pEnergyNj, eEnergyNj: workers.eEnergyNj &+ c.eEnergyNj)
+                workers = workers + c
             } else {
                 line += c.fields(t.role) + " \(t.role)_qos=\(Telemetry.qosName(t.qos))"
             }
         }
         line += workers.fields("workers") + ThreadCounts.of(mainTid).since(mainThreadBase).fields("main")
         line += " worker_qos=" + (vm.threads.filter { $0.role.hasPrefix("worker") }.map { Telemetry.qosName($0.qos) }.first ?? "-")
+        // The QoS each thread actually got (its base priority now) and each
+        // worker's share on performance cores.
+        line += ThreadPriority.of(mainTid).fields("main") + " main_qos_asked=\(mainQoS)"
+        for t in vm.threads where !t.role.hasPrefix("worker") { line += ThreadPriority.of(t.threadID).fields(t.role) }
+        let ws = vm.threads.filter { $0.role.hasPrefix("worker") }
+        line += " workers_qos_got=" + ws.map { ThreadPriority.of($0.threadID).qosName }.joined(separator: ",")
+        line += " workers_pri=" + ws.map { let p = ThreadPriority.of($0.threadID); return p.ok ? "\(p.base)/\(p.current)" : "-" }.joined(separator: ",")
+        line += " workers_p_fracs=" + threadBase.filter { $0.0.role.hasPrefix("worker") }.map { t, b -> String in
+            let c = ThreadCounts.of(t.threadID).since(b)
+            let tot = c.pCpuNs &+ c.eCpuNs
+            return f2(tot > 0 ? Double(c.pCpuNs) / Double(tot) : 0)
+        }.joined(separator: ",")
+        line += ProcessUsage.now().fields(since: usageBase)
         // The collectors' report over the whole run (warm-up included).
         for (k, v) in vm.collectorReport(seconds: Double(ShellVM.now() - startNs) / 1e9) {
             line += " gc_\(k)=\(v.replacingOccurrences(of: " ", with: "_"))"
@@ -359,6 +396,74 @@ import KajoVM
         line += " load_failures=\(loadFailures()) thermal_end=\(Telemetry.thermal()) screen_max_fps=\(platform.maximumFramesPerSecond)"
         Output.shared.emit(resultLine("scenario", options, line))
         finish(0)
+    }
+
+    /// Where the events' latency went: the timer's own lateness (due to
+    /// handler), the handler to the view call (the event turn), and whether
+    /// the event fell due while the main thread was in a turn (and then how
+    /// long that turn still had to run, and from its end to the handler).
+    func eventBreakdown() -> String {
+        let ms = { (a: UInt64, b: UInt64) -> Double in b > a ? Double(b - a) / 1e6 : 0 }
+        let fire = eventTimes.map { ms($0.due, $0.posted) }
+        let handle = eventTimes.map { ms($0.posted, $0.shown) }
+        // The turns are in time order; for each event the turn that covers
+        // its due time, if any (a binary search on starts).
+        let spans = turnSpans
+        var inTurn = 0
+        var rest: [Double] = [], after: [Double] = [], notInFire: [Double] = []
+        var kinds: [String: Int] = [:]
+        for e in eventTimes {
+            var lo = 0, hi = spans.count
+            while lo < hi { let mid = (lo + hi) / 2; if spans[mid].start <= e.due { lo = mid + 1 } else { hi = mid } }
+            if lo > 0, spans[lo - 1].end > e.due {
+                let sp = spans[lo - 1]
+                inTurn += 1
+                kinds[sp.kind.rawValue, default: 0] += 1
+                rest.append(ms(e.due, sp.end))
+                after.append(ms(sp.end, e.posted))
+            } else {
+                notInFire.append(ms(e.due, e.posted))
+            }
+        }
+        let n = max(1, eventTimes.count)
+        var o = " ev_fire_p50_ms=\(f3(percentile(fire, 0.5))) ev_fire_p99_ms=\(f3(percentile(fire, 0.99))) ev_handle_p50_ms=\(f3(percentile(handle, 0.5))) ev_handle_p99_ms=\(f3(percentile(handle, 0.99)))"
+        o += " ev_due_in_turn_frac=\(f3(Double(inTurn) / Double(n))) ev_due_in_turn_kinds=" + kinds.sorted { $0.key < $1.key }.map { "\($0.key):\($0.value)" }.joined(separator: ",")
+        o += " ev_turn_rest_p50_ms=\(f3(percentile(rest, 0.5))) ev_turn_rest_p99_ms=\(f3(percentile(rest, 0.99))) ev_after_turn_p50_ms=\(f3(percentile(after, 0.5))) ev_after_turn_p99_ms=\(f3(percentile(after, 0.99)))"
+        o += " ev_free_fire_p50_ms=\(f3(percentile(notInFire, 0.5))) ev_free_fire_p99_ms=\(f3(percentile(notInFire, 0.99)))"
+        return o
+    }
+
+    /// The main thread's turns in the window by kind: count, p50, p99 and
+    /// max ms, and the fraction of the window the main thread was in one.
+    func turnBreakdown(_ counted: Double) -> String {
+        var by: [String: [Double]] = [:]
+        var total: UInt64 = 0
+        for sp in turnSpans {
+            by[sp.kind.rawValue, default: []].append(Double(sp.end &- sp.start) / 1e6)
+            total &+= sp.end &- sp.start
+        }
+        var o = " main_busy_frac=\(f3(Double(total) / 1e9 / counted))"
+        for (k, v) in by.sorted(by: { $0.key < $1.key }) {
+            o += " turn_\(k)_n=\(v.count) turn_\(k)_p50_ms=\(f3(percentile(v, 0.5))) turn_\(k)_p99_ms=\(f3(percentile(v, 0.99))) turn_\(k)_max_ms=\(f3(v.max() ?? 0))"
+        }
+        return o
+    }
+
+    /// The served requests' times in the target (read to reply written),
+    /// summed on the result line and written one per line to
+    /// `requests-<tag>.txt` beside the results for the link measurement,
+    /// with the uptime and wall clocks read together for alignment.
+    func requestRecords(_ s: ProtocolServer) -> String {
+        let (records, dropped) = s.stats.requestRecords
+        let done = records.filter { $0.writtenNs != 0 }
+        let service = done.map { Double($0.writtenNs &- $0.readNs) / 1e6 }
+        let inVM = records.filter { $0.deliveredNs != 0 }.map { Double($0.deliveredNs &- $0.readNs) / 1e6 }
+        let dir = (Output.shared.filePath as NSString).deletingLastPathComponent
+        let path = (dir as NSString).appendingPathComponent("requests-\(options.string("tag", "-")).txt")
+        var text = "uptime_ns=\(ShellVM.now()) wall_s=\(f3(Date().timeIntervalSince1970)) dropped=\(dropped)\n"
+        for r in records { text += "\(r.connection) \(r.id) \(r.kind) \(r.readNs) \(r.deliveredNs) \(r.writtenNs)\n" }
+        try? text.write(toFile: path, atomically: true, encoding: .utf8)
+        return " served_records=\(records.count) served_records_dropped=\(dropped) served_service_p50_ms=\(f3(percentile(service, 0.5))) served_service_p99_ms=\(f3(percentile(service, 0.99))) served_service_max_ms=\(f3(service.max() ?? 0)) served_invm_max_ms=\(f3(inVM.max() ?? 0))"
     }
 
     func loadFailures() -> String {

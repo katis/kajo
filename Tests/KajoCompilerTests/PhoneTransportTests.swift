@@ -55,6 +55,37 @@ final class TestClock: Sendable {
 }
 
 @Suite(.serialized) struct PhoneTransportTests {
+    @Test func theServerRecordsEachRequestsTimeInTheTarget() throws {
+        // The devices' link measurement (2026-11-06): every request with an
+        // integer id is recorded with when its bytes were read, when the
+        // reply reached deliver and when the writer finished it, in that
+        // order, under the id the client sent.
+        let t = try TCPTarget()
+        defer { t.close() }
+        let server = t.target.server
+        let c = try t.client()
+        defer { c.close() }
+        try c.open(token: server.token, client: "developer", timeout: 60)
+        #expect(try c.eval("3 + 4")["value"] == .string("7"))
+        #expect(try c.eval("6 * 7")["value"] == .string("42"))
+        // The writer notes a reply written after write() returns, which may
+        // be after the client read it: a bounded wait.
+        let end = ShellVM.now() + 30_000_000_000
+        var records = server.stats.requestRecords.records.filter { $0.kind == "evaluate" }
+        while (records.count < 2 || records.contains { $0.writtenNs == 0 }) && ShellVM.now() < end {
+            usleep(10_000)
+            records = server.stats.requestRecords.records.filter { $0.kind == "evaluate" }
+        }
+        #expect(records.count == 2)
+        #expect(Set(records.map(\.id)).count == 2)
+        for r in records {
+            #expect(r.readNs > 0 && r.readNs <= r.deliveredNs && r.deliveredNs <= r.writtenNs)
+        }
+        #expect(server.stats.requestRecords.dropped == 0)
+        // session.open is the transport's, not a recorded request.
+        #expect(!server.stats.requestRecords.records.contains { $0.kind == "session.open" })
+    }
+
     @Test func theServerServesTCPWithTheTokenRuleAndTheLimits() throws {
         let t = try TCPTarget()
         defer { t.close() }

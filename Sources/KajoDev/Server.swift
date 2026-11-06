@@ -260,6 +260,8 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
             let n = unsafe read(conn.fd, &chunk, chunk.count)
             if n < 0 && errno == EINTR { continue }
             if n <= 0 { break }
+            // When the bytes arrived (a request's service time starts here).
+            let readNs = ShellVM.now()
             var start = 0
             for i in 0..<n where chunk[i] == 10 {
                 buffer += chunk[start..<i]
@@ -267,7 +269,7 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
                 if discarding {
                     discarding = false
                     conn.send(errorReply(id: .null, "malformed request: longer than \(RequestLimits.lineBytes) bytes"))
-                } else if !handle(conn, buffer) {
+                } else if !handle(conn, buffer, readNs) {
                     break reading
                 }
                 buffer.removeAll(keepingCapacity: true)
@@ -288,7 +290,7 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
     }
 
     /// One line from a connection. False ends the connection.
-    private func handle(_ conn: Connection, _ line: [UInt8]) -> Bool {
+    private func handle(_ conn: Connection, _ line: [UInt8], _ readNs: UInt64) -> Bool {
         if line.allSatisfy({ $0 == 32 || $0 == 9 || $0 == 13 }) { return true }
         let request: DevRequest
         switch parseRequest(line) {
@@ -343,6 +345,7 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
             return true
         }
         stats.add(\.requests)
+        if case .int(let i) = request.id { stats.noteReceived(conn.id, i, request.kind, readNs) }
         post(conn.id, canonical)
         return true
     }
@@ -424,10 +427,28 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
                 conn = conn * 10 + Int(line[i] - 48)
                 i += 1
             }
+            // `,"id":<integer>` follows: the request's record (its service
+            // time in the target, for the link measurement).
+            var tag: (Int, Int64)? = nil
+            let idKey = Array(",\"id\":".utf8)
+            if i + idKey.count < line.count, Array(line[i..<i + idKey.count]) == idKey {
+                var j = i + idKey.count, v: Int64 = 0, digits = 0
+                let negative = line[j] == 45
+                if negative { j += 1 }
+                while j < line.count, (48...57).contains(line[j]), digits < 18 {
+                    v = v * 10 + Int64(line[j] - 48)
+                    j += 1
+                    digits += 1
+                }
+                if digits > 0 {
+                    tag = (conn, negative ? -v : v)
+                    stats.noteDelivered(conn, negative ? -v : v, t0)
+                }
+            }
             lock.lock()
             let c = connections[conn]
             lock.unlock()
-            c?.send(line)
+            c?.send(line, tag: tag)
             return
         }
         lock.lock()
@@ -499,7 +520,9 @@ final class Connection: @unchecked Sendable {
         }
     }
 
-    func send(_ line: [UInt8]) {
+    /// `tag` (connection, request id): the reply whose write completes the
+    /// request's record in `stats`.
+    func send(_ line: [UInt8], tag: (Int, Int64)? = nil) {
         lock.lock()
         if closed || pending > 64 << 20 {
             let drop = !closed
@@ -523,6 +546,7 @@ final class Connection: @unchecked Sendable {
                 off += n
             }
             stats.noteWritten(off)
+            if let tag { stats.noteReplyWritten(tag.0, tag.1, ShellVM.now()) }
             lock.lock()
             pending -= bytes.count
             lock.unlock()
@@ -596,5 +620,55 @@ public final class ServerStats: @unchecked Sendable {
         v.deliverTotalNs &+= ns
         v.deliverMaxNs = max(v.deliverMaxNs, ns)
         lock.unlock()
+    }
+
+    /// One request with an integer id, on the uptime clock: when its bytes
+    /// were read, when the kernel's reply reached `deliver`, when the writer
+    /// finished writing it (0: not yet). The devices' link measurement
+    /// compares these with the client's round trip of the same id. At most
+    /// `recordCapacity` are kept (the first ones; `recordsDropped` counts
+    /// the rest).
+    public struct RequestRecord: Sendable {
+        public let connection: Int
+        public let id: Int64
+        public let kind: String
+        public let readNs: UInt64
+        public var deliveredNs: UInt64 = 0
+        public var writtenNs: UInt64 = 0
+    }
+    private struct RecordKey: Hashable { let connection: Int; let id: Int64 }
+    public static let recordCapacity = 20_000
+    private var records: [RequestRecord] = []  // under lock
+    private var recordIndex: [RecordKey: Int] = [:]  // under lock: the open ones
+    private var dropped = 0  // under lock
+
+    public var requestRecords: (records: [RequestRecord], dropped: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (records, dropped)
+    }
+
+    func noteReceived(_ connection: Int, _ id: Int64, _ kind: String, _ ns: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard records.count < ServerStats.recordCapacity else { dropped += 1; return }
+        recordIndex[RecordKey(connection: connection, id: id)] = records.count
+        records.append(RequestRecord(connection: connection, id: id, kind: kind, readNs: ns))
+    }
+
+    func noteDelivered(_ connection: Int, _ id: Int64, _ ns: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        if let i = recordIndex[RecordKey(connection: connection, id: id)], records[i].deliveredNs == 0 { records[i].deliveredNs = ns }
+    }
+
+    func noteReplyWritten(_ connection: Int, _ id: Int64, _ ns: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+        let k = RecordKey(connection: connection, id: id)
+        if let i = recordIndex[k] {
+            records[i].writtenNs = ns
+            recordIndex[k] = nil
+        }
     }
 }

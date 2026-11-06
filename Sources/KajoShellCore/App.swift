@@ -113,6 +113,9 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
         case "golden":
             platform.showStatus("golden \(o.summary)")
             startGolden(o)
+        case "spin":
+            platform.showStatus("spin \(o.summary)")
+            startSpin(o)
         case "tests":
             platform.showStatus("tests \(o.summary)")
             let t = TestsMode(o, platform: platform, pairing: pairing)
@@ -135,6 +138,14 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
             demo = d
             d.start()
         }
+    }
+}
+
+/// The energy counters' known workload (Spin.swift), off the main thread.
+nonisolated func startSpin(_ o: LaunchOptions) {
+    onBackgroundThread {
+        runSpin(o)
+        finish(0)
     }
 }
 

@@ -22,7 +22,9 @@
 # target to a targets file of mode 0600 (the phone's: copied from its
 # Application Support, as the owner would read it off the screen) and from
 # there into the client shell's memory; it is never printed. PORT (47100),
-# DD and TIMEOUT override.
+# DD and TIMEOUT override; PACKAGE (Kernel) is the package whose selectors
+# the session lists (Generated against an image built with
+# KAJO_SHELL_CLASSES, apps/Shared/build-images.sh).
 set -uo pipefail
 root=${0:A:h:h}
 serve=${1:?serve} out=${2:?outdir} tag=${3:?tag} scenario=${4:?scenario} form=${5:?form} n=${6:?sessions}
@@ -95,7 +97,7 @@ for (( k = 1; k <= n; k++ )); do
   (( $(date +%s) - start < ${LIMIT:-14} )) || break
   kill -0 $spid 2>/dev/null || break
   TIMEOUT=${TIMEOUT:-200} $root/scripts/mac-shell.sh run $out/client-$tag.txt mode=devsession classes=0 target=target \
-    targets=$targets project=$out/proj-$tag tag=$tag-$k form=$form serve=$serve
+    targets=$targets project=$out/proj-$tag tag=$tag-$k form=$form serve=$serve package=${PACKAGE:-Kernel}
 done
 if [[ $serve == kajo ]]; then kill $spid 2>/dev/null; fi
 wait $spid 2>/dev/null
