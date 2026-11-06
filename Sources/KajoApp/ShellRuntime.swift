@@ -142,7 +142,16 @@ final class RuntimeLink: @unchecked Sendable {
         onTurn?(t, kind)
         if !ticking && (t.preempted || minPriority > 0) && !followUp {
             followUp = true
-            DispatchQueue.main.async { MainActor.assumeIsolated { self.followUp = false; self.turn(.wake) } }
+            // Weakly: the runtime does not outlive its host for a turn it
+            // left (its platform is unowned; a test's host is gone when the
+            // test ends, and the turn would read it).
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.followUp = false
+                    self.turn(.wake)
+                }
+            }
         }
     }
 

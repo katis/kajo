@@ -178,6 +178,26 @@ func offMain<T: Sendable>(_ f: @escaping @Sendable () throws -> T) async throws 
         #expect(missing.runtime == nil)
     }
 
+    @Test func aTurnLeftForLaterDoesNotOutliveItsHost() async throws {
+        // A turn that leaves work schedules a follow-up on the main queue;
+        // the runtime's platform is unowned, so the follow-up must not keep
+        // the runtime past its host (the gate's ThreadSanitizer run trapped
+        // in a later test reading this test's freed host).
+        do {
+            let platform = PropertyPlatform()
+            let app = KajoAppRunner(configuration: KajoAppConfiguration(name: "Sample", appClass: "SampleApp"), platform: platform,
+                                    development: nil)
+            #expect(app.start(imagePath: sampleReleaseImage))
+            let rt = try #require(app.runtime)
+            rt.frameAccountNs = 0
+            usleep(20_000)  // past the frame: the account renews to 0
+            rt.turn(.wake)  // UI-only: a follow-up is scheduled
+            #expect(rt.uiOnlyTurns > 0)
+            closeApp(app)
+        }
+        try await Task.sleep(for: .milliseconds(300))
+    }
+
     @Test func theServiceNameTellsAppsApartAndFitsBonjour() {
         #expect(Development.serviceName(app: "Sample", device: "Joni's iPad") == "Sample on Joni's iPad")
         let long = Development.serviceName(app: String(repeating: "A", count: 30), device: String(repeating: "é", count: 40))
