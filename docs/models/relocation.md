@@ -137,7 +137,7 @@ to a row updates the model in the same commit.
 | `R poll` | Copy protocol (polls only between objects); Phases | `relocPass` (`gcRequested`, `markerSafepoint`) | `relocate` |
 | `R relocate: CAS ... fence` | Copy protocol step 4 | `relocBegin` | `relocate` |
 | `R relocate: hz[M] (seq_cst)`, revert (release) | step 5 | `hazarded`, `relocRevert` | `relocate` / `hazard` |
-| `R relocate: copy` | step 6 | `relocCopy` | `relocate` |
+| `R relocate: copy` | step 6 | `copyBody` | `relocate` |
 | `R relocate: switch (release)` | step 7 | `relocSwitch` | `relocate` |
 | `R addPending (seq_cst fetch_add)` | step 8; epochs | `addPending` | `epoch` |
 | `R tryFreePending: epoch[M] (acquire)`, free | epochs | `tryFreePending(atPause: false)` | `epoch` |

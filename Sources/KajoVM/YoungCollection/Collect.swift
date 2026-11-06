@@ -730,14 +730,3 @@ struct CollectionTally {
         unsafe d.pointee.truncate(kept)
     }
 }
-
-/// The body copy: word by word with relaxed atomic loads and stores (a
-/// mutator may read the old body through the alias meanwhile).
-@inline(never)
-func copyBody(_ om: ObjectMemory, from off: UInt64, to dst: UInt64, bytes: UInt64) {
-    var k: UInt64 = 0
-    while k < bytes {
-        om.setWordAtomic(atOffset: dst &+ k, om.wordAtomic(atOffset: off &+ k))
-        k &+= 8
-    }
-}

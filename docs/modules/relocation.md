@@ -66,7 +66,7 @@ thread and no timed wait.
    CAS `off -> off + 2^32` (seq_cst), a seq_cst fence; the hazard check
    (`isHazarded`): the count of held hazard slots, and when nonzero every
    worker's two slots (seq_cst); hazarded: `relocRevert` (release), the
-   block is not freed this cycle; `relocCopy`: the body word by word, back
+   block is not freed this cycle; `copyBody`: the body word by word, back
    reference included, relaxed atomic loads and stores; `relocSwitch`: one
    release store of the new offset, `inRelocation` cleared, to-space
    bumped. A block whose objects all moved goes **pending** (`addPending`)
@@ -226,7 +226,7 @@ functions. No step changed order; the model is unchanged.
 | `R poll` | `markerPoll` from `relocatePass`, between objects only |
 | `R relocate: CAS ... fence` | `relocBegin` (to-space already taken by `toSpace`: finding 4) |
 | `R relocate: hz[M] (seq_cst)`, revert (release) | `isHazarded`, `relocRevert` |
-| `R relocate: copy` | `relocCopy` |
+| `R relocate: copy` | `copyBody` |
 | `R relocate: switch (release)` | `relocSwitch` |
 | `R addPending (seq_cst fetch_add)` | `addPending` |
 | `R tryFreePending: epoch[M]`, free | `tryFreePending(atPause: false)`, seq_cst loads (finding 2) |
@@ -590,7 +590,7 @@ Module 5 (`Marking/`):
   (the experiment's switch), the broken variant moved the running method's
   bytecodes; the old block was freed by epoch and reused as to-space while
   the worker's pc still pointed into it, and ThreadSanitizer reported
-  `interpret` reading what `relocCopy` had written. The variant now shows
+  `interpret` reading what `copyBody` had written. The variant now shows
   the frame-pinned object moving and the bytecodes staying.
 - **The state word, slot loads and byte accesses are relaxed atomics**
   (the brief assumed module 1's plain loads would do). A plain mutator load
@@ -677,7 +677,7 @@ holds. It is the model's trace with the store buffer replaced by the hook.
 |---|---|---|---|
 | post-store check | `withoutThePostStoreCheckTheStoreIsLost` | the raw store (suite) | the store went into the old body only: slot reads its old value |
 | frame pins | `withoutThePinRuleTheFrameObjectIsMoved` | switch `pinRule` (suite) | the frame's object moved |
-| pins for good | (none in the suite) | `pinRule` off for both bits (hand run, the first version of the variant) | ThreadSanitizer: `interpret` reads to-space `relocCopy` wrote (the running bytecodes moved and their block was reused) |
+| pins for good | (none in the suite) | `pinRule` off for both bits (hand run, the first version of the variant) | ThreadSanitizer: `interpret` reads to-space `copyBody` wrote (the running bytecodes moved and their block was reused) |
 | hazard check | `withoutTheHazardCheckThePrimitivesStoreIsLost` | switch `hazardRule` (suite) | the object moved; the primitive's store through its pointer lost |
 | epoch rule | `withoutTheEpochRuleBlocksAreFreedAtOnce` | switch `epochRule` (suite) | blocks freed while a worker inside the VM had not polled |
 | the enter 0 | `withoutTheEpochZeroAtEnterTheBlockIsFreedUnderTheWorker` | switch `enterZero` (suite) | the block freed under the entering worker's offset |
@@ -689,7 +689,7 @@ holds. It is the model's trace with the store buffer replaced by the hook.
 
 - ThreadSanitizer: the first broken pin variant moved the running method's
   bytecodes; their block was freed by epoch and reused as to-space while
-  the worker's pc pointed into it (`interpret` reading what `relocCopy`
+  the worker's pc pointed into it (`interpret` reading what `copyBody`
   wrote). `pinRule` now turns off frame pins only.
 - ThreadSanitizer: a race between two tests' side tables (an old map and a
   mark map) that only shared an address: `vm_deallocate` and
@@ -748,7 +748,7 @@ has no warning.
 (205), `copySlots` (110; `rememberSlow`, `handOver`), `epochEnter` (29, no
 call), `addPending` (88), `tryFreePending` (237; the pool lock), the pass
 `relocatePass` (471; `markerPoll`, `addPending`, `tryFreePending`,
-`relocCopy`, the pool lock) and its copy loop `relocCopy` (11 instructions,
+`copyBody`, the pool lock) and its copy loop `copyBody` (11 instructions,
 no call): zero `swift_retain`/`swift_release` in every one; `interpret` one
 indirect branch, one jump table, and the post-store check printed from its
 `store_ivar` (the sequence under "Post-store check").

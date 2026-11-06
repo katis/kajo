@@ -153,7 +153,7 @@ extension VM {
 
     func stepCopy(_ s: RelocStep) {
         let (_, r) = unsafe manualRelocator()
-        unsafe relocCopy(r, s.from, s.to, s.bytes)
+        unsafe copyBody(r.pointee.om, from: s.from, to: s.to, bytes: s.bytes)
     }
 
     func stepSwitch(_ s: RelocStep) {

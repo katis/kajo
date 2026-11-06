@@ -307,7 +307,7 @@ func relocateOne(_ vm: VMPointer, _ r: RelocationPointer, _ mw: WorkerPointer, _
         return .hazard
     }
     unsafe perturbInCopy(vm, r, mw)
-    unsafe relocCopy(r, off, dst, bytes)
+    unsafe copyBody(r.pointee.om, from: off, to: dst, bytes: bytes)
     unsafe perturbInCopy(vm, r, mw)  // before the switch
     unsafe relocSwitch(r, mw, o, dst, bytes)
     return .moved
@@ -347,12 +347,13 @@ func relocRevert(_ r: RelocationPointer, _ mw: WorkerPointer, _ o: UInt64, _ off
     unsafe r.pointee.state.pointee.verifyDue = true
 }
 
-/// The copy: the body word by word, back reference included (it names the
-/// same entry and size), relaxed atomic loads from the old body and
-/// relaxed atomic stores into the new one.
+/// The copy of a body: word by word, back reference included (it names the
+/// same entry and size), relaxed atomic loads from the old body and relaxed
+/// atomic stores into the new one (a mutator may read the old body through
+/// the alias meanwhile). The relocator's and module 7's young collections'
+/// copy alike (the collectors review: they were two copies of this loop).
 @inline(never)
-func relocCopy(_ r: RelocationPointer, _ off: UInt64, _ dst: UInt64, _ bytes: UInt64) {
-    let om = unsafe r.pointee.om
+func copyBody(_ om: ObjectMemory, from off: UInt64, to dst: UInt64, bytes: UInt64) {
     var k: UInt64 = 0
     while k < bytes {
         om.setWordAtomic(atOffset: dst &+ k, om.wordAtomic(atOffset: off &+ k))
