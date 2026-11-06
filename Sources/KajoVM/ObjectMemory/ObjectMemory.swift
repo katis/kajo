@@ -330,6 +330,15 @@ import Synchronization
         return unsafe pools.pointee.highWater
     }
 
+    /// Large bytes, part 2: the pools as a fallback found them.
+    var fallbackSnapshot: (highWater: UInt64, poolRuns: Int, pendingRuns: Int, blocksInUse: Int, softLimitBlocks: Int,
+                           lastLargeFailure: UInt8) {
+        lockPools()
+        defer { unlockPools() }
+        let p = unsafe pools.pointee
+        return (p.highWater, p.entryRuns.count, p.pendingRuns.count, p.blocksInUse, p.softLimitBlocks, p.lastLargeFailure)
+    }
+
     // MARK: - counters
 
     var counters: Counters {
@@ -430,6 +439,9 @@ extension ObjectMemory: @unchecked Sendable {}
     /// Large allocations after which module 5's trigger fired and this
     /// worker collected its nursery to start a cycle.
     var largeTriggers: UInt64 = 0
+    /// Large bytes, part 2: why the last large request failed (1 the
+    /// limit, 2 no run of its length), for the fallback's record.
+    var lastLargeFailure: UInt8 = 0
     /// Module 7 under the reserve's rule: blocks promised to young
     /// collections in flight (`reservePromotion`).
     var promotionReserved = 0

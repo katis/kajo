@@ -204,6 +204,43 @@ struct MarkingCounters: Sendable {
     /// fill.
     var lastPromotionBytesPerSecond: Double = 0
     var lastPredictedFillNs: UInt64 = 0
+    /// Large bytes, part 2: fallbacks by what ran out (the young allocation
+    /// found the entry table empty; a collection left old space past its
+    /// soft limit; an old allocation found no room under the limit or no
+    /// run of its length).
+    var fallbacksEntries: UInt64 = 0
+    var fallbacksSoftLimit: UInt64 = 0
+    var fallbacksOldAllocation: UInt64 = 0
+}
+
+/// Large bytes, part 2: the circumstances of one fallback, taken in its
+/// stop before the full collection runs.
+struct FallbackRecord: Sendable {
+    var cause = FullCause.other
+    var phase = MarkingPhase.idle
+    /// The current cycle's trigger and how long ago it started (ns; 0 when
+    /// no cycle runs).
+    var trigger: CycleTrigger? = nil
+    var sinceCycleStartNs: UInt64 = 0
+    /// The sweep's progress over the snapshot's words (0 to 1; 0 before it
+    /// starts), and the objects marked so far.
+    var sweptFraction = 0.0
+    var markedObjects: UInt64 = 0
+    /// Entries: the table's capacity and high water, free runs in the pool
+    /// and runs the sweep holds pending, the old-entry estimate.
+    var entryCapacity: UInt64 = 0
+    var highWater: UInt64 = 0
+    var poolRuns = 0
+    var pendingRuns = 0
+    var oldEntries: UInt64 = 0
+    /// Old space: blocks in use and the soft limit.
+    var blocksInUse = 0
+    var softLimitBlocks = 0
+    /// The marker's QoS class now and whether the policy wants it raised.
+    var markerQoS: UInt32 = 0
+    var wantUserInitiated = false
+    /// An old allocation's failure: 1 the limit, 2 no run of its length.
+    var largeFailure: UInt8 = 0
 }
 
 /// What module 5's report sums, averages or takes the maximum of over
@@ -275,6 +312,8 @@ struct MarkingLog {
         totals.bytesFreed &+= r.bytesFreed
     }
     var lastOldAllocations: UInt64 = 0
+    /// Large bytes, part 2: the last fallbacks' circumstances.
+    var fallbackRecords = RecordRing<FallbackRecord>(capacity: 16)
     /// Words of the snapshot map that may have bits (high water at the
     /// snapshot, rounded up).
     var snapshotWords = 0

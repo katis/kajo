@@ -528,7 +528,29 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("promotionMBs", f(c.lastPromotionBytesPerSecond / 1e6)), ("predictedFillMs", ms(c.lastPredictedFillNs)),
         ("markVerifies", "\(c.verifierRuns)"), ("missed", "\(c.missed)"),
         ("cycleLogDropped", "\(totals.dropped)"),
+        ("fallbacksEntries", "\(c.fallbacksEntries)"), ("fallbacksSoftLimit", "\(c.fallbacksSoftLimit)"),
+        ("fallbacksOld", "\(c.fallbacksOldAllocation)"), ("fallbackLog", fallbackSummary(vm.fallbackLog)),
     ]
+}
+
+/// Large bytes, part 2: each recorded fallback as
+/// cause/phase/trigger/ms since the cycle started/swept percent/entries
+/// used percent (high water)/pool runs/pending runs/old entries percent/
+/// blocks percent of the soft limit/marker QoS/raise wanted/large failure,
+/// separated by commas; "-" when none.
+func fallbackSummary(_ rs: [FallbackRecord]) -> String {
+    if rs.isEmpty { return "-" }
+    func pc(_ a: Double, _ b: Double) -> String { b > 0 ? unsafe String(format: "%.1f", 100 * a / b) : "-" }
+    return rs.map { r in
+        let cause = ["soft", "entries", "other", "old"][Int(r.cause.rawValue)]
+        let phase = ["idle", "marking", "sweeping", "swept"][Int(r.phase.rawValue)]
+        let trig = r.trigger.map { ["floor", "entries", "predictor", "forced"][Int($0.rawValue)] } ?? "-"
+        return [cause, phase, trig, unsafe String(format: "%.1f", Double(r.sinceCycleStartNs) / 1e6),
+                unsafe String(format: "%.0f", r.sweptFraction * 100), pc(Double(r.highWater), Double(r.entryCapacity)),
+                "\(r.poolRuns)", "\(r.pendingRuns)", pc(Double(r.oldEntries), Double(r.entryCapacity)),
+                pc(Double(r.blocksInUse), Double(r.softLimitBlocks)), "\(r.markerQoS)", r.wantUserInitiated ? "1" : "0",
+                "\(r.largeFailure)"].joined(separator: "/")
+    }.joined(separator: ",")
 }
 
 /// Module 6's line: cycles that planned and selected a relocation, what

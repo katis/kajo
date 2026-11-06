@@ -86,6 +86,7 @@ extension ObjectMemory {
             : reserve ? p.pointee.hardLimitBlocks : p.pointee.softLimitBlocks
         if unsafe p.pointee.blocksInUse &+ k > limit {
             unsafe p.pointee.largeFailures &+= 1
+            unsafe p.pointee.lastLargeFailure = 1
             return nil
         }
         // A free block (not in use) is always in the pool (the free-list
@@ -107,6 +108,7 @@ extension ObjectMemory {
         }
         if found < 0 {
             unsafe p.pointee.largeFailures &+= 1
+            unsafe p.pointee.lastLargeFailure = 2
             return nil
         }
         // Out of the pool; then the side table, head last.

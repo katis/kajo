@@ -274,7 +274,7 @@ struct CacheEntry {
                     // Module 10: a full collection forced by an old (large)
                     // allocation is module 5's fallback too: counted, never
                     // hidden (it was not counted before).
-                    if unsafe om.gc.pointee.counters.collections != collections { unsafe noteFullCollection(vm, .softLimit) }
+                    if unsafe om.gc.pointee.counters.collections != collections { unsafe noteFullCollection(vm, .oldAllocation) }
                 }
                 if !stopped { continue }
                 unsafe state.pointee.counters.collectionsTriggered &+= pauseCount() &- before

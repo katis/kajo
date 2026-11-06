@@ -184,25 +184,63 @@ func markingBeforeOldSpaceOperation(_ vm: VMPointer) {
 }
 
 /// Why module 4 ran a full collection.
-enum FullCause {
+enum FullCause: UInt8, Sendable {
     /// A scavenge left old space past its soft limit.
     case softLimit
     /// The entry table was full.
     case entries
     /// A stress flag or the host.
     case other
+    /// Large bytes, part 2: an old (large) allocation found no room under
+    /// the soft limit or no run of its length.
+    case oldAllocation
 }
 
 /// A full collection is about to run in this stop. With concurrent marking
 /// configured, one forced by space is a fallback: a provisioning failure,
-/// counted by the phase it found, never hidden.
+/// counted by the phase it found and by what ran out, never hidden. Its
+/// circumstances are recorded (large bytes, part 2).
 func noteFullCollection(_ vm: VMPointer, _ cause: FullCause) {
     guard let mk = unsafe vm.pointee.marking, cause != .other else { return }
     let log = unsafe mk.pointee.log
     unsafe log.pointee.counters.fallbacks &+= 1
-    switch unsafe mk.phaseNow {
+    let phase = unsafe mk.phaseNow
+    switch phase {
     case .idle: unsafe log.pointee.counters.fallbacksIdle &+= 1
     case .marking: unsafe log.pointee.counters.fallbacksMarking &+= 1
     case .sweeping, .swept: unsafe log.pointee.counters.fallbacksSweeping &+= 1
     }
+    switch cause {
+    case .entries: unsafe log.pointee.counters.fallbacksEntries &+= 1
+    case .softLimit: unsafe log.pointee.counters.fallbacksSoftLimit &+= 1
+    case .oldAllocation: unsafe log.pointee.counters.fallbacksOldAllocation &+= 1
+    case .other: break
+    }
+    let om = unsafe mk.pointee.om
+    let m = unsafe mk.pointee.marker
+    var r = FallbackRecord()
+    r.cause = cause
+    r.phase = phase
+    if phase != .idle, let cur = unsafe log.pointee.currentRecord {
+        r.trigger = cur.trigger
+        r.sinceCycleStartNs = unsafe nanoseconds() &- log.pointee.startNs
+    }
+    if phase == .sweeping, unsafe m.pointee.sweepWords > 0 {
+        r.sweptFraction = unsafe Double(m.pointee.sweepCursor) / Double(m.pointee.sweepWords)
+    } else if phase == .swept {
+        r.sweptFraction = 1
+    }
+    r.markedObjects = unsafe m.pointee.markedObjects
+    r.entryCapacity = om.entryCapacity
+    r.oldEntries = unsafe log.pointee.oldEntries
+    let f = om.fallbackSnapshot
+    r.highWater = f.highWater
+    r.poolRuns = f.poolRuns
+    r.pendingRuns = f.pendingRuns
+    r.blocksInUse = f.blocksInUse
+    r.softLimitBlocks = f.softLimitBlocks
+    r.largeFailure = f.lastLargeFailure
+    r.markerQoS = unsafe m.pointee.qos
+    r.wantUserInitiated = unsafe mk.pointee.wantUserInitiated.pointee.load(ordering: .relaxed)
+    unsafe log.pointee.fallbackRecords.append(r)
 }

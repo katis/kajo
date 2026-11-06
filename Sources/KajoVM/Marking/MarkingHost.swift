@@ -120,6 +120,12 @@ extension VM {
         return inspect { _ in unsafe mk.pointee.log.pointee.records.records }
     }
 
+    /// Large bytes, part 2: the last fallbacks' circumstances, oldest first.
+    var fallbackLog: [FallbackRecord] {
+        guard let mk = unsafe state.pointee.marking else { return [] }
+        return inspect { _ in unsafe mk.pointee.log.pointee.fallbackRecords.records }
+    }
+
     /// Sums and maxima over every cycle, and the records the log dropped.
     var cycleTotals: CycleTotals {
         guard let mk = unsafe state.pointee.marking else { return CycleTotals() }
