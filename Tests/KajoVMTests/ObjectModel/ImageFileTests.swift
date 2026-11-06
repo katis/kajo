@@ -276,6 +276,65 @@ private func theImageLoaderRejects(_ c: Corruption) throws {
     #expect(rejected > 0 && loaded + rejected == 300)
 }
 
+/// Large bytes: an image with a byte object past the header's count field
+/// (16 MiB + 1003 bytes, its length in its back reference) round-trips, and
+/// seeded mutations of its header, its back reference and its run's used
+/// word, and anywhere, load cleanly or are refused. The snapshot fuzzer's
+/// long-bytes seed (`Fixtures/fuzz/snapshot/long-bytes.img`);
+/// `KAJO_WRITE_FUZZ_SEEDS=1` writes it.
+@Test func mutatedImagesWithALongByteObjectLoadCleanOrAreRejected() throws {
+    let n = Int(Header.longBytesFrom) + 1003
+    var config = imageConfig()
+    config.heapBytes = 1024 * BlockHeap.blockBytes
+    let seed = try {
+        let i = try makeImage(heapBlocks: 1024)
+        defer { i.destroy() }
+        try i.load(["prelude", "objectmodel"].map { (file: "\($0).kasm", text: kernel($0)) } + [(file: "t.kasm", text: imageSrc)])
+        let ctx = i.om.makeContext()
+        defer { i.om.destroyContext(ctx) }
+        let b = i.om.tryAllocateAny(ctx, classIndex: WellKnown.byteArray, count: n, isBytes: true, fill: i.nilObject)
+        #expect(b != .none && i.om.header(b).isLongBytes)
+        i.om.storeByte(b, n - 1, 5)
+        i.om.store(i.globals, Image.globalCount - 1, b)
+        return try i.saveImage()
+    }()
+    let back = try Image.load(image: seed, config: config)
+    let b = back.om.load(back.globals, Image.globalCount - 1)
+    #expect(back.om.count(of: b) == UInt64(n) && back.om.loadByte(b, n - 1) == 5)
+    let entry = Int(b.entryIndex)
+    back.destroy()
+    if ProcessInfo.processInfo.environment["KAJO_WRITE_FUZZ_SEEDS"] != nil {
+        try Data(seed).write(to: URL(fileURLWithPath: "\(fixturesDir)/fuzz/snapshot/long-bytes.img"))
+    }
+    #expect(FuzzEntry.image(seed))
+    let methods = (0..<8).reduce(0) { $0 | Int(seed[24 + $1]) << (8 * $1) }
+    let snapAt = 8 * (ImageFile.headerWords + methods)
+    let L = try SnapshotLayout(parsing: Array(seed[snapAt...]))
+    let entryAt = snapAt + L.tableAt + entry * 16
+    let off = (0..<8).reduce(UInt64(0)) { $0 | UInt64(seed[entryAt + $1]) << (8 * UInt64($1)) }
+    let bodyAt = snapAt + L.heapAt(offset: off)
+    let usedAt = snapAt + L.usedAt + 8 * BlockHeap.block(ofOffset: off)
+    // The header's count bits (22..45), the back reference's words (32..63),
+    // the head's used word, or anywhere.
+    var g = SplitMix(seed: 13)
+    var loaded = 0, rejected = 0
+    for _ in 0..<60 {
+        var m = seed
+        for _ in 0..<(1 + Int(g.next() % 2)) {
+            let k: Int
+            switch g.next() % 4 {
+            case 0: k = entryAt + 8 + 2 + Int(g.next() % 4)
+            case 1: k = bodyAt + 4 + Int(g.next() % 4)
+            case 2: k = usedAt + Int(g.next() % 8)
+            default: k = Int(g.next() % UInt64(m.count))
+            }
+            m[k] ^= UInt8(truncatingIfNeeded: 1 << (g.next() % 8))
+        }
+        if FuzzEntry.image(m) { loaded += 1 } else { rejected += 1 }
+    }
+    #expect(rejected > 0 && loaded + rejected == 60)
+}
+
 /// Regressions found by `just fuzz snapshot`: each loads cleanly or is
 /// refused, never traps.
 @Test(arguments: ["crash-wellknown-name", "crash-marker-offset", "crash-nil-not-root"])

@@ -9,7 +9,9 @@
 public enum FuzzEntry {
     private static func config() -> ObjectMemoryConfig {
         var c = ObjectMemoryConfig()
-        c.heapBytes = 64 * BlockHeap.blockBytes
+        // Large bytes: 1024 blocks (32 MiB, reserved, touched only as used)
+        // so the seed with a byte object past 16 MiB loads; it was 64.
+        c.heapBytes = 1024 * BlockHeap.blockBytes
         c.entryCapacity = 1 << 14
         c.entryChunk = 64
         c.verify = true
