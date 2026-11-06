@@ -565,6 +565,14 @@ From the aligned `-enable-testing` release binaries of the A/B:
    inputs in 600 s against 0.89 to 2.26 million before. Keep both runs, or
    run one, choosing 3 or an extreme value per input?
 
+### The owner's answers (2026-11-06)
+
+1. Not answered as asked; the owner asked what the records are. The main
+   session's recommendation stands until a tool reads them: 4096 in the
+   apps, since the totals lose nothing.
+2. **Keep the assertion** in every configuration.
+3. **Keep both runs.**
+
 ## Gates
 
 Run by one script on d1ecb7d (402cf28's code; the commits after it are

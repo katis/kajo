@@ -802,6 +802,23 @@ in `runSlice` and `dequeueLocked`, which run once per slice.
    (`process.terminate` of Processes it did not start, `class.remove`),
    or confined to its package's classes?
 
+### The owner's answers (2026-11-06)
+
+1. **Yes**: a development image stops an unhandled error's Process
+   whether or not a client is connected, so a later client finds it. To
+   be built in a follow-up (as built here it stops only while serving).
+2. **A pragma.** The author mark moves from method metadata to a pragma;
+   to be built in the same follow-up, with the canonical Tonel form and
+   both readers.
+3. **Keep it**: a method that only sends may join a sealed class.
+4. **Whatever makes sense for an app runtime.** The main session's
+   reading: an app cannot have a Process that cannot be ended, so the
+   bound stays (1 s); what a runtime needs beside it is that a cut-off
+   unwinding is never silent, so `terminate` answers whether the blocks
+   ran to their end and a cut-off is counted and reported. The follow-up
+   checks what is built against that.
+5. **The same rights for now.**
+
 ## What 9c needs
 
 From the protocol, every request above; the browser `class.list`,

@@ -1134,6 +1134,21 @@ binaries.
    retried, the form is a request id the target remembers and answers
    from, a protocol change, not a flag.
 
+### The owner's answers after the device run (2026-11-06)
+
+The run on the devices ("On the devices") left three things to decide:
+
+1. **The fallbacks under large churn on the devices**: if such churn is
+   likely in real use (a photo or video app), tune it for devices. It is
+   plausible, so the large-objects follow-up tunes the trigger
+   (`docs/modules/large-objects.md`, the owner's answers).
+2. **The iPad's three unexplained readings** (event latency under the
+   storm, request maxima over Wi-Fi, energy): the owner suspects the
+   iPad's battery at least for the energy, and an investigation is to be
+   run.
+3. **The 2000-class image served from a device**, to check that the class
+   tree keeps the push form: yes, run it.
+
 ## What a later module needs
 
 - **The developer UI on the phone** (if ever): the second round of view

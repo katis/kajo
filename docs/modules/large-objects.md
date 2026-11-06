@@ -695,6 +695,26 @@ release builds (`just arc-check`'s), normalized for addresses
 4. **Card marking for large objects** (Not done): worth building before
    the shells keep large collections that hold young objects?
 
+### The owner's answers (2026-11-06)
+
+1. **16 MiB is too little** if images or photos are held in a ByteArray.
+   The byte limit is to be lifted in a follow-up (how is that module's
+   to measure: a count in words with the odd bytes beside it, or an
+   overflow count word for large objects).
+2. **No relocation of runs.**
+3. **The pieces**: the owner asked whether keeping them is right. The
+   reason to keep them is that a line past one block as one String is old
+   at birth, so every large reply becomes old-space garbage that only a
+   marking cycle frees, where pieces die in a scavenge; that is an
+   argument, not a measurement, and the follow-up measures both forms
+   before it is settled.
+4. **No card marking yet.**
+
+Also from the device run of 2026-11-06: large churn of the kind
+`scenario=large` makes is plausible in a photo or video app, so the
+fallbacks it counted on the devices (3 of 6 runs, none on the Mac) are to
+be tuned away for devices in the same follow-up.
+
 ## Gates
 
 Every gate ran on 7987f59 (the code of this module; the commits after it
