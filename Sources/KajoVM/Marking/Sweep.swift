@@ -141,7 +141,7 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
 func abortCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     let om = unsafe mk.pointee.om
     let log = unsafe mk.pointee.log
-    if unsafe !mk.pointee.config.stress.contains(.markingAlwaysOn) { unsafe mk.pointee.barrier.pointee.store(0, ordering: .relaxed) }
+    if unsafe !mk.pointee.config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOff(mk) }
     om.clearMarks()
     let snap = unsafe mk.pointee.snapshot
     for w in unsafe 0..<log.pointee.snapshotWords { snap.setWord(w, 0) }

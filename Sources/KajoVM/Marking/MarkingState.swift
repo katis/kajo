@@ -286,8 +286,13 @@ extension UnsafeMutablePointer where Pointee == MarkingShared {
 
 /// The barrier flag word: word 2 of module 3's safepoint flag line, so the
 /// interpreter reaches it through the pointer it already holds. Bit 0:
-/// old-space marking (the SATB barrier and the weak keep-alive). Module 7
-/// adds its bits; the fast path tests the whole word.
+/// old-space marking (the SATB barrier and the weak keep-alive). Bits 1 and
+/// up: module 7's count, 2 per open young collection and 2 for the VM
+/// under the young stress flag `barrierAlwaysOn`. The fast path tests the
+/// whole word. Marking sets and clears bit 0 only, with an atomic or and
+/// and (it used to store the whole word, erasing the count: collectors
+/// review, finding 4); module 7 adds and subtracts 2. The stop verifier
+/// checks both halves at every stop (`verifyBarrierWordLocked`).
 @_transparent
 func barrierWord(_ flag: UnsafeMutablePointer<Atomic<UInt32>>) -> UnsafeMutablePointer<Atomic<UInt32>> {
     unsafe flag + 2
@@ -295,6 +300,18 @@ func barrierWord(_ flag: UnsafeMutablePointer<Atomic<UInt32>>) -> UnsafeMutableP
 
 enum BarrierBits {
     static let marking: UInt32 = 1
+}
+
+/// Marking's bit of the barrier word on (a stop, or the VM's install).
+@inline(__always)
+func markingBarrierOn(_ mk: MarkingPointer) {
+    unsafe mk.pointee.barrier.pointee.bitwiseOr(BarrierBits.marking, ordering: .relaxed)
+}
+
+/// Marking's bit of the barrier word off (a stop, or the VM's end).
+@inline(__always)
+func markingBarrierOff(_ mk: MarkingPointer) {
+    unsafe mk.pointee.barrier.pointee.bitwiseAnd(~BarrierBits.marking, ordering: .relaxed)
 }
 
 /// The flag line: the safepoint flag (word 0) and the barrier word (word

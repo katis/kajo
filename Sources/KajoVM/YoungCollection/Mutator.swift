@@ -32,6 +32,9 @@ func youngDeletionRecord(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
 func youngDeletionBarrier(_ vm: VMPointer, _ w: WorkerPointer, _ o: UInt64, _ i: Int) {
     guard let y = unsafe vm.pointee.young, unsafe y.pointee.config.testSwitches.youngDeletionBarrier,
           unsafe barrierWord(vm.pointee.flag).pointee.load(ordering: .relaxed) > 1 else { return }
+    // Counted, so a test sees the stress flag `barrierAlwaysOn` really take
+    // this path after a marking cycle (collectors review, finding 4).
+    unsafe y.counters(w.pointee.index).pointee.deletionBarrierCalls &+= 1
     let om = unsafe vm.pointee.om
     unsafe youngDeletionRecord(vm, y, w, om.loadAtomic(bodyOffset: om.stateWord(o), i))
 }

@@ -220,8 +220,9 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     }
     unsafe log.pointee.counters.initialMarkNs &+= t3 &- t0
     // The barrier is on before any mutator runs again (the stop's release
-    // orders it); then the marker is woken.
-    unsafe mk.pointee.barrier.pointee.store(BarrierBits.marking, ordering: .relaxed)
+    // orders it); then the marker is woken. Bit 0 only: bits 1 and up are
+    // module 7's count (collectors review, finding 4).
+    unsafe markingBarrierOn(mk)
     unsafe pthread_mutex_lock(mk.pointee.lock)
     unsafe mk.pointee.cycle.pointee.store(cycle, ordering: .releasing)
     unsafe mk.setPhase(.marking)

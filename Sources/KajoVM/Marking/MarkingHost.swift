@@ -48,14 +48,14 @@ extension MarkingShared {
             wantUserInitiated: boxed(Atomic<Bool>(false)), markerWaits: boxed(Atomic<UInt64>(0)),
             stopping: boxed(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: boxed(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag)))
-        if config.stress.contains(.markingAlwaysOn) { unsafe mk.pointee.barrier.pointee.store(BarrierBits.marking, ordering: .relaxed) }
+        if config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOn(mk) }
         unsafe vm.pointee.marking = mk
     }
 
     static func uninstall(_ vm: VMPointer) {
         guard let mk = unsafe vm.pointee.marking else { return }
         let s = unsafe mk.pointee
-        unsafe s.barrier.pointee.store(0, ordering: .relaxed)
+        unsafe markingBarrierOff(mk)
         for k in unsafe 0..<s.workerCount { unsafe unlined(s.satb[k]) }
         unsafe s.satb.deallocate()
         while let p = unsafe s.queue.pointee.allocated.popLast() { unsafe p.deallocate() }

@@ -187,6 +187,7 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     if unsafe vm.pointee.config.verifyStops && sp.pointee.wakeups != wakeups {
         unsafe verifierFailed(vm, .stopVerifierFailures, "a parked worker left its park while the stop's work ran")
     }
+    if unsafe vm.pointee.config.verifyStops { unsafe verifyBarrierWordLocked(vm) }
     // Module 4: a full collection a scavenge requested keeps every poll on
     // its slow path until a worker runs it in a stop of its own.
     // Module 8c: so does a save's hold on the scheduler (every running
@@ -295,6 +296,26 @@ func gatherRoots(_ vm: UnsafeMutablePointer<VMState>, _ keeping: [Oop]) -> [Oop]
     }
     unsafe pthread_mutex_unlock(vm.pointee.pendingLock)
     return roots
+}
+
+/// The barrier word's verifier (collectors review, finding 4), at the end
+/// of every stop, mutex held: bits 1 and up count the open young
+/// collections (none: stops never interleave one) plus the young stress
+/// flag `barrierAlwaysOn`; bit 0 is set exactly while a cycle is marking
+/// (or under `markingAlwaysOn`). Marking used to store the whole word and
+/// erase module 7's count.
+func verifyBarrierWordLocked(_ vm: UnsafeMutablePointer<VMState>) {
+    let word = unsafe barrierWord(vm.pointee.flag).pointee.load(ordering: .relaxed)
+    var count = unsafe UInt32(truncatingIfNeeded: vm.pointee.safepoint.pointee.ycActive)
+    if let y = unsafe vm.pointee.young, unsafe y.pointee.config.stress.contains(.barrierAlwaysOn) { count &+= 1 }
+    var marking = false
+    if let mk = unsafe vm.pointee.marking {
+        marking = unsafe mk.phaseNow == .marking || mk.pointee.config.stress.contains(.markingAlwaysOn)
+    }
+    if word &>> 1 != count || (word & BarrierBits.marking != 0) != marking {
+        unsafe verifierFailed(vm, .stopVerifierFailures,
+                              "the barrier word is \(word): \(count) young collections and stress, marking \(marking)")
+    }
 }
 
 /// The schedule verifier: every worker's `current` and every record's

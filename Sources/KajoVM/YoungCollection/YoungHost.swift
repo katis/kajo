@@ -205,6 +205,12 @@ extension VM {
 
     /// Participant `i`'s counters (read after the threads stopped, or for a
     /// worker the test drives).
+    /// The barrier word (tests: bit 0 marking, bits 1 and up module 7's
+    /// count), read in a stop.
+    var barrierWordValue: UInt32 {
+        inspect { _ in unsafe barrierWord(state.pointee.flag).pointee.load(ordering: .relaxed) }
+    }
+
     func youngWorkerCounters(_ i: Int) -> YoungWorkerCounters {
         guard let y = unsafe state.pointee.young else { return YoungWorkerCounters() }
         return unsafe y.counters(i).pointee

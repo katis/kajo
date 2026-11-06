@@ -85,7 +85,10 @@ the safepoint flag at word 0), so the interpreter reaches it through the
 pointer it already keeps for its polls. Bit 0: marking (set by the initial
 mark, cleared by the final mark and an abort; `markingAlwaysOn` never
 clears it). Module 7 adds its bits; the fast path tests the whole word.
-Written with the world stopped only.
+Written with the world stopped only, and only bit 0, with an atomic or and
+and: storing the whole word erased module 7's count (the collectors
+review's finding 4, `docs/modules/collectors-review.md`); the stop
+verifier checks both halves at every stop.
 
 ### Per worker: SATB buffer (`SATBBuffer`, own 128-byte lines)
 

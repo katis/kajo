@@ -316,6 +316,12 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     /// and local collection is refused its promotion room and stops the
     /// world for that scavenge.
     case exhaustedReserve, exhaustedReserveLocal
+    /// Collectors review, finding 4: the young stress flag `barrierAlwaysOn`
+    /// (every store takes the young deletion barrier's slow path) with a
+    /// marking cycle at every scavenge, local young collections, tiny
+    /// nurseries; the stop verifier checks the shared barrier word at every
+    /// stop, and the slow path must still be taken.
+    case youngBarrierAlwaysOn
 
     var testDescription: String { rawValue }
 
@@ -324,7 +330,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         case .oneWorker, .tinyNurseries: 1
         case .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock: 4
         case .localCollection, .offloadCollection, .roundEveryPoll: 4
-        case .exhaustedReserve, .exhaustedReserveLocal: 4
+        case .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn: 4
         default: 8
         }
     }
@@ -333,7 +339,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
                       .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
                       .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll,
-                      .exhaustedReserve, .exhaustedReserveLocal].contains(self)
+                      .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn].contains(self)
         let source = self == .offloadCollection ? mainTasks(p.source) : p.source
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
@@ -386,6 +392,14 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    c.marking.enabled = false
                                    c.young.mode = self == .exhaustedReserve ? .stw : .local
                                    c.young.verify = true
+                               case .youngBarrierAlwaysOn:
+                                   c.nursery.bytes = 24 << 10
+                                   c.nursery.survivorBytes = 2 << 10
+                                   c.young.mode = .local
+                                   c.young.verify = true
+                                   c.young.stress = .barrierAlwaysOn
+                                   c.marking.stress = .cycleAtEveryScavenge
+                                   c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                default: break
                                }
                            }, after: { img in
@@ -469,6 +483,8 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     // the stress really happened
     let c = rt.vm.counters
     #expect(c.forks == UInt64(p.tasks + 1) && c.processErrors == 0)
+    // The stop verifiers (every stop's parked count, the barrier word).
+    #expect(c.stopVerifierFailures == 0, "seed \(p.seed) \(config)")
     switch config {
     case .stopEveryPoll: #expect(c.stops > 10)
     case .preemptEveryPoll: #expect(c.preemptions > 10)
@@ -501,6 +517,12 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     case .stwScavenge: #expect(!rt.vm.hasYoungCollection)
     case .exhaustedReserve, .exhaustedReserveLocal:
         randomScavenges.add(config, rt.vm.nurseryCounters.exhaustedScavenges)
+    case .youngBarrierAlwaysOn:
+        // Every store took the young slow path, cycles or not.
+        let calls = (0..<(config.workers + 2)).reduce(UInt64(0)) { $0 &+ rt.vm.youngWorkerCounters($1).deletionBarrierCalls }
+        #expect(calls > 0, "seed \(p.seed)")
+        randomScavenges.add(config, rt.vm.markingCounters.cycles)
+        #expect(rt.vm.markingCounters.missed == 0)
     case .localCollection, .offloadCollection, .roundEveryPoll:
         let yc = rt.vm.youngCounters
         randomScavenges.add(config, yc.collectionsLocal + yc.collectionsOffloaded)
@@ -542,7 +564,8 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
     if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
-        .localCollection, .offloadCollection, .roundEveryPoll, .exhaustedReserve, .exhaustedReserveLocal].contains(config) {
+        .localCollection, .offloadCollection, .roundEveryPoll, .exhaustedReserve, .exhaustedReserveLocal,
+        .youngBarrierAlwaysOn].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
         // cycle, or moves an object), the configuration must.
         #expect(randomScavenges.take(config) > 0)

@@ -17,7 +17,7 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     let m = unsafe mk.pointee.marker
     let log = unsafe mk.pointee.log
     let config = unsafe mk.pointee.config
-    if !config.stress.contains(.markingAlwaysOn) { unsafe mk.pointee.barrier.pointee.store(0, ordering: .relaxed) }
+    if !config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOff(mk) }
 
     // 1. Drain: partial buffers, queued items, the stack.
     var drained: UInt64 = 0

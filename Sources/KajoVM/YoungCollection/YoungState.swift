@@ -199,6 +199,9 @@ struct YoungWorkerCounters: Sendable {
     var deletionRecords: UInt64 = 0
     var resumeScans: UInt64 = 0
     var blockingRegions: UInt64 = 0
+    /// Stores that took the young deletion barrier's slow path (the
+    /// barrier word's count nonzero; collectors review, finding 4).
+    var deletionBarrierCalls: UInt64 = 0
 }
 
 /// The trigger sampler of young collection without stopping the world:

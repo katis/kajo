@@ -179,6 +179,17 @@ recorded new-half range, carried, next-carried and deferred lists; each
 object's entry state (free, old, young in n, deferred in n), whether it is
 in Y and marked; `ycActive` and `stwWanted`.
 
+The model's barrier word is module 7's count (bits 1 and up of the VM's
+word, one per open collection here). Module 5's marking bit (bit 0) is not
+modelled: marking sets and clears it only in stops, every stop waits until
+no collection is open (`waitForCollectionsLocked`) and no collection opens
+while a stop is wanted or requested, so a marking write never lands while
+a collection is open. Since the collectors review (finding 4) marking
+writes bit 0 alone with an atomic or and and, so even a stop that did
+overlap could not erase the count; before, it stored the whole word, and
+the stress flag `barrierAlwaysOn`'s count was lost at the first cycle. The
+stop verifier checks the word at every stop.
+
 **Worker instructions** (a program per worker; a worker holds no body
 pointer between instructions; a worker still in the VM at its end leaves):
 

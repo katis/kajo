@@ -46,7 +46,7 @@ stopper, stayed at utility.
 | what | where | written by | read by |
 |---|---|---|---|
 | attention word: bit 0 a stop, bits 1.. twice the open rounds | module 3's flag line, word 0 (the poll's word) | stoppers (`fetch_or`/`fetch_and` of bit 0), round openers and last acknowledgers (±2) | every poll (one relaxed load, unchanged) |
-| barrier word: bit 0 marking, bits 1.. twice the open collections | the flag line, word 2 (module 5) | module 5's pauses; collection open and finish (±2) | every pointer store (one relaxed load, unchanged) |
+| barrier word: bit 0 marking, bits 1.. twice the open collections (plus 2 under `barrierAlwaysOn`) | the flag line, word 2 (module 5) | module 5's pauses (bit 0 only, `fetch_or`/`fetch_and`, since the collectors review); collection open and finish (±2) | every pointer store (one relaxed load, unchanged); the stop verifier |
 | handshake per nursery: active, round, kind, `need`, acked per participant, handed roots and buffers, the owner's new-half range | `YoungShared.hs[k]`, own lines | under the safepoint mutex | the same |
 | per nursery: `collecting`, `afterH1`, `afterT1`, `done`, `seq`, Y's ranges | atomics in `YoungShared` | the collection (open, finish) | the deletion barrier, resumers, the collector |
 | round serial | `YoungShared.roundSerial`, own line | round openers (under the mutex) | the poll slow path (acquire): the mutex only when a round opened since |
@@ -403,7 +403,7 @@ bit, set by the sweep that defers it in the same step as the slot count 0.
 |---|---|
 | `collectAtEveryHalf` (`everyhalf`) | offload: 64 KiB eden halves |
 | `roundAtEveryPoll` (`everypoll`) | a drain round after every 16 copies: every poll during a collection services one |
-| `barrierAlwaysOn` (`barrieron`) | the flag word's young bits never clear (the barrier's cost with a collection running) |
+| `barrierAlwaysOn` (`barrieron`) | the flag word's young bits never clear (the barrier's cost with a collection running); before the collectors review the first marking cycle cleared them (finding 4), and the random programs' `youngBarrierAlwaysOn` configuration now checks the slow path is taken |
 
 Module 3's `perturb` reaches the collector (every service point: between
 256 objects, between buffers, in the sweep) and every acknowledgement
