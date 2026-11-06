@@ -6,19 +6,6 @@ import Synchronization
 // entry points (`markStep`, `finalMark`, `sweep`) make the calling thread
 // the marker participant and exist for the tests' exact interleavings.
 
-/// A value in its own 128-byte aligned allocation.
-private func lined<T>(_ v: T) -> UnsafeMutablePointer<T> {
-    let raw = UnsafeMutableRawPointer.allocate(byteCount: (MemoryLayout<T>.stride + 127) & ~127, alignment: 128)
-    let p = unsafe raw.bindMemory(to: T.self, capacity: 1)
-    unsafe p.initialize(to: v)
-    return unsafe p
-}
-
-private func unlined<T: ~Copyable>(_ p: UnsafeMutablePointer<T>) {
-    unsafe p.deinitialize(count: 1)
-    unsafe UnsafeMutableRawPointer(p).deallocate()
-}
-
 extension MarkingShared {
     /// Give `vm` concurrent marking (after its nurseries: the snapshot is
     /// taken at the end of a scavenge). No-op when off or without a nursery.
@@ -44,9 +31,9 @@ extension MarkingShared {
         let mk = unsafe lined(MarkingShared(
             config: config, om: om, workerCount: count, snapshot: snapshot, satb: satb, queue: lined(queue),
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
-            log: lined(MarkingLog()), phase: boxed(Atomic<UInt8>(0)), cycle: boxed(Atomic<UInt64>(0)),
-            wantUserInitiated: boxed(Atomic<Bool>(false)), markerWaits: boxed(Atomic<UInt64>(0)),
-            stopping: boxed(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: boxed(Atomic<UInt32>(0)),
+            log: lined(MarkingLog()), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
+            wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
+            stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag)))
         if config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOn(mk) }
         unsafe vm.pointee.marking = mk
@@ -70,13 +57,13 @@ extension MarkingShared {
         unsafe unlined(s.marker)
         unsafe Worker.destroy(s.markerWorker)
         unsafe unlined(s.log)
-        unsafe unbox(s.phase)
-        unsafe unbox(s.cycle)
-        unsafe unbox(s.wantUserInitiated)
-        unsafe unbox(s.markerWaits)
-        unsafe unbox(s.stopping)
+        unsafe unlined(s.phase)
+        unsafe unlined(s.cycle)
+        unsafe unlined(s.wantUserInitiated)
+        unsafe unlined(s.markerWaits)
+        unsafe unlined(s.stopping)
         unsafe unlined(s.thread)
-        unsafe unbox(s.machThread)
+        unsafe unlined(s.machThread)
         unsafe freeMutex(s.lock)
         unsafe freeCond(s.cond)
         unsafe s.snapshot.release()

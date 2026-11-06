@@ -51,15 +51,15 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe state = raw.bindMemory(to: VMState.self, capacity: 1)
         unsafe state.initialize(to: VMState(
             om: om, image: image, config: config, nilObject: image.nilObject, workers: workers, workerCount: workerCount,
-            flag: flag, safepoint: boxed(SafepointState(stops: stops, parts: .allocate(capacity: workerCount + 2),
+            flag: flag, safepoint: lined(SafepointState(stops: stops, parts: .allocate(capacity: workerCount + 2),
                                                         inside: flags(workerCount + 2), blocking: flags(workerCount + 2))),
             safepointLock: makeMutex(), safepointCond: makeCond(),
-            sched: boxed(SchedulerState()), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
-            doneCond: makeCond(), externalHead: boxed(Atomic<UInt>(0)), pending: boxed(PendingState()),
+            sched: lined(SchedulerState()), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
+            doneCond: makeCond(), externalHead: lined(Atomic<UInt>(0)), pending: lined(PendingState()),
             pendingSlots: pendingSlots, pendingNext: pendingNext, pendingLock: makeMutex(), hostLock: makeMutex(),
-            workerShared: shared, errors: boxed(ErrorLog()), errorsLock: makeMutex(), counters: counters,
-            finalization: boxed(FinalizationState()), epoch: boxed(Atomic<UInt64>(1)), hazardsHeld: boxed(Atomic<Int>(0)),
-            enterWindow: boxed(EnterWindowHook()), saveHold: boxed(Atomic<Bool>(false)), slowPolls: boxed(Atomic<Int>(0)),
+            workerShared: shared, errors: lined(ErrorLog()), errorsLock: makeMutex(), counters: counters,
+            finalization: lined(FinalizationState()), epoch: lined(Atomic<UInt64>(1)), hazardsHeld: lined(Atomic<Int>(0)),
+            enterWindow: lined(EnterWindowHook()), saveHold: lined(Atomic<Bool>(false)), slowPolls: lined(Atomic<Int>(0)),
             savedImages: SavedImages()))
         let seed = config.perturb?.seed ?? 0x9E37_79B9_7F4A_7C15
         for i in 0..<workerCount {
@@ -178,17 +178,17 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe s.safepoint.pointee.parts.deallocate()
         unsafe s.safepoint.pointee.inside.deallocate()
         unsafe s.safepoint.pointee.blocking.deallocate()
-        unsafe unbox(s.epoch)
-        unsafe unbox(s.saveHold)
-        unsafe unbox(s.slowPolls)
-        unsafe unbox(s.hazardsHeld)
-        unsafe unbox(s.enterWindow)
-        unsafe unbox(s.safepoint)
-        unsafe unbox(s.sched)
-        unsafe unbox(s.externalHead)
-        unsafe unbox(s.pending)
-        unsafe unbox(s.errors)
-        unsafe unbox(s.finalization)
+        unsafe unlined(s.epoch)
+        unsafe unlined(s.saveHold)
+        unsafe unlined(s.slowPolls)
+        unsafe unlined(s.hazardsHeld)
+        unsafe unlined(s.enterWindow)
+        unsafe unlined(s.safepoint)
+        unsafe unlined(s.sched)
+        unsafe unlined(s.externalHead)
+        unsafe unlined(s.pending)
+        unsafe unlined(s.errors)
+        unsafe unlined(s.finalization)
         unsafe s.queues.deallocate()
         unsafe s.records.deallocate()
         unsafe s.pendingSlots.deallocate()

@@ -350,15 +350,20 @@ func freeCond(_ c: UnsafeMutablePointer<pthread_cond_t>) {
     unsafe c.deallocate()
 }
 
-/// One value in its own 128-byte line.
-func boxed<T: ~Copyable>(_ v: consuming T) -> UnsafeMutablePointer<T> {
-    let raw = UnsafeMutableRawPointer.allocate(byteCount: max(MemoryLayout<T>.stride, 128), alignment: 128)
+/// One value in its own 128-byte aligned allocation, a whole number of
+/// lines long, so nothing else shares its lines (AGENTS.md: per-worker and
+/// per-lock state on lines of its own). The one pair of such helpers (the
+/// collectors review: module 4, 5 and 6 each had a copy, and this one
+/// rounded only up to one line, so a larger value shared its last line).
+func lined<T: ~Copyable>(_ v: consuming T) -> UnsafeMutablePointer<T> {
+    let raw = UnsafeMutableRawPointer.allocate(byteCount: (MemoryLayout<T>.stride + 127) & ~127, alignment: 128)
     let p = unsafe raw.bindMemory(to: T.self, capacity: 1)
     unsafe p.initialize(to: v)
     return unsafe p
 }
 
-func unbox<T: ~Copyable>(_ p: UnsafeMutablePointer<T>) {
+/// Deinitialize and free what `lined` allocated.
+func unlined<T: ~Copyable>(_ p: UnsafeMutablePointer<T>) {
     unsafe p.deinitialize(count: 1)
     unsafe UnsafeMutableRawPointer(p).deallocate()
 }

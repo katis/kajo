@@ -371,19 +371,6 @@ func pendingBit(_ n: Int) -> UInt32 { 1 &<< UInt32(truncatingIfNeeded: 16 &+ n) 
 
 // MARK: - creation
 
-/// A value in its own 128-byte aligned allocation.
-private func lined<T>(_ v: T) -> UnsafeMutablePointer<T> {
-    let raw = UnsafeMutableRawPointer.allocate(byteCount: (MemoryLayout<T>.stride + 127) & ~127, alignment: 128)
-    let p = unsafe raw.bindMemory(to: T.self, capacity: 1)
-    unsafe p.initialize(to: v)
-    return unsafe p
-}
-
-private func unlined<T: ~Copyable>(_ p: UnsafeMutablePointer<T>) {
-    unsafe p.deinitialize(count: 1)
-    unsafe UnsafeMutableRawPointer(p).deallocate()
-}
-
 private func atomicLine<T: AtomicRepresentable>(_ v: T) -> UnsafeMutablePointer<Atomic<T>> {
     let raw = UnsafeMutableRawPointer.allocate(byteCount: 128, alignment: 128)
     let p = unsafe raw.bindMemory(to: Atomic<T>.self, capacity: 1)

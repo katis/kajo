@@ -156,18 +156,6 @@ struct RelocationCounters: Sendable {
 
 typealias RelocationPointer = UnsafeMutablePointer<RelocationShared>
 
-/// A value in its own 128-byte aligned allocation.
-func linedValue<T>(_ v: T) -> UnsafeMutablePointer<T> {
-    let raw = UnsafeMutableRawPointer.allocate(byteCount: (MemoryLayout<T>.stride + 127) & ~127, alignment: 128)
-    let p = unsafe raw.bindMemory(to: T.self, capacity: 1)
-    unsafe p.initialize(to: v)
-    return unsafe p
-}
-
-func unlinedValue<T>(_ p: UnsafeMutablePointer<T>) {
-    unsafe p.deinitialize(count: 1)
-    unsafe UnsafeMutableRawPointer(p).deallocate()
-}
 
 extension RelocationShared {
     /// Give `vm` concurrent relocation (after marking: the marker relocates).
@@ -181,8 +169,8 @@ extension RelocationShared {
         let blocks = om.heap.blockCount
         let live = UnsafeMutablePointer<UInt32>.allocate(capacity: blocks)
         unsafe live.initialize(repeating: 0, count: blocks)
-        let st = unsafe linedValue(RelocatorState(blockLive: live, blockCount: blocks, context: om.makeContext()))
-        let r = unsafe linedValue(RelocationShared(
+        let st = unsafe lined(RelocatorState(blockLive: live, blockCount: blocks, context: om.makeContext()))
+        let r = unsafe lined(RelocationShared(
             config: config, om: om, workerCount: vm.pointee.workerCount, epoch: vm.pointee.epoch,
             hazardsHeld: vm.pointee.hazardsHeld, state: st, enterWindow: vm.pointee.enterWindow))
         unsafe vm.pointee.relocation = r
@@ -199,8 +187,8 @@ extension RelocationShared {
         unsafe st.pointee.pendingTimes.free()
         unsafe st.pointee.framePins.free()
         unsafe s.om.destroyContext(st.pointee.context)
-        unsafe unlinedValue(st)
-        unsafe unlinedValue(r)
+        unsafe unlined(st)
+        unsafe unlined(r)
         unsafe vm.pointee.relocation = nil
     }
 }

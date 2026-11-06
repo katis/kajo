@@ -27,7 +27,7 @@ extension YoungShared {
         for k in 0..<count {
             let acked = UnsafeMutablePointer<UInt64>.allocate(capacity: participants)
             unsafe acked.initialize(repeating: 0, count: participants)
-            unsafe hs[k] = linedValue(Handshake(acked: acked))
+            unsafe hs[k] = lined(Handshake(acked: acked))
         }
         let records = unsafe vm.pointee.config.recordCapacity
         let scanBytes = (count * records * 8 + 16383) & ~16383
@@ -36,27 +36,27 @@ extension YoungShared {
         let work = UnsafeMutablePointer<UnsafeMutablePointer<CollectorWork>>.allocate(capacity: participants)
         let counters = UnsafeMutablePointer<UnsafeMutablePointer<YoungWorkerCounters>>.allocate(capacity: participants)
         for i in 0..<participants {
-            unsafe work[i] = linedValue(CollectorWork())
-            unsafe counters[i] = linedValue(YoungWorkerCounters())
+            unsafe work[i] = lined(CollectorWork())
+            unsafe counters[i] = lined(YoungWorkerCounters())
         }
         let inFlight = UnsafeMutablePointer<YoungRecord>.allocate(capacity: count)
         unsafe inFlight.initialize(repeating: YoungRecord(), count: count)
         let collector = unsafe Worker.make(image: vm.pointee.image, vm: vm, index: workers + 1, isMain: false,
                                            flag: vm.pointee.flag, pollEvery: vm.pointee.config.pollEvery,
                                            seed: (vm.pointee.config.perturb?.seed ?? 0xC011) &* 0x9E37_79B9 | 1)
-        let y = unsafe linedValue(YoungShared(
+        let y = unsafe lined(YoungShared(
             config: config, mode: config.mode, om: vm.pointee.om, nursery: n, count: count, participants: participants,
-            collectorIndex: workers + 1, hs: hs, roundSerial: boxed(Atomic<UInt64>(0)), collecting: atoms(count, false), afterH1: atoms(count, false),
+            collectorIndex: workers + 1, hs: hs, roundSerial: lined(Atomic<UInt64>(0)), collecting: atoms(count, false), afterH1: atoms(count, false),
             afterT1: atoms(count, false), done: atoms(count, true), seq: atoms(count, UInt64(0)),
             ranges: atoms(count * 4, UInt64(0)),
             scanWords: scanRaw.bindMemory(to: Atomic<UInt64>.self, capacity: count * records), scanWordsBytes: scanBytes,
-            recordCapacity: records, inFlight: inFlight, work: work, counters: counters, queue: linedValue(RawArray<Int>()),
-            collectorCond: makeCond(), thread: linedValue(YoungThread()), collectorWorker: collector,
-            shutdown: boxed(Atomic<Bool>(false)), collectorWaits: boxed(Atomic<UInt64>(0)),
-            collectorMachThread: boxed(Atomic<UInt32>(0)), log: linedValue(YoungLog()),
-            promotedBytes: boxed(Atomic<UInt64>(0)), promotedObjects: boxed(Atomic<UInt64>(0)),
-            sampler: linedValue(YoungSampler()), samplerLock: makeMutex(), peekGate: boxed(Atomic<Int>(0)),
-            peekHeld: boxed(Atomic<Int>(0)), copyWindow: linedValue(EnterWindowHook())))
+            recordCapacity: records, inFlight: inFlight, work: work, counters: counters, queue: lined(RawArray<Int>()),
+            collectorCond: makeCond(), thread: lined(YoungThread()), collectorWorker: collector,
+            shutdown: lined(Atomic<Bool>(false)), collectorWaits: lined(Atomic<UInt64>(0)),
+            collectorMachThread: lined(Atomic<UInt32>(0)), log: lined(YoungLog()),
+            promotedBytes: lined(Atomic<UInt64>(0)), promotedObjects: lined(Atomic<UInt64>(0)),
+            sampler: lined(YoungSampler()), samplerLock: makeMutex(), peekGate: lined(Atomic<Int>(0)),
+            peekHeld: lined(Atomic<Int>(0)), copyWindow: lined(EnterWindowHook())))
         unsafe vm.pointee.young = y
         if config.stress.contains(.barrierAlwaysOn) { unsafe barrierWord(vm.pointee.flag).pointee.wrappingAdd(2, ordering: .relaxed) }
     }
@@ -71,10 +71,10 @@ extension YoungShared {
             unsafe h.pointee.roots.free()
             for i in unsafe 0..<h.pointee.pubs.count { unsafe h.pointee.pubs[i].list.free() }
             unsafe h.pointee.pubs.free()
-            unsafe unlinedValue(h)
+            unsafe unlined(h)
         }
         unsafe s.hs.deallocate()
-        unsafe unbox(s.roundSerial)
+        unsafe unlined(s.roundSerial)
         for i in unsafe 0..<s.participants {
             let w = unsafe s.work[i]
             unsafe w.pointee.grey.free()
@@ -82,8 +82,8 @@ extension YoungShared {
             for j in unsafe 0..<w.pointee.pubs.count { unsafe w.pointee.pubs[j].list.free() }
             unsafe w.pointee.pubs.free()
             unsafe w.pointee.claimed.free()
-            unsafe unlinedValue(w)
-            unsafe unlinedValue(s.counters[i])
+            unsafe unlined(w)
+            unsafe unlined(s.counters[i])
         }
         unsafe s.work.deallocate()
         unsafe s.counters.deallocate()
@@ -95,22 +95,22 @@ extension YoungShared {
         unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.scanWords), s.scanWordsBytes)
         unsafe s.inFlight.deallocate()
         unsafe s.queue.pointee.free()
-        unsafe unlinedValue(s.queue)
+        unsafe unlined(s.queue)
         unsafe freeCond(s.collectorCond)
-        unsafe unlinedValue(s.thread)
+        unsafe unlined(s.thread)
         unsafe Worker.destroy(s.collectorWorker)
-        unsafe unbox(s.shutdown)
-        unsafe unbox(s.collectorWaits)
-        unsafe unbox(s.collectorMachThread)
-        unsafe unlinedValue(s.log)
-        unsafe unbox(s.promotedBytes)
-        unsafe unbox(s.promotedObjects)
-        unsafe unlinedValue(s.sampler)
+        unsafe unlined(s.shutdown)
+        unsafe unlined(s.collectorWaits)
+        unsafe unlined(s.collectorMachThread)
+        unsafe unlined(s.log)
+        unsafe unlined(s.promotedBytes)
+        unsafe unlined(s.promotedObjects)
+        unsafe unlined(s.sampler)
         unsafe freeMutex(s.samplerLock)
-        unsafe unbox(s.peekGate)
-        unsafe unbox(s.peekHeld)
-        unsafe unlinedValue(s.copyWindow)
-        unsafe unlinedValue(y)
+        unsafe unlined(s.peekGate)
+        unsafe unlined(s.peekHeld)
+        unsafe unlined(s.copyWindow)
+        unsafe unlined(y)
         unsafe vm.pointee.young = nil
     }
 }
