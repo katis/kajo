@@ -50,9 +50,11 @@ ended with no failure, the debugger's define-and-retry and the dropped
 link included, and neither device missed a frame while serving a client,
 idle or under the ring. Small requests take 4 to 10 ms over Wi-Fi, the
 debugger's define-and-retry 0.23 to 0.31 s, a dropped link is whole again
-in 1.18 to 1.21 s. The iPad's Bonjour advertisement was never seen (its
-local network permission, the owner's), so its rows are by address only
-("On the devices"). The class tree keeps the push form.
+in 1.18 to 1.21 s. The iPad's Bonjour advertisement was not seen that
+morning (its local network permission); the owner granted it the same day
+and the iPad's rows by name ran at 11:44 to 11:51: 22 sessions by name
+beside 23 by address, none failed, the name costing nothing after the
+first connect ("On the devices"). The class tree keeps the push form.
 
 New: `Sources/KajoDev/Transport.swift` (the address forms, one stream
 opener for every transport, the TXT record, Bonjour advertising,
@@ -551,8 +553,36 @@ screen; nothing was answered or changed here. The token step of
 name is only written into the targets file, never used by address), so
 the iPad's first lan rows stopped there; fixed in 7bdb024 (the lan form
 passes a placeholder name to `device.sh token`), which does not change
-what the iPhone's lan rows did. The iPad's Bonjour rows are therefore
-not measured (Not done).
+what the iPhone's lan rows did. The iPad's Bonjour rows were therefore
+not measured that morning.
+
+**The iPad's Bonjour rows, 2026-11-06 11:44 to 11:51.** The owner approved
+the iPad's local network prompt; a 10 s `dns-sd -B _kajo-dev._tcp local`
+then showed "Joni’s iPad" while it served. The same script, the iPad's
+shell still the morning's build (d70cda2's code) and the same Mac client,
+three runs of idle and ring by address and by name interleaved, 10 s
+between launches, thermal nominal throughout (`ipad-bonjour/`; a first
+attempt at 11:39 is void, its script pointed the Mac client at the iPad's
+build directory and no client started). 45 sessions, 22 by name and 23 by
+address, **none failed**; the iPad missed 0 of 2400 frames in each of the
+12 serving launches (longest turn 3.6 to 3.7 ms idle, 6.2 under the ring).
+p50 of the sessions' p50s, ms [range]:
+
+| | idle, by name | idle, by address | ring, by name | ring, by address |
+|---|--:|--:|--:|--:|
+| sessions | 11 | 11 | 11 | 12 |
+| `class.definition` | 6.3 [5.4–9.5] | 6.1 [5.1–7.5] | 9.2 [7.7–14.0] | 9.3 [8.1–10.6] |
+| `class.hierarchy` | 54.7 [44.8–408.2] | 58.9 [43.5–126.9] | 48.2 [41.4–82.9] | 56.0 [44.7–126.2] |
+| `package.selectors` | 96.9 [82.1–572.8] | 108.4 [83.5–195.6] | 99.0 [91.2–535.6] | 103.1 [88.6–126.8] |
+| the open step | 104.1 [58.2–541.0] | 68.8 [42.9–192.0] | 52.4 [44.8–168.0] | 59.0 [46.3–297.2] |
+| define and retry | 218.4 [188.1–478.7] | 306.6 [203.7–584.2] | 246.4 [214.6–407.3] | 246.8 [220.0–357.1] |
+| the dropped link whole again | 1236.2 [1159.3–1580.5] | 1203.5 [1134.7–1392.8] | 1249.9 [1136.1–1291.9] | 1229.7 [1160.5–1458.1] |
+
+By name and by address agree within their ranges on every request, as on
+the iPhone; the open step by name was slower on the idle rows only (104
+against 69 ms at the median, the ranges overlapping). The iPad's stalls
+are in both forms: request maxima of 0.1 to 0.58 s, so they are the
+link's or the device's, not the name's.
 
 **Round trips over Wi-Fi** (requests per session: p50 of the sessions'
 p50s [their range] / max of their maxima, ms; Mac to Mac by LAN address
@@ -1018,14 +1048,12 @@ binaries.
 
 ## Not done
 
-- **The iPad's Bonjour rows.** Section 3 ran on both devices on
-  2026-11-06 ("On the devices"), but the iPad's `_kajo-dev._tcp`
-  advertisement never appeared on the network while it served (the
-  iPhone's did in every launch), so the iPad was reached by address only.
-  Most likely iPadOS's local network permission for Kajo, which the owner
-  grants on the iPad; then `DEVICE=00008027-0012592C0185002E
-  scripts/remote-session.sh device <out> idle-bonjour-1 idle bonjour 6`
-  makes the rows.
+- **The iPad's Bonjour rows** were not done in the morning's run and are
+  done since (2026-11-06 11:44, "On the devices"): the cause was iPadOS's
+  local network permission for Kajo, which the owner granted. Set only
+  `DEVICE=00008027-0012592C0185002E` for `scripts/remote-session.sh
+  device`; `DD` is read by `scripts/mac-shell.sh` too and moves the Mac
+  client's path.
 - **The 2000-class image served from a device.** The rows used the
   shell image (176 classes); the class tree's cost over Wi-Fi for 2009
   classes is an extrapolation ("On the devices").
@@ -1166,6 +1194,7 @@ came; everything was run again on a487630.
 | section 3, Mac to Mac (`scripts/remote-session.sh mac` and `kajo`) | 51 sessions, no failure; 18 serving rows, 0 frames missed in each; tables under Measurements |
 | section 3 on the phone | **not run**: the iPhone build could not be signed (the status note); 2026-11-06 on 79ef19d: built, signed, served 12 launches with 0 frames missed, the client rows blocked by local network access, the iPad not built ("On the devices") |
 | section 3 on the devices, 2026-11-06 07:16 to 07:45 (d70cda2's build; the iPad's lan rows after 7bdb024's script fix) | iPhone: 18 serving launches, 51 sessions by address and name, no failure, 0 frames missed; iPad: 12 serving launches, 23 sessions by address, no failure, 0 frames missed, its Bonjour name never seen ("On the devices") |
+| the iPad's Bonjour rows, 2026-11-06 11:44 to 11:51 (the same builds, after the owner granted the iPad's local network permission) | 12 serving launches, 45 sessions (22 by name, 23 by address), no failure, 0 frames missed ("On the devices") |
 | `just ios-check` and `just apps` after 7bdb024's script change (2026-11-06 07:49 to 07:51) | exit 0, 0 errors, 0 warnings, both |
 | bench A/B | within noise (Measurements) |
 
