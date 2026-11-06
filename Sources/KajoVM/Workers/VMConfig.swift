@@ -21,6 +21,14 @@ struct VMConfig: Sendable {
     var recordCapacity = 32_768
     /// Pending-root slots: the most outstanding operations (Delays) at once.
     var pendingCapacity = 1 << 16
+    /// The collectors' logs (scavenges, young collections, rounds, marking
+    /// and relocation cycles, main-thread hops) keep this many records each,
+    /// the oldest dropped first and counted; their sums and maxima cover
+    /// the whole run (`RecordRing`, docs/modules/collectors-review.md). The
+    /// default, the stop log's size, holds every record of the measurement
+    /// runs (a 10 s shell scenario, the bench, the soak); an app that runs
+    /// for days takes `ShellOptions.appLogCapacity`.
+    var logCapacity = 1 << 16
     var stress: VMStress = []
     /// Module 4: the nurseries (`bytes` 0: none, every object old).
     var nursery = NurseryConfig()

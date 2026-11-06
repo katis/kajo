@@ -53,7 +53,7 @@ extension YoungShared {
             recordCapacity: records, inFlight: inFlight, work: work, counters: counters, queue: lined(RawArray<Int>()),
             collectorCond: makeCond(), thread: lined(YoungThread()), collectorWorker: collector,
             shutdown: lined(Atomic<Bool>(false)), collectorWaits: lined(Atomic<UInt64>(0)),
-            collectorMachThread: lined(Atomic<UInt32>(0)), log: lined(YoungLog()),
+            collectorMachThread: lined(Atomic<UInt32>(0)), log: lined(YoungLog(logCapacity: vm.pointee.config.logCapacity)),
             promotedBytes: lined(Atomic<UInt64>(0)), promotedObjects: lined(Atomic<UInt64>(0)),
             sampler: lined(YoungSampler()), samplerLock: makeMutex(), peekGate: lined(Atomic<Int>(0)),
             peekHeld: lined(Atomic<Int>(0)), copyWindow: lined(EnterWindowHook())))
@@ -188,19 +188,29 @@ extension VM {
             promotedObjects: y.pointee.promotedObjects.pointee.load(ordering: .relaxed))
     }
 
-    /// Every collection so far, and every round.
+    /// The last collections and rounds (`VMConfig.logCapacity` of each),
+    /// oldest first.
     var youngLog: [YoungRecord] {
         guard let y = unsafe state.pointee.young else { return [] }
         unsafe pthread_mutex_lock(state.pointee.safepointLock)
         defer { unsafe pthread_mutex_unlock(state.pointee.safepointLock) }
-        return unsafe y.pointee.log.pointee.records
+        return unsafe y.pointee.log.pointee.records.records
     }
 
     var roundLog: [RoundRecord] {
         guard let y = unsafe state.pointee.young else { return [] }
         unsafe pthread_mutex_lock(state.pointee.safepointLock)
         defer { unsafe pthread_mutex_unlock(state.pointee.safepointLock) }
-        return unsafe y.pointee.log.pointee.rounds
+        return unsafe y.pointee.log.pointee.rounds.records
+    }
+
+    /// Sums and maxima over every collection and round, and the records
+    /// the logs dropped.
+    var youngTotals: YoungTotals {
+        guard let y = unsafe state.pointee.young else { return YoungTotals() }
+        unsafe pthread_mutex_lock(state.pointee.safepointLock)
+        defer { unsafe pthread_mutex_unlock(state.pointee.safepointLock) }
+        return unsafe y.pointee.log.pointee.totals
     }
 
     /// Participant `i`'s counters (read after the threads stopped, or for a

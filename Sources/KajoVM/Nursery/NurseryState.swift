@@ -256,11 +256,22 @@ struct ScavengeRecord: Sendable {
     var critRootsNs: UInt64 = 0
     var critRemNs: UInt64 = 0
     var maxSweepNs: UInt64 = 0
-    /// Bytes copied and busy time of each participant (the copy rate per
-    /// participant is their quotient).
-    var copiedBytesPerParticipant: [UInt64] = []
-    var busyNsPerParticipant: [UInt64] = []
+    /// Bytes copied and busy time summed over the participants (the copy
+    /// rate per participant is their quotient). Sums, not arrays, since the
+    /// collectors review: a record is a plain value a ring overwrites.
+    var copiedBytes: UInt64 = 0
+    var busyNs: UInt64 = 0
     var packets: UInt64 = 0
+}
+
+/// What module 4's report sums over every scavenge (the ring keeps the
+/// last ones only).
+struct ScavengeTotals: Sendable {
+    var scavenges: UInt64 = 0
+    var participants: UInt64 = 0
+    var copiedBytes: UInt64 = 0
+    var busyNs: UInt64 = 0
+    var dropped: UInt64 = 0
 }
 
 /// The VM's nursery state.
@@ -329,7 +340,19 @@ struct ScavengeRecord: Sendable {
 /// Written by the stopper (with the world stopped) only.
 struct NurseryLog {
     var counters = NurseryCounters()
-    var records: [ScavengeRecord] = []
+    var records: RecordRing<ScavengeRecord>
+    var totals = ScavengeTotals()
+
+    init(logCapacity: Int) { records = RecordRing(capacity: logCapacity) }
+
+    mutating func log(_ r: ScavengeRecord) {
+        records.append(r)
+        totals.scavenges &+= 1
+        totals.participants &+= UInt64(r.participants)
+        totals.copiedBytes &+= r.copiedBytes
+        totals.busyNs &+= r.busyNs
+        totals.dropped = records.dropped
+    }
 }
 
 /// Exported work: packets of up to `words` oops, under `packetLock`.
@@ -384,7 +407,7 @@ extension NurseryShared {
     /// the barrier remembers young holders of other nurseries too.
     static func make(_ requested: NurseryConfig, om: ObjectMemory, workers: Int, offloaded: Bool = false,
                      youngHolders: Bool = false, concurrent: Bool = false, deferredOwnership: Bool = true,
-                     halfBytes: Int = 0) -> NurseryPointer {
+                     halfBytes: Int = 0, logCapacity: Int = 1 << 16) -> NurseryPointer {
         let config = requested.effective
         if let problem = config.validate(workers: workers) { preconditionFailure("nursery: \(problem)") }
         let stride = UInt64(config.stride)
@@ -439,7 +462,7 @@ extension NurseryShared {
             bufferOwners: owners, concurrent: concurrent, deferredOwnership: deferredOwnership, rem: rem, remBytes: remBytes,
             phase: lined(ScavengePhase()), taskNext: atomicLine(0), sweepNext: atomicLine(0), inCopy: atomicLine(0),
             idle: atomicLine(0), copyEnd: atomicLine(UInt64(0)), packets: lined(pool), packetLock: makeMutex(),
-            poolCount: atomicLine(0), state: lined(NurseryLog()), fullRequested: atomicLine(false)))
+            poolCount: atomicLine(0), state: lined(NurseryLog(logCapacity: logCapacity)), fullRequested: atomicLine(false)))
         return unsafe s
     }
 

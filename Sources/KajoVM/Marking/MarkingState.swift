@@ -206,11 +206,30 @@ struct MarkingCounters: Sendable {
     var lastPredictedFillNs: UInt64 = 0
 }
 
+/// What module 5's report sums, averages or takes the maximum of over
+/// every cycle (the ring keeps the last ones only).
+struct CycleTotals: Sendable {
+    var cycles: UInt64 = 0
+    var completed: UInt64 = 0
+    var markCpuNs: UInt64 = 0
+    var markWallNs: UInt64 = 0
+    var sweepNs: UInt64 = 0
+    var durationNs: UInt64 = 0
+    var markedBytes: UInt64 = 0
+    var bytesFreed: UInt64 = 0
+    /// The initial mark's addition to its scavenge, the longest.
+    var imAddMaxNs: UInt64 = 0
+    var dropped: UInt64 = 0
+}
+
 /// Written with the world stopped only.
 struct MarkingLog {
     var counters = MarkingCounters()
-    var records: [CycleRecord] = []
-    /// The current cycle's record (index in `records`), -1 when none.
+    /// The last `VMConfig.logCapacity` cycles, the current one last.
+    var records: RecordRing<CycleRecord>
+    var totals = CycleTotals()
+    /// The current cycle's record (its sequence number in `records`), -1
+    /// when none.
     var current = -1
     var startNs: UInt64 = 0
     /// Promotion over the last scavenges: (time, cumulative promoted bytes).
@@ -223,6 +242,38 @@ struct MarkingLog {
     var oldEntries: UInt64 = 0
     var lastCollections: UInt64 = .max
     var lastPromotedObjects: UInt64 = 0
+
+    init(logCapacity: Int) { records = RecordRing(capacity: logCapacity) }
+
+    /// A cycle starts (its initial mark): its record is the current one.
+    mutating func begin(_ r: CycleRecord) {
+        records.append(r)
+        current = Int(truncatingIfNeeded: records.total &- 1)
+        totals.cycles &+= 1
+        totals.imAddMaxNs = Swift.max(totals.imAddMaxNs, r.snapshotNs &+ r.rootsNs &+ r.survivorsNs)
+        totals.dropped = records.dropped
+    }
+
+    /// The current cycle's record (nil when none, or dropped).
+    var currentRecord: CycleRecord? {
+        get { current < 0 ? nil : records.record(UInt64(current)) }
+        set {
+            guard let v = newValue, current >= 0 else { return }
+            records.update(UInt64(current)) { $0 = v }
+        }
+    }
+
+    /// The current cycle completed (its apply): its record, and the totals.
+    mutating func complete(_ r: CycleRecord) {
+        currentRecord = r
+        totals.completed &+= 1
+        totals.markCpuNs &+= r.markCpuNs
+        totals.markWallNs &+= r.markWallNs
+        totals.sweepNs &+= r.sweepNs
+        totals.durationNs &+= r.durationNs
+        totals.markedBytes &+= r.markedBytes
+        totals.bytesFreed &+= r.bytesFreed
+    }
     var lastOldAllocations: UInt64 = 0
     /// Words of the snapshot map that may have bits (high water at the
     /// snapshot, rounded up).

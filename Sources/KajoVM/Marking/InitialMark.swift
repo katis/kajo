@@ -208,8 +208,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     rec.rootsNs = t2 &- t1
     rec.survivorsNs = t3 &- t2
     rec.snapshotEntries = entries
-    unsafe log.pointee.records.append(rec)
-    unsafe log.pointee.current = log.pointee.records.count - 1
+    unsafe log.pointee.begin(rec)
     unsafe log.pointee.startNs = t0
     unsafe log.pointee.counters.cycles &+= 1
     switch trigger {

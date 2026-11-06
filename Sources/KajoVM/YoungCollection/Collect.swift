@@ -221,7 +221,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe y.pointee.done[k].store(true, ordering: .releasing)
     if unsafe h.pointee.offloaded { unsafe y.pointee.log.pointee.collectionsOffloaded &+= 1 }
     else { unsafe y.pointee.log.pointee.collectionsLocal &+= 1 }
-    unsafe y.pointee.log.pointee.records.append(st)
+    unsafe logCollection(y, st)
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     return st

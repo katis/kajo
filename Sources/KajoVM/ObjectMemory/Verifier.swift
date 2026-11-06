@@ -36,7 +36,10 @@ extension ObjectMemory {
         let report = "object memory verifier, \(when): " + issues.prefix(10).joined(separator: "; ")
         switch config.onVerifyFailure {
         case .trap: fatalError(report)
-        case .record: unsafe gc.pointee.failures.append(report)
+        case .record:
+            // The first reports are kept (the count above has them all): a
+            // long run with a failing verifier must not grow without bound.
+            if unsafe gc.pointee.failures.count < 1000 { unsafe gc.pointee.failures.append(report) }
         }
     }
 

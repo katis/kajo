@@ -57,10 +57,16 @@ extension VM {
         }
     }
 
-    /// Every scavenge so far.
+    /// The last scavenges (`VMConfig.logCapacity` of them), oldest first.
     var scavengeLog: [ScavengeRecord] {
         guard let n = unsafe state.pointee.nursery else { return [] }
-        return inspect { _ in unsafe n.pointee.state.pointee.records }
+        return inspect { _ in unsafe n.pointee.state.pointee.records.records }
+    }
+
+    /// Sums over every scavenge, and the records the log dropped.
+    var scavengeTotals: ScavengeTotals {
+        guard let n = unsafe state.pointee.nursery else { return ScavengeTotals() }
+        return inspect { _ in unsafe n.pointee.state.pointee.totals }
     }
 
     /// The remembered marker of `o` is set.

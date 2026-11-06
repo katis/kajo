@@ -390,8 +390,16 @@ func waitForCollectionsLocked(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
 
 /// The round log's Swift array append (ARC), out of line so the round
 /// itself has none (module 8: `just arc-check` found it inlined into
-/// `runRound` with the swift.org 6.4.2 toolchain). Mutex held.
+/// `runRound` with the swift.org 6.4.2 toolchain). Mutex held. A ring
+/// since the collectors review: no allocation once full.
 @inline(never)
 func logRound(_ y: YoungPointer, _ r: RoundRecord) {
-    unsafe y.pointee.log.pointee.rounds.append(r)
+    unsafe y.pointee.log.pointee.logRound(r)
+}
+
+/// The collection log's append, out of line for the same reason. Mutex
+/// held.
+@inline(never)
+func logCollection(_ y: YoungPointer, _ r: YoungRecord) {
+    unsafe y.pointee.log.pointee.logCollection(r)
 }

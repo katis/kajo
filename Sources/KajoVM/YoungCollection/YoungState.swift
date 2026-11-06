@@ -144,10 +144,34 @@ enum YoungFallback: Int, Sendable, CaseIterable {
     case reserve
 }
 
+/// What module 7's report sums or takes the maximum of over every
+/// collection and round (the rings keep the last ones only).
+struct YoungTotals: Sendable {
+    var collections: UInt64 = 0
+    var rounds: UInt64 = 0
+    var copiedBytes: UInt64 = 0
+    var cpuNs: UInt64 = 0
+    var survivedObjects: UInt64 = 0
+    var overflowBytes: UInt64 = 0
+    var holders: UInt64 = 0
+    var crossRemembered: UInt64 = 0
+    var deferred: UInt64 = 0
+    var deferredFrees: UInt64 = 0
+    var hazardRetries: UInt64 = 0
+    var droppedCollections: UInt64 = 0
+    /// Rounds logged, the longest one's latency and its slowest participant.
+    var roundRecords: UInt64 = 0
+    var roundMaxNs: UInt64 = 0
+    var roundMaxSlowest = -1
+    var droppedRounds: UInt64 = 0
+}
+
 /// Guarded by the safepoint mutex.
 struct YoungLog {
-    var records: [YoungRecord] = []
-    var rounds: [RoundRecord] = []
+    /// The last `VMConfig.logCapacity` collections and rounds.
+    var records: RecordRing<YoungRecord>
+    var rounds: RecordRing<RoundRecord>
+    var totals = YoungTotals()
     var collectionsLocal: UInt64 = 0
     var collectionsOffloaded: UInt64 = 0
     var fallbacks = [UInt64](repeating: 0, count: YoungFallback.allCases.count)
@@ -163,6 +187,37 @@ struct YoungLog {
     var collectorQoS: UInt32 = 0
     /// Collections an offloaded nursery's owner ran itself (no collector thread).
     var offloadedInline: UInt64 = 0
+
+    init(logCapacity: Int) {
+        records = RecordRing(capacity: logCapacity)
+        rounds = RecordRing(capacity: logCapacity)
+    }
+
+    mutating func logCollection(_ r: YoungRecord) {
+        records.append(r)
+        totals.collections &+= 1
+        totals.rounds &+= UInt64(r.rounds)
+        totals.copiedBytes &+= r.survivedBytes &+ r.promotedBytes
+        totals.cpuNs &+= r.cpuNs
+        totals.survivedObjects &+= r.survivedObjects
+        totals.overflowBytes &+= r.overflowBytes
+        totals.holders &+= r.holders
+        totals.crossRemembered &+= r.crossRemembered
+        totals.deferred &+= r.deferred
+        totals.deferredFrees &+= r.deferredFrees
+        totals.hazardRetries &+= r.hazardRetries
+        totals.droppedCollections = records.dropped
+    }
+
+    mutating func logRound(_ r: RoundRecord) {
+        rounds.append(r)
+        totals.roundRecords &+= 1
+        if r.latencyNs > totals.roundMaxNs || totals.roundRecords == 1 {
+            totals.roundMaxNs = r.latencyNs
+            totals.roundMaxSlowest = r.slowest
+        }
+        totals.droppedRounds = rounds.dropped
+    }
 }
 
 /// One participant's young-collection counters. Written by its own thread

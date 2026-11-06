@@ -130,26 +130,26 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     }
     let t5 = nanoseconds()
 
-    let ri = unsafe log.pointee.current
-    if ri >= 0 {
-        unsafe log.pointee.records[ri].finalTtspNs = stop.timeToSafepointNs
-        unsafe log.pointee.records[ri].drainNs = t1 &- t0
-        unsafe log.pointee.records[ri].drainedEntries = drained
-        unsafe log.pointee.records[ri].filterNs = t2 &- t1
-        unsafe log.pointee.records[ri].ephemeronNs = t3 &- t2
-        unsafe log.pointee.records[ri].ephemeronItems = items
-        unsafe log.pointee.records[ri].weakNs = t4 &- t3
-        unsafe log.pointee.records[ri].verifyNs = t5 &- t4
-        unsafe log.pointee.records[ri].finalPauseNs = stop.timeToSafepointNs &+ (t5 &- t0)
-        unsafe log.pointee.records[ri].markCpuNs = m.pointee.markCpuNs
-        unsafe log.pointee.records[ri].markWallNs = m.pointee.markWallNs
-        unsafe log.pointee.records[ri].markedObjects = m.pointee.markedObjects
-        unsafe log.pointee.records[ri].markedBytes = m.pointee.markedBytes
-        unsafe log.pointee.records[ri].satbPushed = pushed
-        unsafe log.pointee.records[ri].satbBuffers = handed
-        unsafe log.pointee.records[ri].markerQoS = m.pointee.qos
-        unsafe log.pointee.records[ri].floatingObjects = verdict.floatingObjects
-        unsafe log.pointee.records[ri].floatingBytes = verdict.floatingBytes
+    if var r = unsafe log.pointee.currentRecord {
+        r.finalTtspNs = stop.timeToSafepointNs
+        r.drainNs = t1 &- t0
+        r.drainedEntries = drained
+        r.filterNs = t2 &- t1
+        r.ephemeronNs = t3 &- t2
+        r.ephemeronItems = items
+        r.weakNs = t4 &- t3
+        r.verifyNs = t5 &- t4
+        r.finalPauseNs = stop.timeToSafepointNs &+ (t5 &- t0)
+        r.markCpuNs = unsafe m.pointee.markCpuNs
+        r.markWallNs = unsafe m.pointee.markWallNs
+        r.markedObjects = unsafe m.pointee.markedObjects
+        r.markedBytes = unsafe m.pointee.markedBytes
+        r.satbPushed = pushed
+        r.satbBuffers = handed
+        r.markerQoS = unsafe m.pointee.qos
+        r.floatingObjects = verdict.floatingObjects
+        r.floatingBytes = verdict.floatingBytes
+        unsafe log.pointee.currentRecord = r
     }
     unsafe log.pointee.counters.finalMarkNs &+= t5 &- t0
     unsafe log.pointee.counters.markedObjects &+= m.pointee.markedObjects

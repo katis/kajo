@@ -161,8 +161,8 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         rec.remSlots &+= st.remSlots
         rec.entriesFreed &+= st.entriesFreed
         rec.packets &+= st.packetsExported
-        rec.copiedBytesPerParticipant.append(st.copiedBytes)
-        rec.busyNsPerParticipant.append(st.busyNs)
+        rec.copiedBytes &+= st.copiedBytes
+        rec.busyNs &+= st.busyNs
         if st.busyNs >= rec.critCopyBusyNs {
             rec.critCopyBusyNs = st.busyNs
             rec.critRootsNs = st.rootsNs
@@ -254,7 +254,7 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
     rec.verifyNs = tv &- tf
     rec.workNs = tv &- t0
     unsafe log.pointee.counters.scavengeNs &+= tv &- t0
-    unsafe log.pointee.records.append(rec)
+    unsafe log.pointee.log(rec)
 }
 
 /// One participant (the stopper or a parked worker): copy, then sweep.

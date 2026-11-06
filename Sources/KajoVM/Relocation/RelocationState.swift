@@ -116,9 +116,12 @@ struct RelocationCounters: Sendable {
     let context: AllocContext
     var counters = RelocationCounters()
     /// Finished cycles' records (appended at the cycle's end, with the
-    /// world stopped), and the current cycle's (a plain value: the pass
-    /// never touches a Swift array).
-    var records: [RelocationCycleRecord] = []
+    /// world stopped; the last `VMConfig.logCapacity` of them), and the
+    /// current cycle's (a plain value: the pass never touches a Swift
+    /// array). `selecting`: finished cycles that selected a block, all of
+    /// them (the report's per-cycle means).
+    var records = RecordRing<RelocationCycleRecord>(capacity: 1 << 16)
+    var selecting: UInt64 = 0
     var current = RelocationCycleRecord()
     var hasCurrent = false
     /// The verifier is due at the next pause: the relocator selected a
@@ -170,6 +173,7 @@ extension RelocationShared {
         let live = UnsafeMutablePointer<UInt32>.allocate(capacity: blocks)
         unsafe live.initialize(repeating: 0, count: blocks)
         let st = unsafe lined(RelocatorState(blockLive: live, blockCount: blocks, context: om.makeContext()))
+        unsafe st.pointee.records = RecordRing(capacity: vm.pointee.config.logCapacity)
         let r = unsafe lined(RelocationShared(
             config: config, om: om, workerCount: vm.pointee.workerCount, epoch: vm.pointee.epoch,
             hazardsHeld: vm.pointee.hazardsHeld, state: st, enterWindow: vm.pointee.enterWindow))

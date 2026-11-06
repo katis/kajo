@@ -62,6 +62,12 @@ public enum Headless {
         public var mainAlloc = 0
         public var mainWork = 0
         public var frameMs = 1000.0 / 120.0
+        /// Records each collector log keeps (`VMConfig.logCapacity`): the
+        /// default holds every record of a measurement run; an app that
+        /// runs for days takes `appLogCapacity` (the shells' demo and
+        /// developer modes; `logs=` overrides).
+        public var logCapacity = 1 << 16
+        public static let appLogCapacity = 4096
         /// Module 8b: where the kernel's events go (NDJSON objects, on the
         /// emitting VM thread); nil drops them.
         public var events: (@Sendable ([UInt8]) -> Void)? = nil
@@ -269,6 +275,8 @@ public enum Headless {
         vc.young.stress = YoungStress(parsing: options.youngStress)
         vc.young.verify = options.verify
         vc.sourcesDirectory = options.sourcesDirectory
+        guard options.logCapacity >= 1 else { return .failure(.unsupported("log capacity: at least 1")) }
+        vc.logCapacity = options.logCapacity
 
         if let problem = vc.nursery.validate(workers: options.workers + 2) { return .failure(.unsupported("nursery: \(problem)")) }
         var config = ObjectMemoryConfig()
@@ -435,7 +443,9 @@ extension Headless {
 func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, String)] {
     guard vm.hasNursery else { return [("nursery", "off")] }
     let c = vm.nurseryCounters
+    // Percentiles over the records the log kept, sums over every scavenge.
     let log = vm.scavengeLog
+    let totals = vm.scavengeTotals
     let scav = stops.filter { $0.kind == .scavenge }
     let fulls = stops.filter { $0.kind == .full }
     let p = scav.map(\.pauseNs).sorted()
@@ -443,12 +453,7 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
     func pct(_ q: Double) -> String { p.isEmpty ? "-" : f(Double(p[min(p.count - 1, Int(Double(p.count) * q))]) / 1e6) }
     let worst = scav.max { $0.pauseNs < $1.pauseNs }
     let mb = { (b: UInt64) in f(Double(b) / 1e6) }
-    var copied: UInt64 = 0, busy: UInt64 = 0, parts = 0
-    for r in log {
-        copied &+= r.copiedBytesPerParticipant.reduce(0, &+)
-        busy &+= r.busyNsPerParticipant.reduce(0, &+)
-        parts += r.participants
-    }
+    let copied = totals.copiedBytes, busy = totals.busyNs
     let rate = busy == 0 ? "-" : f(Double(copied) / Double(busy) * 1e3)  // MB/s per participant
     let sweeps = log.map(\.maxSweepNs).sorted()
     let sweepP50 = sweeps.isEmpty ? "-" : f(Double(sweeps[sweeps.count / 2]) / 1e6)
@@ -458,7 +463,7 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
     return [
         ("scavenges", "\(c.scavenges)"), ("scavP50ms", pct(0.5)), ("scavP99ms", pct(0.99)),
         ("scavMaxMs", p.last.map { f(Double($0) / 1e6) } ?? "-"), ("scavSlowest", worst.map { "\($0.slowest)" } ?? "-"),
-        ("participantsMean", log.isEmpty ? "-" : f(Double(parts) / Double(log.count))),
+        ("participantsMean", totals.scavenges == 0 ? "-" : f(Double(totals.participants) / Double(totals.scavenges))),
         ("promotedMB", mb(c.promotedBytes)), ("promotedMBs", ms > 0 ? f(Double(c.promotedBytes) / 1e3 / ms) : "-"),
         ("survivedMB", mb(c.survivedBytes)), ("overflowMB", mb(c.overflowBytes)),
         ("fullCollections", "\(fulls.count)"), ("fullMaxMs", fullMax), ("fullRequested", "\(c.fullCollectionsRequested)"),
@@ -469,6 +474,7 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
         ("copyMBsPerParticipant", rate), ("sweepP50ms", sweepP50), ("ttspP50ms", ttspP50), ("youngAllocations", "\(c.youngAllocations)"),
         ("largeAllocations", "\(c.largeAllocations)"), ("barrierSlow", "\(c.barrierSlowCalls)"),
         ("remHolders", "\(c.rememberedHolders)"), ("entriesFreed", "\(c.entriesFreed)"),
+        ("scavLogDropped", "\(totals.dropped)"),
     ]
 }
 
@@ -482,7 +488,10 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
 func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
     guard vm.hasMarking else { return [("gc", "stw")] }
     let c = vm.markingCounters
+    // Percentiles and the QoS tally over the records the log kept; sums,
+    // means and maxima over every cycle.
     let log = vm.cycleLog
+    let totals = vm.cycleTotals
     func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
     func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
     func pct(_ xs: [UInt64], _ q: Double) -> String {
@@ -493,7 +502,7 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
     let ttsp = stops.filter { $0.kind == .finalMark }.map(\.timeToSafepointNs)
     let done = log.filter(\.completed)
     let im = log.map { $0.snapshotNs &+ $0.rootsNs &+ $0.survivorsNs }
-    let mean = { (xs: [UInt64]) -> String in xs.isEmpty ? "-" : ms(xs.reduce(0, &+) / UInt64(xs.count)) }
+    let mean = { (sum: UInt64) -> String in totals.completed == 0 ? "-" : ms(sum / totals.completed) }
     var qos: [UInt32: Int] = [:]
     for r in done { qos[r.markerQoS, default: 0] += 1 }
     let qosList = qos.keys.sorted().map { "\($0)x\(qos[$0]!)" }.joined(separator: ",")
@@ -505,19 +514,20 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("aborts", "\(c.aborts)"), ("sweepsInPause", "\(c.sweepsFinishedInPause)"),
         ("finalP50ms", pct(finals, 0.5)), ("finalP99ms", pct(finals, 0.99)), ("finalMaxMs", finals.max().map(ms) ?? "-"),
         ("finalTtspP50ms", pct(ttsp, 0.5)), ("finalDrainP50ms", pct(done.map(\.drainNs), 0.5)),
-        ("imAddP50ms", pct(im, 0.5)), ("imAddMaxMs", im.max().map(ms) ?? "-"),
+        ("imAddP50ms", pct(im, 0.5)), ("imAddMaxMs", totals.cycles == 0 ? "-" : ms(totals.imAddMaxNs)),
         ("imSnapshotP50ms", pct(log.map(\.snapshotNs), 0.5)), ("imRootsP50ms", pct(log.map(\.rootsNs), 0.5)),
         ("imSurvivorsP50ms", pct(log.map(\.survivorsNs), 0.5)),
         ("snapshotEntries", log.last.map { "\($0.snapshotEntries)" } ?? "-"),
         ("applyP50ms", pct(done.map(\.applyNs), 0.5)), ("applyStops", "\(stops.filter { $0.kind == .apply }.count)"),
-        ("markCpuMsPerCycle", mean(done.map(\.markCpuNs))), ("markWallMsPerCycle", mean(done.map(\.markWallNs))),
-        ("sweepMsPerCycle", mean(done.map(\.sweepNs))), ("cycleMsMean", mean(done.map(\.durationNs))),
-        ("markedMBPerCycle", done.isEmpty ? "-" : f(Double(done.map(\.markedBytes).reduce(0, &+)) / Double(done.count) / 1e6)),
-        ("freedMB", f(Double(done.map(\.bytesFreed).reduce(0, &+)) / 1e6)),
+        ("markCpuMsPerCycle", mean(totals.markCpuNs)), ("markWallMsPerCycle", mean(totals.markWallNs)),
+        ("sweepMsPerCycle", mean(totals.sweepNs)), ("cycleMsMean", mean(totals.durationNs)),
+        ("markedMBPerCycle", totals.completed == 0 ? "-" : f(Double(totals.markedBytes) / Double(totals.completed) / 1e6)),
+        ("freedMB", f(Double(totals.bytesFreed) / 1e6)),
         ("floatingMB", f(Double(c.floatingBytes) / 1e6)), ("satbPushed", "\(c.satbPushed)"), ("satbBuffers", "\(c.satbBuffers)"),
         ("markerQoS", qosList.isEmpty ? "-" : qosList), ("qosEscalations", "\(c.qosEscalations)"), ("qosLowerings", "\(c.qosLowerings)"),
         ("promotionMBs", f(c.lastPromotionBytesPerSecond / 1e6)), ("predictedFillMs", ms(c.lastPredictedFillNs)),
         ("markVerifies", "\(c.verifierRuns)"), ("missed", "\(c.missed)"),
+        ("cycleLogDropped", "\(totals.dropped)"),
     ]
 }
 
@@ -534,11 +544,13 @@ func relocationReport(_ vm: VM) -> [(String, String)] {
     let endMB = Double(UInt64(vm.inspect { $0.blocksInUse }) &* blockBytes) / 1e6
     guard vm.hasRelocation else { return [("reloc", "off"), ("oldEndMB", unsafe String(format: "%.1f", endMB))] }
     let c = vm.relocationCounters
-    let log = vm.relocationLog
+    // Cycles that selected a block, over every cycle (the log keeps the
+    // last ones only).
+    let totals = vm.relocationTotals
     func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
     func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
     let freed = c.freedByEpoch &+ c.freedAtPause
-    let selected = log.filter { $0.blocksSelected > 0 }
+    let selecting = totals.selecting
     return [
         ("reloc", "on"), ("relocPlanned", "\(c.cyclesPlanned)"), ("relocCycles", "\(c.cyclesSelected)"),
         ("relocCandidates", "\(c.candidates)"), ("relocSelected", "\(c.blocksSelected)"), ("relocCapped", "\(c.capped)"),
@@ -549,15 +561,16 @@ func relocationReport(_ vm: VM) -> [(String, String)] {
         ("relocAborted", "\(c.passesAborted)"), ("storesRedone", "\(c.storesRedone)"), ("spinEpisodes", "\(c.spinEpisodes)"),
         ("spinMs", ms(c.spinNs)), ("spinMaxMs", ms(c.spinMaxNs)), ("mainSpinEpisodes", "\(c.mainSpinEpisodes)"),
         ("mainSpinMaxMs", ms(c.mainSpinMaxNs)), ("hazardsTaken", "\(c.hazardsTaken)"), ("hazardWaits", "\(c.hazardWaits)"),
-        ("framePins", "\(c.framePins)"), ("framePinsPerCycle", selected.isEmpty ? "-" : f(Double(c.framePins) / Double(selected.count))),
+        ("framePins", "\(c.framePins)"), ("framePinsPerCycle", selecting == 0 ? "-" : f(Double(c.framePins) / Double(selecting))),
         ("pendingMax", "\(c.pendingMax)"), ("freedByEpoch", "\(c.freedByEpoch)"), ("freedAtPause", "\(c.freedAtPause)"),
         ("freeDelayMeanMs", freed == 0 ? "-" : ms(c.freeDelayNs / freed)), ("freeDelayMaxMs", ms(c.freeDelayMaxNs)),
         ("relocCpuMs", ms(c.passCpuNs)), ("relocWallMs", ms(c.passWallNs)),
-        ("relocMovedMBPerCycle", selected.isEmpty ? "-" : f(Double(c.bytesMoved) / 1e6 / Double(selected.count))),
+        ("relocMovedMBPerCycle", selecting == 0 ? "-" : f(Double(c.bytesMoved) / 1e6 / Double(selecting))),
         ("relocVerifies", "\(c.verifierRuns)"), ("relocVerifyFailures", "\(c.verifierFailures)"),
         ("parksWhileRelocating", "\(c.parksWhileRelocating)"),
         ("oldEndMB", unsafe String(format: "%.1f", endMB)),
         ("oldPeakMB", unsafe String(format: "%.1f", Double(c.peakBlocksInUse &* blockBytes) / 1e6)),
+        ("relocLogDropped", "\(totals.dropped)"),
     ]
 }
 
@@ -666,8 +679,11 @@ private func mainLoad(_ vm: VM, _ image: Image, _ options: Headless.Options, wor
 func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
     guard vm.hasYoungCollection else { return [("young", "stw")] }
     let c = vm.youngCounters
+    // Percentiles over the records the logs kept; sums and maxima over
+    // every collection and round.
     let log = vm.youngLog
     let rounds = vm.roundLog
+    let totals = vm.youngTotals
     func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
     func msS(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
     func pct(_ xs: [UInt64], _ q: Double) -> String {
@@ -677,7 +693,6 @@ func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
     let local = log.filter { !$0.offloaded }.map(\.totalNs)
     let off = log.filter(\.offloaded).map(\.totalNs)
     let lat = rounds.map(\.latencyNs)
-    let worst = rounds.max { $0.latencyNs < $1.latencyNs }
     var edenWaits: UInt64 = 0, edenNs: UInt64 = 0, edenMax: UInt64 = 0, del: UInt64 = 0
     for i in 0..<(vm.config.backgroundWorkers + 2) {
         let w = vm.youngWorkerCounters(i)
@@ -686,15 +701,15 @@ func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
         edenMax = max(edenMax, w.edenWaitMaxNs)
         del &+= w.deletionRecords
     }
-    let copied = log.reduce(UInt64(0)) { $0 &+ $1.survivedBytes &+ $1.promotedBytes }
-    let cpu = log.reduce(UInt64(0)) { $0 &+ $1.cpuNs }
+    let copied = totals.copiedBytes
+    let cpu = totals.cpuNs
     let fb = c.fallbacks
     return [
         ("young", c.mode.name), ("ycLocal", "\(c.collectionsLocal)"), ("ycOffloaded", "\(c.collectionsOffloaded)"),
         ("ycInline", "\(c.offloadedInline)"),
-        ("ycRoundsPerCollection", log.isEmpty ? "-" : f(Double(log.map(\.rounds).reduce(0, +)) / Double(log.count))),
-        ("ackP50ms", pct(lat, 0.5)), ("ackP99ms", pct(lat, 0.99)), ("ackMaxMs", lat.max().map(msS) ?? "-"),
-        ("ackSlowest", worst.map { "\($0.slowest)" } ?? "-"),
+        ("ycRoundsPerCollection", totals.collections == 0 ? "-" : f(Double(totals.rounds) / Double(totals.collections))),
+        ("ackP50ms", pct(lat, 0.5)), ("ackP99ms", pct(lat, 0.99)), ("ackMaxMs", totals.roundRecords == 0 ? "-" : msS(totals.roundMaxNs)),
+        ("ackSlowest", totals.roundRecords == 0 ? "-" : "\(totals.roundMaxSlowest)"),
         ("ycLocalP50ms", pct(local, 0.5)), ("ycLocalP99ms", pct(local, 0.99)),
         ("ycOffP50ms", pct(off, 0.5)), ("ycOffP99ms", pct(off, 0.99)),
         ("ycH0P50ms", pct(log.map(\.h0Ns), 0.5)), ("ycH1P50ms", pct(log.map(\.h1Ns), 0.5)),
@@ -702,24 +717,25 @@ func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
         ("ycSweepP50ms", pct(log.map(\.sweepNs), 0.5)), ("ycEpochWaitP50ms", pct(log.map(\.epochWaitNs), 0.5)),
         ("ycEpochWaitP99ms", pct(log.map(\.epochWaitNs), 0.99)), ("ycCpuP50ms", pct(log.map(\.cpuNs), 0.5)),
         ("ycCopyMBs", cpu == 0 ? "-" : f(Double(copied) / Double(cpu) * 1e3)),
-        ("ycSurvived", "\(log.reduce(0) { $0 &+ $1.survivedObjects })"), ("ycPromoted", "\(c.promotedObjects)"),
+        ("ycSurvived", "\(totals.survivedObjects)"), ("ycPromoted", "\(c.promotedObjects)"),
         ("ycPromotedMB", f(Double(c.promotedBytes) / 1e6)),
-        ("ycOverflowMB", f(Double(log.reduce(UInt64(0)) { $0 &+ $1.overflowBytes }) / 1e6)),
+        ("ycOverflowMB", f(Double(totals.overflowBytes) / 1e6)),
         ("edenWaits", "\(edenWaits)"), ("edenWaitMs", msS(edenNs)), ("edenWaitMaxMs", msS(edenMax)),
-        ("ycCarried", "\(log.last?.carried ?? 0)"), ("ycHolders", "\(log.reduce(0) { $0 &+ $1.holders })"),
-        ("deletionRecords", "\(del)"), ("ycCrossRemembered", "\(log.reduce(0) { $0 &+ $1.crossRemembered })"),
-        ("deferred", "\(log.reduce(0) { $0 &+ $1.deferred })"), ("deferredFreed", "\(log.reduce(0) { $0 &+ $1.deferredFrees })"),
+        ("ycCarried", "\(log.last?.carried ?? 0)"), ("ycHolders", "\(totals.holders)"),
+        ("deletionRecords", "\(del)"), ("ycCrossRemembered", "\(totals.crossRemembered)"),
+        ("deferred", "\(totals.deferred)"), ("deferredFreed", "\(totals.deferredFrees)"),
         ("deferredReleasedAtPauses", "\(vm.nurseryCounters.deferredReleased)"),
         ("snapshotExclusions", "\(c.snapshotExclusions)"),
         ("fallbackStopWanted", "\(fb[0])"), ("fallbackEntries", "\(fb[1])"), ("fallbackSoftLimit", "\(fb[2])"),
         ("fallbackReserve", "\(fb[YoungFallback.reserve.rawValue])"),
-        ("hazardRetries", "\(log.reduce(0) { $0 &+ $1.hazardRetries })"),
+        ("hazardRetries", "\(totals.hazardRetries)"),
         ("youngRootScans", "\(c.initialMarks)"),
         ("youngRootScanMeanMs", c.initialMarks == 0 ? "-" : msS(c.youngRootScanNs / c.initialMarks)),
         ("youngRootScanMaxMs", msS(c.youngRootScanMaxNs)),
         ("collectorQoS", "\(c.collectorQoS)"), ("collectorCpuMs", msS(c.collectorCpuNs)),
         ("collectorWakeups", "\(c.collectorWakeups)"),
         ("ycVerifies", "\(c.verifierRuns)"),
+        ("ycLogDropped", "\(totals.droppedCollections)"), ("roundLogDropped", "\(totals.droppedRounds)"),
     ]
 }
 

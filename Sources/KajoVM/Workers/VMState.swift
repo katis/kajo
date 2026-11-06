@@ -175,7 +175,8 @@ struct SchedulerState {
     var nextId: Int64 = 1
     var recordFree = -1
     var recordHighWater = 0
-    var hopLatencies: [UInt64] = []
+    /// The last `VMConfig.logCapacity` hops' latencies to the main worker.
+    var hopLatencies = RecordRing<UInt64>(capacity: 1 << 16)
     /// Module 8b: the id of the Process the host waits for, and whether it
     /// has terminated.
     var watchedId: Int64 = -1

@@ -106,16 +106,16 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe relocationAtCycleEnd(vm, completed: true)
     unsafe mk.setPhase(.idle)
     let t1 = nanoseconds()
-    let ri = unsafe log.pointee.current
-    if ri >= 0 {
-        unsafe log.pointee.records[ri].sweepNs = m.pointee.sweepNs
-        unsafe log.pointee.records[ri].sweepCpuNs = m.pointee.sweepCpuNs
-        unsafe log.pointee.records[ri].entriesFreed = m.pointee.entriesFreed
-        unsafe log.pointee.records[ri].bytesFreed = m.pointee.bytesFreed
-        unsafe log.pointee.records[ri].blocksFreed = UInt64(blocks)
-        unsafe log.pointee.records[ri].applyNs = t1 &- t0
-        unsafe log.pointee.records[ri].durationNs = t1 &- log.pointee.startNs
-        unsafe log.pointee.records[ri].completed = true
+    if var r = unsafe log.pointee.currentRecord {
+        r.sweepNs = unsafe m.pointee.sweepNs
+        r.sweepCpuNs = unsafe m.pointee.sweepCpuNs
+        r.entriesFreed = unsafe m.pointee.entriesFreed
+        r.bytesFreed = unsafe m.pointee.bytesFreed
+        r.blocksFreed = UInt64(blocks)
+        r.applyNs = t1 &- t0
+        r.durationNs = unsafe t1 &- log.pointee.startNs
+        r.completed = true
+        unsafe log.pointee.complete(r)
     }
     unsafe log.pointee.lastCycleNs = t1 &- log.pointee.startNs
     unsafe log.pointee.current = -1
@@ -150,8 +150,10 @@ func abortCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     om.setPendingDead(nil)
     om.setMarkingActive(false)
     unsafe relocationAtCycleEnd(vm, completed: false)
-    let ri = unsafe log.pointee.current
-    if ri >= 0 { unsafe log.pointee.records[ri].aborted = true }
+    if var r = unsafe log.pointee.currentRecord {
+        r.aborted = true
+        unsafe log.pointee.currentRecord = r
+    }
     unsafe log.pointee.current = -1
     unsafe log.pointee.counters.aborts &+= 1
     unsafe pthread_mutex_lock(mk.pointee.lock)

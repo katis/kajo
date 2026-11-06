@@ -54,7 +54,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             flag: flag, safepoint: lined(SafepointState(stops: stops, parts: .allocate(capacity: workerCount + 2),
                                                         inside: flags(workerCount + 2), blocking: flags(workerCount + 2))),
             safepointLock: makeMutex(), safepointCond: makeCond(),
-            sched: lined(SchedulerState()), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
+            sched: lined(SchedulerState(hopLatencies: RecordRing(capacity: config.logCapacity))), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
             doneCond: makeCond(), externalHead: lined(Atomic<UInt>(0)), pending: lined(PendingState()),
             pendingSlots: pendingSlots, pendingNext: pendingNext, pendingLock: makeMutex(), hostLock: makeMutex(),
             workerShared: shared, errors: lined(ErrorLog()), errorsLock: makeMutex(), counters: counters,
@@ -316,7 +316,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             return true
         }
     }
-    var hopLatencies: [UInt64] { schedRead { $0.hopLatencies } }
+    /// The last hops' latencies (`VMConfig.logCapacity` of them), oldest first.
+    var hopLatencies: [UInt64] { schedRead { $0.hopLatencies.records } }
 
     private func schedRead<T>(_ body: (SchedulerState) -> T) -> T {
         unsafe pthread_mutex_lock(state.pointee.schedLock)

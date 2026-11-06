@@ -31,7 +31,7 @@ extension MarkingShared {
         let mk = unsafe lined(MarkingShared(
             config: config, om: om, workerCount: count, snapshot: snapshot, satb: satb, queue: lined(queue),
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
-            log: lined(MarkingLog()), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
+            log: lined(MarkingLog(logCapacity: vm.pointee.config.logCapacity)), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
             wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
             stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag)))
@@ -114,10 +114,16 @@ extension VM {
         }
     }
 
-    /// Every cycle so far.
+    /// The last cycles (`VMConfig.logCapacity` of them), oldest first.
     var cycleLog: [CycleRecord] {
         guard let mk = unsafe state.pointee.marking else { return [] }
-        return inspect { _ in unsafe mk.pointee.log.pointee.records }
+        return inspect { _ in unsafe mk.pointee.log.pointee.records.records }
+    }
+
+    /// Sums and maxima over every cycle, and the records the log dropped.
+    var cycleTotals: CycleTotals {
+        guard let mk = unsafe state.pointee.marking else { return CycleTotals() }
+        return inspect { _ in unsafe mk.pointee.log.pointee.totals }
     }
 
     /// Start a cycle now: a scavenge and the initial mark in one stop (a

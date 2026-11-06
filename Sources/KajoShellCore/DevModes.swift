@@ -39,6 +39,9 @@ func devSocketPath(_ options: LaunchOptions) -> String {
         var o = Headless.Options()
         o.workers = options.int("workers", 2)
         o.heapMiB = options.int("heap", 512)
+        // The developer UI runs for days: the collectors' logs keep the last
+        // records only (their sums cover the whole run).
+        o.logCapacity = options.int("logs", Headless.Options.appLogCapacity)
         do {
             let rt = try ShellRuntime(imagePath: options.string("image", resources.devImage), options: o, platform: platform,
                                       events: devTranscriptSink())

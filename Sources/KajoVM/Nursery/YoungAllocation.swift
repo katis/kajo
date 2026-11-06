@@ -217,7 +217,7 @@ extension NurseryShared {
         let n = unsafe NurseryShared.make(config, om: om, workers: count, offloaded: concurrent && young.mode == .offload,
                                           youngHolders: concurrent && young.testSwitches.crossNurseryBarrier,
                                           concurrent: concurrent, deferredOwnership: young.testSwitches.deferredOwnership,
-                                          halfBytes: half)
+                                          halfBytes: half, logCapacity: unsafe vm.pointee.config.logCapacity)
         unsafe vm.pointee.nursery = n
         for i in 0..<count { unsafe vm.worker(i).pointee.interp.young = n.alloc(i) }
         let needed = config.testSwitches.promotionReserveBlocks ?? config.reserveBytes(workers: count) / BlockHeap.blockBytes

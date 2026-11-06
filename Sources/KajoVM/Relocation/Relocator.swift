@@ -166,6 +166,7 @@ func relocationAtCycleEnd(_ vm: VMPointer, completed: Bool) {
     if unsafe st.pointee.hasCurrent {
         unsafe st.pointee.current.completed = completed
         unsafe st.pointee.records.append(st.pointee.current)
+        if unsafe st.pointee.current.blocksSelected > 0 { unsafe st.pointee.selecting &+= 1 }
         unsafe st.pointee.hasCurrent = false
         unsafe st.pointee.verifyDue = true
     }

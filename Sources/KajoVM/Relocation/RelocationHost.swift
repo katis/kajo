@@ -45,10 +45,22 @@ extension VM {
         inspect { _ in unsafe state.worker(worker).pointee.relocation }
     }
 
+    /// The last finished cycles (`VMConfig.logCapacity` of them) and the
+    /// current one, oldest first.
     var relocationLog: [RelocationCycleRecord] {
         guard let r = unsafe state.pointee.relocation else { return [] }
         return inspect { _ in
-            unsafe r.pointee.state.pointee.records + (r.pointee.state.pointee.hasCurrent ? [r.pointee.state.pointee.current] : [])
+            unsafe r.pointee.state.pointee.records.records + (r.pointee.state.pointee.hasCurrent ? [r.pointee.state.pointee.current] : [])
+        }
+    }
+
+    /// Cycles that selected a block (every finished one and the current
+    /// one), and the finished cycles' records the log dropped.
+    var relocationTotals: (selecting: UInt64, dropped: UInt64) {
+        guard let r = unsafe state.pointee.relocation else { return (0, 0) }
+        return inspect { _ in
+            let st = unsafe r.pointee.state.pointee
+            return unsafe (st.selecting &+ (st.hasCurrent && st.current.blocksSelected > 0 ? 1 : 0), st.records.dropped)
         }
     }
 
