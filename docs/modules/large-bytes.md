@@ -11,10 +11,12 @@ Three things, in this order of weight:
    might be too little if you have images or photos in a ByteArray." A
    decoded 12-megapixel photo is 48 MiB of RGBA, a 48-megapixel one 192
    MiB, a 4K frame 33 MiB.
-2. The churn of large objects that `scenario=large` makes does not fall
-   back to a stop-the-world collection on the devices (3 of 6 device runs
-   counted fallbacks, none on the Mac). The owner: such churn is likely in
-   a photo or video app, so tune it for devices.
+2. Neither the churn of large objects that `scenario=large` makes nor
+   the plain allocation storm falls back to a stop-the-world collection
+   on the devices (3 of 6 large-churn runs counted fallbacks, and 14 of
+   49 storm launches in the device investigation counted one that cost 5
+   to 17 frames each; none on the Mac). The owner: such churn is likely
+   in a photo or video app, so tune it for devices.
 3. The transport's pieces are measured against one String per line, and
    the cheaper form stays. The owner asked whether keeping the pieces is
    right; the reason given so far is an argument, not a number.
@@ -117,12 +119,26 @@ missed in a scenario that allocates, fills and drops photo-sized
 ByteArrays (48 MiB) on a background worker while the main thread
 animates.
 
-## 2. Large churn on the devices
+## 2. Fallbacks on the devices
 
 `scenario=large` on the devices counted module 5 fallbacks
 (`fallbacksIdle`, with as many stop-the-world scavenges) in 3 of 6 runs,
 at thermal serious, costing no frame; the Mac counted none in any run.
-Find out why before changing a number: which resource ran out (old
+
+The storm does worse. In the device investigation of 2026-11-06
+(`docs/modules/shells.md`, "Where the 2.2 ms went", last bullet; raw rows
+in the session's `devices3/B` and `B2`) 14 of 49 storm launches counted
+`fallbacksSweeping`, each with one or two stop-the-world full collections
+of 41 to 84 ms and 5 to 17 missed frames: 3 of 16 at 5 workers with the
+devices cooled, none of 6 at 3 workers or of 6 at 5 workers heated, 11 of
+21 at 7 workers, and no launch without a fallback missed a frame. The morning's matrix passes saw none, so reproduce it
+first (the investigation's rows ran `events=1000` and its new telemetry;
+say whether either matters) and report the rate over at least 20 launches
+per device before and after. One missing row had `gc_sweepMsPerCycle` at
+103 ms with the marker at utility QoS: old space ran out while the lazy
+sweep, on efficiency cores, still held the memory the cycle had freed.
+
+For both, find out why before changing a number: which resource ran out (old
 space's soft limit, blocks with no run of the needed length, the entry
 table), how far the marker was into its cycle when it did, at what QoS
 and on which cores the marker ran (utility, so efficiency cores, by ADR
@@ -134,11 +150,14 @@ a bounded time for the sweep's apply before it falls back. Any policy
 change is measured for energy on the phone as experiments/power did,
 since the marker's QoS was chosen there for a fifth of the energy.
 
-Done when 10 launches of `scenario=large` on each device, interleaved
-with idle, count no fallback, miss no frame, and the main thread's
-stopped time is no worse than the rows in `docs/modules/shells.md`; the
-Mac's rows stay as they are; and the same holds for the photo-sized
-scenario of part 1.
+Done when 10 launches of `scenario=large` and 20 of the storm (at 5 and
+at 7 workers, cooled and heated) on each device, interleaved with idle,
+count no fallback, miss no frame, and the main thread's stopped time is
+no worse than the rows in `docs/modules/shells.md`; the Mac's rows stay
+as they are; and the same holds for the photo-sized scenario of part 1.
+If a fallback cannot be removed at 7 workers on a device (more busy
+threads than performance cores), say what bounds it and what the shell's
+default worker count should be there.
 
 ## 3. Pieces against one String
 

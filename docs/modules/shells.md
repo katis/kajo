@@ -811,6 +811,23 @@ thread actually had (`*_pri`, `*_qos_got`).
   every block, and in the morning at serious); a fully loaded cluster
   and a single thread are different power limits, and the counters here
   do not say which one the OS applied.
+- **Frames were missed in 14 of these 49 storm launches, and every one is
+  a module 5 fallback** (found by the main session reading the raw rows;
+  the investigation's question was the latency, and its tables do not
+  show the column). Every launch that missed a frame counted
+  `fallbacksSweeping` (old space ran out while the lazy sweep was still
+  running) and one or two stop-the-world full collections of 41 to 84 ms,
+  5 to 17 frames each; every launch with no fallback missed none. At 5
+  workers, cooled: 2 of 8 on the iPad at nominal (5 and 6 frames, one of
+  them the half-load row) and 1 of 8 on the iPhone (its last, at fair);
+  0 of 6 at 3 workers and 0 of 6 at 5 workers heated. At 7 workers (the
+  heating launches): 5 of 15 on the iPad, 6 of 6 on the iPhone. The morning's matrix passes (two runs of storm per
+  worker count) counted none. `gc_sweepMsPerCycle` in a missing row was
+  103 ms with the marker at utility on efficiency cores: the sweep, not
+  the mark, is what the allocation outran. This is the same provisioning
+  failure as the large churn's `fallbacksIdle`, in the plain storm, and
+  it costs frames; the large-bytes follow-up
+  (`docs/modules/large-bytes.md`, part 2) traces and removes both.
 
 ### Drift and thermal
 
