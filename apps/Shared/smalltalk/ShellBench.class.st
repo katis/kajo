@@ -63,6 +63,7 @@ ShellBench class >> startLoad: aName workers: n [
 	aName = 'storm' ifTrue: [n timesRepeat: [[self storm] forkAt: 1]. ^ n].
 	aName = 'ring' ifTrue: [1 to: n do: [:w | [self ring: w] forkAt: 1]. ^ n].
 	aName = 'large' ifTrue: [[self large] forkAt: 1. ^ 1].
+	aName = 'photo' ifTrue: [[self photo] forkAt: 1. ^ 1].
 	aName = 'share' ifTrue: [
 		shared := Array new: n * 256.
 		0 to: n - 1 do: [:w | [self share: w of: n] forkAt: 1].
@@ -89,6 +90,19 @@ ShellBench class >> large [
 		b := nil].
 	 (huge at: 999001) size = 2 ifFalse: [failures := failures + 1].
 	 i := i + 1] repeat
+]
+
+{ #category : #loads }
+ShellBench class >> photo [
+	"Large bytes: a photo app's churn on one Process: forever a decoded 12-megapixel RGBA photo, a ByteArray of 48 000 000 bytes (past the header's count field), filled row by row from a 16 000-byte row (primitive 38), checked at both ends and dropped; the last one stays live."
+	| row keep p n |
+	n := 4000 * 3000 * 4.
+	row := ByteArray new: 16000.
+	1 to: 16000 do: [:i | row at: i put: i \\ 251].
+	[p := ByteArray new: n.
+	 1 to: n by: 16000 do: [:k | p replaceFrom: k to: k + 15999 with: row startingAt: 1].
+	 ((p at: 1) = 1 and: [(p at: n) = (16000 \\ 251)]) ifFalse: [failures := failures + 1].
+	 keep := p] repeat
 ]
 
 { #category : #loads }

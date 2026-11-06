@@ -143,6 +143,12 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                             "store_temp 1"]
                 }
                 out += ["push_nil", "store_temp 3"]
+                // Large bytes: a ByteArray (past the header's count field in
+                // the configurations whose heap can hold one, `longBytesSource`),
+                // a byte stored past 2^24 - 8 and at its end, read back.
+                let b = Int64(rng.below(256))
+                acc &+= b
+                out += ["push_temp 1", "push_nil", "push_lit \(b)", "send longBytes: 1", "add", "store_temp 1"]
             case 13:  // module 8: acc += nil nlr: v (a non-local return from a block two frames up)
                 let v = Int64(rng.below(201) - 100)
                 acc &+= v
@@ -335,17 +341,28 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         }
     }
 
+    /// Large bytes: the configurations whose random programs make byte
+    /// objects past the header's count field (16 MiB + 1003 bytes) in their
+    /// large-object step, with a heap of 128 MiB to hold a few at once: one
+    /// and eight workers (the ordinary paths), a cycle at every scavenge
+    /// (marking and the lazy sweep over them) and local young collection
+    /// (module 7 beside them). The others keep the step's ByteArray at 4100
+    /// bytes: their heaps (8 MiB, or the exhausted reserve's few blocks)
+    /// cannot hold one, and the stress modes (a collection at every
+    /// allocation, a stop at every poll) would spend their time zeroing.
+    var longBytes: Bool { [.oneWorker, .eightWorkers, .cycleEveryScavenge, .localCollection].contains(self) }
+
     func runtime(_ p: RandomProgram) throws -> Runtime {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
                       .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
                       .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll,
                       .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn].contains(self)
-        let source = self == .offloadCollection ? mainTasks(p.source) : p.source
+        let source = (self == .offloadCollection ? mainTasks(p.source) : p.source) + longBytesSource(long: longBytes)
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
         let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
-        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2 : 256,
+        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2 : longBytes ? 4096 : 256,
                            reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
                            configure: { c in
                                // Programs allocate tens of KiB: 512 KiB
@@ -414,6 +431,54 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                }
                            })
     }
+}
+
+/// Large bytes: `nil longBytes: v` makes a ByteArray of L bytes (16 MiB +
+/// 1003, past the header's count field, when `long`; 4100 otherwise),
+/// stores v at its end and at byte M (2^24 - 8 + 2 when long, past the
+/// count field's sentinel), and answers (b at: L) + (b at: M) - v + (b
+/// basicSize - L): v.
+func longBytesSource(long: Bool) -> String {
+    let L = long ? Int(Header.longBytesFrom) + 1003 : 4100
+    let M = long ? Int(Header.longBytesFrom) + 2 : 4000
+    return """
+    method Object lbSize temps=0 prim=95
+      push_nil
+      return_top
+    end
+    method UndefinedObject longBytes: temps=1
+      push_lit @ByteArray
+      push_lit \(L)
+      send new: 1
+      store_temp 1
+      push_temp 1
+      push_lit \(L)
+      push_temp 0
+      send at:put: 2
+      pop
+      push_temp 1
+      push_lit \(M)
+      push_temp 0
+      send at:put: 2
+      pop
+      push_temp 1
+      push_lit \(L)
+      send at: 1
+      push_temp 1
+      push_lit \(M)
+      send at: 1
+      add
+      push_temp 0
+      sub
+      push_temp 1
+      send lbSize 0
+      push_lit \(L)
+      sub
+      add
+      return_top
+    end
+
+    """
 }
 
 /// The exhausted-reserve configurations' whole heap (the image takes one
@@ -644,7 +709,7 @@ func snapshotPoll(_ p: RandomProgram, _ mode: SnapshotMode) -> Int {
 /// saved).
 func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode) throws -> (saved: Int64?, resumed: Int64?, didSave: Bool) {
     let n = snapshotPoll(p, mode)
-    let rt = try Runtime(p.source + snapshotSrc, background: mode.workers.save, heapBlocks: 256, stress: mode.stress,
+    let rt = try Runtime(p.source + longBytesSource(long: false) + snapshotSrc, background: mode.workers.save, heapBlocks: 256, stress: mode.stress,
                          verify: mode.verify, configure: { c in
                              mode.configure(&c, p.seed)
                              c.snapshotAtPoll = n

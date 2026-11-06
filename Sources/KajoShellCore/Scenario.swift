@@ -6,7 +6,7 @@ import KajoApp
 import KajoAppDevelopment
 import KajoVM
 
-/// `mode=scenario scenario=storm|ring|share|idle gc=cm|stw young=stw|local|offload
+/// `mode=scenario scenario=storm|ring|share|large|photo|idle gc=cm|stw young=stw|local|offload
 /// workers=N seconds=10 warmup=1 events=0|1000 hog=0|1 budget=on|off`:
 /// module 7's scenarios driven by the real display link. The window is
 /// built in Smalltalk (ShellBench), a probe view is moved by Smalltalk on
