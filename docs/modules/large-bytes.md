@@ -304,7 +304,9 @@ poll does.
 
 ### After
 
-The last block ran c196de8's build (the final code) on both devices,
+The last block ran c196de8's build on both devices (the final code but
+for f4f625c, which only moves the fallback record's read of the marker's
+QoS to an atomic after ThreadSanitizer reported it; no behaviour changed),
 2026-11-06 22:13 to 22:33, interleaved as the first (ten rounds: storm at
 5 and at 7 workers, with and without 1000 events per second alternating,
 idle, the large churn and the photo churn, the iPad then the iPhone each
@@ -642,16 +644,17 @@ the full suite.
 
 ## Unsafe surface
 
-116 new lines with `unsafe` (129 added, 13 removed, comments excluded),
+120 new lines with `unsafe` (133 added, 13 removed, comments excluded),
 all in `Sources/KajoVM`: `Marking/Sweep.swift` 46 (the fallback records,
 `finishSweepInStop`, the allocation's wait: the marking state's fields,
 the pools' snapshot, the waits under their lock), `ObjectModel/LongBytes.swift`
 35 (the polls, the pending roots, `memset`, `memmove` and `memcmp` on
 the heap through offsets loaded from the entry), `Marking/MarkingHost.swift`
-10 (the waits' sub-state and lock, the policy's flag), `YoungCollection/Owner.swift`
-7, `Headless.swift` 4, `Interpreter/InterpreterState.swift` 3,
-`Nursery/YoungAllocation.swift` 3, `ObjectMemory/LargeObjects.swift` 3,
-`Marking/InitialMark.swift` 2, `Workers/VM.swift` 2,
+11 (the waits' sub-state and lock, the QoS atomic, the policy's flag),
+`YoungCollection/Owner.swift` 7, `Headless.swift` 4,
+`Interpreter/InterpreterState.swift` 3, `Marking/Marker.swift` 3 (the QoS
+atomic), `Nursery/YoungAllocation.swift` 3, `ObjectMemory/LargeObjects.swift`
+3, `Marking/InitialMark.swift` 2, `Workers/VM.swift` 2,
 `ObjectMemory/ObjectMemory.swift` 1. Nothing in `KajoDev` or the shells.
 The clean build of the gates reports no strict memory-safety warning.
 
@@ -687,6 +690,10 @@ The disassembly of the starting commit's and this follow-up's aligned
   view's text, a file written by 148, the save's path, a parsed number;
   the file and network primitives that fill a ByteArray were not this
   follow-up's.
+- **The other polled primitives at the limit**: comparison, hash, search,
+  scalar count and UTF-8 validation were run over 16 MiB + 1003 bytes (the
+  test, with its stretch bound), not timed at 1 GiB; only `new:`,
+  `at:`/`at:put:` and the copy were.
 - **The allocation measurements on the devices** (allocate, `at:`/`at:put:`,
   copy at 16 MiB to 1 GiB): measured on the Mac only; the devices ran the
   photo scenario, which allocates, fills and drops 48 MB ByteArrays.
@@ -694,6 +701,12 @@ The disassembly of the starting commit's and this follow-up's aligned
   stopped time while a serving shell answers 100 large replies, and the
   round trips from a device, were not measured; the forms were decided on
   the Mac's numbers.
+- **The snapshot fuzzer and the long seed**: libFuzzer reads
+  `long-bytes.img` (16.8 MB) but, with no `-max_len`, generates and runs
+  inputs of at most 1 MiB, so the seed runs truncated (and is refused).
+  The seeded mutations of `ImageFileTests` cover it whole; `scripts/fuzz.sh`
+  was not given a larger `max_len` (every input would be allowed to grow
+  to 17 MB).
 - **The `fallbackEntries` key of module 7's report** stays 0 (module 7
   never counted it); the marking report's `fallbacksEntries` is the count.
 
@@ -720,7 +733,45 @@ The disassembly of the starting commit's and this follow-up's aligned
 
 ## Gates
 
-GATES
+Every gate ran on f4f625c (the last commit that changes code; the commits
+after it are this doc), Mac mini (M2 Pro), swift.org 6.4.2 (the toolchain
+first on PATH), 2026-11-06 22:57 to 2026-11-07 01:56, no device run
+meanwhile, every output in a file under the session's `largebytes/gates/`,
+each step logged with its commit in `largebytes/gates.log`. The first run
+(c196de8, 22:33 to 22:57, `gates/run1-c196de8/`) passed the clean build,
+`swift test` and `swift test` under load, and was stopped in its
+ThreadSanitizer gate: the sanitizer reported the fallback record, taken in
+an allocation's stop, reading the marker's `qos` field that the marker
+thread writes outside the VM at its start (random programs, `relocate`
+and large-object configurations); f4f625c reads it from an atomic the
+marker sets beside it, and the whole sequence ran again.
+
+| gate | result |
+|---|---|
+| clean build (`--scratch-path .build/clean-check`) | exit 0, 0 errors, 0 warnings, 19 s (the toolchain's compilation cache) |
+| `swift test` | 369 + 100 passed, 317 + 94 s |
+| under load (12 busy loops) | 369 + 100 passed, 370 + 113 s |
+| ThreadSanitizer | 369 + 100 passed, 0 reports, 504 + 2420 s |
+| ThreadSanitizer under load | 369 + 100 passed, 0 reports, 739 + 2945 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release in 133 functions, `interpret` 1056 instructions, one indirect branch and one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 369 + 100 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | passed: 1000 seeds under every configuration (27 lines, no failing seed), the long-bytes step in four; the resumed modes saving 908 to 995 of 1000 |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.21 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 2.78 million runs, no crash (its seeds upgraded, `long-bytes.img` among them, read whole but run truncated to libFuzzer's default `max_len` of 1 MiB: see Not done) |
+| `just fuzz syntax 600` | libFuzzer build ok, 0.98 million runs, no crash |
+| `just fuzz protocol 600` | libFuzzer build ok, 1.61 million runs, no crash |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| `just kernel-test` | 204 tests, 204 passed |
+| `just new-check` | ok: both targets in both configurations, 0 errors, 0 warnings; the Release products without the protocol |
+
+(369 is `KajoVMTests`, 17 of them new; 100 `KajoCompilerTests`.) The
+disassembly comparison (Hot-path check) is of c196de8's aligned build;
+f4f625c changes only the fallback record's read, out of every path the
+check covers, and its `just arc-check` passes. The bench A/B ran on
+6f051b0; the code after it changed only the allocation slow paths.
 
 ## Commands
 
