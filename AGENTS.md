@@ -812,7 +812,7 @@ cleared, `Behavior>>compile:` keeping sources and the pragma index,
 a make-and-run fuzz mode; two 8b bugs fixed: the sources table could not
 pass one block and a build step dying in an unhandled error went on, and
 a message chain of thousands overflowed the parser's stack; its four open
-questions await the owner); the native shells
+questions answered by the owner on 2026-11-04); the native shells
 built in module 9a (`docs/modules/shells.md`: the public host surface
 `Sources/KajoVM/Shell/` over which no oop crosses, the event queue on
 module 3's external-signal queue, the first view wrappers behind one hop
@@ -926,7 +926,8 @@ compacting full collections of 250 ms where the concurrent modes miss
 none; the same follow-up walks message chains by loops in the bootstrap
 compiler, lowers the nesting limit to 32 in both compilers after
 measuring 4 to 9.5 KB of debug stack per level, and runs the syntax
-fuzzer on a 512 KB thread; its two open questions await the owner; live
+fuzzer on a 512 KB thread; its two open questions answered by the owner
+on 2026-11-04 (the oracle's misses are acceptable, the limit stays 32); live
 classes built in module 8e, `docs/modules/live-classes.md`: primitives 145
 to 147 define, redefine and remove a class in the install stop, re-checking
 the build's rules through the shared `ClassRules`, a redefinition making
@@ -941,14 +942,16 @@ definitions kept in the image; the Tonel writer and reader in Smalltalk
 over file primitives 148 and 149 bounded to the directory `--sources`
 opens, `kernel/` rewritten in the canonical form the image writes and a
 byte-identical round-trip test; 1500 class-spec and 500 reshape-spec
-mutations; its five open questions await the owner; the vm-teardown
+mutations; its five open questions answered by the owner on 2026-11-04 or
+closed by later modules; the vm-teardown
 follow-up, `docs/modules/vm-teardown.md`: `VM.destroy` runs one final
 promote-all stop and hands every stash's entries back, so the image the
 host holds afterwards is whole, `Image.saveImage` works and another VM can
 run over the same image (5 to 15 µs for an empty nursery, 1.0 to 1.2 ms for
 a full one, in release); the file primitives resolve the last path
 component too, read with `O_NOFOLLOW` and create the write's temporary
-file exclusively; its two open questions await the owner; the
+file exclusively; its two open questions answered by the owner on
+2026-11-04 and built in module 10; the
 collectors review, `docs/modules/collectors-review.md` (2026-11-06): the
 first external review of modules 1 and 4 to 7 (pull request 1, 54 files)
 found nine things and all nine are fixed, each with a test that fails on
