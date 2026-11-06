@@ -31,22 +31,29 @@ extension ObjectMemory {
     /// Out of line: the large path is a slow path and never inlined into
     /// a hot one.
     @inline(never)
-    func tryAllocateAny(_ ctx: AllocContext, classIndex: UInt64, count: Int, isBytes: Bool, fill: Oop) -> Oop {
-        precondition(count >= 0 && count <= Header.maxLargeCount, "object larger than the count field")
+    func tryAllocateAny(_ ctx: AllocContext, classIndex: UInt64, count: Int, isBytes: Bool, fill: Oop,
+                        deferZero: Bool = false) -> Oop {
+        precondition(count >= 0 && count <= (isBytes ? Header.maxByteLength : Header.maxLargeCount),
+                     "object larger than its limit")
         if count <= (isBytes ? Header.maxBytes : Header.maxSlots) {
             return isBytes ? tryAllocateBytes(ctx, classIndex: classIndex, count: count)
                            : tryAllocate(ctx, classIndex: classIndex, slots: count, fill: fill)
         }
-        return tryAllocateLarge(ctx, classIndex: classIndex, count: count, isBytes: isBytes, fill: fill)
+        return tryAllocateLarge(ctx, classIndex: classIndex, count: count, isBytes: isBytes, fill: fill, deferZero: deferZero)
     }
 
     /// A large object: a run of blocks, an entry from `ctx`'s list, the body
     /// filled with `fill` (pointer objects) or zeros. Old at birth: the old
     /// map has it from the start, and a marking cycle in progress never
     /// sweeps it (it is not in that cycle's snapshot, and its blocks carry
-    /// the cycle's stamp).
-    func tryAllocateLarge(_ ctx: AllocContext, classIndex: UInt64, count: Int, isBytes: Bool, fill: Oop) -> Oop {
-        precondition(count >= 0 && count <= Header.maxLargeCount, "object larger than the count field")
+    /// the cycle's stamp). Large bytes: a byte object up to
+    /// `Header.maxByteLength`; with `deferZero` a long one's bytes are left
+    /// for the caller to zero (`Machine.zeroLongBytes`, in polled chunks),
+    /// since one fill of a gigabyte keeps every stop waiting.
+    func tryAllocateLarge(_ ctx: AllocContext, classIndex: UInt64, count: Int, isBytes: Bool, fill: Oop,
+                          deferZero: Bool = false) -> Oop {
+        precondition(count >= 0 && count <= (isBytes ? Header.maxByteLength : Header.maxLargeCount),
+                     "object larger than its limit")
         assert(classIndex != 0 && classIndex <= Header.maxClassIndex)
         let c = unsafe ctx.state
         if unsafe c.pointee.freeEntry == 0, !refillEntries(ctx) {
@@ -61,8 +68,15 @@ extension ObjectMemory {
         let e = unsafe c.pointee.freeEntry
         unsafe c.pointee.freeEntry = stateWord(e) & EntryState.nextMask
         let n = UInt64(truncatingIfNeeded: count)
-        let header = classIndex | n &<< Header.countShift | (isBytes ? Header.bytesBit : 0)
-        initializeObject(e, at: off, header: header, bytes: bytes, fill: isBytes ? 0 : fill.raw)
+        let field = isBytes ? Header.countField(bytes: n) : n
+        let header = classIndex | field &<< Header.countShift | (isBytes ? Header.bytesBit : 0)
+        let defer0 = deferZero && isBytes && n >= Header.longBytesFrom
+        initializeObject(e, at: off, header: header, bytes: defer0 ? 16 : bytes, fill: isBytes ? 0 : fill.raw)
+        if defer0 {
+            // The back reference with the whole body's words; the first
+            // word zeroed with it, the rest the caller's.
+            setWordAtomic(atOffset: off, BackRef.make(entryIndex: e &>> 4, words: bytes &>> 3))
+        }
         oldMap.insert(e &>> 4)
         unsafe c.pointee.counters.allocations &+= 1
         unsafe c.pointee.counters.allocatedBytes &+= bytes

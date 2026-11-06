@@ -202,22 +202,28 @@ extension ObjectMemory {
                     continue
                 }
                 if hd.isLarge != (h.kind(b) == BlockKind.head) {
-                    out.fail("entry \(e): a body of \(hd.bodyBytes) bytes in a block of kind \(h.kind(b))")
+                    out.fail("entry \(e): a body of \(BackRef.words(h.word(atOffset: s)) &<< 3) bytes in a block of kind \(h.kind(b))")
                     continue
                 }
             }
             if !isRegisteredClass(hd.classIndex) { out.fail("entry \(e): class index \(hd.classIndex) is not registered") }
-            if s &+ hd.bodyBytes > BlockHeap.start(ofBlock: b) &+ h.usedBytes(b) {
-                out.fail("entry \(e): body at \(s) of \(hd.bodyBytes) bytes is outside block \(b)'s used bytes")
+            // Large bytes: a long byte object's size is only in its back
+            // reference (a word inside a block in use, so safe to read); it
+            // must lie within its run and agree with the header's sentinel.
+            let br = h.word(atOffset: s)
+            let bodyBytes = hd.bodyWords(backRef: br) &<< 3
+            if s &+ bodyBytes > BlockHeap.start(ofBlock: b) &+ h.usedBytes(b)
+                && !(hd.isLongBytes && config.testSwitches.trustLongLength) {
+                out.fail("entry \(e): body at \(s) of \(bodyBytes) bytes is outside block \(b)'s used bytes")
                 continue
             }
-            let br = h.word(atOffset: s)
             if BackRef.entryIndex(br) != e {
                 out.fail("entry \(e): the body's back reference names entry \(BackRef.entryIndex(br))")
                 continue
             }
-            if BackRef.words(br) != hd.bodyWords {
-                out.fail("entry \(e): body size \(BackRef.words(br)) words, header says \(hd.bodyWords)")
+            if !hd.agrees(words: BackRef.words(br)) {
+                let says = hd.isLongBytes ? "a long byte object of \(hd.longLength(words: BackRef.words(br))) bytes" : "\(hd.bodyWords)"
+                out.fail("entry \(e): body size \(BackRef.words(br)) words, header says \(says)")
                 continue
             }
             if seen[Int(e)] != 1 { out.fail("entry \(e): offset \(s) is not the start of a body in block \(b)'s walk") }
@@ -257,7 +263,7 @@ extension ObjectMemory {
         }
         let start = BlockHeap.start(ofBlock: b)
         let w = h.word(atOffset: start)
-        if BackRef.words(w) &<< 3 != used {
+        if BackRef.words(w) &<< 3 != used && !config.testSwitches.trustLongLength {
             out.fail("run at block \(b): its body of \(BackRef.words(w)) words is not its used \(used)")
             return k
         }

@@ -182,7 +182,7 @@ extension ObjectMemory {
         let hd = Header(raw: headerWord(raw))
         var f: UInt64 = 0xcbf2_9ce4_8422_2325 ^ hd.raw
         let off = stateWord(raw)
-        for i in 0..<hd.bodyWords { f = (f ^ heap.word(atOffset: off &+ i &<< 3)) &* 0x100_0000_01b3 }
+        for i in 0..<bodyWords(entry: raw) { f = (f ^ heap.word(atOffset: off &+ i &<< 3)) &* 0x100_0000_01b3 }
         return f
     }
 

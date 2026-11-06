@@ -6,18 +6,20 @@
 // broken, and nothing is kept.
 //
 //     word 0   magic "KAJOIMG\0"
-//     word 1   version (5, module 10: large objects, runs of blocks in
-//              the snapshot's block table; 4 since 9b: two more VM
+//     word 1   version (6, large bytes: byte objects past the header's
+//              count, their length in the back reference, module 1's
+//              snapshot version 5; 5 since module 10: large objects, runs
+//              of blocks in the snapshot's block table; 4 since 9b: two more VM
 //              selectors, holes in the class table, the source-map method
 //              flag; 3 since 8d: the Metaclass layout gained the class
-//              pool and the header the flags word; versions 1 to 4 are
+//              pool and the header the flags word; versions 1 to 5 are
 //              refused, images are rebuilt from their sources)
 //     word 2   the special-objects Array (`SpecialObjects`), a root
 //     word 3   method count M
 //     word 4   snapshot length L in bytes
 //     word 5   flags: bit 0 a release image (module 8d), every other bit 0
 //     M words  the method table: every CompiledMethod in the heap
-//     L bytes  module 1's snapshot (version 4)
+//     L bytes  module 1's snapshot (version 5)
 //
 // Module 1's loader checks the heap's structure, since module 10 the block
 // table's runs too (every head's used past one block and within the
@@ -66,7 +68,7 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
     var description: String {
         switch self {
         case .badMagic: "not a Kajo image (bad magic)"
-        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before module 10's large objects: rebuild it from its sources)" : "")
+        case .unsupportedVersion(let v): "unsupported image version \(v)" + (v < ImageFile.version ? " (made before the large-bytes follow-up's long byte objects: rebuild it from its sources)" : "")
         case .malformed(let s): "malformed image: \(s)"
         case .snapshot(let e): "image snapshot: \(e)"
         case .rule(let s): "image rejected: \(s)"
@@ -79,9 +81,9 @@ enum ImageError: Error, Equatable, CustomStringConvertible {
 
 enum ImageFile {
     static let magic: UInt64 = 0x0047_4D49_4F4A_414B  // "KAJOIMG\0"
-    /// Module 10: 5 (runs of blocks for large objects; module 1's snapshot
-    /// version 4). 9b's 4, 8d's 3, 8c's 2 and 8b's 1 are refused.
-    static let version: UInt64 = 5
+    /// Large bytes: 6 (long byte objects; module 1's snapshot version 5).
+    /// Module 10's 5, 9b's 4, 8d's 3, 8c's 2 and 8b's 1 are refused.
+    static let version: UInt64 = 6
     static let headerWords = 6
     /// Flags word bits.
     static let releaseFlag: UInt64 = 1

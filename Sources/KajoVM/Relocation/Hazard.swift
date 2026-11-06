@@ -85,6 +85,8 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     let rcv = c.receiver, src = m.argument(2, of: c), startO = c.arg0, stopO = c.arg1, fromO = m.argument(3, of: c)
     guard rcv.isObject, src.isObject, startO.isSmallInteger, stopO.isSmallInteger, fromO.isSmallInteger else { return .none }
     let rc = m.classIndex(of: rcv), sc = m.classIndex(of: src)
+    // Large bytes: byte objects into a byte receiver that is not text.
+    if om.isBytes(rcv) && om.isBytes(src) && !om.isSealed(rc) && !om.isSealed(sc) { return primReplaceBytes(m, c) }
     guard !om.isSealed(rc), !om.isSealed(sc), !om.isBytes(rcv), !om.isBytes(src) else { return .none }
     // Module 8: a read-only receiver is refused (modificationForbiddenAt:value:).
     if om.isReadOnly(rcv) { return m.refuseReadOnly(rcv, at: startO, value: src) }

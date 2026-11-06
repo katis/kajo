@@ -21,12 +21,15 @@ extension ObjectMemory {
         retireAllContexts()
         let sa = stateWord(a.raw), ha = headerWord(a.raw)
         let sb = stateWord(b.raw), hb = headerWord(b.raw)
+        // Each body keeps its size (large bytes: a long one's is only in its
+        // back reference).
+        let wa = bodyWords(entry: a.raw), wb = bodyWords(entry: b.raw)
         setStateWord(a.raw, sb)
         setHeaderWord(a.raw, hb)
         setStateWord(b.raw, sa)
         setHeaderWord(b.raw, ha)
-        heap.setWord(atOffset: sa, BackRef.make(entryIndex: b.entryIndex, words: Header(raw: ha).bodyWords))
-        heap.setWord(atOffset: sb, BackRef.make(entryIndex: a.entryIndex, words: Header(raw: hb).bodyWords))
+        heap.setWord(atOffset: sa, BackRef.make(entryIndex: b.entryIndex, words: wa))
+        heap.setWord(atOffset: sb, BackRef.make(entryIndex: a.entryIndex, words: wb))
         unsafe gc.pointee.counters.becomes &+= 1
         verifyAtPause("after become", phase: .idle)
     }

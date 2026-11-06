@@ -159,6 +159,8 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
 /// Primitive 161's line: a String's bytes, or the bytes of an Array's
 /// Strings and ByteArrays joined (at most 64 MiB); nil otherwise.
 private func lineBytes(_ m: Machine, _ v: Oop) -> [UInt8]? {
+    // Large bytes: a long String (past 16 MiB) is not a line (`text` is
+    // nil for it); the transport's own limit is 16 MiB (RequestLimits).
     if m.text(v) != nil { return m.om.bytes(of: v) }
     guard v.isObject, m.classIndex(of: v) == WellKnown.array else { return nil }
     var out: [UInt8] = []
@@ -166,8 +168,8 @@ private func lineBytes(_ m: Machine, _ v: Oop) -> [UInt8]? {
         let p = m.om.load(v, i)
         guard p.isObject else { return nil }
         let ci = m.classIndex(of: p)
-        guard m.text(p) != nil || ci == WellKnown.byteArray else { return nil }
-        out += m.om.bytes(of: p)
+        guard m.text(p) != nil || ci == WellKnown.byteArray, let b = m.om.bytesIfShort(of: p) else { return nil }
+        out += b
         if out.count > 64 << 20 { return nil }
     }
     return out

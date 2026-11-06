@@ -1,11 +1,14 @@
 import Darwin
 import Foundation
 
-/// Snapshot format, version 4 (module 4 added the class formats, the
+/// Snapshot format, version 5 (module 4 added the class formats, the
 /// finalization queue and the nil object; module 8 the format word's kind,
 /// sealed and behaviors fields and the immediates SmallFloat and Character
-/// in slots; module 10 the block kinds of large objects' runs; versions 1
-/// to 3 are refused).
+/// in slots; module 10 the block kinds of large objects' runs; large bytes
+/// the long byte objects, whose header's count from 2^24 - 8 on is a
+/// sentinel and whose length is their back reference's words; versions 1
+/// to 4 are refused: a version 4 byte object of 16 777 208 to 16 777 215
+/// bytes would read as a long one).
 /// Little-endian 64-bit words, then raw heap and table bytes (the hosts are
 /// little-endian):
 ///
@@ -47,7 +50,7 @@ enum SnapshotError: Error, Equatable, CustomStringConvertible {
     var description: String {
         switch self {
         case .badMagic: "not a Kajo object memory snapshot (bad magic)"
-        case .unsupportedVersion(let v): "unsupported snapshot version \(v)"
+        case .unsupportedVersion(let v): "unsupported snapshot version \(v)" + (v < SnapshotLayout.version ? " (made before the large-bytes follow-up's long byte objects)" : "")
         case .malformed(let s): "malformed snapshot: \(s)"
         case .doesNotFit(let s): "snapshot does not fit the configuration: \(s)"
         case .invariant(let issues): "snapshot breaks invariants: " + issues.prefix(10).joined(separator: "; ")
@@ -60,7 +63,7 @@ enum SnapshotError: Error, Equatable, CustomStringConvertible {
 /// touches only the bytes given, with bounds checks: no unsafe code.
 struct SnapshotLayout {
     static let magic: UInt64 = 0x0000_4D4F_4F4A_414B // "KAJOOM\0\0"
-    static let version: UInt64 = 4
+    static let version: UInt64 = 5
     /// Module 10: where a block's kind sits in its used word.
     static let kindShift: UInt64 = 56
     static let usedMask: UInt64 = (1 << 56) - 1

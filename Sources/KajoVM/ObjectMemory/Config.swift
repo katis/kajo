@@ -108,6 +108,14 @@ enum ObjectMemoryError: Error, Equatable {
 struct TestSwitches: Sendable {
     /// Compaction moves pinned bodies.
     var ignorePins = false
+    /// Large bytes: a long byte object's length is its count field (the
+    /// sentinel), as if the header held it: the bounds check that trusts
+    /// the sentinel.
+    var trustCountField = false
+    /// Large bytes: the verifier (and so the loader) trusts a long byte
+    /// object's length: no check of a run's back reference against its
+    /// used bytes, nor of a long body against its block's.
+    var trustLongLength = false
     // Module 8: each turns one object-model rule off, out of line only,
     // so the suite shows the rule's test failing without it.
     /// A non-local return cuts straight to its home, past unwind marks.

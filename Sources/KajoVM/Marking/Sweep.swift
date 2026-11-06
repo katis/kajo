@@ -45,7 +45,7 @@ func sweepCycle(_ vm: VMPointer, _ mk: MarkingPointer, inPause: Bool) -> Bool {
                     live |= 1 &<< b
                     unsafe m.pointee.sweepLive[BlockHeap.block(ofOffset: om.stateWord(raw))] = 1
                 } else {
-                    bytes &+= Header(raw: om.headerWord(raw)).bodyBytes
+                    bytes &+= om.bodyWords(entry: raw) &<< 3  // large bytes: a long one's from its back reference
                     om.setHeaderWord(raw, 0)
                     unsafe om.setStateWord(raw, EntryState.free(next: m.pointee.runHead))
                     unsafe m.pointee.runHead = raw

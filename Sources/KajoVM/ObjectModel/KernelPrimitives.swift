@@ -39,7 +39,7 @@ func kernelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard c.argc == 0, c.receiver.isObject, om.isBytes(c.receiver) else { return .none }
         let ci = m.classIndex(of: c.receiver)
         guard ci == WellKnown.string || ci == WellKnown.symbol,
-              let text = String(validating: om.bytes(of: c.receiver), as: UTF8.self),
+              let raw = om.bytesIfShort(of: c.receiver), let text = String(validating: raw, as: UTF8.self),
               text.utf8.count < 400, text.allSatisfy({ $0.isASCII && ($0.isNumber || "+-.eE".contains($0)) }),
               let d = Double(text) else { return .none }
         return m.float(d)
@@ -137,8 +137,8 @@ extension Machine {
     func text(_ o: Oop) -> String? {
         guard o.isObject, om.isBytes(o) else { return nil }
         let ci = classIndex(of: o)
-        guard ci == WellKnown.string || ci == WellKnown.symbol else { return nil }
-        return String(decoding: om.bytes(of: o), as: UTF8.self)
+        guard ci == WellKnown.string || ci == WellKnown.symbol, let b = om.bytesIfShort(of: o) else { return nil }
+        return String(decoding: b, as: UTF8.self)
     }
 
     /// A new String holding `bytes` (valid UTF-8), `.none` when the heap is full.

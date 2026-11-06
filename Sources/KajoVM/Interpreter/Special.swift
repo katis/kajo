@@ -54,6 +54,9 @@ func specialFastPath(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
         guard cls == WellKnown.array || cls == WellKnown.byteArray else { return nil }
         let count = (h & Header.countMask) &>> Header.countShift
         if index == SpecialIndex.size {
+            // Large bytes: a long ByteArray's count field is a sentinel; the
+            // send's primitive answers its length (`count(of:)`).
+            if count >= Header.longBytesFrom && cls == WellKnown.byteArray { return nil }
             unsafe sp.pointee = tagged(Int(count))
             return unsafe regsAt(s, pc, sp, fp, hdr)
         }

@@ -53,6 +53,13 @@ ByteArray >> printOn: aStream [
 ]
 
 { #category : #accessing }
+ByteArray >> replaceFrom: start to: stop with: aCollection startingAt: from [
+	"Large bytes: primitive 38 copies bytes from a byte object (polled between chunks past 256 KiB); anything else, or a copy within the receiver whose target overlaps after its source, runs the loop."
+	<primitive: 38>
+	^ super replaceFrom: start to: stop with: aCollection startingAt: from
+]
+
+{ #category : #accessing }
 ByteArray >> utf8ScalarAt: i [
 	"Decode the UTF-8 scalar starting at byte i (the bytes are known to be valid)."
 	| b n v |

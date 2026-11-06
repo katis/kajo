@@ -76,7 +76,7 @@ func verifyFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext)
             out.fail("entry \(e) is reachable but not marked (missed)")
         } else if marked && !r {
             v.floatingObjects &+= 1
-            v.floatingBytes &+= om.header(Oop(raw: e &<< 4)).bodyBytes
+            v.floatingBytes &+= om.bodyWords(entry: e &<< 4) &<< 3
         }
     }
     v.failed = !out.list.isEmpty

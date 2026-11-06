@@ -154,6 +154,10 @@ struct CacheEntry {
     var readOnlyValue = Oop.none
     /// Module 8: stack segments grown (stack growth by copying).
     var stackGrowths: UInt64 = 0
+    /// Large bytes: byte work in polled loops (`LongBytes.swift`), and the
+    /// bytes done since this worker's last such poll.
+    var byteWork = ByteWorkCounters()
+    var byteWorkUnpolled: UInt64 = 0
 
     static let cacheEntries = 1024
 }
@@ -242,8 +246,12 @@ struct CacheEntry {
     /// for everything else).
     @inline(never)
     func allocateLarge(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop = .none) -> Oop {
-        guard count >= 0, count <= Header.maxLargeCount else { return .none }
-        let o = allocateOld(cls, count: count, bytes: bytes, keeping: extra, softFailure: true)
+        guard count >= 0, count <= (bytes ? Header.maxByteLength : Header.maxLargeCount) else { return .none }
+        // Large bytes: a long byte object is zeroed here, in polled chunks
+        // (a gigabyte's fill in one go keeps every stop waiting).
+        let long = bytes && UInt64(count) >= Header.longBytesFrom
+        let o = allocateOld(cls, count: count, bytes: bytes, keeping: extra, softFailure: true, deferZero: long)
+        if o != .none && long { zeroLongBytes(o) }
         if o != .none, let vm = unsafe workerOf(state).pointee.vm { unsafe startCycleAfterLargeAllocation(vm, workerOf(state), o) }
         return o
     }
@@ -252,7 +260,8 @@ struct CacheEntry {
     /// block, else a stop that collects (module 1's policy; module 4's hook
     /// promotes everything first). Module 10: any size (`tryAllocateAny`);
     /// `softFailure` answers `.none` without recording an error.
-    func allocateOld(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop, softFailure: Bool = false) -> Oop {
+    func allocateOld(_ cls: UInt64, count: Int, bytes: Bool, keeping extra: Oop, softFailure: Bool = false,
+                     deferZero: Bool = false) -> Oop {
         let ctx = unsafe state.pointee.context
         if let vm = unsafe workerOf(state).pointee.vm {
             // Module 3: another worker may be stopping the world already;
@@ -261,7 +270,8 @@ struct CacheEntry {
             let keep = extra == .none ? [nilObject] : [nilObject, extra]
             while true {
                 if unsafe !state.pointee.collectAtEveryAllocation {
-                    let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject)
+                    let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
+                                              deferZero: deferZero)
                     if o != .none { return o }
                 }
                 var result: Oop? = nil
@@ -276,13 +286,14 @@ struct CacheEntry {
                     // the dead runs until its apply; finishing its sweep
                     // here frees them, before module 1's full collection.
                     if unsafe finishSweepInStop(vm, for: .oldAllocation) {
-                        let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject)
+                        let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
+                                                  deferZero: deferZero)
                         if o != .none {
                             result = o
                             return
                         }
                     }
-                    result = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots)
+                    result = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots, deferZero: deferZero)
                                    : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
                     // Module 10: a full collection forced by an old (large)
                     // allocation is module 5's fallback too: counted, never
@@ -301,7 +312,7 @@ struct CacheEntry {
         var roots = rootsForPause()
         if extra != .none { roots.append(extra) }
         let before = pauseCount()
-        let o = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots)
+        let o = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots, deferZero: deferZero)
                       : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
         afterPause(collections: pauseCount() &- before)
         guard let o else {

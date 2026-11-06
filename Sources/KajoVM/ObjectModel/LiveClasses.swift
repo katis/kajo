@@ -111,8 +111,9 @@ private func inStop<T>(_ m: Machine, keeping: [Oop], _ work: (_ roots: () -> [Oo
 extension Machine {
     /// The text of a Symbol (or String).
     fileprivate func symbolText(_ o: Oop) -> String? {
-        guard o.isObject, om.isBytes(o), classIndex(of: o) == WellKnown.symbol || classIndex(of: o) == WellKnown.string else { return nil }
-        return String(validating: om.bytes(of: o), as: UTF8.self)
+        guard o.isObject, om.isBytes(o), classIndex(of: o) == WellKnown.symbol || classIndex(of: o) == WellKnown.string,
+              let b = om.bytesIfShort(of: o) else { return nil }
+        return String(validating: b, as: UTF8.self)
     }
 
     /// The elements of an Array, nil for anything else.
@@ -830,7 +831,10 @@ private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard c.argc == 2, m.classIndex(of: c.arg1) == WellKnown.string, m.om.isBytes(c.arg1) else { return .none }
         // A refused path never reaches here; the file is replaced whole
         // (written beside it and renamed over it).
-        let bytes = m.om.bytes(of: c.arg1)
+        // Large bytes: a file write copies the String through Swift,
+        // unpolled: not a long one (file primitives over long bytes are
+        // not this follow-up's).
+        guard let bytes = m.om.bytesIfShort(of: c.arg1) else { return .none }
         let tmp = path + ".kajo-tmp"
         guard writeFile(tmp, bytes), unsafe rename(tmp, path) == 0 else {
             _ = unsafe unlink(tmp)

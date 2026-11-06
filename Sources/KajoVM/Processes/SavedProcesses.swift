@@ -290,7 +290,7 @@ func savePrimitive(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     if c.arg0 != m.nilObject {
         guard c.arg0.isObject, m.om.isBytes(c.arg0),
               m.classIndex(of: c.arg0) == WellKnown.string || m.classIndex(of: c.arg0) == WellKnown.symbol,
-              let s = String(validating: m.om.bytes(of: c.arg0), as: UTF8.self), !s.isEmpty else { return .none }
+              let b = m.om.bytesIfShort(of: c.arg0), let s = String(validating: b, as: UTF8.self), !s.isEmpty else { return .none }
         path = s
     }
     guard let bytes = unsafe saveImageWithProcesses(vm, w, .primitive(argc: c.argc)) else { return .none }

@@ -68,11 +68,11 @@ extension Machine {
     }
 
     /// A new String of `n` bytes, zeroed (the caller fills it with valid
-    /// UTF-8 before anything else can see it). Module 10: up to the count
-    /// field (16 MiB); past a block it is a large object.
+    /// UTF-8 before anything else can see it). Module 10: past a block it
+    /// is a large object; large bytes: up to `Header.maxByteLength`.
     @inline(__always)
     func newString(count n: Int) -> Oop {
-        guard n <= Header.maxLargeCount else { return .none }
+        guard n <= Header.maxByteLength else { return .none }
         return allocateAny(WellKnown.string, count: n, bytes: true)
     }
 
@@ -219,8 +219,13 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     switch n {
     case 120, 121:
         guard c.argc == 1, m.isText(r), m.isText(c.arg0) else { return .none }
-        if n == 121 { return m.boolean(om.sameBytes(r, c.arg0)) }
+        // Large bytes: past a chunk, polled (`LongBytes.swift`).
         let a = Int(om.count(of: r)), b = Int(om.count(of: c.arg0))
+        if Swift.min(a, b) > ByteWork.chunk {
+            if n == 121 { return m.sameBytesLong(r, c.arg0).map { m.boolean($0) } ?? .none }
+            return m.compareBytesLong(r, c.arg0).map { Oop(smallInteger: $0) } ?? .none
+        }
+        if n == 121 { return m.boolean(om.sameBytes(r, c.arg0)) }
         var i = 0
         while i < a && i < b {
             let x = om.loadByte(r, i), y = om.loadByte(c.arg0, i)
@@ -230,14 +235,14 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         return Oop(smallInteger: a < b ? -1 : a == b ? 0 : 1)
     case 122:
         guard c.argc == 0, m.isText(r) else { return .none }
+        if om.count(of: r) > UInt64(ByteWork.chunk) { return m.byteHashLong(r).map { Oop(smallInteger: $0) } ?? .none }
         return Oop(smallInteger: om.byteObjectHash(r))
     case 123:
         guard c.argc == 1, m.isText(r), m.isText(c.arg0) else { return .none }
         let a = Int(om.count(of: r)), b = Int(om.count(of: c.arg0))
         let s = m.newString(count: a + b)
         if s == .none { return .none }
-        m.copyBytes(r, 0, into: s, 0, a)
-        m.copyBytes(c.arg0, 0, into: s, a, b)
+        guard m.fillFresh(s, 0, from: r, 0, a), m.fillFresh(s, a, from: c.arg0, 0, b) else { return .none }
         return s
     case 124, 136:
         guard c.argc == 1, m.isText(r), c.arg0.isSmallInteger else { return .none }
@@ -257,6 +262,7 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         return m.boolean(m.isBoundary(r, Int(truncatingIfNeeded: c.arg0.smallIntegerValue) &- 1))
     case 126:
         guard c.argc == 0, m.isText(r) else { return .none }
+        if om.count(of: r) > UInt64(ByteWork.chunk) { return m.scalarCountLong(r).map { Oop(smallInteger: $0) } ?? .none }
         var k: Int64 = 0
         for i in 0..<Int(om.count(of: r)) where om.loadByte(r, i) & 0xC0 != 0x80 { k &+= 1 }
         return Oop(smallInteger: k)
@@ -267,7 +273,7 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard a >= 0, b >= a, b <= Int(om.count(of: r)), m.isBoundary(r, a), m.isBoundary(r, b) else { return .none }
         let s = m.newString(count: b - a)
         if s == .none { return .none }
-        m.copyBytes(r, a, into: s, 0, b - a)
+        guard m.fillFresh(s, 0, from: r, a, b - a) else { return .none }
         return s
     case 128:
         // aByteArray encode: aCharacter at: offset -> bytes written
@@ -281,18 +287,25 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         let k = encodeScalar(v) { j, b in unsafe checkedStoreByte(st, r, i &+ j, b) }
         return Oop(smallInteger: Int64(k))
     case 129:
-        guard c.argc == 0, m.isText(r) else { return .none }
+        // Large bytes: no Symbol is long (its bytes would be hashed and
+        // copied in a stop); the kernel reports the failure.
+        guard c.argc == 0, m.isText(r), !om.header(r).isLongBytes else { return .none }
         return m.intern(r)
     case 130, 131:
         guard c.argc == 0, r.isObject, om.isBytes(r) else { return .none }
-        if m.isValidUTF8(r) {
+        let long = om.header(r).isLongBytes
+        let valid = long ? m.isValidUTF8Long(r) : m.isValidUTF8(r)
+        guard let valid else { return .none }
+        if valid {
             let count = Int(om.count(of: r))
             let s = m.newString(count: count)
             if s == .none { return .none }
-            m.copyBytes(r, 0, into: s, 0, count)
+            guard m.fillFresh(s, 0, from: r, 0, count) else { return .none }
             return s
         }
-        return n == 131 ? m.repairedString(r) : .none
+        // Large bytes: repairing goes through Swift arrays, unpolled: not
+        // for a long object.
+        return n == 131 && !long ? m.repairedString(r) : .none
     case 132:
         guard c.argc == 1, r.isObject, om.isBytes(r), c.arg0.isSmallInteger else { return .none }
         let i = c.arg0.smallIntegerValue
@@ -306,6 +319,7 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         let start = Int(truncatingIfNeeded: c.arg1.smallIntegerValue) &- 1
         guard m.isBoundary(r, start) else { return .none }
         let hay = Int(om.count(of: r)), k = Int(om.count(of: c.arg0))
+        if hay > ByteWork.chunk { return m.indexOfLong(r, c.arg0, from: start).map { Oop(smallInteger: $0) } ?? .none }
         var i = start
         while i + k <= hay {
             var j = 0
@@ -316,6 +330,7 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         return Oop(smallInteger: 0)
     case 135:
         guard c.argc == 1, m.isText(c.arg0) else { return .none }
+        if om.header(c.arg0).isLongBytes { return m.nilObject }  // no Symbol is long (129)
         let t = c.arg0
         let f = om.symbolLookupSlot(unsafe m.state.pointee.symbolTable, hash: om.byteObjectHash(t)) { om.sameBytes($0, t) }
         if f.symbol == .none { return m.nilObject }

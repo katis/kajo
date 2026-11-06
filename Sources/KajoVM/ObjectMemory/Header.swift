@@ -4,7 +4,10 @@
 /// SPEC "Header word"):
 ///
 ///     bits  0..21  class index (0 is never a class: a free entry's header is 0)
-///     bits 22..45  count: slots, or bytes for a byte object
+///     bits 22..45  count: slots, or bytes for a byte object (large bytes:
+///                  a byte object of 16 777 208 bytes or more holds
+///                  16 777 208 | its length's low three bits, and its
+///                  length is in its back reference: `isLongBytes`)
 ///     bit  46      mark, full collection     reserved: module 1 marks in a side byte map
 ///     bit  47      byte object
 ///     bit  48      fired ephemeron: queued for finalization once, strong since
@@ -83,9 +86,31 @@ struct Header: Hashable, Sendable {
     /// bytecodes' operands, Contexts, eden allocation).
     static let maxSlots: Int = BlockHeap.blockBytes / 8 - 1
     static let maxBytes: Int = maxSlots * 8
-    /// Module 10: the largest object at all, by the count field: 16 777 215
-    /// slots (128 MiB) or bytes (16 MiB).
+    /// Module 10: the largest pointer object, by the count field: 16 777 215
+    /// slots (128 MiB). Large bytes: still the largest pointer object; byte
+    /// objects go to `maxByteLength`.
     static let maxLargeCount: Int = Int(maxCount)
+
+    /// Large bytes: the count field of a byte object at or past this length
+    /// (2^24 - 8, a multiple of 8) is a sentinel, `longBytesFrom | n & 7`,
+    /// and its length comes from its back reference's words. Every byte
+    /// object shorter than this keeps its exact length in the field, so
+    /// the bounds check `i < count` stays the fast path: for a long object
+    /// the field is at most its length, so the check never admits an index
+    /// out of bounds, and only its failure (out of line already) asks for
+    /// the true length.
+    static let longBytesFrom: UInt64 = maxCount & ~7
+    /// Large bytes: the longest byte object, 2 GiB - 1 bytes. A body is
+    /// one run of blocks whose head's `used` is a UInt32 (4 GiB), the back
+    /// reference counts words in 32 bits (32 GiB), and the heap, its
+    /// reserve, the growth and the nursery region share one 4 GiB
+    /// reservation: half of it is the most one object may ask for. The
+    /// heap's size and the device's memory bound it first in practice.
+    static let maxByteLength: Int = (1 << 31) - 1
+
+    /// The count field of a byte object of `n` bytes.
+    @inline(__always)
+    static func countField(bytes n: UInt64) -> UInt64 { n >= longBytesFrom ? longBytesFrom | n & 7 : n }
 
     init(classIndex: UInt64, count: UInt64, isBytes: Bool) {
         precondition(classIndex <= Header.maxClassIndex && count <= Header.maxCount)
@@ -93,9 +118,40 @@ struct Header: Hashable, Sendable {
     }
 
     var classIndex: UInt64 { raw & Header.classMask }
-    /// Slots, or bytes for a byte object.
+    /// The count field: slots, or bytes for a byte object, except a long
+    /// byte object's sentinel (`isLongBytes`; its length is
+    /// `ObjectMemory.count(of:)`).
     var count: UInt64 { (raw & Header.countMask) &>> Header.countShift }
     var isBytes: Bool { raw & Header.bytesBit != 0 }
+
+    /// Large bytes: a byte object of `longBytesFrom` bytes or more, whose
+    /// count field is a sentinel. Always large (a run), old, never moved.
+    var isLongBytes: Bool { raw & Header.bytesBit != 0 && count >= Header.longBytesFrom }
+
+    /// Large bytes: a long byte object's length from its body's words (its
+    /// back reference): the whole words but the back reference, less the
+    /// padding the field's low three bits leave.
+    @inline(__always)
+    func longLength(words: UInt64) -> UInt64 {
+        let full = (words &- 1) &<< 3
+        let odd = count & 7
+        return odd == 0 ? full : full &- 8 &+ odd
+    }
+
+    /// Large bytes: the back reference's words agree with this header:
+    /// equal to `bodyWords` for every object but a long byte object, whose
+    /// words must decode to a length from `longBytesFrom` to the limit.
+    func agrees(words: UInt64) -> Bool {
+        guard isLongBytes else { return words == bodyWords }
+        guard words >= 2 && words <= UInt64(Header.maxByteLength / 8 + 2) else { return false }
+        let n = longLength(words: words)
+        return n >= Header.longBytesFrom && n <= UInt64(Header.maxByteLength)
+    }
+
+    /// Body words from the header and, for a long byte object, the back
+    /// reference `br`.
+    @inline(__always)
+    func bodyWords(backRef br: UInt64) -> UInt64 { isLongBytes ? BackRef.words(br) : bodyWords }
 
     var isPinnedForGood: Bool {
         get { raw & Header.pinnedForGoodBit != 0 }
@@ -136,8 +192,12 @@ struct Header: Hashable, Sendable {
         set { raw = newValue ? raw | Header.firedBit : raw & ~Header.firedBit }
     }
 
-    /// Body words: the back reference plus slots or byte words.
+    /// Body words: the back reference plus slots or byte words. Not for a
+    /// long byte object, whose header does not hold its length: its
+    /// readers use `bodyWords(backRef:)` or `ObjectMemory.bodyWords(entry:)`
+    /// (large bytes; every reader is in docs/modules/large-bytes.md).
     var bodyWords: UInt64 {
+        assert(!isLongBytes, "a long byte object's body words are in its back reference")
         let n = count
         return 1 &+ (isBytes ? (n &+ 7) &>> 3 : n)
     }
@@ -146,5 +206,6 @@ struct Header: Hashable, Sendable {
 
     /// Module 10: the body does not fit one block, so it is a run of blocks
     /// (the count test; no header bit marks it, since no hot path asks).
-    var isLarge: Bool { bodyBytes > UInt64(BlockHeap.blockBytes) }
+    /// A long byte object is always one.
+    var isLarge: Bool { isLongBytes || bodyBytes > UInt64(BlockHeap.blockBytes) }
 }

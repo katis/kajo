@@ -64,7 +64,7 @@ func verifyRelocation(_ vm: VMPointer, _ r: RelocationPointer) -> [String] {
             out.fail("entry \(e): body in block \(b), which is free")
             continue
         }
-        if s &+ hd.bodyBytes > BlockHeap.start(ofBlock: b) &+ ends[b] {
+        if s &+ (om.bodyWords(entry: e &<< 4) &<< 3) > BlockHeap.start(ofBlock: b) &+ ends[b] {
             out.fail("entry \(e): body at \(s) runs past the bodies of block \(b)")
         }
         if BackRef.entryIndex(h.word(atOffset: s)) != e { out.fail("entry \(e): its body's back reference names another entry") }

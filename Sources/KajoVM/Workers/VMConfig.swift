@@ -115,6 +115,9 @@ struct VMTestSwitches: Sendable {
     var publishBeforeClearing = false
     /// Delays are not registered in the pending-root table.
     var noPendingRoots = false
+    /// Large bytes: the byte primitives' polled loops never poll (the
+    /// broken variant of "no primitive over bytes keeps a stop waiting").
+    var noBytePolls = false
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no

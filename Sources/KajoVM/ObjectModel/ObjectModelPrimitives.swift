@@ -186,7 +186,8 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     if m.om.isBytes(c.receiver) {
         let o = m.allocateAny(ci, count: n, bytes: true, keeping: c.receiver)
         if o == .none { return .none }
-        for i in 0..<n { m.om.storeByte(o, i, m.om.loadByte(c.receiver, i)) }
+        // Large bytes: past a chunk, polled with the copy a pending root.
+        guard m.fillFresh(o, 0, from: c.receiver, 0, n) else { return .none }
         return o
     }
     // Module 10: a large receiver's copy is large too (old at birth).

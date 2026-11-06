@@ -51,20 +51,22 @@ extension ObjectMemory {
         return o == .none ? nil : o
     }
 
-    /// As `allocate`, for a byte object.
-    func allocateBytes(_ ctx: AllocContext, classIndex: UInt64, count: Int, extraRoots: [Oop] = []) -> Oop? {
+    /// As `allocate`, for a byte object (`deferZero`: a long one's bytes
+    /// are the caller's to zero, `tryAllocateLarge`).
+    func allocateBytes(_ ctx: AllocContext, classIndex: UInt64, count: Int, extraRoots: [Oop] = [],
+                       deferZero: Bool = false) -> Oop? {
         if config.stress.contains(.collectAtEveryAllocation) {
             unsafe gc.pointee.counters.stressCollections &+= 1
             collect(extraRoots: extraRoots)
         }
-        var o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0))
+        var o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0), deferZero: deferZero)
         if o == .none {
             collect(extraRoots: extraRoots)
-            o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0))
+            o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0), deferZero: deferZero)
         }
         if o == .none {
             compact(extraRoots: extraRoots)
-            o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0))
+            o = tryAllocateAny(ctx, classIndex: classIndex, count: count, isBytes: true, fill: Oop(raw: 0), deferZero: deferZero)
         }
         return o == .none ? nil : o
     }

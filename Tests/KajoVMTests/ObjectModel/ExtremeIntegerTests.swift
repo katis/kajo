@@ -5,7 +5,9 @@
 // the VM; `basicNew:` of a word class multiplied before its check. Every
 // primitive that takes a SmallInteger argument is called here with
 // minVal, maxVal, -1, 0 and the receiver's count + 1 in each integer
-// argument (all combinations), and the VM must answer every call.
+// argument (all combinations), and the VM must answer every call. Large
+// bytes: `basicNew:` also takes the old and the new size limits and one
+// past each, and primitive 38 a byte receiver.
 
 import Testing
 @testable import KajoVM
@@ -22,6 +24,12 @@ private struct PrimitiveCase {
 private let minVal = "\(Oop.smallIntegerMin)", maxVal = "\(Oop.smallIntegerMax)"
 
 private func extremes(_ count: Int64) -> [String] { [minVal, maxVal, "-1", "0", "\(count + 1)"] }
+
+/// Large bytes: `basicNew:` also takes the old limit (the count field's,
+/// 16 777 215), one past it (a long byte object for the byte kinds, past
+/// the limit for pointers), the byte objects' new limit and one past it.
+private let sizeBoundaries = ["\(Header.maxLargeCount)", "\(Header.maxLargeCount + 1)", "\(Header.maxByteLength)",
+                              "\(Header.maxByteLength + 1)"]
 
 private let array3 = "  push_lit @Array\n  push_int 3\n  send new: 1\n"
 private let bytes4 = "  push_lit @ByteArray\n  push_int 4\n  send new: 1\n"
@@ -40,6 +48,8 @@ private let cases: [PrimitiveCase] = {
     c.append(PrimitiveCase(prim: 15, receiver: "  push_nil\n", args: [nil, "  push_int 0\n"], count: Int64(Image.globalCount)))
     c.append(PrimitiveCase(prim: 25, receiver: "  push_nil\n", args: [nil, "  push_nil\n"], count: 0))
     c.append(PrimitiveCase(prim: 38, receiver: array3, args: [nil, nil, array3, nil], count: 3))
+    // Large bytes: primitive 38 copies bytes too.
+    c.append(PrimitiveCase(prim: 38, receiver: bytes4, args: [nil, nil, bytes4, nil], count: 4))
     c.append(PrimitiveCase(prim: 73, receiver: "  push_lit 1.5\n", args: [nil], count: 0))
     c.append(PrimitiveCase(prim: 77, receiver: "  push_nil\n", args: [nil], count: 0))
     c.append(PrimitiveCase(prim: 91, receiver: array3, args: [nil], count: 3))
@@ -94,7 +104,8 @@ private func extremeSource() -> (src: String, calls: [String]) {
         var combos: [[String]] = [[]]
         for a in c.args {
             combos = combos.flatMap { prefix in
-                (a.map { [$0] } ?? extremes(c.count).map { "  push_lit \($0)\n" }).map { prefix + [$0] }
+                (a.map { [$0] } ?? (extremes(c.count) + (c.prim == 3 ? sizeBoundaries : [])).map { "  push_lit \($0)\n" })
+                    .map { prefix + [$0] }
             }
         }
         for r in receivers(c) {

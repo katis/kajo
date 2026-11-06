@@ -56,7 +56,8 @@ func traceObject(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePoi
     }
     let h = om.headerWord(o)
     let s = om.stateWord(o)
-    let bytes = Header(raw: h).bodyBytes
+    // Large bytes: a long byte object's size is in its back reference.
+    let bytes = Header(raw: h).isLongBytes ? om.bodyWords(entry: o) &<< 3 : Header(raw: h).bodyBytes
     unsafe m.pointee.markedObjects &+= 1
     unsafe m.pointee.markedBytes &+= bytes
     // Module 6: live bytes per block, when a relocation is planned.

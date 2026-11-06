@@ -102,7 +102,7 @@ private func run(_ img: Image, _ n: Int64) throws -> Int64 {
 }
 
 private enum Corruption: String, CaseIterable {
-    case badMagic, badVersion, aVersion2Image, aVersion4Image, unknownFlags, truncated, methodMissingFromTable, extraTableEntry
+    case badMagic, badVersion, aVersion2Image, aVersion4Image, aVersion5Image, unknownFlags, truncated, methodMissingFromTable, extraTableEntry
     case badOpcode, jumpIntoAnOperand, maxStackTooSmall, literalNotASelector, ivarOutsideTheClass, methodOfAnotherClass
     case methodNotPinned, liveContext, aProcess, closureOfTheWrongSize, badClassFormatForInstance
     case misplacedSymbol, specialSelectorChanged, wellKnownClassRenamed, dictionaryOfAnotherClass, methodClassCycle
@@ -174,10 +174,11 @@ private func corrupt(_ c: Corruption) throws -> [UInt8] {
     func put(_ i: Int, _ v: UInt64) { for k in 0..<8 { b[8 * i + k] = UInt8(truncatingIfNeeded: v >> (8 * UInt64(k))) } }
     switch c {
     case .badMagic: b[0] ^= 1
-    case .badVersion: put(1, 6)
+    case .badVersion: put(1, 7)
     // module 8d: 8c's images (version 2) are refused, their Metaclass objects a slot short
     case .aVersion2Image: put(1, 2)
     case .aVersion4Image: put(1, 4)  // module 9b's, before module 10's runs
+    case .aVersion5Image: put(1, 5)  // module 10's, before the long byte objects
     case .unknownFlags: put(5, 2)
     case .truncated: b.removeLast(9)
     case .methodMissingFromTable:

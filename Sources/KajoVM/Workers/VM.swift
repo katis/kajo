@@ -527,6 +527,21 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     }
 
     /// Module 2's counters summed over the workers, read after they stopped.
+    /// Large bytes: the byte primitives' polled work over every worker:
+    /// chunks, polls, parks and bytes summed, the longest stretch between
+    /// two polls the maximum. Read in a stop.
+    var byteWorkCounters: ByteWorkCounters {
+        inspect { _ in
+            var c = ByteWorkCounters()
+            for i in unsafe 0..<state.pointee.workerCount {
+                let x = unsafe state.worker(i).pointee.interp.byteWork
+                c.chunks &+= x.chunks; c.polls &+= x.polls; c.parks &+= x.parks; c.bytes &+= x.bytes
+                c.longestStretch = Swift.max(c.longestStretch, x.longestStretch)
+            }
+            return c
+        }
+    }
+
     var interpreterCounters: InterpreterCounters {
         var c = InterpreterCounters()
         for i in unsafe 0..<state.pointee.workerCount {

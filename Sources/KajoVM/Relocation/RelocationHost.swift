@@ -150,7 +150,7 @@ extension VM {
         unsafe enterVM(state, mw)
         let om = image.om
         let off = om.stateWord(o.raw)
-        let bytes = om.header(o).bodyBytes
+        let bytes = om.bodyWords(entry: o.raw) &<< 3
         guard let dst = unsafe toSpace(r, bytes), unsafe relocBegin(state, r, mw, o.raw, off) else {
             unsafe leaveVM(state, mw)
             return nil

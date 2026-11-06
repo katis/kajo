@@ -194,7 +194,7 @@ private func checkYoungBodies(_ n: NurseryPointer, _ out: inout Issues, after: B
         let h = Header(raw: om.headerWord(raw))
         if h.isDeferredFree { continue }
         if !h.isYoung {
-            if s &+ h.bodyBytes > UInt64(om.heap.bytes) { out.fail("old entry \(e) has its body at \(s), outside old space") }
+            if s &+ (om.bodyWords(entry: raw) &<< 3) > UInt64(om.heap.bytes) { out.fail("old entry \(e) has its body at \(s), outside old space") }
             continue
         }
         let k = h.nurseryIndex

@@ -167,11 +167,31 @@ import Synchronization
         return header(o).classIndex
     }
 
-    /// Slots, or bytes for a byte object.
+    /// Slots, or bytes for a byte object: the length, a long byte
+    /// object's from its back reference (large bytes).
     @inline(__always)
     func count(of o: Oop) -> UInt64 {
         assert(isUsedReference(o))
-        return header(o).count
+        let h = header(o)
+        if h.isLongBytes { return longByteCount(o, h) }
+        return h.count
+    }
+
+    /// Large bytes: a long byte object's length (out of line).
+    @inline(never)
+    func longByteCount(_ o: Oop, _ h: Header) -> UInt64 {
+        // The broken variant: the bounds check trusts the sentinel.
+        if config.testSwitches.trustCountField { return h.count }
+        return h.longLength(words: BackRef.words(wordAtomic(atOffset: stateWord(o.raw))))
+    }
+
+    /// Large bytes: body words of the object at entry offset `raw`, a long
+    /// byte object's from its back reference.
+    @inline(__always)
+    func bodyWords(entry raw: UInt64) -> UInt64 {
+        let h = Header(raw: headerWord(raw))
+        if h.isLongBytes { return BackRef.words(wordAtomic(atOffset: stateWord(raw))) }
+        return h.bodyWords
     }
 
     @inline(__always)
@@ -237,7 +257,7 @@ import Synchronization
     /// The same for one byte of a byte object (`at:put:` on a ByteArray).
     @inline(__always)
     func storeByteChecked(_ o: Oop, _ i: Int, _ v: UInt8) -> Bool {
-        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < header(o).count)
+        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < count(of: o))
         let sw = unsafe stateWordAtomic(o.raw)
         let e1 = unsafe sw.pointee.load(ordering: .relaxed)
         let off = Int(truncatingIfNeeded: e1) &+ 8 &+ i
@@ -283,7 +303,7 @@ import Synchronization
 
     @inline(__always)
     func loadByte(_ o: Oop, _ i: Int) -> UInt8 {
-        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < header(o).count)
+        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < count(of: o))
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i
         return unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt8>.self).pointee.load(ordering: .relaxed)
     }
@@ -292,7 +312,7 @@ import Synchronization
     /// image loader only. Mutators use `storeByteChecked`.
     @inline(__always)
     func storeByte(_ o: Oop, _ i: Int, _ v: UInt8) {
-        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < header(o).count)
+        assert(isUsedReference(o) && header(o).isBytes && UInt64(i) < count(of: o))
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ i
         unsafe (heapBase + off).assumingMemoryBound(to: Atomic<UInt8>.self).pointee.store(v, ordering: .relaxed)
     }

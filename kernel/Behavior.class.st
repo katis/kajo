@@ -165,10 +165,15 @@ Behavior >> basicNew [
 
 { #category : #'instance creation' }
 Behavior >> basicNew: size [
-	"Module 10: past 4095 slots (32 760 bytes) the instance is a large object, old at birth; the count field holds at most 16777215 slots or bytes."
+	"Module 10: past 4095 slots (32 760 bytes) the instance is a large object, old at birth. The largest pointer object has 16777215 slots; large bytes: the largest byte object 2147483647 bytes (of a words class, as many elements as fit)."
 	<primitive: 3>
-	(size isInteger and: [size > 16777215]) ifTrue: [
-		^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots: the largest object has 16777215'].
+	| kinds limit |
+	kinds := #(#bytes #words16 #words32 #words64).
+	limit := (kinds includes: (ClassBuilder kindOf: self))
+		ifTrue: [2147483647 // (#(1 2 4 8) at: (kinds indexOf: (ClassBuilder kindOf: self)))]
+		ifFalse: [16777215].
+	(size isInteger and: [size > limit]) ifTrue: [
+		^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots: the largest object has ' , limit printString].
 	(size isInteger and: [size > 4095]) ifTrue: [
 		^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots: no room in the heap for a large object of that size'].
 	^ self error: 'cannot make an instance of ' , self name , ' with ' , size printString , ' slots'
