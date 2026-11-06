@@ -213,7 +213,10 @@ final class KajoTextView: NSTextView {
         return true
     }
 
-    func setRowCount(_ n: Int) {
+    /// Any SmallInteger may arrive: a count past what a table can show
+    /// (the count field's limit) is refused, not allocated.
+    func setRowCount(_ n: Int) -> Bool {
+        guard n <= 16_777_215 else { return false }
         rows = Array(repeating: nil, count: max(0, n))
         asked = []
         quietly { table?.reloadData() }
@@ -592,13 +595,14 @@ extension MacPlatform: NSTextViewDelegate {
         case ("setRows", let t as TableSource), ("addRows", let t as TableSource):
             guard t.setRows(a, append: m == "addRows") else { return nil }
         case ("setRowCount", let t as TableSource):
-            t.setRowCount(Int(a.first?.int ?? 0))
+            guard t.setRowCount(Int(a.first?.int ?? 0)) else { return nil }
         case ("setRowsAt", let t as TableSource):
             guard t.setRowsAt(a) else { return nil }
         case ("selectRow", let t as TableSource):
             t.select(Int(a.first?.int ?? 0))
         case ("setPosition", _):
-            guard let s = e.view as? NSSplitView, a.count == 2, let i = a[0].int, let p = a[1].double else { return nil }
+            guard let s = e.view as? NSSplitView, a.count == 2, let i = a[0].int, let p = a[1].double,
+                  i >= 1, i < s.subviews.count else { return nil }
             s.setPosition(p, ofDividerAt: Int(i) - 1)
         case ("addItem", let t as ToolbarHost):
             guard a.count == 2, let id = a[0].int else { return nil }

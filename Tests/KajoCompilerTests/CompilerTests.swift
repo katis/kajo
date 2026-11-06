@@ -237,7 +237,10 @@ import Testing
     let sources = ["f ^ 3 + 4", "f: x ^ a := x * 2", "f ^ [:k | b := k] value: 5",
                    "f ^ #(1 $a 'b' #c #(2 3) #[1 2]) , {1.5. 1.0e300. 123456789012345678901234567890. 'x'}",
                    "f <tag: 1> <primitive: 60> ^ 0", "f | t | t := 0. #(1 2) do: [:e | t := t + e]. ^ t",
-                   "f 1 to: 3 do: [:i | a := i]. ^ a", "f ^ [:x | x > 1 ifTrue: [^ x]. 0] value: 2", "f ^ Object"]
+                   "f 1 to: 3 do: [:i | a := i]. ^ a", "f ^ [:x | x > 1 ifTrue: [^ x]. 0] value: 2", "f ^ Object",
+                   // collectors review, finding 2: run with an extreme argument as well
+                   "f: x ^ (x + x) * (x - 1) // (x \\\\ 7 + 1)", "replaceFrom: s to: e with: x startingAt: f <primitive: 38> ^ self",
+                   "at: i put: v <primitive: 2> ^ v"]
     for s in sources {
         let (m, _) = try compileMethod(Array(s.utf8), file: "t", in: FuzzSyntax.context)
         #expect(FuzzEntry.makeAndRun(m), "\(s)")

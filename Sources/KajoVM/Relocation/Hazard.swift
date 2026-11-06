@@ -88,12 +88,15 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     guard !om.isSealed(rc), !om.isSealed(sc), !om.isBytes(rcv), !om.isBytes(src) else { return .none }
     // Module 8: a read-only receiver is refused (modificationForbiddenAt:value:).
     if om.isReadOnly(rcv) { return m.refuseReadOnly(rcv, at: startO, value: src) }
+    // Any SmallInteger may arrive: the bounds are checked one by one before
+    // any arithmetic (collectors review, finding 2: `stop - start + 1` of
+    // minVal and maxVal overflowed and trapped).
     let start = startO.smallIntegerValue, stop = stopO.smallIntegerValue, from = fromO.smallIntegerValue
-    let n = stop - start + 1
-    if n == 0 && start >= 1 && start <= Int64(om.count(of: rcv)) + 1 { return rcv }
-    guard n > 0, start >= 1, stop <= Int64(om.count(of: rcv)), from >= 1, from + n - 1 <= Int64(om.count(of: src)) else {
-        return .none
-    }
+    let rcount = Int64(om.count(of: rcv)), scount = Int64(om.count(of: src))
+    guard start >= 1, start <= rcount + 1, stop >= start - 1, stop <= rcount else { return .none }
+    let n = stop - start + 1  // 0 ... rcount
+    if n == 0 { return rcv }
+    guard from >= 1, from <= scount - n + 1 else { return .none }
     let w = unsafe workerOf(m.state)
     guard let vm = unsafe w.pointee.vm else {
         // Module 2's standalone interpreter: nothing relocates.

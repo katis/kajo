@@ -81,7 +81,10 @@ public enum FuzzEntry {
     /// through the make primitive (143, the trust boundary: the one
     /// bytecode verifier on what it made), and a method it made runs once
     /// through primitive 85 on a standalone interpreter, with 3 for every
-    /// argument. A method whose code loops (a backward jump in it or in a
+    /// argument, then again with an extreme SmallInteger for every argument
+    /// (minVal, maxVal, -1 or 0, chosen by the bytecodes' length: a
+    /// primitive answers failure for such an argument and never traps,
+    /// docs/modules/collectors-review.md, finding 2). A method whose code loops (a backward jump in it or in a
     /// block) is made but not run: the standalone interpreter has no
     /// preemption to end it. Answers whether the method was made. A refusal
     /// is the normal outcome of what the assembler let through (it is the
@@ -114,12 +117,15 @@ public enum FuzzEntry {
         precondition(verifyHeapMethod(image.om, made, classIndex: target, nilObject: image.nilObject) == nil,
                      "a made method the verifier refuses")
         if loops(image.om, made, depth: 0) { return true }
-        guard let rcv = image.om.allocate(image.context, classIndex: target, slots: 2, fill: image.nilObject),
-              let args = image.om.allocate(image.context, classIndex: WellKnown.array, slots: m.argc,
-                                           fill: Oop(smallInteger: 3), extraRoots: [rcv]) else { return true }
-        let rh = image.om.addRoot(rcv), ah = image.om.addRoot(args)
-        defer { image.om.removeRoot(rh); image.om.removeRoot(ah) }
-        _ = interp.run(on: stack, receiver: made, selector: "valueWithReceiver:arguments:", arguments: [rcv, args])
+        let extreme = [Oop.smallIntegerMin, Oop.smallIntegerMax, -1, 0][m.bytecodes.count % 4]
+        for value in [3, extreme] {
+            guard let rcv = image.om.allocate(image.context, classIndex: target, slots: 2, fill: image.nilObject),
+                  let args = image.om.allocate(image.context, classIndex: WellKnown.array, slots: m.argc,
+                                               fill: Oop(smallInteger: value), extraRoots: [rcv]) else { return true }
+            let rh = image.om.addRoot(rcv), ah = image.om.addRoot(args)
+            defer { image.om.removeRoot(rh); image.om.removeRoot(ah) }
+            _ = interp.run(on: stack, receiver: made, selector: "valueWithReceiver:arguments:", arguments: [rcv, args])
+        }
         image.om.retireAllContexts()
         let issues = image.om.verifyHeap() + image.om.verifyFreeLists()
         precondition(issues.isEmpty, "a made method's run left a bad heap: \(issues)")

@@ -124,8 +124,11 @@ private func primBasicNew(_ m: Machine, _ cls: Oop, size: Oop) -> Oop {
         if total > Int64(Header.maxSlots) { return m.allocateLarge(ci, count: Int(total), bytes: false) }
         return m.allocate(ci, slots: Int(total))
     default:
+        // The count first: `n * elementBytes` of a large n overflowed and
+        // trapped (collectors review, finding 2).
+        guard n <= Int64(Header.maxLargeCount) else { return .none }
         let bytes = n * Int64(f.kind.elementBytes)
-        guard n <= Int64(Header.maxLargeCount), bytes <= Int64(Header.maxLargeCount) else { return .none }
+        guard bytes <= Int64(Header.maxLargeCount) else { return .none }
         if bytes > Int64(Header.maxBytes) { return m.allocateLarge(ci, count: Int(bytes), bytes: true) }
         return m.allocateBytes(ci, count: Int(bytes))
     }
