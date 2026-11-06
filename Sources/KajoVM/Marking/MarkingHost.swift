@@ -85,7 +85,8 @@ private func startCycleInStop(_ vm: VMPointer, _ mk: MarkingPointer, _ w: Worker
         unsafe applyInStop(vm, mk)
     }
     guard unsafe mk.phaseNow == .idle, unsafe !fullCollectionDue(vm) else { return }
-    unsafe updateWantedQoS(mk)
+    unsafe countOldEntriesAtPause(vm, mk)
+    unsafe updateWantedQoS(mk, oldEntries: nil)
     unsafe initialMark(vm, mk, roots: roots, trigger: .forced, literal: !doScavenge)
 }
 
@@ -118,6 +119,12 @@ extension VM {
     var cycleLog: [CycleRecord] {
         guard let mk = unsafe state.pointee.marking else { return [] }
         return inspect { _ in unsafe mk.pointee.log.pointee.records.records }
+    }
+
+    /// Large bytes, part 2: the QoS policy wants the marker raised.
+    var markerWantsRaise: Bool {
+        guard let mk = unsafe state.pointee.marking else { return false }
+        return unsafe mk.pointee.wantUserInitiated.pointee.load(ordering: .relaxed)
     }
 
     /// Large bytes, part 2: the last fallbacks' circumstances, oldest first.

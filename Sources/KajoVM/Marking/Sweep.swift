@@ -118,6 +118,7 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
         unsafe log.pointee.complete(r)
     }
     unsafe log.pointee.lastCycleNs = t1 &- log.pointee.startNs
+    unsafe log.pointee.lastApplyAtNs = t1
     unsafe log.pointee.current = -1
     unsafe log.pointee.counters.cyclesCompleted &+= 1
     unsafe log.pointee.counters.applies &+= 1
@@ -126,11 +127,9 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe log.pointee.counters.entriesFreed &+= m.pointee.entriesFreed
     unsafe log.pointee.oldEntries &-= Swift.min(log.pointee.oldEntries, m.pointee.entriesFreed)
     unsafe log.pointee.counters.blocksFreed &+= UInt64(blocks)
-    // The policy lowers the marker only when a cycle ends with headroom
-    // above the threshold.
-    let soft = om.softLimitBlocks
-    let headroom = Double(Swift.max(0, soft - om.blocksInUse)) / Double(Swift.max(1, soft))
-    if unsafe headroom >= mk.pointee.config.escalateBelow {
+    // The policy lowers the marker only when a cycle ends with the headroom
+    // of both old space and the entry table above the threshold.
+    if unsafe !wantsRaise(mk, oldEntries: log.pointee.oldEntries, blocksOnly: mk.pointee.config.testSwitches.qosOnBlocksOnly) {
         unsafe mk.pointee.wantUserInitiated.pointee.store(false, ordering: .relaxed)
     }
 }
@@ -183,6 +182,28 @@ func markingBeforeOldSpaceOperation(_ vm: VMPointer) {
     }
 }
 
+/// Large bytes, part 2 (world stopped): the entry table is empty while a
+/// cycle sweeps or has swept; finish the sweep in this pause and apply it,
+/// as module 1's operations do first (`markingBeforeOldSpaceOperation`),
+/// so the entries it freed reach the allocators without a full
+/// collection. Answers false when no sweep was pending (the caller falls
+/// back) or under the test switch that turns the rule off.
+func finishSweepForEntries(_ vm: VMPointer) -> Bool {
+    guard let mk = unsafe vm.pointee.marking, unsafe !mk.pointee.config.testSwitches.noSweepForEntries else { return false }
+    let phase = unsafe mk.phaseNow
+    guard phase == .sweeping || phase == .swept else { return false }
+    let t0 = nanoseconds()
+    let log = unsafe mk.pointee.log
+    if phase == .sweeping {
+        _ = unsafe sweepCycle(vm, mk, inPause: true)
+        unsafe log.pointee.counters.sweepsFinishedInPause &+= 1
+    }
+    unsafe applyInStop(vm, mk)
+    unsafe log.pointee.counters.sweepsFinishedForEntries &+= 1
+    unsafe log.pointee.counters.sweepsFinishedForEntriesNs &+= nanoseconds() &- t0
+    return true
+}
+
 /// Why module 4 ran a full collection.
 enum FullCause: UInt8, Sendable {
     /// A scavenge left old space past its soft limit.
@@ -196,16 +217,17 @@ enum FullCause: UInt8, Sendable {
     case oldAllocation
 }
 
-/// A full collection is about to run in this stop. With concurrent marking
+/// A full collection is about to run in this stop (or, for an old
+/// allocation, ran: `record` was taken before it). With concurrent marking
 /// configured, one forced by space is a fallback: a provisioning failure,
 /// counted by the phase it found and by what ran out, never hidden. Its
 /// circumstances are recorded (large bytes, part 2).
-func noteFullCollection(_ vm: VMPointer, _ cause: FullCause) {
+func noteFullCollection(_ vm: VMPointer, _ cause: FullCause, record: FallbackRecord? = nil) {
     guard let mk = unsafe vm.pointee.marking, cause != .other else { return }
     let log = unsafe mk.pointee.log
+    let r = unsafe record ?? fallbackRecord(vm, cause)!
     unsafe log.pointee.counters.fallbacks &+= 1
-    let phase = unsafe mk.phaseNow
-    switch phase {
+    switch r.phase {
     case .idle: unsafe log.pointee.counters.fallbacksIdle &+= 1
     case .marking: unsafe log.pointee.counters.fallbacksMarking &+= 1
     case .sweeping, .swept: unsafe log.pointee.counters.fallbacksSweeping &+= 1
@@ -216,15 +238,27 @@ func noteFullCollection(_ vm: VMPointer, _ cause: FullCause) {
     case .oldAllocation: unsafe log.pointee.counters.fallbacksOldAllocation &+= 1
     case .other: break
     }
+    unsafe log.pointee.fallbackRecords.append(r)
+}
+
+/// The circumstances of a fallback now (world stopped); nil without
+/// concurrent marking.
+func fallbackRecord(_ vm: VMPointer, _ cause: FullCause) -> FallbackRecord? {
+    guard let mk = unsafe vm.pointee.marking else { return nil }
+    let log = unsafe mk.pointee.log
     let om = unsafe mk.pointee.om
     let m = unsafe mk.pointee.marker
+    let phase = unsafe mk.phaseNow
     var r = FallbackRecord()
     r.cause = cause
     r.phase = phase
+    let now = nanoseconds()
     if phase != .idle, let cur = unsafe log.pointee.currentRecord {
         r.trigger = cur.trigger
-        r.sinceCycleStartNs = unsafe nanoseconds() &- log.pointee.startNs
+        r.sinceCycleStartNs = unsafe now &- log.pointee.startNs
     }
+    if unsafe log.pointee.lastApplyAtNs != 0 { r.sinceLastApplyNs = unsafe now &- log.pointee.lastApplyAtNs }
+    r.cyclesStarted = unsafe log.pointee.totals.cycles
     if phase == .sweeping, unsafe m.pointee.sweepWords > 0 {
         r.sweptFraction = unsafe Double(m.pointee.sweepCursor) / Double(m.pointee.sweepWords)
     } else if phase == .swept {
@@ -242,5 +276,5 @@ func noteFullCollection(_ vm: VMPointer, _ cause: FullCause) {
     r.largeFailure = f.lastLargeFailure
     r.markerQoS = unsafe m.pointee.qos
     r.wantUserInitiated = unsafe mk.pointee.wantUserInitiated.pointee.load(ordering: .relaxed)
-    unsafe log.pointee.fallbackRecords.append(r)
+    return r
 }

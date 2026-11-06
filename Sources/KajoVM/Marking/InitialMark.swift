@@ -42,7 +42,7 @@ func afterScavenge(_ vm: VMPointer, roots: [Oop], literalBefore: RawArray<UInt64
     unsafe log.pointee.samples.append((now, promoted))
     if unsafe log.pointee.samples.count > MarkingConfig.rateWindow { unsafe log.pointee.samples.removeFirst() }
     unsafe countOldEntries(vm, mk)
-    unsafe updateWantedQoS(mk)
+    unsafe updateWantedQoS(mk, oldEntries: nil)
     if unsafe mk.phaseNow != .idle || fullCollectionDue(vm) { return }
     guard let trigger = unsafe decideTrigger(mk) else { return }
     unsafe initialMark(vm, mk, roots: roots, trigger: trigger, literal: false)
@@ -116,16 +116,30 @@ func decideTrigger(_ mk: MarkingPointer, rate: Double, oldEntries: UInt64?, reco
     return predicted ? .predictor : nil
 }
 
-/// The policy's QoS: user-initiated while headroom is below the threshold.
-/// The marker takes it at its next poll. World stopped.
-func updateWantedQoS(_ mk: MarkingPointer) {
-    let om = unsafe mk.pointee.om
-    let soft = om.softLimitBlocks
-    let headroom = Double(Swift.max(0, soft - om.blocksInUse)) / Double(Swift.max(1, soft))
-    let low = unsafe headroom < mk.pointee.config.escalateBelow
+/// The policy's QoS: user-initiated while the headroom of old space (free
+/// fraction of the soft limit) or of the entry table (free fraction of its
+/// capacity, the old entries `oldEntries` or the log's estimate taken as
+/// used) is below the threshold. The marker takes it at its next poll.
+/// World stopped, or (module 7, large bytes part 2) any participant: it
+/// reads the pools under their lock and stores one atomic.
+func updateWantedQoS(_ mk: MarkingPointer, oldEntries: UInt64?) {
+    if unsafe mk.pointee.config.testSwitches.qosOnBlocksOnly && oldEntries != nil { return }
+    let low = unsafe wantsRaise(mk, oldEntries: oldEntries ?? mk.pointee.log.pointee.oldEntries,
+                                blocksOnly: mk.pointee.config.testSwitches.qosOnBlocksOnly)
     // Raised as soon as headroom is low; lowered only when a cycle ends
     // with headroom above the threshold (`applyInStop`).
     if low { unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed) }
+}
+
+/// Either resource's headroom is below the threshold.
+func wantsRaise(_ mk: MarkingPointer, oldEntries: UInt64, blocksOnly: Bool) -> Bool {
+    let om = unsafe mk.pointee.om
+    let soft = om.softLimitBlocks
+    let headroom = Double(Swift.max(0, soft - om.blocksInUse)) / Double(Swift.max(1, soft))
+    let cap = Double(Swift.max(1, om.entryCapacity))
+    let entryHeadroom = Swift.max(0, 1 - Double(oldEntries) / cap)
+    let threshold = unsafe mk.pointee.config.escalateBelow
+    return headroom < threshold || (!blocksOnly && entryHeadroom < threshold)
 }
 
 /// Take the snapshot and grey the roots (world stopped). `literal`: the

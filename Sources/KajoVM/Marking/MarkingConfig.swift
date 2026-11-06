@@ -80,4 +80,11 @@ struct MarkingTestSwitches: Sendable {
     var noRememberedFilter = false
     /// `at:` on a weak slot does not record its referent while marking.
     var noWeakKeepAlive = false
+    /// Large bytes, part 2: the QoS policy as module 5 built it, decided at
+    /// the initial mark only and on old space only (the entry table and
+    /// the decisions while a cycle runs are off).
+    var qosOnBlocksOnly = false
+    /// Large bytes, part 2: an empty entry table during a sweep falls back
+    /// to a full collection, as before (the sweep is not finished first).
+    var noSweepForEntries = false
 }

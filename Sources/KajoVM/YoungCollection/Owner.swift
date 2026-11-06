@@ -189,8 +189,21 @@ func afterYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer
     }
     if let mk = unsafe vm.pointee.marking {
         unsafe sampleForTrigger(vm, y, mk)
-        if unsafe mk.phaseNow == .idle && !fullCollectionDue(vm), let trigger = unsafe youngTrigger(vm, y, mk) {
-            unsafe stopWorld(vm, c, retry: false) { stop in unsafe initialMarkPause(vm, y, mk, stop, trigger: trigger) }
+        if unsafe mk.phaseNow == .idle {
+            if unsafe !fullCollectionDue(vm), let trigger = unsafe youngTrigger(vm, y, mk) {
+                let before = unsafe mk.pointee.log.pointee.totals.cycles
+                unsafe stopWorld(vm, c, retry: false) { stop in unsafe initialMarkPause(vm, y, mk, stop, trigger: trigger) }
+                if unsafe mk.pointee.log.pointee.totals.cycles == before { unsafe vm.count(.triggersNotStarted) }
+            }
+        } else {
+            // Large bytes, part 2: while a cycle runs the QoS policy is
+            // decided again at every collection, on old space and on the
+            // entry table (the entries a sweep has freed are not
+            // allocatable until its apply, so they count as used). It was
+            // decided only at the initial mark, on old space only: on the
+            // devices the storm's table ran out while the utility-QoS
+            // marker on efficiency cores was still sweeping.
+            unsafe updateWantedQoS(mk, oldEntries: youngOldEntries(vm, y, mk))
         }
     }
     let config = unsafe y.pointee.config
@@ -221,11 +234,24 @@ private func sampleForTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingP
 /// The trigger on this module's samples (module 5's rule: floor,
 /// predictor, forced).
 private func youngTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingPointer) -> CycleTrigger? {
-    // Old entries: module 5's estimate (kept at stops) plus what young
-    // collections promoted since it last changed (read from a running
-    // participant: written in stops only, before this thread last took the
-    // safepoint mutex). Without it the entries trigger never fires and the
-    // table fills (a full collection).
+    let entries = unsafe youngOldEntries(vm, y, mk)
+    unsafe pthread_mutex_lock(y.pointee.samplerLock)
+    let samples = unsafe y.pointee.sampler.pointee.samples
+    unsafe pthread_mutex_unlock(y.pointee.samplerLock)
+    var rate = 0.0
+    if samples.count >= 2, let a = samples.first, let b = samples.last, b.ns > a.ns {
+        rate = Double(b.promoted &- a.promoted) / (Double(b.ns &- a.ns) / 1e9)
+    }
+    return unsafe decideTrigger(mk, rate: rate, oldEntries: entries, record: false)
+}
+
+/// Old entries: module 5's estimate (kept at stops) plus what young
+/// collections promoted since it last changed (read from a running
+/// participant: written in stops only, before this thread last took the
+/// safepoint mutex). Without it the entries trigger never fires and the
+/// table fills (a full collection). During a sweep the estimate still
+/// holds the entries it freed (they are taken off at the apply).
+func youngOldEntries(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingPointer) -> UInt64 {
     let logged = unsafe mk.pointee.log.pointee.oldEntries
     let promoted = unsafe y.pointee.promotedObjects.pointee.load(ordering: .relaxed)
     unsafe pthread_mutex_lock(y.pointee.samplerLock)
@@ -236,13 +262,8 @@ private func youngTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingPoint
         unsafe sp.pointee.lastCollections = 0
     }
     let entries = unsafe logged &+ (promoted &- sp.pointee.lastPromotedObjects)
-    let samples = unsafe sp.pointee.samples
     unsafe pthread_mutex_unlock(y.pointee.samplerLock)
-    var rate = 0.0
-    if samples.count >= 2, let a = samples.first, let b = samples.last, b.ns > a.ns {
-        rate = Double(b.promoted &- a.promoted) / (Double(b.ns &- a.ns) / 1e9)
-    }
-    return unsafe decideTrigger(mk, rate: rate, oldEntries: entries, record: false)
+    return entries
 }
 
 /// The initial-mark pause of young collection without stopping the world
@@ -253,7 +274,7 @@ func initialMarkPause(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingPointer, 
     if unsafe mk.phaseNow == .swept && !mk.pointee.config.stress.contains(.sweepNeverApplies) { unsafe applyInStop(vm, mk) }
     guard unsafe mk.phaseNow == .idle, unsafe !fullCollectionDue(vm) else { return }
     unsafe countOldEntriesAtPause(vm, mk)
-    unsafe updateWantedQoS(mk)
+    unsafe updateWantedQoS(mk, oldEntries: nil)
     unsafe initialMark(vm, mk, roots: stop.roots(), trigger: trigger, literal: false)
 }
 

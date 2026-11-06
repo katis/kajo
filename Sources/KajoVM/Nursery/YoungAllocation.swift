@@ -115,12 +115,15 @@ extension Machine {
             }
             let full = tableFull || (force && fullStress)
             let before = pauseCount()
+            let collections = om.counters.collections
             let stopped = unsafe stopWorld(vm, w, retry: false, keeping: keep) { stop in
                 if full && fullStress { unsafe om.gc.pointee.counters.stressCollections &+= 1 }
                 unsafe youngPause(vm, w, stop, full: full)
             }
             if !stopped { continue }
-            if full { fulls += 1 }
+            // A sweep finished in the stop instead (large bytes, part 2) is
+            // not a full collection: the retry finds its entries.
+            if full && om.counters.collections != collections { fulls += 1 }
             force = false
             unsafe state.pointee.counters.collectionsTriggered &+= Swift.max(1, pauseCount() &- before)
         }
@@ -133,7 +136,14 @@ extension Machine {
 func youngPause(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext, full: Bool) {
     guard let n = unsafe vm.pointee.nursery else { return }
     if full {
-        unsafe noteFullCollection(vm, vm.pointee.om.config.stress.contains(.collectAtEveryAllocation) ? .other : .entries)
+        let stress = unsafe vm.pointee.om.config.stress.contains(.collectAtEveryAllocation)
+        // Large bytes, part 2: the table ran out while a sweep still held
+        // the entries it freed (pending until its apply). Finishing the
+        // sweep here and applying it hands them over; module 1's full
+        // collection would do the same first and then mark and sweep the
+        // whole heap (41 to 84 ms on the devices). Counted, never hidden.
+        if !stress, unsafe finishSweepForEntries(vm) { return }
+        unsafe noteFullCollection(vm, stress ? .other : .entries)
         unsafe fullCollection(vm, stop)
     } else if unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) {
         unsafe noteFullCollection(vm, .softLimit)

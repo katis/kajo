@@ -226,7 +226,10 @@ func startCycleAfterLargeAllocation(_ vm: VMPointer, _ w: WorkerPointer, _ o: Oo
     guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .idle,
           unsafe decideTrigger(mk, rate: 0, oldEntries: nil, record: false) != nil else { return }
     let h = unsafe registerPending(vm, o)
-    if h < 0 { return }  // the pending table is full: the next young collection decides
+    if h < 0 {  // the pending table is full: the next young collection decides
+        unsafe vm.count(.largeTriggersUnrooted)
+        return
+    }
     defer { unsafe unregisterPending(vm, h) }
     let om = unsafe vm.pointee.om
     om.lockPools()

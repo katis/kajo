@@ -211,6 +211,11 @@ struct MarkingCounters: Sendable {
     var fallbacksEntries: UInt64 = 0
     var fallbacksSoftLimit: UInt64 = 0
     var fallbacksOldAllocation: UInt64 = 0
+    /// Large bytes, part 2: stops in which the young allocation found the
+    /// entry table empty while a cycle swept, and the sweep was finished
+    /// and applied there instead of a full collection; their time.
+    var sweepsFinishedForEntries: UInt64 = 0
+    var sweepsFinishedForEntriesNs: UInt64 = 0
 }
 
 /// Large bytes, part 2: the circumstances of one fallback, taken in its
@@ -222,6 +227,9 @@ struct FallbackRecord: Sendable {
     /// no cycle runs).
     var trigger: CycleTrigger? = nil
     var sinceCycleStartNs: UInt64 = 0
+    /// Since the last cycle's apply (0: none yet), and cycles started.
+    var sinceLastApplyNs: UInt64 = 0
+    var cyclesStarted: UInt64 = 0
     /// The sweep's progress over the snapshot's words (0 to 1; 0 before it
     /// starts), and the objects marked so far.
     var sweptFraction = 0.0
@@ -312,6 +320,8 @@ struct MarkingLog {
         totals.bytesFreed &+= r.bytesFreed
     }
     var lastOldAllocations: UInt64 = 0
+    /// Large bytes, part 2: when the last apply ended (ns, 0: none yet).
+    var lastApplyAtNs: UInt64 = 0
     /// Large bytes, part 2: the last fallbacks' circumstances.
     var fallbackRecords = RecordRing<FallbackRecord>(capacity: 16)
     /// Words of the snapshot map that may have bits (high water at the

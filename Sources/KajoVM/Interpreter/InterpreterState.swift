@@ -269,12 +269,15 @@ struct CacheEntry {
                 let stopped = unsafe stopWorld(vm, w, retry: false, keeping: keep) { stop in
                     let roots = stop.roots()
                     let collections = unsafe om.gc.pointee.counters.collections
+                    // Large bytes, part 2: the record is taken before the
+                    // collection, as the pools stood when the request failed.
+                    let pre = unsafe fallbackRecord(vm, .oldAllocation)
                     result = bytes ? om.allocateBytes(ctx, classIndex: cls, count: count, extraRoots: roots)
                                    : om.allocate(ctx, classIndex: cls, slots: count, fill: nilObject, extraRoots: roots)
                     // Module 10: a full collection forced by an old (large)
                     // allocation is module 5's fallback too: counted, never
                     // hidden (it was not counted before).
-                    if unsafe om.gc.pointee.counters.collections != collections { unsafe noteFullCollection(vm, .oldAllocation) }
+                    if unsafe om.gc.pointee.counters.collections != collections { unsafe noteFullCollection(vm, .oldAllocation, record: pre) }
                 }
                 if !stopped { continue }
                 unsafe state.pointee.counters.collectionsTriggered &+= pauseCount() &- before

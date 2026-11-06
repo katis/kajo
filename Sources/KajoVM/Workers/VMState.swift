@@ -263,6 +263,11 @@ enum Counter: Int, CaseIterable {
     case interruptsAsked, interrupts, stepStops, resends, protocolRequests, protocolReplies
     /// Module 9c: calls of the protocol client's transport (primitive 164).
     case clientCalls
+    /// Large bytes, part 2: a young collection decided that a marking cycle
+    /// starts and no initial mark followed (its stop parked for another,
+    /// or the pause found a cycle running or a full collection due); a
+    /// large allocation decided it and found the pending table full.
+    case triggersNotStarted, largeTriggersUnrooted
 }
 
 /// A snapshot of the counters.

@@ -530,11 +530,15 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("cycleLogDropped", "\(totals.dropped)"),
         ("fallbacksEntries", "\(c.fallbacksEntries)"), ("fallbacksSoftLimit", "\(c.fallbacksSoftLimit)"),
         ("fallbacksOld", "\(c.fallbacksOldAllocation)"), ("fallbackLog", fallbackSummary(vm.fallbackLog)),
+        ("sweepsForEntries", "\(c.sweepsFinishedForEntries)"), ("sweepsForEntriesMs", ms(c.sweepsFinishedForEntriesNs)),
+        ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
+        ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
     ]
 }
 
 /// Large bytes, part 2: each recorded fallback as
-/// cause/phase/trigger/ms since the cycle started/swept percent/entries
+/// cause/phase/trigger/ms since the cycle started/ms since the last
+/// apply/cycles started/swept percent/entries
 /// used percent (high water)/pool runs/pending runs/old entries percent/
 /// blocks percent of the soft limit/marker QoS/raise wanted/large failure,
 /// separated by commas; "-" when none.
@@ -546,6 +550,7 @@ func fallbackSummary(_ rs: [FallbackRecord]) -> String {
         let phase = ["idle", "marking", "sweeping", "swept"][Int(r.phase.rawValue)]
         let trig = r.trigger.map { ["floor", "entries", "predictor", "forced"][Int($0.rawValue)] } ?? "-"
         return [cause, phase, trig, unsafe String(format: "%.1f", Double(r.sinceCycleStartNs) / 1e6),
+                unsafe String(format: "%.1f", Double(r.sinceLastApplyNs) / 1e6), "\(r.cyclesStarted)",
                 unsafe String(format: "%.0f", r.sweptFraction * 100), pc(Double(r.highWater), Double(r.entryCapacity)),
                 "\(r.poolRuns)", "\(r.pendingRuns)", pc(Double(r.oldEntries), Double(r.entryCapacity)),
                 pc(Double(r.blocksInUse), Double(r.softLimitBlocks)), "\(r.markerQoS)", r.wantUserInitiated ? "1" : "0",
