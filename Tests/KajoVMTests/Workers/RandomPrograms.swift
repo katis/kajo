@@ -503,6 +503,21 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
         randomScavenges.add(config, rt.vm.markingCounters.cycles)
         #expect(rt.vm.markingCounters.missed == 0)
     case .relocateEveryLiveBlock:
+        // A selection needs a cycle's final mark, and ten small programs
+        // under ThreadSanitizer can end before the utility-QoS marker
+        // finishes the cycle their last scavenge started (708e994's gate
+        // run): let every cycle started finish before the runtime stops,
+        // so each seed's work reaches its selection. A bounded wait on
+        // work done, not a time assertion. The counters are read in a stop,
+        // so the poll is slow (a host polling every 0.5 ms starves the
+        // marker it waits for).
+        let started = rt.vm.markingCounters.cycles
+        let end = now() + UInt64((underThreadSanitizer ? 600.0 : 120.0) * 1e9)
+        while now() < end {
+            let m = rt.vm.markingCounters
+            if m.cyclesCompleted &+ m.aborts >= started { break }
+            usleep(20_000)
+        }
         let r = rt.vm.relocationCounters
         if ProcessInfo.processInfo.environment["KAJO_RELOC_DEBUG"] != nil {
             print("RELOC seed \(p.seed) cycles \(rt.vm.markingCounters.cycles) planned \(r.cyclesPlanned) selected \(r.blocksSelected) candidates \(r.candidates) moved \(r.objectsMoved) pinned \(r.skippedPinned) aborted \(r.passesAborted)")
