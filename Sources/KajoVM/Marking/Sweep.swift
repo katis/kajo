@@ -182,17 +182,22 @@ func markingBeforeOldSpaceOperation(_ vm: VMPointer) {
     }
 }
 
-/// Large bytes, part 2: an old allocation found no room while a cycle is
-/// marking, so the cycle is behind: the policy raises the marker and this
-/// worker waits for the final mark, at most `MarkingConfig.allocationWaitMs`,
-/// polling for stops and module 7's rounds as a primitive's long loop does
-/// (registers saved), never in a stop. The main worker does not wait (a
-/// frame is shorter than the wait). Answers true when the cycle has left
-/// marking (the caller tries again; a stop then finishes the sweep).
-func waitForMarkingCycle(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
+/// Large bytes, part 2: an allocation found no room (old space, or the
+/// entry table) while a cycle is marking, so the cycle is behind: the
+/// policy raises the marker and this worker waits for the final mark, at
+/// most `MarkingConfig.allocationWaitMs`, polling for stops and module 7's
+/// rounds as a primitive's long loop does (registers saved), never in a
+/// stop; `holding`, an object only the allocation holds, is a pending root
+/// meanwhile. The main worker does not wait (a frame is shorter than the
+/// wait). Answers true when the cycle has left marking (the caller tries
+/// again; a stop then finishes the sweep).
+func waitForMarkingCycle(_ vm: VMPointer, _ w: WorkerPointer, holding: Oop = .none) -> Bool {
     guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .marking, unsafe w.pointee.index != 0 else { return false }
     let bound = UInt64(unsafe mk.pointee.config.allocationWaitMs) &* 1_000_000
     if bound == 0 { return false }
+    let h = holding == .none ? -1 : unsafe registerPending(vm, holding)
+    if holding != .none && h < 0 { return false }  // the pending table is full: no wait
+    defer { if h >= 0 { unsafe unregisterPending(vm, h) } }
     unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed)
     let cycle = unsafe mk.cycleNow
     let t0 = nanoseconds()

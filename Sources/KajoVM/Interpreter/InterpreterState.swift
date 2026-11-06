@@ -280,7 +280,7 @@ struct CacheEntry {
                     // sweep. Once per allocation.
                     if !waited {
                         waited = true
-                        if unsafe waitForMarkingCycle(vm, w) { continue }
+                        if unsafe waitForMarkingCycle(vm, w, holding: extra) { continue }
                     }
                 }
                 var result: Oop? = nil

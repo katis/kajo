@@ -83,6 +83,7 @@ extension Machine {
         // them: out of memory, a failure the program sees.
         var collected = false
         var noRoom = 0
+        var waitedForCycle = false
         while true {
             if !force {
                 if unsafe a.pointee.stash.next == a.pointee.stash.count, unsafe om.refillStash(stash, atLeast: 1024) {
@@ -112,6 +113,13 @@ extension Machine {
                 unsafe collectOwnNursery(vm, y, w, held: extra)
                 unsafe state.pointee.counters.collectionsTriggered &+= 1
                 continue
+            }
+            // Large bytes, part 2: the table is empty while a cycle marks:
+            // wait (bounded) for its final mark, as an old allocation does;
+            // the stop below then finishes the sweep. Once per allocation.
+            if tableFull && !waitedForCycle {
+                waitedForCycle = true
+                if unsafe waitForMarkingCycle(vm, w, holding: extra) { continue }
             }
             let full = tableFull || (force && fullStress)
             let before = pauseCount()
