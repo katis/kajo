@@ -63,7 +63,7 @@ extension Machine {
         }
         precondition(count >= 0 && count <= Header.maxLargeCount, "object larger than the count field")
         let c = UInt64(count)
-        let size = isBytes ? (c &+ 7) & ~7 &+ 8 : c &<< 3 &+ 8
+        let size = ObjectMemory.bodyBytes(count: count, isBytes: isBytes)
         // Large for eden (module 4's `largeLimit`), or past a block (module
         // 10's runs): allocated old.
         if unsafe size > n.pointee.largeLimit {
