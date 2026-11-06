@@ -14,7 +14,8 @@ primitives that read slots, `Relocation/Hazard.swift`, `Marking/`,
 `ObjectMemory/ObjectMemory.swift` and `VirtualMemory.swift`,
 `Loader/Image.swift`, `Loader/FuzzEntry.swift`, `Headless.swift`),
 `Sources/KajoShellCore/` (the apps' log capacity) and
-`apps/KajoShell-macOS/Sources/DevViews.swift`. Tests in
+`apps/KajoShell-macOS/Sources/DevViews.swift` (since module 11a
+`Sources/KajoApp/AppKitViews.swift`). Tests in
 `Tests/KajoVMTests/Marking/WeakMarkingTests.swift`,
 `ObjectModel/ExtremeIntegerTests.swift`,
 `YoungCollection/BarrierWordTests.swift`, `Workers/LogRingTests.swift`,

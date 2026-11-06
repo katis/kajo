@@ -61,7 +61,9 @@ opener for every transport, the TXT record, Bonjour advertising,
 resolving and browsing, the machine's addresses),
 `Sources/KajoShellCore/Serving.swift` (a shell serving over TCP, the
 pairing token kept per install, the pairing screen's contents), the
-pairing screen in `apps/KajoShell-iOS/Sources/IOSShell.swift`,
+pairing screen in `apps/KajoShell-iOS/Sources/IOSShell.swift` (both moved
+by module 11a to `Sources/KajoAppDevelopment/Serving.swift` and
+`Pairing.swift`, `docs/modules/app-project.md`),
 `apps/Shared/smalltalk/DevSessionTarget.class.st` (what the session does
 to a target other than its own image), `tools/TargetPickerModelTest`,
 `scripts/remote-session.sh` and `scripts/remote-report.py` (the remote
@@ -177,7 +179,10 @@ advertises, and shows the pairing screen; the scenario's result line adds
 what the server did in the window (`served_sessions`, `served_requests`,
 `served_bytes`, failed and refused pairings, `deliver_mean_us`,
 `deliver_max_us`, `writer_max_pending_kb`). A development image serves TCP
-only when asked: no launch argument, no listener. The iOS pairing screen
+only when asked: no launch argument, no listener. (The shells keep this.
+For a generated app module 11a made serving a property of the Debug
+build, from launch with no argument, as the owner decided on 2026-11-05;
+`docs/modules/app-project.md`.) The iOS pairing screen
 is a panel above every Smalltalk window: "Kajo serves: <Bonjour name>",
 the token in 28-point monospaced bold, each address with the port, what
 the listener does (serving, or refusing for a minute after N failed
@@ -1124,7 +1129,9 @@ binaries.
    the protection. A session list with a disconnect button is the tool if
    a forgotten client ever matters.
 4. **Serving without the launch argument**: no; serving stays an explicit
-   act of a development image.
+   act of a development image. (Superseded for generated apps by the
+   owner's distribution shape of 2026-11-05: a Debug build serves from
+   launch, module 11a; the shells keep the argument.)
 5. **Signing**: the owner clears the keychain prompt on the mini, then the
    phone's rows run with `scripts/device.sh build` and
    `scripts/remote-session.sh device`.

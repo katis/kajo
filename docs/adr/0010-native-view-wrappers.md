@@ -38,7 +38,9 @@ every later wrapper inherits.
 - **The protocol is the same on AppKit and UIKit.** The kernel classes
   (View, Window, Label, Button, TextView, Slider) say what a view does; the
   shell's view host says how (`apps/KajoShell-macOS` AppKit,
-  `apps/KajoShell-iOS` UIKit). Coordinates are points with y down on both
+  `apps/KajoShell-iOS` UIKit; since module 11a both hosts are the library
+  `KajoApp`, `AppKitHost` and `UIKitHost`, which the shells and every
+  generated app run). Coordinates are points with y down on both
   (the macOS host flips its containers). A Window is an NSWindow on macOS
   and a full-screen container in the iOS shell's one window.
 - **Lifetime: the finalization Process releases a dead wrapper's view.**
@@ -105,8 +107,9 @@ every later wrapper inherits.
 - `Sources/KajoVM/Shell/` holds the public host surface (ShellVM) and
   primitives 150 to 154; `kernel/` holds View, Window, Label, Button,
   TextView, Slider, UIEvent, UIEventLoop and ViewTest.
-- A shell implements `ShellPlatform` (KajoShellCore): the view host, the
-  display link, the release, the status line.
+- A shell implements `ShellPlatform` (KajoShellCore; since module 11a
+  `KajoApp`, whose `AppKitHost` and `UIKitHost` are the implementations):
+  the view host, the display link, the release, the status line.
 - docs/modules/shells.md describes the built form and its measurements.
 
 ## Built (9c)

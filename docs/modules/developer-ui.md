@@ -17,7 +17,9 @@ client transport (primitive 164, `kernel/ClientTransport`,
 `ScrollView`, `Toolbar`, `Menu`; AppKit in
 `apps/KajoShell-macOS/Sources/DevViews.swift`, UIKit's text view in
 `IOSShell.swift`, what both share in
-`Sources/KajoShellCore/TextOffsets.swift`), `kernel/LargeArray`,
+`Sources/KajoShellCore/TextOffsets.swift`; since module 11a these are
+`Sources/KajoApp/AppKitViews.swift`, `UIKitHost.swift` and
+`TextOffsets.swift`, `docs/modules/app-project.md`), `kernel/LargeArray`,
 `JsonText` and `JsonPieceStream` (objects and lines longer than one heap
 block, section 5), the macOS shell's `mode=dev` and `mode=devsession`
 (`Sources/KajoShellCore/DevModes.swift`), the scripted session

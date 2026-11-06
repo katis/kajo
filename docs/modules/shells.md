@@ -224,6 +224,14 @@ version kept a nil lock per subclass and failed six of its own tests).
 
 ## The shells (`apps/`, `Sources/KajoShellCore/`)
 
+Since module 11a (`docs/modules/app-project.md`) the AppKit and UIKit
+hosts described here are library code, `Sources/KajoApp/` (`AppKitHost`,
+`AppKitViews.swift`, `UIKitHost`, with `ShellPlatform` and `ShellRuntime`),
+and serving and the pairing screen are `Sources/KajoAppDevelopment/`; the
+shells' Swift in `apps/` is the entry point and the choice of a status
+line, a spinner and the pairing screen's style. What follows is the 9a
+layout as built.
+
 ```
 apps/Shared/build-images.sh            the bundled images, built with the PATH toolchain in a clean environment
 apps/Shared/smalltalk/                 ShellBench (the scenarios), BenchNode, BenchBox, ShellDemo

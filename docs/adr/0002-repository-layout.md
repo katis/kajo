@@ -21,6 +21,8 @@ Sources/kajo/          headless CLI: boot an image, run tests, serve the dev pro
 Tests/KajoVMTests/     Swift Testing suite for the VM
 kernel/                Smalltalk sources, text format to be decided
 apps/                  Xcode projects for the macOS and iOS shells, depending on the root package
+                       (since module 11a their hosts are the root package's KajoApp library, and
+                       `kajo new` writes a developer's own app project anywhere else)
 experiments/           throwaway spikes, one directory each, deletable
 docs/CONTEXT.md        domain vocabulary
 docs/adr/              one decision per file, numbered

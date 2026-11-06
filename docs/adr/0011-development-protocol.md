@@ -131,3 +131,13 @@ pre-shared key). The first remote session was measured Mac to Mac (the
 macOS shell in the phone's serve mode, and `kajo run --protocol tcp`):
 the iPhone build could not be signed on the mini during the module
 (codesign waited on a keychain prompt), so the phone's rows are not done.
+
+## Built (11a)
+
+Module 11a (`docs/modules/app-project.md`, ADR 0014) made serving a
+property of a generated app's Debug build: it serves over TCP from launch
+with no argument, advertised as "<app> on <device>", with 9d's
+per-install token, and its pairing screen is a shake away on iOS and in
+the app menu on the Mac. A Release build links none of the transport
+(checked on the binary by `just new-check`) on top of its image refusing
+to serve. The shells keep serving by launch argument.
