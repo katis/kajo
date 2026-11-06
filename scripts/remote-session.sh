@@ -47,7 +47,11 @@ case $serve in
     spid=$!
     log=$out/serve-$tag-console.log
     for i in {1..300}; do grep -q "^serving=tcp" $log 2>/dev/null && break; sleep 0.2; done
-    $root/scripts/device.sh token $targets || { print "remote-session: no token from the phone"; }
+    # the lan form names the device by address, so the token must not wait
+    # for its Bonjour name (a device whose advertisement is not seen still
+    # serves on its address)
+    tname=(); [[ $form == lan ]] && tname=(by-address)
+    $root/scripts/device.sh token $targets $tname || { print "remote-session: no token from the phone"; }
     token=$(awk -F'\t' '{print $3}' $targets 2>/dev/null) ;;
   kajo)
     swift build -c release --package-path $root --product kajo > /dev/null || exit 1
