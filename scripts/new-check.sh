@@ -73,6 +73,13 @@ build Sample-macOS Debug macos-debug
 mac=$DD/Build/Products/Debug/Sample.app/Contents
 # A Debug Mac build links the app into a debug dylib beside the stub.
 check macos-debug $mac/MacOS/Sample.debug.dylib $mac/Info.plist $mac/Resources/kajo/app.img debug
+# The Debug build's VM: optimized and not a checked build (the KajoAppBuild
+# trait the pin enables), read from the compile line.
+vmline=$(grep -m1 -- "-module-name KajoVM " $out/build-macos-debug.log)
+trait=$([[ $vmline == *"-DKajoAppBuild"* ]] && print 1 || print 0)
+opt=$([[ $vmline == *" -O "* ]] && print 1 || print 0)
+print "macos-debug: vm_trait=$trait vm_optimized=$opt"
+[[ $trait == 1 && $opt == 1 ]] || { print "macos-debug: FAILED the Debug VM is a checked or unoptimized build"; fail=1; }
 # Incremental: nothing changed, then one source touched (the image is built
 # again, nothing else).
 build Sample-macOS Debug macos-debug-again
