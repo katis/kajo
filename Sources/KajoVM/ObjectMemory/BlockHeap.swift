@@ -30,8 +30,8 @@ import Darwin
     /// with the world stopped, as `inUse` is.
     let kind: UnsafeMutablePointer<UInt8>
 
-    init(bytes: Int, extraBytes: Int = 0) throws(ObjectMemoryError) {
-        let (p, entry) = try unsafe VirtualMemory.reserveTwice(bytes + extraBytes)
+    init(bytes: Int, extraBytes: Int = 0, probe: ReservationProbe? = nil) throws(ObjectMemoryError) {
+        let (p, entry) = try unsafe VirtualMemory.reserveTwice(bytes + extraBytes, probe: probe)
         unsafe base = p
         self.bytes = bytes
         self.extraBytes = extraBytes
@@ -45,8 +45,8 @@ import Darwin
         unsafe kind.initialize(repeating: BlockKind.ordinary, count: blockCount)
     }
 
-    func release() {
-        unsafe VirtualMemory.releaseTwice(base, bytes + extraBytes, memoryEntry)
+    func release(probe: ReservationProbe? = nil) {
+        unsafe VirtualMemory.releaseTwice(base, bytes + extraBytes, memoryEntry, probe: probe)
         unsafe used.deallocate()
         unsafe inUse.deallocate()
         unsafe kind.deallocate()

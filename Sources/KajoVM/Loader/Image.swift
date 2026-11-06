@@ -48,12 +48,24 @@ package final class Image {
     /// Boot: nil, true, false, the well-known classes and their metaclasses,
     /// the symbol table, the special selectors, the globals, the special
     /// objects (SPEC-SHARED "Boot / allocation order", steps 1 to 3, with
-    /// module 8's metaclasses).
+    /// module 8's metaclasses). The Image owns `memory` from here: when the
+    /// boot fails (a heap too small for the well-known objects) the memory
+    /// is destroyed, since no caller can reach it to (the collectors
+    /// review's finding 6, beside the object memory's own initializer).
     init(memory: ObjectMemory, limits: LoaderLimits = LoaderLimits(), pinsForGood: Bool = true) throws(LoadError) {
         om = memory
         self.limits = limits
         self.pinsForGood = pinsForGood
         context = memory.makeContext()
+        do {
+            try boot()
+        } catch {
+            memory.destroy()
+            throw error
+        }
+    }
+
+    private func boot() throws(LoadError) {
         for _ in 0..<(2 * WellKnown.count) { om.registerClass(.none) }
         nilObject = try allocatePinned(WellKnown.undefinedObject, slots: 0, fill: Oop(smallInteger: 0))
         om.addRoot(nilObject)

@@ -78,6 +78,11 @@ struct ObjectMemoryConfig: Sendable {
     var verify = checkedBuild
     var onVerifyFailure: VerifyFailurePolicy = checkedBuild ? .trap : .record
     var testSwitches = TestSwitches()
+    /// Tests: every address-space reservation the object memory makes or
+    /// releases is recorded here, and one may be made to fail (the
+    /// collectors review, finding 6: a partial failure of `init` leaked
+    /// the reservations before it).
+    var reservations: ReservationProbe? = nil
 
     init() {}
 

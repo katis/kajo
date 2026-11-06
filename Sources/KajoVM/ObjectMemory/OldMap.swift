@@ -32,15 +32,17 @@ import Synchronization
     let wordCount: Int
 
     /// A zero-filled reservation for `entries` bits.
-    init(entries: UInt64) throws(ObjectMemoryError) {
+    init(entries: UInt64, probe: ReservationProbe? = nil) throws(ObjectMemoryError) {
         wordCount = Int((entries &+ 63) &>> 6)
-        let raw = try unsafe VirtualMemory.reserve(EntryBitmap.bytes(wordCount))
+        let raw = try unsafe VirtualMemory.reserve(EntryBitmap.bytes(wordCount), probe: probe)
         unsafe words = raw.bindMemory(to: Atomic<UInt64>.self, capacity: wordCount)
     }
 
     static func bytes(_ words: Int) -> Int { (words &* 8 &+ 16383) & ~16383 }
 
-    func release() { unsafe VirtualMemory.release(UnsafeMutableRawPointer(words), EntryBitmap.bytes(wordCount)) }
+    func release(probe: ReservationProbe? = nil) {
+        unsafe VirtualMemory.release(UnsafeMutableRawPointer(words), EntryBitmap.bytes(wordCount), probe: probe)
+    }
 
     @inline(__always)
     func word(_ w: Int) -> UInt64 { unsafe words[w].load(ordering: .relaxed) }

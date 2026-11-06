@@ -35,19 +35,27 @@ import Synchronization
             throw .invalidConfig("entryCapacity must be in 2...2^32")
         }
         guard config.entryChunk >= 1 else { throw .invalidConfig("entryChunk must be positive") }
-        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes + growth, extraBytes: config.nurseryRegionBytes)
+        let probe = config.reservations
+        let heap = try BlockHeap(bytes: config.heapBytes + config.reserveBytes + growth, extraBytes: config.nurseryRegionBytes,
+                                 probe: probe)
         let tableBytes = config.entryCapacity * 16
-        let table: UnsafeMutableRawPointer
-        let marks: UnsafeMutableRawPointer
+        // Each reservation is released if a later one fails (the entry
+        // table alone is up to 64 GiB of address space; the collectors
+        // review's finding 6: only the heap was released before).
+        var reservedTable: UnsafeMutableRawPointer? = nil
+        var reservedMarks: UnsafeMutableRawPointer? = nil
         let oldMap: EntryBitmap
         do {
-            unsafe table = try VirtualMemory.reserve(tableBytes)
-            unsafe marks = try VirtualMemory.reserve(config.entryCapacity)
-            oldMap = try EntryBitmap(entries: UInt64(config.entryCapacity))
+            unsafe reservedTable = try VirtualMemory.reserve(tableBytes, probe: probe)
+            unsafe reservedMarks = try VirtualMemory.reserve(config.entryCapacity, probe: probe)
+            oldMap = try EntryBitmap(entries: UInt64(config.entryCapacity), probe: probe)
         } catch {
-            heap.release()
+            if let m = unsafe reservedMarks { unsafe VirtualMemory.release(m, config.entryCapacity, probe: probe) }
+            if let t = unsafe reservedTable { unsafe VirtualMemory.release(t, tableBytes, probe: probe) }
+            heap.release(probe: probe)
             throw error
         }
+        let table = unsafe reservedTable.unsafelyUnwrapped, marks = unsafe reservedMarks.unsafelyUnwrapped
         let poolLock = os_unfair_lock_t.allocate(capacity: 1)
         unsafe poolLock.initialize(to: os_unfair_lock())
         let pools = UnsafeMutablePointer<Pools>.allocate(capacity: 1)
@@ -83,10 +91,11 @@ import Synchronization
         unsafe s.finalization.pointee.free()
         unsafe s.finalization.deinitialize(count: 1)
         unsafe s.finalization.deallocate()
-        s.heap.release()
-        unsafe VirtualMemory.release(table, s.tableBytes)
-        unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.marks), Int(s.entryCapacity))
-        s.oldMap.release()
+        let probe = s.config.reservations
+        s.heap.release(probe: probe)
+        unsafe VirtualMemory.release(table, s.tableBytes, probe: probe)
+        unsafe VirtualMemory.release(UnsafeMutableRawPointer(s.marks), Int(s.entryCapacity), probe: probe)
+        s.oldMap.release(probe: probe)
         unsafe shared.deinitialize(count: 1)
         unsafe shared.deallocate()
     }
