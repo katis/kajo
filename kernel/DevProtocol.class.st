@@ -9,7 +9,8 @@ Class {
 		'pending',
 		'lock',
 		'kinds',
-		'argumentNames'
+		'argumentNames',
+		'oneString'
 	],
 	#category : #'Kernel-Development'
 }
@@ -94,7 +95,19 @@ DevProtocol class >> emit: aKind with: aJsonObject [
 	o := JsonObject new.
 	o at: 'v' put: 1; at: 'kind' put: aKind; at: 'ts' put: Smalltalk microsecondClock.
 	aJsonObject keysAndValuesDo: [:k :v | o at: k put: v].
-	^ self primEmit: (Json writePieces: o)
+	^ self primEmit: (self lineOf: o)
+]
+
+{ #category : #events }
+DevProtocol class >> lineOf: anObject [
+	"The JSON text of anObject for primitive 161: in pieces of 16 KiB (Json writePieces:, the default), or as one ByteArray (Json write:) when oneString is set (large bytes, part 3: the two forms measured against each other)."
+	^ oneString == true ifTrue: [Array with: (Json write: anObject)] ifFalse: [Json writePieces: anObject]
+]
+
+{ #category : #events }
+DevProtocol class >> oneString: aBoolean [
+	"Large bytes, part 3: replies and events written as one ByteArray (true) or in pieces (false, the default)."
+	oneString := aBoolean
 ]
 
 { #category : #primitives }
@@ -126,9 +139,9 @@ DevProtocol class >> reply: aReplyTo error: aString [
 
 { #category : #replies }
 DevProtocol class >> reply: aReplyTo result: anObject [
-	"The result is written in pieces (Json writePieces:), so a reply may be longer than one object can be (module 9c)."
+	"The result is written in pieces (Json writePieces:), so a reply may be longer than one object can be (module 9c); or as one ByteArray (lineOf:, large bytes part 3)."
 	^ self primEmit: {'{"v":1,"kind":"reply","conn":' , aReplyTo first printString , ',"id":' , (Json write: aReplyTo last) , ',"ok":true,"result":'}
-		, (Json writePieces: anObject) , #('}')
+		, (self lineOf: anObject) , #('}')
 ]
 
 { #category : #requests }

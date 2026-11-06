@@ -48,6 +48,12 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     /// Reflection never shows the tokens the host holds.
     public var customMirror: Mirror { Mirror(self, children: ["connections": openConnections]) }
 
+    /// Large bytes, part 3: a received line goes to the image as one
+    /// `line` event however long (up to what one String holds), rather
+    /// than in `linePart` pieces of 16 KiB. Set before connecting (the
+    /// shells' `lineform=string`); off by default.
+    public var linesWhole = false
+
     /// A known target: where it is (a socket path or another address form,
     /// `TargetAddress`) and, when the host knows it, its token (in memory
     /// only: never written, never handed to the image).
@@ -330,7 +336,8 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
                 }
             }
             let now = ShellVM.now()
-            let pieces = linePieces(String(decoding: writeJSON(out), as: UTF8.self))
+            let text = String(decoding: writeJSON(out), as: UTF8.self)
+            let pieces = linesWhole && text.utf8.count <= RequestLimits.imageBytes ? [text] : linePieces(text)
             for (k, p) in pieces.enumerated() {
                 post(ShellEvent(kind: k == pieces.count - 1 ? .line : .linePart, target: c.id, value: .string(p), timeNs: now))
             }

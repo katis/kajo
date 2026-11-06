@@ -160,6 +160,18 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         }
         runtime.start()
         if let h = runtime.clientHost { hostBox.set(h) }
+        // Large bytes, part 3: `lineform=string` sends long lines as one
+        // String both ways (the replies this image writes, the lines its
+        // client receives); `pieces`, the default, in 16 KiB pieces.
+        // `replies=` and `received=` set one direction each.
+        let form = options.string("lineform", "pieces")
+        if options.string("received", form) == "string" { runtime.clientHost?.linesWhole = true }
+        if options.string("replies", form) == "string" {
+            if let p = runtime.vm.spawn("oneString:", receiver: "DevProtocol", arguments: [.bool(true)]) {
+                runtime.vm.waitUntilTerminated(p)
+                runtime.vm.release(p)
+            }
+        }
         if target == nil {
             do { server = try runtime.serveProtocol(socket: devSocketPath(options)) } catch {}
             guard server != nil else {
@@ -300,7 +312,7 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         typeTimer?.cancel()
         let nominal = Double(platform.maximumFramesPerSecond)
         let fa = FrameAccount(timestamps: frameTimes.filter { $0 <= endTs }, start: startTs, end: endTs, nominalHz: nominal)
-        var line = "target=\(target == nil ? "local" : "remote") classes=\(options.int("classes", 2000)) load=\(load) workers=\(options.int("workers", 5)) typing=\(typing)"
+        var line = "target=\(target == nil ? "local" : "remote") classes=\(options.int("classes", 2000)) load=\(load) workers=\(options.int("workers", 5)) typing=\(typing) lineform=\(options.string("lineform", "pieces")) replies=\(options.string("replies", options.string("lineform", "pieces"))) received=\(options.string("received", options.string("lineform", "pieces")))"
         line += " seconds=\(f3(endTs - startTs)) nominal_hz=\(f2(nominal)) frames=\(fa.frames) expected=\(fa.expected) missed=\(fa.missed) drops=\(fa.drops)"
         line += " gap_p99_ms=\(f3(fa.gapP99Ms)) gap_max_ms=\(f3(fa.gapMaxMs)) turns=\(turns) preempted_turns=\(preempted) max_turn_ms=\(f3(Double(maxTurnNs) / 1e6)) view_calls=\(viewCalls)"
         // The longest turn: what stopped it from ending at its budget.
