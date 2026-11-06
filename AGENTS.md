@@ -696,6 +696,35 @@ Safety:
    three times; the agent reported it and measured Mac to Mac instead of
    answering a keychain prompt it was not allowed to touch. Report what
    blocks and what was done without it.
+ - A barrier belongs to the slot, not to the primitive that first needed
+   it. `at:` had the weak keep-alive barrier; the array copy, `instVarAt:`,
+   `slotAt:`, `shallowCopy` and the symbol table's bucket growth read the
+   same slots without it, and only an outside review asked. When a read or
+   a store gets a barrier, list every path that reads or stores that kind
+   of slot in the same commit (the table is in
+   `docs/modules/collectors-review.md`), and a new slot-reading primitive
+   goes through `keepAliveRead`.
+ - A word two modules share is changed with bit operations, never stored
+   whole, and has a verifier that names both owners. Marking stored the
+   barrier word and erased module 7's count; nothing failed, the young
+   stress flag just stopped stressing after the first cycle. A stress
+   mode needs a counter that shows its slow path is being taken, or it
+   can be off without anyone knowing.
+ - A primitive checks its bounds one by one before any arithmetic on its
+   arguments; `stop - start + 1` trapped on minVal and maxVal. Every
+   primitive that takes an integer is called with minVal, maxVal, -1, 0
+   and count + 1 by one seeded test (`ExtremeIntegerTests`), and a new
+   primitive is added to it.
+ - A log nothing trims is a leak in an app that runs for days, and an
+   append under a mutex is an allocation under it. Logs are `RecordRing`s
+   with running totals; reports take sums from the totals, percentiles
+   from the records kept, and say how many were dropped.
+ - An outside review is a verification layer of its own. The gates, the
+   models and the fuzzers had all passed the code in which pull request 1
+   found three bugs a program can hit; it read for paths that lacked what
+   their neighbours had, which no test of ours was looking for. A pull
+   request diffs from the merge base, so a review of existing files needs
+   a base branch without them and a head that is the base plus the files.
 
 ## Verification
 
@@ -919,7 +948,34 @@ host holds afterwards is whole, `Image.saveImage` works and another VM can
 run over the same image (5 to 15 µs for an empty nursery, 1.0 to 1.2 ms for
 a full one, in release); the file primitives resolve the last path
 component too, read with `O_NOFOLLOW` and create the write's temporary
-file exclusively; its two open questions await the owner). ADRs
+file exclusively; its two open questions await the owner; the
+collectors review, `docs/modules/collectors-review.md` (2026-11-06): the
+first external review of modules 1 and 4 to 7 (pull request 1, 54 files)
+found nine things and all nine are fixed, each with a test that fails on
+the starting commit: every primitive that reads a slot a program could
+make weak keeps its referent alive while a cycle marks (the array copy,
+`instVarAt:`, `slotAt:`, `shallowCopy` and, found beside them, the symbol
+table's bucket growth had no keep-alive barrier; the array copy records a
+weak source's referents in a pass before the copy, so every other copy
+runs the old loop: 1.011 with a cycle marking, where a check per slot cost
+1.068); no primitive traps on an extreme SmallInteger (the array copy and
+`basicNew:` did arithmetic before their bounds checks, two Mac shell view
+wrappers took any count), with a seeded test of 840 calls and an extreme
+argument in the make-and-run fuzz mode; the collectors' logs are rings of
+`VMConfig.logCapacity` records (65 536, 4096 in the shells' demo and
+developer modes) with running totals and a dropped count; marking sets and
+clears only bit 0 of the shared barrier word (it stored the whole word and
+erased module 7's count, so the young stress flag stopped stressing after
+the first cycle; no deletion record was ever lost, because stops wait for
+open young collections), with a stop verifier on the word and a
+`youngBarrierAlwaysOn` random-program configuration; a reshape runs
+module 4's hook before it lists instances; the object memory releases
+every reservation when a later one fails and an Image whose boot fails
+destroys its memory; one `bodyBytes`, one pair of cache-line helpers, one
+`copyBody`; bench within noise and `interpret` identical; its three open
+questions await the owner (4096 records for apps, the stop-verifier
+assertion in every random-program configuration, the fuzzer's second
+run)). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -940,7 +996,8 @@ cover.
    `Workers/` and `Processes/` (module 3, built; `docs/modules/workers.md`:
    workers, safepoints, Process-owned stacks, scheduler, budgeted
    preemption, external signals, the seeded random-program generator and
-   `just soak`), `Nursery/` with `ObjectMemory/Generations.swift` (module 4,
+   `just soak`; since the collectors review `RecordRing.swift`, the ring
+   every collector log is, `docs/modules/collectors-review.md`), `Nursery/` with `ObjectMemory/Generations.swift` (module 4,
    built; `docs/modules/nursery.md`: per-worker eden and survivors, age and
    claim tags, barrier and remembered set, parallel stop-the-world scavenge,
    entry stashes, weak slots, ephemerons in the oracle, the finalization
