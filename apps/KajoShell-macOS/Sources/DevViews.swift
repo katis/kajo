@@ -220,6 +220,7 @@ final class KajoTextView: NSTextView {
         rows = Array(repeating: nil, count: max(0, n))
         asked = []
         quietly { table?.reloadData() }
+        return true
     }
 
     /// setRowsAt: the first row, the columns, then cells flat.
