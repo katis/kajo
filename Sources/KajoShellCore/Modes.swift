@@ -65,23 +65,25 @@ public func runGolden(_ options: LaunchOptions, resources: ShellResources = .mai
             let paths = [resources.kasm("prelude"), resources.kasm("lib"), resources.kasm(name)]
             let files = paths.map { (path: $0, text: (try? String(contentsOfFile: $0, encoding: .utf8)) ?? "") }
             let t0 = Telemetry.thermal()
+            let u0 = ProcessUsage.now()
             let r = Headless.run(files, options: o)
-            failed += emitGolden("kasm", name, want, workers, r, t0, options)
+            failed += emitGolden("kasm", name, want, workers, r, t0, options, ProcessUsage.now().fields(since: u0))
         }
     }
     if kind == "all" || kind == "st" {
         for (name, want) in GoldenKernels.smalltalk where which == "all" || which == name {
             let bytes = FileManager.default.contents(atPath: resources.smalltalkImage(name)).map { [UInt8]($0) } ?? []
             let t0 = Telemetry.thermal()
+            let u0 = ProcessUsage.now()
             let r = Headless.run(image: bytes, options: o)
-            failed += emitGolden("st", name, want, workers, r, t0, options)
+            failed += emitGolden("st", name, want, workers, r, t0, options, ProcessUsage.now().fields(since: u0))
         }
     }
     Output.shared.emit(resultLine("golden", options, "summary=1 failed=\(failed)"))
 }
 
 private func emitGolden(_ kind: String, _ name: String, _ want: Int64, _ workers: Int, _ r: Headless.Outcome,
-                        _ thermalStart: String, _ options: LaunchOptions) -> Int {
+                        _ thermalStart: String, _ options: LaunchOptions, _ usage: String = "") -> Int {
     let got: String
     var ok = 0
     switch r.checksum {
@@ -92,7 +94,7 @@ private func emitGolden(_ kind: String, _ name: String, _ want: Int64, _ workers
     }
     let qos = r.report.first { $0.name == "qos" }?.value ?? "-"
     Output.shared.emit(resultLine("golden", options,
-        "kind=\(kind) kernel=\(name) workers=\(workers) checksum=\(got) expected=\(workers == 1 ? "\(want)" : "-") ok=\(ok) ms=\(f1(r.milliseconds)) qos=\(qos) thermal_start=\(thermalStart)"))
+        "kind=\(kind) kernel=\(name) workers=\(workers) checksum=\(got) expected=\(workers == 1 ? "\(want)" : "-") ok=\(ok) ms=\(f1(r.milliseconds)) qos=\(qos) thermal_start=\(thermalStart)" + usage))
     return ok == 0 ? 1 : 0
 }
 
