@@ -318,7 +318,7 @@ func fallbackRecord(_ vm: VMPointer, _ cause: FullCause) -> FallbackRecord? {
     r.blocksInUse = f.blocksInUse
     r.softLimitBlocks = f.softLimitBlocks
     r.largeFailure = f.lastLargeFailure
-    r.markerQoS = unsafe m.pointee.qos
+    r.markerQoS = unsafe mk.pointee.qosNow.pointee.load(ordering: .relaxed)
     r.wantUserInitiated = unsafe mk.pointee.wantUserInitiated.pointee.load(ordering: .relaxed)
     return r
 }

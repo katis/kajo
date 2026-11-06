@@ -370,6 +370,10 @@ struct MarkingLog {
     /// cycle (`waitForMarkingCycle`), under their own lock.
     let waits: UnsafeMutablePointer<AllocationWaits>
     let waitsLock: UnsafeMutablePointer<pthread_mutex_t>
+    /// Large bytes: the marker thread's QoS as it last set it, for readers
+    /// on other threads (the fallback record); the marker's own `qos` is
+    /// written outside stops.
+    let qosNow: UnsafeMutablePointer<Atomic<UInt32>>
     /// The VM is shutting down: the marker abandons its work at its next poll.
     let stopping: UnsafeMutablePointer<Atomic<Bool>>
     /// The marker thread (the host starts and joins it) and its Mach port.

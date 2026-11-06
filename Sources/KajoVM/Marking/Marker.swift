@@ -243,6 +243,7 @@ func markCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     if outcome != .done { return }
     unsafe perturb(vm, mw)  // before the final-mark request
     unsafe m.pointee.qos = qos_class_self().rawValue
+    unsafe mk.pointee.qosNow.pointee.store(m.pointee.qos, ordering: .relaxed)
     unsafe stopWorld(vm, mw, retry: true) { stop in unsafe runFinalMark(vm, mk, stop, cycle: cycle) }
 }
 
@@ -260,6 +261,7 @@ func applyWantedQoS(_ mk: MarkingPointer) {
     if unsafe m.pointee.qos == target.rawValue { return }
     pthread_set_qos_class_self_np(target, 0)
     unsafe m.pointee.qos = qos_class_self().rawValue
+    unsafe mk.pointee.qosNow.pointee.store(m.pointee.qos, ordering: .relaxed)
     if want { unsafe m.pointee.escalations &+= 1 } else { unsafe m.pointee.lowerings &+= 1 }
 }
 
@@ -276,6 +278,7 @@ func markerLoop(_ vm: VMPointer, _ mk: MarkingPointer) {
     let mw = unsafe mk.pointee.markerWorker
     unsafe mk.pointee.machThread.pointee.store(pthread_mach_thread_np(pthread_self()), ordering: .relaxed)
     unsafe m.pointee.qos = qos_class_self().rawValue
+    unsafe mk.pointee.qosNow.pointee.store(m.pointee.qos, ordering: .relaxed)
     unsafe pthread_mutex_lock(mk.pointee.lock)
     while true {
         let q = unsafe mk.pointee.queue
