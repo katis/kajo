@@ -252,6 +252,19 @@ were not re-measured on the A15. The decision above (accepted, variant B)
 stands on the iPhone 17 Pro measurements; nothing on the 13 Pro
 contradicts it.
 
+Measured (iPad, 2026-11-06): the iPad Pro 12.9-inch 3rd generation (A12X,
+4 performance and 4 efficiency cores), the same scripts and kernels, three
+runs, every checksum the published one (docs/modules/shells.md): walk
+5452, 2821, 999 ms at 1, 2 and 6 workers; sends 3683, 1941, 952; ivars
+2661, 1460, 697; alloc 5731, 3078, 1617; fib 2622, 1384, 670; Smalltalk
+sends 3078, 1621, 783. At one worker walk is 1.47 times the A15's time
+and the compute kernels 1.24 to 1.40 (alloc 1.62): on the A12X the
+table's hop costs relatively more than on the A15, about as much as
+closures (1.47); walk scales 5.5x to six workers on four performance
+cores. One of walk's three one-worker launches was 15 percent slower
+(6248 against 5446 and 5452). Still whole kernels, not a direct-pointer
+A/B.
+
 ## Built (10): large objects (2026-11-05)
 
 Module 10 (docs/modules/large-objects.md) lifts module 1's "bodies never

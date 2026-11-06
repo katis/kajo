@@ -3,7 +3,11 @@
 Status: built 2026-11-04, on the Mac; on the iPhone 13 Pro 2026-11-04
 18:40 to 18:56, after the owner signed Xcode in to the team: the build,
 the kernel tests (179 of 179) and the whole matrix ran through the scripts
-unchanged ("The iPhone 13 Pro" under Measurements). Module 9 of `docs/PLAN.md` is split: 9a (this) is
+unchanged ("The iPhone 13 Pro" under Measurements); on the iPad Pro
+12.9-inch (3rd generation) 2026-11-06 07:02 to 07:31, once it signed: the
+kernel tests (202 of 202), the whole matrix and the scenarios at 5 and at
+7 workers, every frame kept but the ring under the stop-the-world scavenge
+at 7 workers ("The iPad Pro" under Measurements). Module 9 of `docs/PLAN.md` is split: 9a (this) is
 the native shells that run the kernel image on macOS and on the iPhone, the
 host surface they need, the first native view wrappers (ADR 0010,
 proposed), and the device measurements ADRs 0003 to 0008 wait for; 9b, the
@@ -270,7 +274,10 @@ timestamp. Since 2026-11-06 the iOS app targets the iPhone and the iPad
 both, nothing else changed), for the iPad Pro 12.9-inch (3rd generation,
 A12X: 4 performance and 4 efficiency cores, 120 Hz) attached to the mini;
 `DEVICE=<UDID>` points `scripts/device.sh` and `shell-matrix.sh device`
-at it.
+at it. The iPad (iPadOS 26.7.2, `cores=8`, ProMotion at 120 Hz) built,
+signed and ran every mode on 2026-11-06 with nothing changed for it: the
+same full-screen window, 119.9 to 120.0 Hz delivered, the shell's code unchanged from the
+iPhone's build (DerivedData `$TMPDIR/kajo-shell-ipad`).
 
 **Modes** (`key=value` launch arguments; every mode prints one result line
 per run with `thermal`, `footprint_mb`, `footprint_peak_mb`, `avail_mb`):
@@ -348,10 +355,11 @@ Again on the iPhone on 2026-11-06 (c2de63f, module 10's kernel): 202
 tests, 198 passed, 1 failed and 3 errors, all four in 9c's
 `ViewWrapperTest`, in 5348 ms at nominal (`docs/modules/phone-transport.md`,
 "On the devices"; the macOS shell's tests mode fails three of the same
-four, 199 of 202). **The iPad Pro's rows** (its kernel tests and the whole
-matrix, the scenarios at 5 and at 7 workers) **did not run**: its build
-failed at signing, "No Accounts" and a team profile that does not include
-the iPad; Xcode's account is the owner's to add.
+four, 199 of 202; since 815b512 202 of 202 on every host). **On the
+iPad Pro** (`DEVICE=00008027-0012592C0185002E scripts/device.sh tests`,
+2026-11-06 07:02, d70cda2's build, the kernel of 815b512): **202 tests,
+202 passed** in 7083 ms, thermal nominal, peak footprint 59 MB
+(`ViewWrapperTest` included: `View class>>supports:` asked UIKit).
 
 ### The kernels in the shell
 
@@ -362,44 +370,44 @@ six, on both machines. The 8c column is `kajo run` on the same Mac (module 8c's 
 experiments/device-measurement's VMR at one worker where it ran the same
 kernel.
 
-| kernel | workers | macOS shell | 8c `kajo run` | iPhone 13 Pro | iPhone 17 Pro |
-|---|--:|--:|--:|--:|--:|
-| alloc | 1 | 2956 [2950–2958] | 2958 | 3544 [3228–3565] | - |
-| alloc | 2 | 1527 [1522–1530] | - | 2336 [2029–2543] | - |
-| alloc | 6 | 550 [548–551] | - | 1588 [1399–1749] | - |
-| arith | 1 | 2568 [2567–2570] | 2550 | 2722 [2674–2756] | - |
-| arith | 2 | 1322 [1321–1323] | - | 1573 [1473–1763] | - |
-| arith | 6 | 454 [453–456] | - | 802 [747–814] | - |
-| closures | 1 | 3717 [3711–3718] | - | 4500 [4065–4594] | - |
-| closures | 2 | 1887 [1881–1888] | - | 3102 [2534–3446] | - |
-| closures | 6 | 635 [633–639] | - | 1664 [1411–1756] | - |
-| fib | 1 | 1697 [1697–1702] | 1720 | 1874 [1800–1886] | - |
-| fib | 2 | 860 [859–867] | - | 1080 [1015–1189] | - |
-| fib | 6 | 292 [291–294] | - | 602 [591–650] | - |
-| floats | 1 | 3215 [3214–3216] | - | 3670 [3447–3695] | - |
-| floats | 2 | 1622 [1617–1624] | - | 2422 [2055–2728] | - |
-| floats | 6 | 549 [548–550] | - | 1358 [1199–1463] | - |
-| ivars | 1 | 1983 [1978–1984] | 1979 | 2147 [2071–2238] | - |
-| ivars | 2 | 1002 [1002–1004] | - | 1368 [1184–1371] | - |
-| ivars | 6 | 339 [337–340] | - | 683 [629–712] | - |
-| sends | 1 | 2584 [2580–2598] | 2588 | 2903 [2710–3000] | - |
-| sends | 2 | 1312 [1302–1315] | - | 1737 [1588–1952] | - |
-| sends | 6 | 444 [442–444] | - | 902 [843–940] | - |
-| storeheavy | 1 | 2423 [2413–2430] | 2401 | 2626 [2521–2717] | - |
-| storeheavy | 2 | 1225 [1223–1231] | - | 1714 [1464–1833] | - |
-| storeheavy | 6 | 414 [413–415] | - | 873 [808–920] | - |
-| walk | 1 | 3620 [3554–3639] | - | 3710 [3542–3715] | - |
-| walk | 2 | 1766 [1761–1773] | - | 2242 [1873–2355] | - |
-| walk | 6 | 373 [372–383] | - | 892 [844–948] | - |
-| Smalltalk closures | 1 | 3815 [3810–3823] | 3823 | 4598 [4214–4610] | - |
-| Smalltalk closures | 2 | 1932 [1932–1937] | - | 3047 [2632–3371] | - |
-| Smalltalk closures | 6 | 652 [651–654] | - | 1602 [1425–1697] | - |
-| Smalltalk ivars | 1 | 1982 [1977–1982] | 1975 | 2168 [2067–2230] | - |
-| Smalltalk ivars | 2 | 1002 [999–1003] | - | 1362 [1208–1443] | - |
-| Smalltalk ivars | 6 | 338 [338–340] | - | 625 [625–650] | - |
-| Smalltalk sends | 1 | 2307 [2301–2319] | 2267 | 2523 [2408–2562] | - |
-| Smalltalk sends | 2 | 1160 [1156–1181] | - | 1610 [1403–1735] | - |
-| Smalltalk sends | 6 | 388 [386–391] | - | 795 [740–810] | - |
+| kernel | workers | macOS shell | 8c `kajo run` | iPhone 13 Pro | iPad Pro (3rd gen.) | iPhone 17 Pro |
+|---|--:|--:|--:|--:|--:|--:|
+| alloc | 1 | 2956 [2950–2958] | 2958 | 3544 [3228–3565] | 5731 [5720–5739] | - |
+| alloc | 2 | 1527 [1522–1530] | - | 2336 [2029–2543] | 3078 [3073–3364] | - |
+| alloc | 6 | 550 [548–551] | - | 1588 [1399–1749] | 1617 [1604–2348] | - |
+| arith | 1 | 2568 [2567–2570] | 2550 | 2722 [2674–2756] | 3458 [3457–3461] | - |
+| arith | 2 | 1322 [1321–1323] | - | 1573 [1473–1763] | 1857 [1856–1860] | - |
+| arith | 6 | 454 [453–456] | - | 802 [747–814] | 889 [841–1016] | - |
+| closures | 1 | 3717 [3711–3718] | - | 4500 [4065–4594] | 6619 [6618–6627] | - |
+| closures | 2 | 1887 [1881–1888] | - | 3102 [2534–3446] | 3487 [3482–4340] | - |
+| closures | 6 | 635 [633–639] | - | 1664 [1411–1756] | 1813 [1672–2628] | - |
+| fib | 1 | 1697 [1697–1702] | 1720 | 1874 [1800–1886] | 2622 [2622–2623] | - |
+| fib | 2 | 860 [859–867] | - | 1080 [1015–1189] | 1384 [1384–1387] | - |
+| fib | 6 | 292 [291–294] | - | 602 [591–650] | 670 [649–823] | - |
+| floats | 1 | 3215 [3214–3216] | - | 3670 [3447–3695] | 4736 [4734–4736] | - |
+| floats | 2 | 1622 [1617–1624] | - | 2422 [2055–2728] | 2494 [2493–3232] | - |
+| floats | 6 | 549 [548–550] | - | 1358 [1199–1463] | 1436 [1312–2143] | - |
+| ivars | 1 | 1983 [1978–1984] | 1979 | 2147 [2071–2238] | 2661 [2661–2662] | - |
+| ivars | 2 | 1002 [1002–1004] | - | 1368 [1184–1371] | 1460 [1402–1649] | - |
+| ivars | 6 | 339 [337–340] | - | 683 [629–712] | 697 [696–984] | - |
+| sends | 1 | 2584 [2580–2598] | 2588 | 2903 [2710–3000] | 3683 [3683–3684] | - |
+| sends | 2 | 1312 [1302–1315] | - | 1737 [1588–1952] | 1941 [1939–2010] | - |
+| sends | 6 | 444 [442–444] | - | 902 [843–940] | 952 [922–1330] | - |
+| storeheavy | 1 | 2423 [2413–2430] | 2401 | 2626 [2521–2717] | 3265 [3264–3266] | - |
+| storeheavy | 2 | 1225 [1223–1231] | - | 1714 [1464–1833] | 1721 [1717–1776] | - |
+| storeheavy | 6 | 414 [413–415] | - | 873 [808–920] | 860 [857–1207] | - |
+| walk | 1 | 3620 [3554–3639] | - | 3710 [3542–3715] | 5452 [5446–6248] | - |
+| walk | 2 | 1766 [1761–1773] | - | 2242 [1873–2355] | 2821 [2805–3215] | - |
+| walk | 6 | 373 [372–383] | - | 892 [844–948] | 999 [990–1262] | - |
+| Smalltalk closures | 1 | 3815 [3810–3823] | 3823 | 4598 [4214–4610] | 6742 [6742–6743] | - |
+| Smalltalk closures | 2 | 1932 [1932–1937] | - | 3047 [2632–3371] | 3545 [3544–4625] | - |
+| Smalltalk closures | 6 | 652 [651–654] | - | 1602 [1425–1697] | 1911 [1693–2615] | - |
+| Smalltalk ivars | 1 | 1982 [1977–1982] | 1975 | 2168 [2067–2230] | 2653 [2653–2654] | - |
+| Smalltalk ivars | 2 | 1002 [999–1003] | - | 1362 [1208–1443] | 1399 [1398–1645] | - |
+| Smalltalk ivars | 6 | 338 [338–340] | - | 625 [625–650] | 690 [685–906] | - |
+| Smalltalk sends | 1 | 2307 [2301–2319] | 2267 | 2523 [2408–2562] | 3078 [3071–3078] | - |
+| Smalltalk sends | 2 | 1160 [1156–1181] | - | 1610 [1403–1735] | 1621 [1620–1938] | - |
+| Smalltalk sends | 6 | 388 [386–391] | - | 795 [740–810] | 783 [775–1212] | - |
 
 The iPhone 13 Pro column: the iOS shell, Release, three runs interleaved
 over 18:42 to 18:48, thermal nominal for the first run and fair for the
@@ -411,6 +419,24 @@ Pro's "twice the M2 Max". At six workers it is 2.0 to 2.9 times the Mac's
 time: fib scales 3.1x from one worker to six, walk 4.2x, alloc 2.2x, with
 two performance cores. walk's three one-worker runs (3542 to 3715 ms) show
 no second regime (AGENTS.md's slow single-thread regime).
+
+The iPad Pro column (A12X: 4 performance and 4 efficiency cores; the
+same scripts with `DEVICE=` the iPad, `ipad-rest/` of the 2026-11-06 run,
+07:15 to 07:30 after a 5 minute cooling wait): every checksum the published
+one at one worker and the same in every run at two and six. Thermal fair
+and nominal at one and two workers, serious in some six-worker runs
+(their ranges' upper ends). At one worker the A12X is 1.24 to 1.62 times
+the A15's time (ivars and storeheavy 1.24, sends and arith 1.27, fib 1.40,
+walk and closures 1.47, alloc 1.62) and 1.35 to 1.94 times the M2 Pro's;
+with four performance cores it scales further, so at six workers it is
+within 2 to 12 percent of the iPhone (fib 670 against 602, walk 999
+against 892, alloc 1617 against 1588): fib 3.9x from one worker to six,
+walk 5.5x, alloc 3.5x. walk at one worker had one run of three 15 percent
+slower (6248 against 5446 and 5452 ms); fib's 21 one-worker launches (the
+drift checks and the golden part) were 2620 to 2635 ms but for three right
+after a scenario block (2788 at fair, 2974 and 2663 at serious), so the
+iPad shows no stable second regime either, only the occasional slow
+launch, and no thermal slowdown (below).
 
 ### The scenarios on the Mac's display
 
@@ -539,23 +565,102 @@ What the phone showed that the Mac did not:
   `timestamp` there is later than the moment the callback runs, so it is
   not the Mac's lateness and is not reported.
 
+### The scenarios on the iPad Pro's display
+
+The same matrix on the iPad Pro 12.9-inch (3rd generation, iPad8,5, A12X:
+4 performance and 4 efficiency cores, iPadOS 26.7.2, ProMotion at
+`maximumFramesPerSecond` 120, 119.9 to 120.0 Hz delivered in every
+scenario run but the control and the ring under the oracle at 7 workers),
+`DEVICE=00008027-0012592C0185002E scripts/shell-matrix.sh device`,
+2026-11-06 on d70cda2's build, three runs interleaved. The brief asked
+for the scenarios once at 5 background workers and once at 7 (`ipad-w5/`
+07:02 to 07:09, `ipad-w7/` 07:09 to 07:16, each between fib drift
+checks). **5 workers is the configuration for everything else** (the
+golden kernels are 1, 2 and 6 by the script; events and hog ran at 5):
+it is the iPhone's, so the two devices compare row for row, and at 7 the
+background workers and the main thread take all eight cores, so the
+collector and marker share cores with workers and the ring under the
+stop-the-world scavenge misses frames (below), a measure of
+oversubscription rather than of the collectors. Thermal: nominal at the
+start of the 5-worker block and fair from its second run; fair through
+the 7-worker block and serious at its end.
+
+5 background workers:
+
+| scenario | young | missed of 1200 | max gap ms | stopped for others ms/10 s | own ms/10 s | acks other (mean µs) | preemptions | collector P | marker P | power W | peak MB |
+|---|---|--:|--:|--:|--:|---|--:|--:|--:|--:|--:|
+| idle | offload | 0 | 8.4 [8.3–8.4] | 0.0 | 0.0 | 0 (-) | 1265 [1265–1266] | 0.00 | 0.00 | 0.0 | 27 [27–27] |
+| storm | stw | 0 | 8.3 [8.3–8.4] | 474.9 [468.9–549.9] | 0.0 | 0 (-) | 9956 [9914–11182] | - | 0.00 | 0.7 [0.6–0.7] | 553 [532–564] |
+| storm | local | 0 | 8.4 [8.3–8.4] | 53.7 [51.6–59.8] | 0.0 | 1366 [1332–1544] (31) | 10402 [9556–10801] | - | 0.00 | 0.9 [0.8–1.0] | 707 [608–747] |
+| storm | offload | 0 | 8.3 | 53.3 [51.7–54.0] | 0.0 | 1562 [1259–1615] (34) | 10279 [9720–10649] | 0.00 | 0.00 | 0.9 [0.8–1.0] | 663 [656–665] |
+| ring | stw | 0 | 8.4 [8.3–8.4] | 1243.6 [1242.9–1315.3] | 0.0 | 0 (-) | 9621 [9128–9706] | - | 0.00 | 1.2 [1.1–1.5] | 502 [498–508] |
+| ring | local | 0 | 8.3 [8.3–8.4] | 100.5 [99.0–107.7] | 0.0 | 2364 [2216–2451] (36) | 10209 [10026–10432] | - | 0.00 | 1.1 [1.0–1.2] | 551 [526–555] |
+| ring | offload | 0 | 8.4 [8.3–8.4] | 92.6 [92.1–106.1] | 0.0 | 2224 [2145–2461] (35) | 10259 [10089–10440] | 0.00 | 0.00 | 1.1 [1.0–1.1] | 544 [535–548] |
+| share | stw | 0 | 8.3 [8.3–8.4] | 71.3 [69.4–76.1] | 0.0 | 0 (-) | 11661 [11647–11668] | - | 0.00 | 0.5 [0.5–0.5] | 46 [46–47] |
+| share | local | 0 | 8.3 [8.3–8.4] | 70.2 [58.1–71.2] | 0.0 | 1726 [1644–1769] (43) | 11595 [11595–11613] | - | 0.00 | 0.8 [0.8–0.9] | 45 [45–46] |
+| share | offload | 0 | 8.4 [8.3–8.4] | 64.4 [63.8–67.0] | 0.0 | 1824 [1565–1961] (39) | 11603 [11592–11610] | 0.00 | 0.00 | 0.8 [0.7–0.9] | 45 [45–46] |
+
+7 background workers (stopped for others, ms per 10 s, and frames missed;
+every other row 0 missed with max gap 8.3 to 8.4 ms):
+
+| scenario | stw | local | offload |
+|---|--:|--:|--:|
+| storm | 474.6 [464.2–530.5] | 64.7 [60.7–77.4] | 80.0 [50.7–82.9] |
+| ring | 1418.2 [1279.6–1424.8], **23 [7–30] missed**, max gap 19.6 [16.7–25.0] ms | 118.7 [96.6–136.5] | 117.2 [107.2–154.6] |
+| share | 78.7 [77.6–85.5] | 78.5 [74.0–82.8] | 77.9 [66.8–84.9] |
+
+What the iPad showed:
+
+- **No frame missed at 5 workers in any scenario and mode**, the oracle's
+  ring included (the iPhone missed 2 there): the ring's stop-the-world
+  scavenges were 6.3 to 6.7 ms at p50 and the longest main-thread turn
+  13.4 to 13.6 ms, inside a frame and its slack. At 7 workers the same
+  row's scavenges grew to 9.1 to 10.5 ms p50, the longest turn to 17.7 to
+  21.1 ms, and it missed 7 to 30 frames; young collection without
+  stopping the world missed none at 7 either.
+- **Against stop-the-world**, young collection stops the main thread 9
+  times less under the storm (53 to 54 against 475 ms per 10 s) and 12 to
+  13 times less under the ring (93 to 101 against 1244); about the
+  iPhone's ratios (10 and 15 to 16). **share is even** on the iPad (64
+  to 70 against 71 at 5 workers, 78 to 79 against 79 at 7), between the
+  Mac (worse) and the iPhone (half): the oracle's scavenges are cheaper
+  here (0.57 to 0.60 ms p50 against the iPhone's 0.99), the
+  acknowledgements slower (39 to 43 µs mean against 30).
+- **Four performance cores change where the work runs**: the five
+  workers ran 74 to 77 percent of their CPU on performance cores (the
+  iPhone's 34 to 36 with two), 56 to 61 percent at 7 workers; the main
+  thread 93 to 100 percent under load and 3 to 9 percent idle. The marker
+  at utility stayed on the efficiency cores (P share 0.00) and never fell
+  back (0 fallbacks, 0 aborts in all 60 scenario runs).
+- The final mark with young collection on: max 4.8 to 8.6 ms at 5
+  workers (8.4 to 16.5 at 7), against 0.26 to 0.56 under the oracle; as on
+  the iPhone it cost no frame and was not investigated.
+- Power (`ri_energy_nj`, process CPU only): 0.5 to 1.2 W with five busy
+  workers, about a third to a half of the iPhone's 1.8 to 3.4 W (which ran
+  at serious; these rows at nominal and fair). Neither counts DRAM, the
+  display or the render server, and the reading on iPadOS 26 has not been
+  checked against another source.
+- Peak footprint as on the iPhone: 27 MB idle, 45 to 58 MB share, 553 to
+  747 MB storm, 498 to 620 MB ring.
+
 Beside module 7's headless matrix (M2 Max, 8 background workers, the
 driver loop's stopped time per 10 s) and the iPhone 17 Pro scenarios of
-experiments/device-measurement (Part C after cooling, 5 workers) and the
-iPhone 13 Pro above (5 workers, thermal serious):
+experiments/device-measurement (Part C after cooling, 5 workers), the
+iPhone 13 Pro above (5 workers, thermal serious) and the iPad Pro (5
+workers, nominal and fair):
 
-| main thread stopped for others, ms per 10 s | macOS shell (M2 Pro, 7 workers) | module 7 headless (M2 Max, 8) | iPhone 17 Pro (5) | iPhone 13 Pro (5) |
-|---|--:|--:|--:|--:|
-| storm stw | 338² | 708 | 108 | 464 |
-| storm local | 87 | 134 | 25 | 43 |
-| storm offload | 92 | 129 | 29 | 48 |
-| ring stw | 1381¹ | 2273 | - | 1252 |
-| ring local | 148¹ | 206 | 1.6 | 76 |
-| ring offload | 153¹ | 185 | - | 81 |
-| share stw | 89² | 139 | - | 113 |
-| share local | 104 | 195 | - | 55 |
-| share offload | 104 | 203 | - | 54 |
-| frames missed (any mode) | 0, ring stw 143¹ | n/a | storm stw 1, others 0 | 0, ring stw 2 (1 to 4) |
+| main thread stopped for others, ms per 10 s | macOS shell (M2 Pro, 7 workers) | module 7 headless (M2 Max, 8) | iPhone 17 Pro (5) | iPhone 13 Pro (5) | iPad Pro (5) |
+|---|--:|--:|--:|--:|--:|
+| storm stw | 338² | 708 | 108 | 464 | 475 |
+| storm local | 87 | 134 | 25 | 43 | 54 |
+| storm offload | 92 | 129 | 29 | 48 | 53 |
+| ring stw | 1381¹ | 2273 | - | 1252 | 1244 |
+| ring local | 148¹ | 206 | 1.6 | 76 | 101 |
+| ring offload | 153¹ | 185 | - | 81 | 93 |
+| share stw | 89² | 139 | - | 113 | 71 |
+| share local | 104 | 195 | - | 55 | 70 |
+| share offload | 104 | 203 | - | 54 | 64 |
+| frames missed (any mode) | 0, ring stw 143¹ | n/a | storm stw 1, others 0 | 0, ring stw 2 (1 to 4) | 0 (at 7 workers ring stw 23, 7 to 30) |
 
 - **No frame missed** in any scenario but the ring under the
   stop-the-world scavenge (at 1024 MiB 6 of 1200, max gap 16.7 ms; at the
@@ -614,6 +719,28 @@ On the iPhone 13 Pro (5 background workers, thermal serious throughout):
   with events and the hog (P share 0.96 to 1.00), but only for 0.7 to 1.5
   ms of CPU per run.
 
+On the iPad Pro (5 background workers, 2026-11-06 07:24 to 07:30, thermal
+serious throughout, `ipad-rest/`):
+
+| scenario | missed of 1200 | max gap ms | event latency p50 / p99 / max ms | stuck report ms | preemptions per 10 s |
+|---|---|--:|---|--:|--:|
+| idle, 1000 events/s | 0 | 8.3 [8.3–8.4] | 0.216 / 3.66 [3.63–3.66] / 4.0 [4.0–4.0] | - | 504 [480–545] |
+| storm offload, 1000 events/s | 0 | 8.3 | 2.244 [2.237–2.258] / 6.48 [6.45–6.49] / 14.2 [13.8–14.7] | - | 13786 [13521–13833] |
+| hog on main, 1000 events/s | 0 | 8.3 | 0.250 [0.246–0.254] / 3.46 [3.45–3.46] / 3.6 [3.6–5.0] | 305 [304–308] | 2412 [2411–2413] |
+| hog, budget off (control) | 1192 | 9003.2 [9003.1–9003.2] | - | 18002 [18002–18002] | 2 |
+
+- Idle and with the hog the iPad matches the iPhone (p50 0.22 to 0.25
+  ms, p99 3.5 to 3.7, no frame missed, 2412 preemptions, the stuck report
+  at 304 to 308 ms, the control holding main for 9 s).
+- **Under the storm the event p50 is 2.24 ms**, 22 times the iPhone's
+  0.100 and the Mac's 0.043, with the p99 at 6.5 ms and the max 13.8 to
+  14.7 ms; every event was still handled and no frame missed. The main
+  thread was stopped for others 81 to 88 ms per 10 s in these runs
+  (53 in the storm row without events) and the young collector thread
+  ran 15 to 35 percent on performance cores (the iPhone's 96 to 100).
+  Where the 2 ms goes (the 1 ms timer's lateness under load on this
+  kernel, the turns it waits behind, or the collector) was not separated.
+
 ### Drift and thermal
 
 fib at one worker before and after the whole Mac matrix (three launches
@@ -627,6 +754,19 @@ fib at one worker: before 1808 [1793–1812] ms at nominal, after 2471
 matrix: up to 15 percent at serious). Every scenario, event and hog row
 but the first run of idle and storm ran at serious; the phone was not
 cooled between parts, as the script runs them. No cooled re-run was made.
+
+On the iPad Pro (2026-11-06, 0 of 198 matrix launches failed, the
+scenarios run twice): nominal at the start, fair from the second run of
+the 5-worker scenarios (07:04), serious at the end of the 7-worker
+scenarios (07:16); after a 5 minute wait the golden kernels began at
+nominal and fair and were serious from the six-worker kernels on, and
+events and hog ran at serious. **fib at one worker did not slow down**:
+2621 [2621–2624] ms at nominal before the last block and 2622
+[2621–2623] ms at serious after it; the drift checks around the scenario
+blocks were 2622 nominal before, 2620 to 2788 fair after the 5-worker
+block, 2626 to 2974 serious after the 7-worker one (the slow launches the
+first after a block). The iPhone 13 Pro lost 37 percent at serious; the
+iPad's large chassis held its one-thread clock.
 
 ### Energy and footprint (Mac)
 
@@ -645,6 +785,50 @@ with five busy workers (storm under the oracle the most). Peak
 `phys_footprint`: 31 MB idle, 56 to 58 MB share, 545 to 683 MB storm, 535
 to 562 MB ring (600 MiB heap); `os_proc_available_memory` stayed at 2.4 to
 3.0 GB. The kernel tests peaked at 66 MB.
+
+On the iPad Pro (the same reading; idle at nominal and fair, the rest at
+serious): 0.016 to 0.019 W idle, 0.11 W with 1000 events per second, 0.13
+W with the hog preempted every turn, 0.04 W with the main thread held by
+the control, 0.5 to 1.2 W with five busy workers. The hog and control
+rows are a tenth to a fiftieth of the iPhone's for a main thread that
+runs flat out on a performance core, which looks too low to be the whole
+process's CPU energy; until it is checked against another source the
+iPad's power column compares iPad rows with each other only. Peak
+`phys_footprint`: 27 MB idle, 45 to 58 MB share, 532 to 747 MB storm, 498
+to 620 MB ring; `os_proc_available_memory` 2.1 to 2.8 GB. The kernel
+tests peaked at 59 MB.
+
+### The large-object churn on the devices
+
+Module 10's `scenario=large` (docs/modules/large-objects.md, "Frames
+while a Process allocates and drops large objects") is not in the
+matrix script; it ran on both devices as the Mac ran it, `scripts/device.sh
+run ... mode=scenario scenario=large seconds=10` with the shell's defaults
+(5 workers, offload, concurrent marking, relocation on), three launches
+each interleaved with `scenario=idle`, 2026-11-06 (iPhone 07:26 to 07:28
+after its remote-session rows, iPad 07:30 to 07:31 after its matrix; both
+at **thermal serious** in every launch). The iPhone had not run it before.
+
+| device | missed of 1200 | longest turn ms | main stopped by others ms/10 s | stops per 10 s | marking cycles | final mark p50 / max ms | counted fallbacks | power W | peak MB |
+|---|--:|--:|--:|--:|--:|---|--:|--:|--:|
+| iPhone 13 Pro, large | 0, 0, 0 | 3.0 [3.0–3.4] | 117.0 [113.2–124.7] | 2167 [2064–2175] | 784 [748–785] | 0.40 to 0.42 / 1.92 [1.46–2.31] | 2, 0, 1 | 3.4 [3.0–3.4] | 541 [538–542] |
+| iPhone 13 Pro, idle | 0, 0, 0 | 3.3 [3.3–3.4] | 0 | 0 | 0 | - | 0 | 0.015 | 32 [32–33] |
+| iPad Pro, large | 0, 0, 0 | 4.2 [4.0–4.3] | 160.0 [152.7–165.5] | 1437 [1427–1440] | 521 [516–522] | 0.51 to 0.53 / 2.57 [2.54–2.92] | 0, 0, 1 | 0.22 | 522 [518–526] |
+| iPad Pro, idle | 0, 0, 0 | 3.7 [3.6–3.9] | 0 | 0 | 0 | - | 0 | 0.016 [0.016–0.019] | 27 [27–28] |
+| Mac mini (module 10), large | 0, 0, 0 | 2.5 to 2.8 | 59 to 67 | 2220 to 2240 | 811 to 819 | 0.16 p50 / 0.79 p99 | 0 | - | 434 to 440 |
+
+- **0 frames missed on both devices**, the bar 9a set, with every cycle
+  started by a large allocation (`byFloor` equal to the cycle count in
+  every run) and no full collection.
+- The main thread is stopped about twice the Mac's time (117 and 160
+  against 59 to 67 ms per 10 s) for fewer stops; the iPad's stops are
+  longer (fewer cycles, 521 against the iPhone's 784, at a slower churn).
+- **Three of the six device runs counted fallbacks** (the iPhone 2 and 1,
+  the iPad 1; the other three none): module 5's `fallbacksIdle`, each
+  run with as many stop-the-world scavenges, none of them costing a frame.
+  The Mac's runs counted none. A churn of large objects at a phone's
+  speed can outrun the trigger on old space now and then; it is counted,
+  as module 5 requires, and left for the owner (open questions).
 
 ### The kernels against the starting commit
 
@@ -727,6 +911,12 @@ switch.
   scenario row ran at fair or serious.
 - Why the final mark is 7 to 17 ms at most on the phone with young
   collection on, against under 0.6 ms with the stop-the-world scavenge.
+  The iPad shows the same (4.8 to 8.6 ms at 5 workers, 8.4 to 16.5 at 7).
+- Why the iPad's event p50 under the storm is 2.2 ms (the iPhone's 0.10),
+  and whether its `ri_energy_nj` covers the whole process (its hog and
+  control rows read a tenth to a fiftieth of the iPhone's).
+- The iPad's events and hog rows at nominal (they ran at serious; its one
+  thread kept its clock there, its multi-thread rows were not re-run).
 - Energy beyond the process's CPU (DRAM, display, render server).
 - The re-entrancy guard for nested run loops (ADR 0004): the shells run no
   modal loop.
@@ -880,6 +1070,7 @@ on logged. "Load" is twelve `yes` busy loops.
 | the iPhone build (`scripts/device.sh build`) | pass on 7df0e5e after the owner's sign-in (2026-11-04 18:40): signed, built, installed; at ad81366 it failed before compiling, "No Accounts" (What needs the owner) |
 | the kernel tests on the iPhone (`scripts/device.sh tests`) | pass on 7df0e5e: 179 of 179 in 2223 ms, UIKit behind ViewTest; in the macOS shell (ad81366): 141 of 141; on c2de63f (2026-11-06): 198 of 202, the four failures 9c's ViewWrapperTest (Measurements) |
 | the iPad Pro build (`DEVICE=00008027-0012592C0185002E scripts/device.sh build`, 2026-11-06, c2de63f) | **failed at signing**: "No Accounts", and the team profile does not include the iPad; nothing ran on the iPad |
+| the iPad Pro, later on 2026-11-06 (d70cda2's build, signed once the owner added the iPad) | kernel tests 202 of 202 in 7083 ms; the matrix 198 launches, 0 failed; the large churn 6 launches (Measurements) |
 
 ## Commands
 

@@ -395,3 +395,18 @@ modes of a scenario ran back to back in each run.
 
 The table the acceptance question above waited for now exists for the
 iPhone 13 Pro; the decision stays the owner's.
+
+Measured (iPad, 2026-11-06): the iPad Pro 12.9-inch 3rd generation (A12X:
+4 performance and 4 efficiency cores), the same matrix at 5 background
+workers, thermal nominal then fair (docs/modules/shells.md). Main thread
+stopped for others, ms per 10 s, stop-the-world / local / offload: storm
+475 (469 to 550) / 54 (52 to 60) / 53 (52 to 54); ring 1244 (1243 to
+1315) / 101 (99 to 108) / 93 (92 to 106); share 71 (69 to 76) / 70 (58 to
+71) / 64 (64 to 67). 0 frames missed in every row. share is even on the
+iPad (the oracle's scavenges 0.57 to 0.60 ms p50, the acknowledgements
+39 to 43 µs mean). The marker at utility stayed on the efficiency cores
+(P share 0.00), 0 fallbacks and 0 aborts in 60 scenario runs; the
+workers ran 74 to 77 percent on performance cores. At 7 workers (every
+core busy) local and offload still missed nothing while the ring under
+the oracle missed 23 (7 to 30): storm 475 / 65 / 80, ring 1418 / 119 /
+117, share 79 / 79 / 78.

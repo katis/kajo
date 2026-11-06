@@ -42,6 +42,18 @@ network permission for the shell, not yet given on the phone. The iPad Pro
 attached the same day could not be built for (its signing needs Xcode's
 account, below).
 
+**2026-11-06 07:16 to 07:45, the client rows.** With Local Network
+allowed on the Mac and the iPad signed, section 3 ran on both devices:
+74 sessions from the Mac's tools over Wi-Fi (51 to the iPhone 13 Pro by
+address and by Bonjour name, 23 to the iPad Pro by address), every one
+ended with no failure, the debugger's define-and-retry and the dropped
+link included, and neither device missed a frame while serving a client,
+idle or under the ring. Small requests take 4 to 10 ms over Wi-Fi, the
+debugger's define-and-retry 0.23 to 0.31 s, a dropped link is whole again
+in 1.18 to 1.21 s. The iPad's Bonjour advertisement was never seen (its
+local network permission, the owner's), so its rows are by address only
+("On the devices"). The class tree keeps the push form.
+
 New: `Sources/KajoDev/Transport.swift` (the address forms, one stream
 opener for every transport, the TXT record, Bonjour advertising,
 resolving and browsing, the machine's addresses),
@@ -504,6 +516,215 @@ serving), 2026-11-05 12:42 to 12:53, thermal fair:
 
 ### On the devices
 
+**The client rows, 2026-11-06 07:16 to 07:45**, on d70cda2's build of the
+iOS shell (the phone and the iPad as `scripts/device.sh build` made them
+that day) and the macOS shell as client on the mini's display, Local
+Network allowed for the session by the owner. `scripts/remote-session.sh
+device <out> <scenario>-<form>-<run> <scenario> <form> 6`, sessions
+bounded by the script's 14 s window (4 or 5 a launch), the target in
+`mode=serve protocol=tcp:47100` for 20 s after 1 s of warmup with the
+default 5 background workers and offload young collection, three runs of
+every row interleaved with the control row (sessions 0) per scenario, 10 s
+between launches; the iPhone 07:16 to 07:27 (`iphone-remote/`), the iPad
+07:38 to 07:45 (`ipad-remote/`) after a 5 minute cooling wait; tables
+by `scripts/remote-report.py` per device. The iPhone 13 Pro (iOS 27.2) at
+192.168.1.103 and by its Bonjour name "Joni’s iPhone"; the iPad Pro
+12.9-inch 3rd generation (iPadOS 26.7.2) at 192.168.1.55, **by address
+only**: its `_kajo-dev._tcp` advertisement was never seen (below). The
+Mac at 192.168.1.10 on the same network.
+
+**What ran**: 51 sessions against the iPhone (26 by address, 25 by name;
+idle and ring) and 23 against the iPad (by address), **every one ended
+with no failure**: the define-and-retry step and the dropped link on every
+one, the class file written into every launch's project directory. The
+serving device kept every frame in all 30 serving launches.
+
+**The iPad's Bonjour name never appeared.** In every iPad serving launch
+the shell printed `serving=tcp port=47100 addresses=169.254.48.14,
+192.168.1.55,...` and its pairing screen, `ping 192.168.1.55` answered
+(19 to 45 ms), but `device.sh token`'s 5 s browse and a separate 10 s
+`dns-sd -B _kajo-dev._tcp local` while it served saw no service, where the
+iPhone's appeared in every launch. The likely cause is iPadOS's local
+network permission for Kajo, which the iPad may be asking for on its
+screen; nothing was answered or changed here. The token step of
+`remote-session.sh` waited for the Bonjour name even in the lan form (the
+name is only written into the targets file, never used by address), so
+the iPad's first lan rows stopped there; fixed in 7bdb024 (the lan form
+passes a placeholder name to `device.sh token`), which does not change
+what the iPhone's lan rows did. The iPad's Bonjour rows are therefore
+not measured (Not done).
+
+**Round trips over Wi-Fi** (requests per session: p50 of the sessions'
+p50s [their range] / max of their maxima, ms; Mac to Mac by LAN address
+from the table above for the comparison):
+
+| request | iPhone, idle, LAN | iPhone, ring, LAN | iPhone, idle, Bonjour | iPhone, ring, Bonjour | iPad, idle, LAN | iPad, ring, LAN | Mac to Mac, TCP 192.168.1.10 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| `class.definition` | 12: 3.9 [3.5–5.1] / 50.5 | 12: 8.2 [6.9–9.3] / 218.0 | 12: 3.8 [3.4–4.6] / 152.6 | 12: 8.1 [6.8–10.3] / 26.0 | 12: 6.9 [5.4–24.6] / 432.2 | 12: 9.9 [8.5–12.0] / 203.7 | 12: 0.8 [0.8–0.9] / 6.8 |
+| `class.hierarchy` | 5: 40.9 [38.7–55.1] / 83.8 | 5: 47.4 [42.9–50.7] / 96.0 | 5: 39.9 [38.9–48.1] / 185.4 | 5: 49.0 [44.6–60.6] / 75.4 | 5: 64.9 [41.9–479.6] / 704.2 | 5: 51.7 [42.3–88.6] / 313.3 | 5: 29.0 [26.1–30.8] / 31.6 |
+| `class.hierarchy (retried)` | 1: 1151.4 [1118.3–1226.6] / 1226.6 | 1: 1176.6 [1069.3–1261.1] / 1261.1 | 1: 1185.2 [1091.4–1210.0] / 1210.0 | 1: 1160.7 [1126.6–1226.4] / 1226.4 | 1: 1175.4 [1110.6–1319.2] / 1319.2 | 1: 1162.3 [1103.7–1373.5] / 1373.5 | 1: 1049.8 [1033.4–1050.2] / 1050.2 |
+| `class.selectors` | 14: 4.6 [3.5–5.3] / 74.5 | 14: 8.0 [6.7–9.3] / 72.5 | 14: 4.3 [3.4–5.4] / 151.2 | 14: 7.6 [6.6–8.4] / 78.3 | 14: 7.0 [6.0–15.8] / 428.0 | 14: 10.1 [8.6–11.8] / 203.3 | 14: 1.1 [1.0–1.6] / 57.6 |
+| `evaluate` | 3: 3.4 [3.0–7.3] / 26.1 | 3: 12.2 [7.6–22.4] / 40.1 | 3: 5.5 [3.1–14.3] / 37.2 | 3: 9.5 [6.9–18.6] / 26.1 | 3: 7.3 [6.0–25.6] / 88.0 | 3: 12.2 [9.8–26.3] / 104.8 | 3: 4.5 [0.7–4.6] / 8.7 |
+| `method.compile` | 4: 6.9 [5.1–9.4] / 51.8 | 4: 11.9 [8.8–18.4] / 59.1 | 4: 7.0 [5.9–8.2] / 152.9 | 4: 13.0 [9.7–23.3] / 43.2 | 4: 8.6 [6.1–14.7] / 298.2 | 4: 15.1 [10.1–22.7] / 206.3 | 4: 3.6 [3.5–5.4] / 6.7 |
+| `method.remove` | 1: 6.4 [3.3–15.4] / 15.4 | 1: 11.5 [4.1–15.6] / 15.6 | 1: 6.7 [3.3–26.1] / 26.1 | 1: 12.7 [5.5–37.8] / 37.8 | 1: 11.9 [4.5–232.1] / 232.1 | 1: 15.7 [5.3–99.7] / 99.7 | 1: 3.0 [3.0–3.1] / 3.1 |
+| `method.source` | 10: 5.4 [3.1–6.4] / 25.3 | 10: 6.9 [5.8–8.5] / 33.7 | 10: 5.0 [3.2–6.3] / 24.8 | 10: 6.7 [6.2–8.0] / 26.1 | 10: 7.1 [5.9–8.2] / 297.0 | 10: 9.0 [7.7–10.5] / 294.8 | 7: 0.6 [0.6–0.7] / 14.7 |
+| `package.list` | 4: 4.7 [4.0–14.6] / 71.7 | 4: 7.5 [5.5–13.2] / 75.1 | 4: 4.4 [3.7–13.2] / 175.8 | 4: 9.0 [5.1–15.6] / 26.8 | 4: 7.2 [5.4–98.0] / 630.8 | 4: 9.7 [7.4–16.4] / 210.0 | 4: 2.0 [1.0–2.1] / 11.4 |
+| `package.selectors` | 2: 77.2 [76.5–85.1] / 94.6 | 2: 95.6 [91.9–105.0] / 124.8 | 2: 77.4 [76.7–92.1] / 95.1 | 2: 103.0 [91.2–111.9] / 118.4 | 2: 96.9 [82.7–467.7] / 482.7 | 2: 103.2 [91.1–127.2] / 357.2 | 2: 78.1 [75.2–78.1] / 82.6 |
+| `process.frames` | 6: 78.2 [63.9–93.5] / 122.4 | 6: 78.5 [45.1–94.2] / 119.4 | 6: 71.5 [37.9–95.1] / 121.2 | 6: 73.5 [49.5–83.9] / 221.3 | 6: 65.7 [56.6–76.8] / 247.8 | 6: 62.1 [57.4–74.9] / 325.0 | 6: 42.1 [28.9–51.1] / 88.6 |
+| `process.list` | 1: 8.7 [4.4–23.4] / 23.4 | 1: 13.3 [8.0–19.5] / 19.5 | 1: 6.2 [4.6–18.5] / 18.5 | 1: 13.4 [10.3–34.2] / 34.2 | 1: 11.8 [8.1–19.2] / 19.2 | 1: 15.4 [10.6–96.2] / 96.2 | 1: 1.8 [1.0–2.0] / 2.0 |
+| `process.list (retried)` | 1: 1086.8 [1030.3–1146.5] / 1146.5 | 1: 1104.3 [1032.7–1177.7] / 1177.7 | 1: 1104.2 [1050.5–1155.1] / 1155.1 | 1: 1104.6 [1057.6–1157.9] / 1157.9 | 1: 1058.9 [1026.2–1234.1] / 1234.1 | 1: 1095.3 [1024.4–1291.1] / 1291.1 | 1: 1006.5 [1006.4–1008.6] / 1008.6 |
+| `process.restart` | 1: 3.1 [2.7–4.8] / 4.8 | 1: 7.4 [5.0–10.2] / 10.2 | 1: 3.1 [2.7–24.9] / 24.9 | 1: 6.6 [3.8–24.8] / 24.8 | 1: 5.7 [3.4–7.7] / 7.7 | 1: 9.0 [4.9–23.1] / 23.1 | 1: 0.6 [0.5–0.6] / 0.6 |
+| `process.retrySend` | 1: 26.4 [3.2–35.9] / 35.9 | 1: 31.0 [12.3–47.4] / 47.4 | 1: 28.2 [3.1–44.4] / 44.4 | 1: 29.3 [7.0–44.1] / 44.1 | 1: 23.6 [4.5–39.7] / 39.7 | 1: 34.8 [29.2–216.0] / 216.0 | 1: 20.0 [20.0–25.1] / 25.1 |
+| `process.step` | 2: 5.1 [3.2–9.7] / 27.2 | 2: 7.0 [5.5–8.3] / 17.8 | 2: 5.4 [3.1–6.4] / 13.8 | 2: 7.1 [6.3–9.1] / 30.0 | 2: 6.7 [3.4–11.3] / 351.5 | 2: 9.5 [6.3–12.6] / 83.9 | 2: 2.0 [0.5–4.2] / 5.7 |
+| `process.terminate` | 1: 9.1 [3.6–24.3] / 24.3 | 1: 10.4 [6.7–21.8] / 21.8 | 1: 6.2 [3.5–25.9] / 25.9 | 1: 10.8 [6.7–27.8] / 27.8 | 1: 14.4 [11.6–159.7] / 159.7 | 1: 9.8 [5.8–14.7] / 14.7 | 1: 5.4 [0.6–8.5] / 8.5 |
+| `test.run` | 1: 32.2 [23.8–59.0] / 59.0 | 1: 33.3 [19.9–61.2] / 61.2 | 1: 32.2 [14.3–48.0] / 48.0 | 1: 48.2 [17.8–72.0] / 72.0 | 1: 74.6 [16.0–464.1] / 464.1 | 1: 25.0 [15.0–285.6] / 285.6 | 1: 40.0 [7.6–42.9] / 42.9 |
+
+- **Wi-Fi adds a few milliseconds to a small request**: the iPhone
+  answers `class.definition`, `class.selectors`, `method.source` and
+  `package.list` in 3.8 to 5.4 ms at p50 with the target idle (the Mac to
+  itself 0.6 to 2.0), 6.7 to 9.0 with the ring running on the phone; the
+  iPad 6.9 to 7.2 and 9.0 to 10.1. The Bonjour name costs nothing after
+  the first connect (the iPhone's rows by name and by address agree
+  within the ranges; the open step is 52 to 60 ms by name against 49 to
+  56 by address, where the Mac's own name cost 0.28 to 0.44 s).
+- **The large replies are the device's work**: `class.hierarchy` (176
+  classes, 16.5 KB) 40 to 41 ms on the idle iPhone, 47 to 49 under the
+  ring, 52 to 65 on the iPad, against 29 Mac to Mac; `package.selectors`
+  of Kernel (2043 methods, about 57 KB) 77 ms idle and 96 to 103 under
+  the ring on the iPhone, 97 to 103 on the iPad, against 78. On the idle
+  iPhone the hierarchy costs 11 to 12 ms more than on the Mac and the
+  selectors nothing more.
+- **The iPad's link stalls**: its maxima reach 0.2 to 0.7 s on requests
+  whose p50 is under 10 ms (`class.definition` 432 ms, `package.list`
+  631, `class.hierarchy` 704, the first session's open step 706), in
+  runs scattered over both scenarios, with the iPad's own turns at 3.4 to
+  6.5 ms; the iPhone's maxima stay under 0.25 s. The Wi-Fi of a
+  2018 iPad (or its power saving between bursts) is the suspect, not
+  measured further.
+- Retried requests count from their first send as on the Mac: the 1 s
+  backoff, then 0.05 to 0.2 s more (1.06 to 1.19 s at p50 against the
+  Mac's 1.007 to 1.050).
+
+**Sessions and the dropped link** (the client shell's frames missed in the
+session; outage from the loss to the new session):
+
+| target | sessions | seconds | client frames missed | reconnects | outage ms | sent again |
+|---|--:|--:|--:|--:|--:|--:|
+| iPhone, idle, LAN | 14 | 2.8 [2.7–2.9] | 68 [60–74] | 1 | 1079.7 [1024.3–1140.2] | 2 |
+| iPhone, ring, LAN | 12 | 3.1 [3.0–3.3] | 66 [61–73] | 1 | 1093.1 [1024.8–1167.0] | 2 |
+| iPhone, idle, Bonjour | 13 | 2.9 [2.8–3.0] | 69 [59–78] | 1 | 1093.5 [1046.1–1136.9] | 2 |
+| iPhone, ring, Bonjour | 12 | 3.0 [2.9–3.2] | 65.5 [55–84] | 1 | 1093.0 [1048.0–1138.7] | 2 |
+| iPad, idle, LAN | 11 | 3.4 [3.0–6.9] | 46 [40–72] | 1 | 1051.6 [1019.3–1224.6] | 2 |
+| iPad, ring, LAN | 12 | 3.3 [3.1–4.0] | 45 [35–63] | 1 | 1063.6 [1014.8–1281.0] | 2 |
+| Mac to Mac, TCP LAN, target idle | 18 | 2.33 [2.24–2.38] | 46 [41–51] | 1 | 1007.0 [1004.5–1009.0] | 2 |
+| Mac to Mac, TCP LAN, target ring | 18 | 2.42 [2.37–2.46] | 52 [46–57] | 1 | 1006.2 [1003.7–1008.1] | 2 |
+
+Steps (ms):
+
+| step | iPhone, idle, LAN | iPhone, ring, LAN | iPhone, idle, Bonjour | iPhone, ring, Bonjour | iPad, idle, LAN | iPad, ring, LAN | Mac to Mac, TCP 192.168.1.10 |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| open | 56.4 [47.5–73.6] | 48.9 [47.6–96.7] | 60.2 [42.0–139.6] | 52.4 [46.6–56.9] | 133.9 [59.9–705.8] | 56.8 [48.0–244.4] | 30.7 [30.6–30.8] |
+| reset | 14.1 [11.5–17.8] | 17.4 [10.9–23.8] | 12.0 [11.2–30.8] | 17.9 [11.9–39.7] | 17.6 [11.9–233.4] | 23.9 [12.2–101.5] | 6.5 [5.5–9.2] |
+| populate.push | 44.3 [38.2–69.4] | 44.1 [39.0–51.3] | 41.8 [38.1–46.8] | 50.6 [38.2–68.8] | 66.0 [46.8–494.1] | 50.4 [40.7–134.3] | 27.1 [26.7–32.9] |
+| populate.onDemand | 41.6 [41.3–41.8] | 45.8 [41.6–58.2] | 41.7 [41.5–53.2] | 49.2 [41.4–74.9] | 64.3 [48.3–100.1] | 53.1 [41.5–59.4] | 25.0 [24.9–33.4] |
+| tree.push | 7.0 [6.9–15.4] | 6.9 [6.8–7.2] | 6.9 [1.6–7.0] | 6.9 [6.8–7.0] | 7.1 [1.6–8.5] | 6.7 [1.5–7.2] | 6.8 [6.7–6.9] |
+| tree.onDemand | 1.3 [1.3–1.4] | 1.3 [1.3–6.9] | 1.3 [1.3–7.2] | 1.3 [1.3–1.5] | 7.3 [1.6–8.3] | 1.3 [1.2–7.3] | 1.4 [1.3–1.5] |
+| selectors.request | 87.9 [79.7–94.7] | 97.0 [94.3–105.1] | 91.3 [83.8–95.2] | 104.0 [95.0–112.6] | 121.5 [93.8–467.8] | 110.8 [93.1–205.3] | 78.1 [75.3–78.2] |
+| selectors.push.2043 | 6.5 [1.4–14.2] | 6.5 [6.4–8.6] | 8.4 [1.2–14.2] | 8.5 [6.4–9.0] | 1.4 [1.0–10.6] | 4.9 [1.0–14.6] | 1.7 [1.7–7.0] (2049) |
+| selectors.onDemand.2043 | 9.6 [9.0–14.0] | 9.6 [9.1–10.1] | 9.6 [9.0–12.3] | 9.4 [9.0–9.9] | 10.0 [9.3–15.5] | 13.4 [9.0–21.0] | 11.1 [9.8–11.2] (2049) |
+| select.10 | 202.9 [183.6–219.0] | 262.7 [222.1–296.9] | 203.6 [182.8–228.5] | 250.8 [189.8–311.3] | 419.2 [263.9–1431.7] | 398.3 [275.3–778.4] | 156.8 [139.0–156.9] |
+| compile | 16.6 [14.1–40.1] | 28.6 [24.3–240.8] | 15.0 [13.1–30.4] | 35.0 [24.6–52.8] | 30.4 [19.3–41.7] | 35.5 [24.1–135.7] | 17.1 [15.2–17.5] |
+| test.run | 60.7 [39.0–74.4] | 50.6 [31.0–75.1] | 60.6 [52.9–70.3] | 62.8 [31.2–89.9] | 100.0 [16.5–507.6] | 48.3 [23.8–288.9] | 43.9 [32.0–48.1] |
+| error.debugger | 105.2 [92.0–140.4] | 122.1 [94.9–148.9] | 106.6 [80.8–132.0] | 109.2 [89.3–141.6] | 107.6 [73.9–135.7] | 100.4 [74.9–198.9] | 83.7 [74.9–98.3] |
+| step | 34.4 [26.7–57.4] | 52.6 [46.6–70.7] | 35.4 [26.9–50.0] | 66.3 [52.0–73.5] | 59.9 [34.7–418.7] | 66.2 [51.4–267.2] | 25.7 [21.9–26.0] |
+| fix.proceed | 14.4 [12.4–32.7] | 25.8 [19.2–38.2] | 14.4 [12.4–36.7] | 31.0 [17.9–50.4] | 25.1 [12.1–306.6] | 29.9 [17.9–42.9] | 12.1 [11.7–12.7] |
+| define.retry | 280.8 [252.4–341.1] | 296.9 [266.6–422.5] | 295.1 [260.0–406.8] | 299.4 [239.1–345.1] | 234.5 [198.7–419.4] | 314.7 [214.2–427.3] | 210.9 [202.5–224.7] |
+| drop.stop | 108.3 [98.1–124.0] | 114.2 [99.7–150.4] | 113.5 [91.2–143.6] | 114.1 [97.3–241.9] | 91.2 [69.1–184.8] | 92.9 [72.5–172.2] | 82.7 [62.3–99.5] |
+| drop.reconnect | 1182.3 [1144.0–1251.4] | 1196.8 [1080.0–1292.1] | 1202.5 [1100.5–1249.8] | 1195.8 [1151.4–1251.5] | 1199.1 [1126.9–1343.9] | 1212.2 [1129.5–1392.4] | 1060.8 [1042.3–1068.4] |
+| drop.terminate | 14.8 [5.8–28.5] | 16.3 [11.4–24.9] | 12.2 [5.8–30.4] | 16.5 [10.9–34.0] | 18.8 [15.0–170.6] | 15.4 [6.8–30.9] | 8.5 [6.3–14.4] |
+
+- **The debugger across Wi-Fi** (`define.retry`): 0.23 to 0.31 s at p50
+  from the doit to the Process going on after the method was defined from
+  the Mac's debugger and the send retried (the Mac to itself 0.20 to
+  0.21); the doit's stop with the debugger open (`drop.stop`) 0.09 to 0.11
+  s.
+- **The dropped link**: everything back (both replies, the stopped Process
+  listed as stopped, its debugger's frames fetched again) 1.18 to 1.21 s
+  after the drop at p50 on both devices (Mac to Mac 1.05 to 1.09), of
+  which 1.006 s is the backoff; the reconnect itself (the outage) 1.05 to
+  1.09 s. Two requests were pending at every loss and both were sent
+  again and answered.
+- `select.10` (ten classes selected, each a definition and its selectors)
+  is the step that shows the link most: 0.20 s idle and 0.25 to 0.26 s
+  under the ring on the iPhone, 0.40 to 0.42 s on the iPad, 0.16 Mac to
+  Mac.
+- The client shell missed more frames per session against the iPhone (55
+  to 84) than against the Mac or the iPad (35 to 72): the sessions are
+  longer and the windows and debugger open in them as before; the
+  client's misses are AppKit's, not the link's (9c's and the Mac-to-Mac
+  finding), and were not separated further.
+
+**The serving device's frames** (20 s windows at 120 Hz; with a client,
+the four or five sessions above in the window; the control row with
+none; 9a's rows and the Mac to Mac rows for the comparison):
+
+| row | runs | missed of 2400 | longest turn ms | requests served | main thread CPU ms per 10 s | stopped for others ms per 10 s | `deliver` max µs | power W | peak MB | thermal at start |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| iPhone, idle, a client (LAN) | 3 | 0 | 3.3 | 350 [280–350] | 3639 [3624–3639] | 0.3 [0.1–0.5] | 36.1 [25.5–149.9] | 0.34 [0.28–0.36] | 74 [69–74] | nominal, fair, serious |
+| iPhone, idle, a client (Bonjour) | 3 | 0 | 3.3 | 280 [280–350] | 3652 [3645–3654] | 0.4 [0.3–0.5] | 39.5 [34.8–41.6] | 0.30 [0.29–0.33] | 70 [69–73] | nominal, nominal, serious |
+| iPhone, idle, no client | 3 | 0 | 3.3 | 0 | 3696 [3617–3697] | 0 | - | 0.019 [0.016–0.084] | 33 [33–34] | nominal, fair, fair |
+| iPhone, ring, a client (LAN) | 3 | 0 | 5.0 [4.8–5.3] | 280 | 2946 [2802–3005] | 52.9 [45.7–53.7] | 230.9 [142.0–581.2] | 3.5 [3.4–3.8] | 583 [580–591] | nominal |
+| iPhone, ring, a client (Bonjour) | 3 | 0 | 5.2 [4.6–6.3] | 280 | 3056 [2902–3607] | 54.1 [48.4–70.8] | 73.6 [66.0–90.2] | 3.3 [2.1–3.5] | 585 [564–586] | nominal, fair, fair |
+| iPhone, ring, no client | 3 | 0 | 4.7 [4.6–5.0] | 0 | 2727 [2570–2774] | 50.1 [44.3–59.6] | - | 4.0 [3.9–4.4] | 593 [581–596] | nominal |
+| iPad, idle, a client (LAN) | 3 | 0 | 3.5 [3.4–3.5] | 278 [210–280] | 3647 [3641–3647] | 0.4 [0.3–0.8] | 84.1 [81.8–273.4] | 0.05 | 59 [55–60] | nominal, nominal, fair |
+| iPad, idle, no client | 3 | 0 | 3.4 [3.3–3.6] | 0 | 3622 [3620–3627] | 0 | - | 0.025 | 27 | nominal, nominal, fair |
+| iPad, ring, a client (LAN) | 3 | 0 | 6.5 [6.4–6.5] | 276 [276–278] | 3426 [3406–3447] | 101.3 [89.0–107.1] | 68.0 [56.8–139.8] | 1.25 [1.22–1.25] | 569 [525–571] | nominal, nominal, fair |
+| iPad, ring, no client | 3 | 0 | 6.5 [6.3–7.3] | 0 | 3376 [3374–3377] | 101.5 [94.2–105.7] | - | 1.25 [1.24–1.26] | 531 [520–560] | nominal, nominal, fair |
+| 9a's rows (10 s), iPhone idle / ring offload (serious) | 3 | 0 / 0 of 1200 | - | - | - | 0.0 / 80.5 | - | 0.016 / 1.8 | 31 / 557 | serious |
+| 9a's rows (10 s), iPad idle / ring offload | 3 | 0 / 0 of 1200 | 3.6 to 3.8 / 6.9 to 7.2 | - | - | 0.0 / 92.6 | - | 0.017 / 1.1 | 27 / 544 | nominal, fair |
+| Mac to Mac: idle / ring, a client | 3 | 0 / 0 | 3.2 / 3.7 | 374 / 385 | 2704 / 2064 | - | 29.1 / 35.0 | - | - | fair |
+
+- **No frame missed on either device while serving a client**, idle or
+  under the ring, by address or by name; the longest main-thread turn
+  stayed the scenario's (3.3 to 3.5 ms idle, 5.0 to 6.5 under the ring),
+  the same with and without a client. The requests run on the background
+  workers and the few that touch views hop to main inside the budget,
+  as on the Mac.
+- **A client costs the main thread nothing it measures**: the stopped
+  time with a client equals the control row's (iPhone ring 53 to 54
+  against 50 ms per 10 s, iPad 101 against 102), and so does the main
+  thread's CPU idle (3.6 to 3.7 s per 10 s either way). Under the ring
+  with a client the iPhone's main thread used 0.2 to 0.3 s more per 10 s.
+- **A client is not free in energy**: on the idle iPhone the process drew
+  0.30 to 0.34 W with a client against 0.019 W without (the requests'
+  Processes on the workers, the socket and the Wi-Fi wakeups the reading
+  attributes to the process), and peaked at 70 to 74 MB against 33; the
+  iPad's 0.05 against 0.025 W (its readings low throughout, shells.md).
+- `deliver` stayed in microseconds (at most 0.58 ms, once, on the iPhone
+  under the ring); at most 55.4 KB waited in a writing queue, the Kernel
+  selectors' reply as on the Mac.
+- Thermal: the iPhone's rows started at nominal, fair or serious (it had
+  served the probe launch just before and was not cooled between rows); the iPad's at nominal, fair in the third
+  run. Per row in the table; per launch in `serve-*.txt`.
+
+**The kernel tests**: the iPad Pro passed 202 of 202 (7083 ms, nominal,
+peak 59 MB; shells.md). The iPhone's 202 of 202 since 815b512 is the
+follow-up's.
+
+**The question 9d left for the devices** (whether the class tree wants
+the on-demand form or a request per package over Wi-Fi): **neither; push
+stays the default**. Over Wi-Fi the tree's reply cost the idle iPhone 11
+to 12 ms more than the Mac to itself for 176 classes (40 against 29 ms),
+the iPad 23 to 36 ms more; scaled by bytes to 9c's 2009 classes that is
+about 0.13 to 0.4 s beside the 0.33 s the client spends reading the
+reply in any case, and the client-side steps (`tree.push` 7 ms,
+`tree.onDemand` 1.3 ms) are what they were Mac to Mac. The 2000-class
+image itself was not served from a device; if it is, the first number
+to read is `class.hierarchy` against the 0.33 s local.
+
+**The partial run of 00:17** (before Local Network was allowed and the
+iPad was signed) is kept below as it was recorded.
+
 2026-11-06 00:17 to 00:31, on 79ef19d (module 10's VM and kernel, the iOS
 spec at device family 1 and 2, the two script fixes below), the iOS shell
 Release as `scripts/device.sh build` makes it.
@@ -591,12 +812,8 @@ the timer assertion): the test is written for the headless host, and
 9a's and 9c's shell runs predate it. Not changed here (the code is not
 this run's to change).
 
-**The question 9d left for the phone** (whether the class tree wants the
-on-demand form or a request per package over Wi-Fi) is still not
-answered by a measurement: no request crossed Wi-Fi. The Mac-to-Mac
-reasoning stands (the reply's bytes cost a tenth of the request at most
-next to building and reading the JSON, so push stays the default) until
-`remote-session.sh device` runs.
+(At 00:31 the question 9d left for the phone was still open: no request
+had crossed Wi-Fi. It is answered above.)
 
 ### The kernels against the starting commit
 
@@ -801,25 +1018,19 @@ binaries.
 
 ## Not done
 
-- **The phone's rows with a client.** Since 2026-11-06 the iOS shell
-  builds, signs and serves on the iPhone 13 Pro, with its pairing screen
-  and token file, and its frames while serving with no client are
-  measured ("On the devices"); its Bonjour advertisement was never seen
-  on the network, and the Mac's tools could not reach it (local network
-  privacy on the Mac, probably the phone's permission too; "On the
-  devices"). So section 3's rows on the phone are still not run: the round trips over Wi-Fi, the
-  phone's frames while serving against 9a's phone rows, the debugger and
-  the dropped link across Wi-Fi, the phone's thermal state per row, and
-  whether iOS asks for local network access. The commands are ready:
-  `scripts/device.sh build`, then `scripts/remote-session.sh device <out>
-  <tag> idle|ring lan|bonjour <sessions>` per row (it serves through
-  `scripts/device.sh serve`, takes the token with `scripts/device.sh
-  token` and runs the sessions from the macOS shell), with a bounded
-  cooling wait between rows as 9a's matrix had none. `device.sh serve`
-  ran (12 launches); `token` copies the token since its fix and has not
-  yet found the service by name. The iPad Pro (iPadOS 26.7.2, device
-  family 2 since 2026-11-06) ran nothing: its build waits on Xcode's
-  account to add it to the profile.
+- **The iPad's Bonjour rows.** Section 3 ran on both devices on
+  2026-11-06 ("On the devices"), but the iPad's `_kajo-dev._tcp`
+  advertisement never appeared on the network while it served (the
+  iPhone's did in every launch), so the iPad was reached by address only.
+  Most likely iPadOS's local network permission for Kajo, which the owner
+  grants on the iPad; then `DEVICE=00008027-0012592C0185002E
+  scripts/remote-session.sh device <out> idle-bonjour-1 idle bonjour 6`
+  makes the rows.
+- **The 2000-class image served from a device.** The rows used the
+  shell image (176 classes); the class tree's cost over Wi-Fi for 2009
+  classes is an extrapolation ("On the devices").
+- **The iPad's link stalls** (request maxima of 0.2 to 0.7 s over p50s
+  under 10 ms) are not explained; the iPhone's maxima stayed under 0.25 s.
 - **TLS** (the owner's question below) and any encryption; USB
   tunnelling; the developer UI on the phone; more than one Mac's tools on
   one phone at a time beyond what the server already allows (it accepts
@@ -863,6 +1074,10 @@ binaries.
    Local Network access on the Mac for the session that starts the
    client (and on the phone for Kajo, if it asks), and Xcode's account
    for the iPad's profile ("On the devices").
+   *2026-11-06, later*: both done; the rows ran on the iPhone and the iPad
+   the same morning (51 and 23 sessions, no failure, no frame missed on
+   either device). One owner step remains: the iPad's local network
+   permission for Kajo, if it is asking, so its Bonjour name appears.
 6. **The not-retried requests.** `evaluate`, `process.evaluate`,
    `process.step` and `test.run` fail at a dropped link instead of being
    sent again; the tool shows the error and the developer repeats the doit
@@ -910,10 +1125,10 @@ binaries.
   writer threads keep their line interface. The Bonjour advertisement can
   stay dns_sd's. A TCP connection that sends anything before a TLS
   handshake would be refused at the first line, as now.
-- **The phone's measurements** first: the round trips over Wi-Fi decide
-  whether the class tree wants the on-demand form or a request per
-  package (Measurements: on the Mac the reply's bytes cost nothing next
-  to the JSON work in both images).
+- **The phone's measurements** (2026-11-06): the round trips over Wi-Fi
+  answered that the class tree keeps the push form ("On the devices");
+  the 2000-class image served from a device is the measurement that
+  would revisit it.
 
 ## Gates
 
@@ -950,6 +1165,8 @@ came; everything was run again on a487630.
 | 9c's scripted session on the macOS shell (`just mac-shell`, local target) | 12 launches (three each of the 2000-class session with no load and with the storm, typing with the storm and with none), every result line written, no failure; 9c's numbers hold: `class.hierarchy` of 2009 classes 326 to 334 ms (9c 329), `package.selectors` 640 ms (657), typing with the storm p50 4.9 ms, 1 frame missed of 1259; the session is 5.7 to 5.9 s now against 3.7 to 3.9 (the two new steps, 1.9 to 2.0 s with 11 to 14 frames missed; drop.reconnect is 1.33 to 1.41 s there, the 2009-class hierarchy being one of the two requests sent again) |
 | section 3, Mac to Mac (`scripts/remote-session.sh mac` and `kajo`) | 51 sessions, no failure; 18 serving rows, 0 frames missed in each; tables under Measurements |
 | section 3 on the phone | **not run**: the iPhone build could not be signed (the status note); 2026-11-06 on 79ef19d: built, signed, served 12 launches with 0 frames missed, the client rows blocked by local network access, the iPad not built ("On the devices") |
+| section 3 on the devices, 2026-11-06 07:16 to 07:45 (d70cda2's build; the iPad's lan rows after 7bdb024's script fix) | iPhone: 18 serving launches, 51 sessions by address and name, no failure, 0 frames missed; iPad: 12 serving launches, 23 sessions by address, no failure, 0 frames missed, its Bonjour name never seen ("On the devices") |
+| `just ios-check` and `just apps` after 7bdb024's script change (2026-11-06 07:49 to 07:51) | exit 0, 0 errors, 0 warnings, both |
 | bench A/B | within noise (Measurements) |
 
 (312 is `KajoVMTests`, 82 `KajoCompilerTests`, whose kernel-image suite

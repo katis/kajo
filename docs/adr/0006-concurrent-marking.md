@@ -118,6 +118,16 @@ user-initiated it marked at 3.6, the cycle on a 256 MiB heap fell from
 the marker runs at user-initiated at least while promotion is high. See
 experiments/device-measurement/RESULTS.md.
 
+Measured (iPad, 2026-11-06): on the iPad Pro 12.9-inch 3rd generation
+(A12X, 4 performance and 4 efficiency cores) in the iOS shell, the
+marker at utility ran on the efficiency cores (P share 0.00 to 0.01;
+0.04 to 0.08 under the ring's oracle at 7 workers) under storm, ring and
+share at 5 and at 7 busy workers and never fell
+back (0 fallbacks, 0 aborts in 60 scenario runs); the large-object churn
+counted 1 fallback in 3 runs (the iPhone 13 Pro 3 in 3 runs); the final mark
+max 4.8 to 8.6 ms with young collection on at 5 workers
+(docs/modules/shells.md).
+
 ## Energy on device (2026-11-02)
 
 `experiments/power` measured CPU energy (`ri_energy_nj`, per thread through

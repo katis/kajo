@@ -206,7 +206,19 @@ ms) with the p99 about the same (2.9 to 3.5 against 2.1 to 3.2); the frame
 load took 3.6 to 3.7 s of the main thread per 10 s (the Mac 2.2 to 2.4),
 the longest turn under load 3 to 8 ms with young collection on, up to 10
 ms under the storm's stop-the-world scavenges and 16 to 19 ms under the
-ring's, which are its two missed frames. Under load the main thread ran 88 to 100 percent on performance
+ring's, which are its two missed frames.
+
+Measured (iPad, 2026-11-06): the iPad Pro 12.9-inch 3rd generation
+(A12X, 120 Hz, 5 background workers, the same windows, runs and loads;
+docs/modules/shells.md): 0 frames missed of 1200 idle, with 1000 events
+per second, with the hog on main and in every scenario and young mode at
+5 workers; the ring under the stop-the-world scavenge at 7 workers missed
+23 (7 to 30). Event latency idle p50 0.216 ms, p99 3.66, max 4.0; under
+the storm p50 2.244 ms, p99 6.48, max 14.2 (the iPhone's p50 0.100; not
+separated); with the hog on main p50 0.250, p99 3.46, 2412 preemptions,
+the stuck report at 305 ms (304 to 308); the control 1192 missed. Thermal
+serious for the event and hog rows. Serving the development protocol to
+a client over Wi-Fi (module 9d) cost neither device a frame. Under load the main thread ran 88 to 100 percent on performance
 cores; idle it ran on efficiency cores and still made every frame. Not
 built: the re-entrancy guard (the shells run no modal loop).
 
