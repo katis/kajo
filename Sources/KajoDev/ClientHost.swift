@@ -26,10 +26,10 @@ import KajoVM
 // the bounded JSON reader and handed to the image as the canonical text
 // the writer makes of it (a `line` event, target the connection); a line
 // that is not JSON is a `line` event of kind `client.error` naming why,
-// never a trap. A line longer than 16 KiB arrives in pieces (`linePart`
-// events, then the `line` with the last): 9c's answer to objects of one
-// heap block, kept by module 10 although one String may now hold a line
-// (an open question for the owner). When the connection was opened with a project directory,
+// never a trap. A line arrives as one String up to 16 MiB - 1 bytes
+// (large bytes, part 3: measured cheaper for the image than 9c's pieces of
+// 16 KiB, which module 10 had kept); a longer one in pieces of that size
+// (`linePart` events, then the `line` with the last). When the connection was opened with a project directory,
 // the `files` of every reply are written there (9b's `ProjectWriter`: file
 // names only). The end of a connection is a `lost` event.
 //
@@ -47,12 +47,6 @@ import KajoVM
 public final class ClientHost: @unchecked Sendable, CustomReflectable {
     /// Reflection never shows the tokens the host holds.
     public var customMirror: Mirror { Mirror(self, children: ["connections": openConnections]) }
-
-    /// Large bytes, part 3: a received line goes to the image as one
-    /// `line` event however long (up to what one String holds), rather
-    /// than in `linePart` pieces of 16 KiB. Set before connecting (the
-    /// shells' `lineform=string`); off by default.
-    public var linesWhole = false
 
     /// A known target: where it is (a socket path or another address form,
     /// `TargetAddress`) and, when the host knows it, its token (in memory
@@ -336,8 +330,11 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
                 }
             }
             let now = ShellVM.now()
+            // Large bytes, part 3: one `line` event up to what the host
+            // hands the image as one String (16 MiB - 1), measured cheaper
+            // than 16 KiB pieces for the image that reads it; pieces past it.
             let text = String(decoding: writeJSON(out), as: UTF8.self)
-            let pieces = linesWhole && text.utf8.count <= RequestLimits.imageBytes ? [text] : linePieces(text)
+            let pieces = text.utf8.count <= RequestLimits.imageBytes ? [text] : linePieces(text, limit: RequestLimits.imageBytes)
             for (k, p) in pieces.enumerated() {
                 post(ShellEvent(kind: k == pieces.count - 1 ? .line : .linePart, target: c.id, value: .string(p), timeNs: now))
             }
@@ -398,9 +395,9 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     }
 }
 
-/// A line in pieces of at most 16 KiB, cut between scalars: no object of
-/// the image can hold more than 32 KiB (a `linePart` event per piece but
-/// the last, which is the `line` event).
+/// A line in pieces of at most `limit` bytes (16 KiB by default), cut
+/// between scalars (a `linePart` event per piece but the last, which is the
+/// `line` event). Large bytes: the host cuts only lines past 16 MiB - 1.
 public func linePieces(_ text: String, limit: Int = 16384) -> [String] {
     if text.utf8.count <= limit { return [text] }
     var out: [String] = []
