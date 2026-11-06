@@ -214,8 +214,14 @@ docs/modules/shells.md): 0 frames missed of 1200 idle, with 1000 events
 per second, with the hog on main and in every scenario and young mode at
 5 workers; the ring under the stop-the-world scavenge at 7 workers missed
 23 (7 to 30). Event latency idle p50 0.216 ms, p99 3.66, max 4.0; under
-the storm p50 2.244 ms, p99 6.48, max 14.2 (the iPhone's p50 0.100; not
-separated); with the hog on main p50 0.250, p99 3.46, 2412 preemptions,
+the storm p50 2.244 ms, p99 6.48, max 14.2 (the iPhone's p50 0.100;
+separated the same evening: cooled, the iPad's storm p50 is 0.118 ms and
+p99 3.09 against the iPhone's 0.097 and 2.29; at serious the iPad's
+performance cluster ran at about half its clock, the frame load overran
+its 3 ms turn into the event turns, the main thread was busy 64 percent
+and the median event waited behind a turn; at 46 to 57 percent busy the
+p50 was 0.18 to 1.32 ms; docs/modules/shells.md, "Where the 2.2 ms
+went"); with the hog on main p50 0.250, p99 3.46, 2412 preemptions,
 the stuck report at 305 ms (304 to 308); the control 1192 missed. Thermal
 serious for the event and hog rows. Serving the development protocol to
 a client over Wi-Fi (module 9d) cost neither device a frame. Under load the main thread ran 88 to 100 percent on performance

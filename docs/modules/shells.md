@@ -646,8 +646,10 @@ What the iPad showed:
 - Power (`ri_energy_nj`, process CPU only): 0.5 to 1.2 W with five busy
   workers, about a third to a half of the iPhone's 1.8 to 3.4 W (which ran
   at serious; these rows at nominal and fair). Neither counts DRAM, the
-  display or the render server, and the reading on iPadOS 26 has not been
-  checked against another source.
+  display or the render server. Checked since against a known workload
+  ("The iPad's energy reading" below): the A12X's performance-core
+  energy is not usable, so these rows compare with nothing but each
+  other.
 - Peak footprint as on the iPhone: 27 MB idle, 45 to 58 MB share, 553 to
   747 MB storm, 498 to 620 MB ring.
 
@@ -749,6 +751,67 @@ serious throughout, `ipad-rest/`):
   Where the 2 ms goes (the 1 ms timer's lateness under load on this
   kernel, the turns it waits behind, or the collector) was not separated.
 
+**Where the 2.2 ms went** (the devices investigation, 2026-11-06 16:50 to
+17:04, ad0b433/3547e8b's build of the iOS shell, iPad and iPhone launches
+interleaved, the Mac's load average 1.5 to 1.9; `devices3/B` and `B2` in
+the session's scratchpad). The scenario now splits each event's latency
+into the timer (due to handler), the handler to the view call, and
+whether the event fell due inside a main-thread turn (and how long that
+turn still ran); it logs every main-thread turn by kind, the fraction of
+the window the main thread was in one (`main_busy_frac`), the clock and
+IPC of each thread from the per-thread counters, and the priority each
+thread actually had (`*_pri`, `*_qos_got`).
+
+| row (5 workers, storm, offload, 1000 events/s) | thermal | events p50 / p99 ms | main busy | due in a turn | the turn's rest p50 ms | frame turn p50 ms | main P GHz | main IPC |
+|---|---|--:|--:|--:|--:|--:|--:|--:|
+| iPad, cooled, 3 runs | nominal | 0.118 [0.118–0.121] / 3.09 | 0.341 | 0.326 | 1.27 | 2.60 | 2.32 | 3.41 |
+| iPhone, cooled, 3 runs | nominal | 0.097 [0.096–0.097] / 2.29 | 0.270 | 0.259 | 1.03 | 2.15 | 2.46 | 4.35 |
+| iPad, after 15 storm launches at 7 workers, 3 runs | fair | 1.324, 0.754, 0.178 / 6.3, 6.2, 4.2 | 0.568, 0.513, 0.455 | 0.515, 0.478, 0.441 | 0.95 to 1.17 | 3.04 (at its budget) | 1.37, 1.51, 1.72 | 3.50 to 3.57 |
+| iPhone, after 6 such launches, 3 runs | serious | 0.104, 0.099, 0.099 / 3.2, 2.7, 2.7 | 0.37, 0.32, 0.32 | - | - | 2.54 to 2.88 | 1.78 to 2.10 | 4.37 to 4.39 |
+| the morning's iPad row (`ipad-rest/`) | serious | 2.244 / 6.48 | 0.64 (6.42 s of VM per 10 s) | - | - | - | not logged | - |
+
+- **The cause is the main thread's busy fraction, set by the iPad's
+  clock under sustained load.** An event that falls due while the main
+  thread is in a turn waits for the rest of that turn (about half of it,
+  1.0 to 1.3 ms at p50); one that falls due between turns is handled in
+  0.1 ms (the timer's own lateness, `ev_free_fire` p50 0.099 ms on the
+  iPad, 0.088 on the iPhone). Once the main thread is busy more than half
+  the time, the median event is one that waited. Cooled, the iPad's main
+  thread is busy 34 percent under the storm and its p50 is 0.12 ms, the
+  iPhone's ratio (1.2 times, not 22). Heated, the iPad's performance
+  cluster ran at 1.27 to 1.72 GHz instead of 2.32 (the clock fell launch
+  by launch from 2.32 to 1.27 GHz across the 15 heating launches while
+  the state read only fair), the frame load no longer fit its 3 ms turn
+  (frame turns at their budget, 1290 to 3293 preempted turns against 11 to
+  44 cooled), the rest of it ran in the event turns (event-turn p99 1.0 ms
+  against 0.19), the main thread was busy 46 to 57 percent and the p50
+  rose to 0.18, 0.75 and 1.32 ms with the busy fraction. The morning's
+  row was the same at serious with the main thread busy 64 percent.
+  Halving the frame load (`mainwork=30000`) cooled took the p99 from 3.1
+  to 1.8 ms on the iPad and 2.3 to 1.35 on the iPhone, the p50 unchanged.
+- **Not the cores, the QoS, the worker count or the collectors**: the
+  main thread had priority 47 (user-interactive) on both devices in
+  every row (61 launches) and ran 96 to 100 percent on performance
+  cores; the workers' base priority was 37 (user-initiated), the
+  collector's 37, the marker's 20 (utility). (At 7 busy workers the
+  workers' current priority decayed to 21 to 35 below their base, the
+  scheduler's usual decay for threads that never block; the main
+  thread's never did.) 3 workers instead of 5 left the iPhone's p50 as
+  it was and moved the iPad's to 0.184 ms, toward its idle row's 0.217,
+  through the timer's own lateness between turns (0.129 against 0.099
+  ms), not through turns; the main thread's stopped-for-others time was
+  21 to 80 ms per 10 s in every row, under 1 percent of the window; the
+  young collector thread ran at most 3.4 ms of CPU in a window.
+- **The iPhone keeps its p50 when hot** because its frame load costs it
+  less: IPC 4.4 against the A12X's 3.4 to 3.6 at a similar clock, so even
+  at 1.8 GHz and serious its main thread stayed 32 to 37 percent busy.
+- What is still unknown: why the A12X's cluster clock falls to half at a
+  state that reads only fair while its single-thread clock never fell
+  (fib at one worker ran at 2.48 GHz, 2620 to 2635 ms, before and after
+  every block, and in the morning at serious); a fully loaded cluster
+  and a single thread are different power limits, and the counters here
+  do not say which one the OS applied.
+
 ### Drift and thermal
 
 fib at one worker before and after the whole Mac matrix (three launches
@@ -805,6 +868,53 @@ iPad's power column compares iPad rows with each other only. Peak
 `phys_footprint`: 27 MB idle, 45 to 58 MB share, 532 to 747 MB storm, 498
 to 620 MB ring; `os_proc_available_memory` 2.1 to 2.8 GB. The kernel
 tests peaked at 59 MB.
+
+**The iPad's energy reading checked against a known workload** (the
+devices investigation, 2026-11-06 16:42 to 16:46, ad0b433/3547e8b's
+build, `mode=spin`: N threads at the QoS asked, each running an integer
+loop until its own CPU time reaches 3 s; iPad and iPhone interleaved,
+three runs, every launch at thermal nominal, the first row repeated at the
+end within 1 percent; `devices3/A`). `ri_energy_nj` and the per-thread
+counts (`proc_pidinfo` flavor 34, now with its instruction and cycle
+words) agree with each other on both devices, so the per-thread flavor
+is not the problem; the energy model behind both is:
+
+| spin | iPad W | iPad GHz | iPhone W | iPhone GHz |
+|---|--:|--:|--:|--:|
+| 1 thread, user-initiated (P core) | 0.043 | 2.47 | 1.04 | 3.21 |
+| 1 thread, utility (E core) | 0.061 | 1.57 | 0.103 | 2.01 |
+| 2 threads | 0.086 | 2.35 | 2.08 | 3.15 |
+| 4 threads | 0.173 | 2.29 | 2.30 (two on E cores) | 3.16 |
+| every core (8 / 6) | 0.485 | 2.31 P, 1.57 E | 2.51 | 3.16 P, 2.01 E |
+| fib, one worker | 0.076 | 2.48 | 2.74 | 3.22 |
+
+- **On the A12X under iPadOS 26.7.2 the API does not report usable
+  numbers for the performance cores.** Per cycle the iPad's P core reads
+  17 pJ and its E core 40 pJ; the iPhone's P core reads 323 pJ and its E
+  core 52 pJ. A performance core that costs less than half an efficiency
+  core per cycle at 2.47 GHz is not a measurement; the P-core figure
+  scales linearly with threads (0.043 W each) like a fixed coefficient.
+  The E-core figure is within 1.3 times of the iPhone's and may be
+  usable; nothing here can check it against a meter. Every iPad power
+  number in this document is therefore not comparable with the iPhone's,
+  and iPad rows with each other only where their P/E split is the same.
+  `ri_billed_energy` and `ri_serviced_energy` read 0 to 0.7 mJ in these
+  runs on both devices.
+- **No sign of a capped peak clock.** One spinning thread ran at 2.47 GHz
+  and fib and walk at one worker at 2.48 and 2.49 GHz on the iPad (the
+  A12X's rated 2.49), every launch, spread under 0.5 percent (fib 2644,
+  2638 to 2645 ms; walk 5452, 5450 to 5460). The iPhone ran at 3.21 to
+  3.23 (the A15's 3.23). The 1.24 to 1.62 times of the single-worker
+  kernels are clock and IPC: fib 1.51 times = 1.30 (3.22 against 2.48
+  GHz) times 1.21 (IPC 3.57 against 2.95). A worn battery that the OS
+  throttles shows as a lower peak clock; these runs show the rated one,
+  which is what the evidence supports: no throttled peak at one thread
+  while plugged in. The battery's health was not read, and a limit that
+  applies only on battery or only under a multi-core load (the heated
+  cluster above, 1.27 GHz at fair) is not excluded.
+- The iPhone's walk at one worker showed AGENTS.md's two regimes again
+  (3570 to 5290 ms, IPC 1.70 to 2.42 at 3.10 to 3.23 GHz: the slow regime
+  is IPC, not clock); the iPad's did not (5450 to 5460).
 
 ### The large-object churn on the devices
 
@@ -920,9 +1030,12 @@ switch.
 - Why the final mark is 7 to 17 ms at most on the phone with young
   collection on, against under 0.6 ms with the stop-the-world scavenge.
   The iPad shows the same (4.8 to 8.6 ms at 5 workers, 8.4 to 16.5 at 7).
-- Why the iPad's event p50 under the storm is 2.2 ms (the iPhone's 0.10),
-  and whether its `ri_energy_nj` covers the whole process (its hog and
-  control rows read a tenth to a fiftieth of the iPhone's).
+- Done since (2026-11-06 evening, "Where the 2.2 ms went" and "The
+  iPad's energy reading"): the iPad's event p50 under the storm is its
+  throttled cluster clock making the main thread busy more than half the
+  time, and its `ri_energy_nj` does not report usable performance-core
+  energy. Why the A12X's cluster clock halves at a state that reads fair
+  is not known.
 - The iPad's events and hog rows at nominal (they ran at serious; its one
   thread kept its clock there, its multi-thread rows were not re-run).
 - Energy beyond the process's CPU (DRAM, display, render server).

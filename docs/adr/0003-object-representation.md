@@ -263,7 +263,12 @@ table's hop costs relatively more than on the A15, about as much as
 closures (1.47); walk scales 5.5x to six workers on four performance
 cores. One of walk's three one-worker launches was 15 percent slower
 (6248 against 5446 and 5452). Still whole kernels, not a direct-pointer
-A/B.
+A/B. Re-measured that evening with the clock and IPC from the
+counters (docs/modules/shells.md, "The iPad's energy reading"): one worker
+ran at the A12X's rated 2.48 to 2.49 GHz in every launch (fib 2644 ms,
+walk 5452, spread under 0.5 percent), so the ratios against the A15 are
+its clock (3.22 GHz, 1.30 times) and its IPC (fib 2.95 against 3.57,
+walk 2.03 against 1.70 to 2.42), not a throttled peak.
 
 ## Built (10): large objects (2026-11-05)
 

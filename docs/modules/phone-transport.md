@@ -54,7 +54,10 @@ in 1.18 to 1.21 s. The iPad's Bonjour advertisement was not seen that
 morning (its local network permission); the owner granted it the same day
 and the iPad's rows by name ran at 11:44 to 11:51: 22 sessions by name
 beside 23 by address, none failed, the name costing nothing after the
-first connect ("On the devices"). The class tree keeps the push form.
+first connect ("On the devices"). The class tree keeps the push form,
+and kept it when the 2000-class image was served from both devices that
+evening; the iPad's request stalls are its Wi-Fi in power save, not the
+target ("On the devices", the devices investigation).
 
 New: `Sources/KajoDev/Transport.swift` (the address forms, one stream
 opener for every transport, the TXT record, Bonjour advertising,
@@ -635,7 +638,10 @@ from the table above for the comparison):
   runs scattered over both scenarios, with the iPad's own turns at 3.4 to
   6.5 ms; the iPhone's maxima stay under 0.25 s. The Wi-Fi of a
   2018 iPad (or its power saving between bursts) is the suspect, not
-  measured further.
+  measured further. Measured since ("The devices investigation" below):
+  the target served every request in at most 7.4 ms while the client
+  saw up to 245 ms; both devices doze between bursts, the iPad also
+  under steady traffic.
 - Retried requests count from their first send as on the Mac: the 1 s
   backoff, then 0.05 to 0.2 s more (1.06 to 1.19 s at p50 against the
   Mac's 1.007 to 1.050).
@@ -755,7 +761,116 @@ about 0.13 to 0.4 s beside the 0.33 s the client spends reading the
 reply in any case, and the client-side steps (`tree.push` 7 ms,
 `tree.onDemand` 1.3 ms) are what they were Mac to Mac. The 2000-class
 image itself was not served from a device; if it is, the first number
-to read is `class.hierarchy` against the 0.33 s local.
+to read is `class.hierarchy` against the 0.33 s local. It was served
+that evening (below): push holds.
+
+**The devices investigation, 2026-11-06 16:42 to 17:35** (ad0b433 and
+3547e8b, the iOS shell rebuilt with the instruments it added: each served
+request's time in the target, from its bytes read to its reply written,
+per request id, `requests-<tag>.txt` in the app's Documents; the Mac's
+load average 1.5 to 3.0 before each block, 7.1 once at the end of the
+session rows; every device launch at thermal nominal; outputs in the
+session's scratchpad `devices3/C` and `devices3/D`).
+
+*The link stalls.* `scripts/link-probe.sh` serves `scenario=idle` on the
+iPad, the iPhone and the macOS shell on this Mac at once and
+`scripts/link-probe.py` times one small request (`class.definition` of
+Object) against all three in the same window: 30 s of bursts of three
+with idle gaps of 0.25 to 8 s between them, 15 s of one request every 20
+ms, 30 s of bursts again; five launches (no ping, with a 1 s ping, ping
+alone at 1 s and at 0.2 s, no ping again). Round trips at the client
+against the target's own time for the same request id:
+
+| target | requests | round trip p50 ms | max ms | round trips over 100 ms | the target's own time p50 / max ms |
+|---|--:|--:|--:|--:|--:|
+| iPad, bursts after a gap of 0.25 to 8 s (three launches) | 216 | 6.9 to 9.4 | 245 | 14 | 2.3 to 2.5 / 6.4 |
+| iPad, one every 20 ms, no ping | 1132 | 7.5 to 7.6 | 170 | 26 | 2.5 / 5.8 |
+| iPad, one every 20 ms, with a 1 s ping | 660 | 5.4 | 21 | 0 | 2.3 / 6.4 |
+| iPhone, bursts after a gap | 216 | 4.8 to 5.4 | 177 | 14 | 2.1 to 2.2 / 7.4 |
+| iPhone, one every 20 ms | 1963 | 5.0 to 5.1 | 79 | 0 | 2.1 / 3.8 |
+| the Mac to itself (its LAN address) | 2113 | 0.6 to 0.8 | 3.6 | 0 | 0.5 / 3.0 |
+
+- **The stalls are the link's, not the target's.** Every one of the
+  2008 iPad requests was served in at most 6.4 ms inside the iPad (from
+  its bytes read to its reply written), every iPhone request in at most
+  7.4 ms, while the client saw up to 245 ms. The longest main-thread turn
+  of every serving launch was 3.3 to 5.1 ms, `deliver` in microseconds.
+- **Both devices doze between bursts.** The first request after an idle
+  gap of 0.25 to 1 s took 95 to 115 ms in most launches on the iPad and
+  the iPhone alike (the p50 of those requests per launch 10 to 111 ms),
+  and after 2 to 8 s 6 to 177 ms; back-to-back requests 5 to 7 ms; the
+  Mac to itself 1 to 2 ms after any gap. About 100 ms is one Wi-Fi beacon interval: the device's radio in
+  power save waking for the buffered packet. The Mac's `ping` shows the
+  same with no request traffic at all: at 1 s intervals p50 21 ms (iPad)
+  and 67 ms (iPhone), max 245 and 216 ms; at 0.2 s the p50 drops to 3.5
+  and 3.6 ms, with the iPhone's maxima at 1.4 to 1.8 s and 8 timeouts in
+  393 (its radio leaving the channel; not examined further).
+- **The iPad also stalls under steady traffic.** At one request every 20
+  ms the iPhone never passed 79 ms; the iPad had 13 round trips of 104 to
+  170 ms in each of the two launches without a ping (26 of 1132), and
+  none in the launch where a 1 s ping ran beside it (max 21 ms). So
+  steady traffic removes the iPhone's stalls and not the iPad's, and the
+  iPad's go away with more traffic; that is a power-save behaviour of the
+  iPad's Wi-Fi (or its driver) and not anything the shell or the VM can
+  see. This is a bound, not a cause: nothing on the Mac can read the
+  iPad's radio state.
+- **The morning's 0.4 to 0.7 s maxima did not recur** in this window
+  (iPad max 245 ms with the probe, 169 ms in the four sessions of 9d's
+  script below); with the target's own time now logged they would show
+  as link time if they did.
+- 9d's scripted sessions by address, two launches per device right after
+  (9 iPad and 10 iPhone sessions, none failed, 0 frames missed on either
+  serving device): round-trip maxima up to 169 ms on the iPad (124 on
+  `package.list`, 114 on `class.definition`) and 165 ms on the iPhone,
+  while the longest any request took inside either target was 30 to 33
+  ms (`class.hierarchy` and `package.selectors`).
+- Not this measurement's: the macOS shell serving as the control missed
+  87 to 101 frames in three of its five launches (longest turn 64 to 248
+  ms) while its requests took at most 3.0 ms inside it; the Mac's shell
+  launched while `devicectl` launched both devices, and it was not
+  examined.
+
+*The 2000-class image served from the devices.* The iOS shell built with
+`KAJO_SHELL_CLASSES=1806` (apps/Shared/build-images.sh: `shell.img` is the
+scenario image plus `scripts/gen-classes.py`'s 1806 classes of 11 methods,
+dev2000.img's classes without the tools, 36.9 MB), served with `heap=1024`
+for 70 s, the Mac's scripted session against it by address with
+`PACKAGE=Generated` (`scripts/remote-session.sh device <out> <tag> idle
+lan 8 seconds=70 heap=1024`), three launches per device and three of a
+headless `kajo run` on the Mac serving the same image on its LAN address
+as the control, interleaved; 24 sessions per target, **none failed**, 0 of
+8400 frames missed on either serving device (longest turn 3.7 and 3.3
+ms), peak footprint 243 to 251 MB on both. ms, p50 of the sessions' p50s
+[range] / the max of the maxima:
+
+| | iPad | iPhone | Mac (headless, LAN) | Mac to Mac local, 9c / module 10 |
+|---|--:|--:|--:|--:|
+| `class.hierarchy` (2009 classes) | 404 [335–747] / 999 | 360 [332–386] / 685 | 335 [323–360] / 375 | 329 / 336 |
+| its time inside the target (read to written) | 82 to 231, once 466 | 55 to 119 | - | - |
+| `package.selectors` (19 866) | 551 [492–905] / 1279 | 513 [455–584] / 659 | 457 [422–496] / 547 | 657 / 443 |
+| its time inside the target | 137 to 169 | 99 to 125 | - | - |
+| the tree pushed (`tree.push`) | 41 [35–83] | 74 [36–90] | 58 [35–66] | 65 / 60 |
+| the tree on demand (`tree.onDemand`) | 41 [35–75] | 66 [36–90] | 58 [36–64] | 57 / 66 |
+| populate, tree pushed / on demand | 516 / 562 | 520 / 554 | 377 / 384 | 384 / 451 (9c), 352 / 432 (10) |
+| 19 866 rows pushed | 34 | 35 | 51 | 108 / 36 |
+| 19 866 rows on demand | 11 | 11 | 12 | 15 / - |
+
+- **Push still holds.** The tree's own step is the client's and is the
+  same in either form on every target (35 to 90 ms, the spread is the
+  Mac's AppKit, not the target); what a device adds is the request:
+  `class.hierarchy` 1.07 (iPhone) to 1.2 (iPad) times the Mac's at p50,
+  of which the target's own work is 55 to 231 ms and the rest the 190
+  KB reply crossing Wi-Fi and the client reading it, as on the Mac. The
+  on-demand tree would still fetch the whole hierarchy in this protocol,
+  so it would save nothing over Wi-Fi. Long lists stay on demand as 9c
+  decided (19 866 rows: 34 to 35 ms pushed, 11 ms on demand).
+- The iPad's maxima (1.0 s for the hierarchy, 1.3 s for the selectors,
+  one 466 ms inside the target on its first hierarchy) are the iPad's
+  link and first-request cost as above; its p50s are within 1.2 times
+  the Mac's.
+- The 9d extrapolation (0.13 to 0.4 s added for 2009 classes) was close
+  for the iPad's p50 (69 ms over the Mac) and too high for the iPhone
+  (25 ms).
 
 **The partial run of 00:17** (before Local Network was allowed and the
 iPad was signed) is kept below as it was recorded.
@@ -1059,11 +1174,12 @@ binaries.
   `DEVICE=00008027-0012592C0185002E` for `scripts/remote-session.sh
   device`; `DD` is read by `scripts/mac-shell.sh` too and moves the Mac
   client's path.
-- **The 2000-class image served from a device.** The rows used the
-  shell image (176 classes); the class tree's cost over Wi-Fi for 2009
-  classes is an extrapolation ("On the devices").
-- **The iPad's link stalls** (request maxima of 0.2 to 0.7 s over p50s
-  under 10 ms) are not explained; the iPhone's maxima stayed under 0.25 s.
+- **The 2000-class image served from a device**: done since
+  (2026-11-06 evening, "On the devices"); push holds.
+- **The iPad's link stalls**: bounded since (the same section): the
+  target's own time is at most 7.4 ms, the stalls are the Wi-Fi link in
+  power save; why the iPad's also stalls under steady traffic, and the
+  morning's 0.4 to 0.7 s maxima (not seen again), are not explained.
 - **TLS** (the owner's question below) and any encryption; USB
   tunnelling; the developer UI on the phone; more than one Mac's tools on
   one phone at a time beyond what the server already allows (it accepts
