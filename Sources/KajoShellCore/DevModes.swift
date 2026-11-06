@@ -2,6 +2,8 @@ import Darwin
 import Dispatch
 import Foundation
 import KajoDev
+import KajoApp
+import KajoAppDevelopment
 import KajoVM
 
 // Module 9c (docs/modules/developer-ui.md): the developer UI in the macOS
@@ -30,7 +32,10 @@ func devSocketPath(_ options: LaunchOptions) -> String {
     var runtime: ShellRuntime?
     var server: ProtocolServer?
 
-    public init(_ options: LaunchOptions, platform: ShellPlatform) {
+    let pairing: PairingPresenter?
+
+    public init(_ options: LaunchOptions, platform: ShellPlatform, pairing: PairingPresenter? = nil) {
+        self.pairing = pairing
         self.options = options
         self.platform = platform
     }
@@ -43,10 +48,10 @@ func devSocketPath(_ options: LaunchOptions) -> String {
         // records only (their sums cover the whole run).
         o.logCapacity = options.int("logs", Headless.Options.appLogCapacity)
         do {
-            let rt = try ShellRuntime(imagePath: options.string("image", resources.devImage), options: o, platform: platform,
-                                      events: devTranscriptSink())
+            let rt = try makeShellRuntime(imagePath: options.string("image", resources.devImage), options: o, platform: platform,
+                                       events: devTranscriptSink(), pairing: pairing)
             runtime = rt
-            rt.clientHost.readTargetsFile()
+            rt.clientHost?.readTargetsFile()
             rt.start()
             rt.ticking = false
             guard let s = try rt.serveProtocol(socket: devSocketPath(options)) else {
@@ -128,7 +133,10 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
     var typingStart = 0.0
     var typingEnd = 0.0
 
-    public init(_ options: LaunchOptions, platform: ShellPlatform) {
+    let pairing: PairingPresenter?
+
+    public init(_ options: LaunchOptions, platform: ShellPlatform, pairing: PairingPresenter? = nil) {
+        self.pairing = pairing
         self.options = options
         self.platform = platform
         typing = options.int("typing", 0)
@@ -145,13 +153,13 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         let classes = options.int("classes", 2000)
         let image = options.string("image", classes > 0 ? resources.dev2000Image : resources.devImage)
         do {
-            runtime = try ShellRuntime(imagePath: image, options: o, platform: platform, events: sessionSink())
+            runtime = try makeShellRuntime(imagePath: image, options: o, platform: platform, events: sessionSink(), pairing: pairing)
         } catch {
             Output.shared.emit(resultLine("devsession", options, "FAILED=1 error=\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
             finish(2)
         }
         runtime.start()
-        hostBox.set(runtime.clientHost)
+        if let h = runtime.clientHost { hostBox.set(h) }
         if target == nil {
             do { server = try runtime.serveProtocol(socket: devSocketPath(options)) } catch {}
             guard server != nil else {
@@ -159,8 +167,8 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
                 finish(2)
             }
         } else {
-            runtime.clientHost.readTargetsFile(options.string("targets", NSHomeDirectory() + "/.kajo/targets"))
-            runtime.clientHost.startBrowsing()
+            runtime.clientHost?.readTargetsFile(options.string("targets", NSHomeDirectory() + "/.kajo/targets"))
+            runtime.clientHost?.startBrowsing()
         }
         runtime.onTurn = { [unowned self] t, _ in
             self.turns += 1
@@ -194,6 +202,17 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         if let target {
             selector = "startRemote:package:project:"
             args = [.string(target), .string(options.string("package", "Kernel")), options["project"].map { .string($0) } ?? .nil]
+            // Module 11a: `session=app`: the tools against a running app,
+            // one method of its class changed (its source read from the
+            // file `source=`) and `probe=` evaluated until it answers
+            // `expect=`.
+            if options["session"] == "app" {
+                let source = options["source"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? ""
+                selector = "startApp:package:class:selector:source:probe:expect:project:"
+                args = [.string(target), .string(options.string("package", "Sample")), .string(options.string("appclass", "SampleApp")),
+                        .string(options.string("selector", "pressed")), .string(source), .string(options.string("probe", "")),
+                        .string(options.string("expect", "")), options["project"].map { .string($0) } ?? .nil]
+            }
         }
         guard let p = runtime.vm.spawn(selector, receiver: "DevSessionBench", arguments: args, main: true, priority: 2) else {
             Output.shared.emit(resultLine("devsession", options, "FAILED=1 error=spawn"))

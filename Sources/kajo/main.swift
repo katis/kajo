@@ -1,6 +1,7 @@
 import Foundation
 import KajoCompiler
 import KajoDev
+import KajoGenerator
 import KajoVM
 
 let usage = """
@@ -18,6 +19,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
+       kajo new <Name> --bundle-id <id> (--kajo <path> | --kajo-url <url> --revision <rev>) [--team <id>] [--directory <dir>]
        kajo version
 \(clientUsage)
 
@@ -47,6 +49,15 @@ the Transcript and every stopped Process on stderr. Release images refuse.
 interface, advertised with Bonjour as _kajo-dev._tcp (--name, or this
 Mac's name), and prints the port and the addresses with the token. --release marks it a release
 image: Smalltalk cannot make, install or remove methods in it.
+
+new (module 11a): writes a Kajo app project into <dir> (default ./<Name>,
+which must be empty or absent): an xcodegen spec with <Name>-macOS and
+<Name>-iOS over one Tonel directory (src/, the package <Name> with the
+class <Name>App and its test), the Swift both targets run, the Info.plists
+(only Debug's name the local network), the build phase that makes a
+development image (Debug) or a release image (Release) with the pinned
+Kajo's kajo, and the Xcode project when xcodegen is on PATH. --kajo names a
+Kajo checkout on this machine; --kajo-url and --revision a repository.
 
 seal: loads an image (every loader check), marks it a release image and
 saves it to <out.img>. Nothing clears the mark.
@@ -190,6 +201,53 @@ case "build-image":
         print("\(out): \(r.classes) classes, \(r.methods) methods, \(r.image.count) bytes, \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms\(options.release ? ", release image" : "")")
     } catch {
         fail("kajo build-image: \(error)", 1)
+    }
+case "new":
+    var spec = AppProjectSpec(name: "", bundleIdentifier: "", kajo: .path(""))
+    var url: String? = nil, revision: String? = nil, path: String? = nil, directory: String? = nil
+    var i = 0
+    func value() -> String {
+        i += 1
+        guard i < args.count else { fail("\(args[i - 1]) needs a value\n\(usage)") }
+        return args[i]
+    }
+    while i < args.count {
+        switch args[i] {
+        case "--bundle-id": spec.bundleIdentifier = value()
+        case "--team": spec.team = value()
+        case "--kajo": path = value()
+        case "--kajo-url": url = value()
+        case "--revision": revision = value()
+        case "--directory": directory = value()
+        case let a where a.hasPrefix("-"): fail("unknown option \(a)\n\(usage)")
+        default:
+            guard spec.name.isEmpty else { fail("one name\n\(usage)") }
+            spec.name = args[i]
+        }
+        i += 1
+    }
+    guard !spec.name.isEmpty, !spec.bundleIdentifier.isEmpty else { fail(usage) }
+    switch (path, url, revision) {
+    case (let p?, nil, nil):
+        // A relative checkout is taken from the current directory.
+        spec.kajo = .path(p.hasPrefix("/") ? p : (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(p))
+    case (nil, let u?, let r?): spec.kajo = .git(url: u, revision: r)
+    default: fail("kajo new: where Kajo comes from: --kajo <path>, or --kajo-url <url> with --revision <rev>")
+    }
+    let dir: String
+    switch AppProjectGenerator.resolve(directory ?? spec.name, base: FileManager.default.currentDirectoryPath) {
+    case .success(let d): dir = d
+    case .failure(let r): fail("kajo new: \(r)", 1)
+    }
+    switch AppProjectGenerator.write(spec, into: dir) {
+    case .success(let files):
+        print("\(dir): \(files.count) files")
+        do {
+            print(try AppProjectGenerator.generateXcodeProject(in: dir) ? "\(dir)/\(spec.name).xcodeproj" : "no xcodegen on PATH: run `xcodegen generate` in \(dir)")
+        } catch {
+            fail("kajo new: \(error)", 1)
+        }
+    case .failure(let r): fail("kajo new: \(r)", 1)
     }
 case "seal":
     guard args.count == 2 else { fail(usage) }

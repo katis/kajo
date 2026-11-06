@@ -21,23 +21,43 @@
 #                                           token; the token is never printed
 #
 # DEVICE (UDID), TEAM, DD (DerivedData) and TIMEOUT override the defaults.
+# Module 11a: PROJECT (an .xcodeproj), SCHEME, CONFIG (Release by default),
+# PRODUCT (the .app's name) and BUNDLE build, install and launch another
+# app the same way: a generated app (`kajo new`). Only the shell's and the
+# sample's bundle identifiers are accepted (a free team may make ten new
+# identifiers a week; a device build never makes a fresh one).
 # Signing is automatic (`-allowProvisioningUpdates`): Xcode needs an account
 # for TEAM (Xcode > Settings > Accounts) to make the development profile.
 set -uo pipefail
 root=${0:A:h:h}
 DEVICE=${DEVICE:-00008110-001855C63642801E}
 TEAM=${TEAM:-BDN6M642M2}
-BUNDLE=dev.katajamaki.kajo.shell
+BUNDLE=${BUNDLE:-dev.katajamaki.kajo.shell}
+case $BUNDLE in
+  dev.katajamaki.kajo.shell|dev.katajamaki.kajo.sample) ;;
+  *) print "device.sh: BUNDLE is dev.katajamaki.kajo.shell or dev.katajamaki.kajo.sample, not $BUNDLE"; exit 2 ;;
+esac
+PROJECT=${PROJECT:-}
+SCHEME=${SCHEME:-KajoShell}
+CONFIG=${CONFIG:-Release}
+PRODUCT=${PRODUCT:-KajoShell}
 DD=${DD:-${TMPDIR:-/tmp}/kajo-shell-ios}
 TIMEOUT=${TIMEOUT:-300}
-APP=$DD/Build/Products/Release-iphoneos/KajoShell.app
+APP=$DD/Build/Products/$CONFIG-iphoneos/$PRODUCT.app
 
 build() {
-  (cd $root/apps/KajoShell-iOS && command -v xcodegen > /dev/null && xcodegen generate > /dev/null)
-  gtimeout 2400 xcodebuild -project $root/apps/KajoShell-iOS/KajoShell-iOS.xcodeproj -scheme KajoShell \
-    -configuration Release -destination "id=$DEVICE" -derivedDataPath $DD -allowProvisioningUpdates \
+  local project=$PROJECT
+  if [[ -z $project ]]; then
+    (cd $root/apps/KajoShell-iOS && command -v xcodegen > /dev/null && xcodegen generate > /dev/null)
+    project=$root/apps/KajoShell-iOS/KajoShell-iOS.xcodeproj
+  fi
+  local t0=$(date +%s)
+  gtimeout 2400 xcodebuild -project $project -scheme $SCHEME \
+    -configuration $CONFIG -destination "id=$DEVICE" -derivedDataPath $DD -allowProvisioningUpdates \
     DEVELOPMENT_TEAM=$TEAM build > $DD-build.log 2>&1 || { grep -E "error:" $DD-build.log | sort -u; return 1; }
+  local built=$(( $(date +%s) - t0 ))
   gtimeout 300 xcrun devicectl device install app --device $DEVICE $APP > /dev/null || return 1
+  print "device.sh: built $SCHEME $CONFIG in ${built}s, installed $BUNDLE"
 }
 
 # run <out> args...: one launch, its lines (the result lines start with

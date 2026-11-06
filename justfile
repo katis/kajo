@@ -64,6 +64,10 @@ kernel-test *ARGS:
 apps:
     scripts/apps-check.sh
 
+# Module 11a: `kajo new` writes the Sample app, both targets built in both configurations from clean (0 warnings), the Release products checked for the protocol
+new-check OUT="":
+    scripts/new-check.sh {{OUT}}
+
 # Module 9a: the macOS shell (`just mac-shell build`, `just mac-shell run <out> mode=... key=value`)
 mac-shell *ARGS:
     scripts/mac-shell.sh {{ARGS}}

@@ -1,6 +1,9 @@
 /// Debug builds are checked builds: every verifier runs at every pause.
-/// Release builds keep the verifiers one flag away (`verify`).
-#if DEBUG
+/// Release builds keep the verifiers one flag away (`verify`). Module 11a:
+/// an app's Debug build (the KajoAppBuild trait its pinned dependency
+/// enables, Package.swift) is not a checked build; Xcode compiles every
+/// package with DEBUG in its Debug configuration whatever the app asks.
+#if DEBUG && !KajoAppBuild
 let checkedBuild = true
 #else
 let checkedBuild = false

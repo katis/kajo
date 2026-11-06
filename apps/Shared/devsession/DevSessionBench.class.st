@@ -116,6 +116,42 @@ DevSessionBench class >> startRemote: aTarget package: aPackage project: aDirect
 ]
 
 { #category : #session }
+DevSessionBench class >> startApp: aTarget package: aPackage class: aClassName selector: aSelector source: aSource probe: aProbe expect: aString project: aDirectoryOrNil [
+	"Module 11a: the tools against a running app (a generated app's development build, by its Bonjour name or address): open the browser on the app's class, show the class side's aSelector, accept aSource for it, and evaluate aProbe in a workspace until it answers aString: the change is live in the running app. Its file is written into aDirectoryOrNil."
+	| w |
+	steps := OrderedCollection new.
+	failure := nil.
+	package := aPackage.
+	targetClass := aClassName.
+	client := DevTools openTarget: aTarget name: 'app' project: aDirectoryOrNil.
+	client isNil ifTrue: [Transcript show: 'devsession: done {"failure":"no transport"}'; cr; flush. ^ false].
+	browser := (DevTools windowsOf: BrowserWindow) first model.
+	w := WorkspaceModel new client: client; yourself.
+	queue := OrderedCollection new.
+	queue add: [
+		self begin: 'app.select'.
+		browser selectClass: aClassName.
+		browser isClassSide ifFalse: [browser toggleSide].
+		self when: [browser className = aClassName and: [browser selectorsLoaded]] then: [
+			browser selectSelector: aSelector.
+			self when: [browser selector = aSelector and: [browser sourceKind == #method]] then: [self end]]].
+	queue add: [
+		self begin: 'app.compile'.
+		browser accept: aSource.
+		self when: [browser status beginsWith: 'compiled'] then: [self end]].
+	queue add: [
+		self begin: 'app.live'.
+		w evaluate: aProbe then: [:r | nil].
+		self when: [w lastResult notNil] then: [
+			(w lastResult at: 'value') = aString printString
+				ifTrue: [self end]
+				ifFalse: [self fail: 'the probe answered ' , (w lastResult at: 'value')]]].
+	self begin: 'open'.
+	self when: [client isOpen and: [browser hierarchy size > 0]] then: [self end].
+	^ true
+]
+
+{ #category : #session }
 DevSessionBench class >> run: firstSteps [
 	browser := (DevTools windowsOf: BrowserWindow) first model.
 	queue := firstSteps.

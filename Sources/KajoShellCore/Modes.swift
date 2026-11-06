@@ -2,6 +2,8 @@ import Darwin
 import Dispatch
 import Foundation
 import KajoCompiler
+import KajoApp
+import KajoAppDevelopment
 import KajoVM
 
 /// The images and kernels a shell bundles (`apps/Shared/build-images.sh`
@@ -107,7 +109,10 @@ private func emitGolden(_ kind: String, _ name: String, _ want: Int64, _ workers
     var runtime: ShellRuntime?
     let collector = EventLines()
 
-    public init(_ options: LaunchOptions, platform: ShellPlatform) {
+    let pairing: PairingPresenter?
+
+    public init(_ options: LaunchOptions, platform: ShellPlatform, pairing: PairingPresenter? = nil) {
+        self.pairing = pairing
         self.options = options
         self.platform = platform
     }
@@ -122,7 +127,7 @@ private func emitGolden(_ kind: String, _ name: String, _ want: Int64, _ workers
         o.workers = options.int("workers", 2)
         o.heapMiB = options.int("heap", 512)
         do {
-            let rt = try ShellRuntime(imagePath: resources.kernelImage, options: o, platform: platform, events: sink)
+            let rt = try makeShellRuntime(imagePath: resources.kernelImage, options: o, platform: platform, events: sink, pairing: pairing)
             runtime = rt
             rt.start()
             let filter: ShellValue = options["filter"].map { .string($0) } ?? .nil

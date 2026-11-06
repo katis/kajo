@@ -8,16 +8,29 @@ let package = Package(
         .library(name: "KajoVM", targets: ["KajoVM"]),
         .library(name: "KajoCompiler", targets: ["KajoCompiler"]),
         .library(name: "KajoShellCore", targets: ["KajoShellCore"]),
+        // Module 11a: what a generated app links. KajoApp is the runtime and
+        // the AppKit and UIKit hosts (one product, each half compiled for its
+        // platform); KajoAppDevelopment is a Debug build's serving half.
+        .library(name: "KajoApp", targets: ["KajoApp"]),
+        .library(name: "KajoAppDevelopment", targets: ["KajoAppDevelopment"]),
+        .library(name: "KajoGenerator", targets: ["KajoGenerator"]),
         .library(name: "KajoDev", targets: ["KajoDev"]),
         .executable(name: "kajo", targets: ["kajo"]),
     ],
+    // Module 11a: a generated app's pinned dependency enables KajoAppBuild:
+    // Xcode builds every package in its Debug configuration unoptimized and
+    // with DEBUG (a checked build: every verifier at every pause), whatever
+    // the app's settings say. Under this trait the VM is optimized (-O, file
+    // by file: Xcode's index-while-building refuses whole-module flags) and
+    // unchecked in Debug too. The repository's own builds never enable it.
+    traits: [.trait(name: "KajoAppBuild")],
     targets: [
         // The VM core: object memory, GC, interpreter, scheduler.
         // This is the trusted computing base. Strict memory safety is on so
         // every unsafe construct is labelled and greppable.
         .target(
             name: "KajoVM",
-            swiftSettings: [.strictMemorySafety()]
+            swiftSettings: [.strictMemorySafety(), .unsafeFlags(["-O"], .when(configuration: .debug, traits: ["KajoAppBuild"]))]
         ),
         // Module 8b: the bootstrap compiler (Smalltalk method syntax and
         // Tonel class files to bytecode set v1), the kernel image build.
@@ -28,13 +41,34 @@ let package = Package(
             dependencies: ["KajoVM"],
             swiftSettings: [.strictMemorySafety()]
         ),
+        // Module 11a: the runtime over the host surface and the AppKit and
+        // UIKit view hosts (moved from apps/), and the entry a generated
+        // app's Swift calls. No measurement, no compiler, no protocol.
+        .target(
+            name: "KajoApp",
+            dependencies: ["KajoVM"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
+        // Module 11a: a development build's half: serving the development
+        // protocol (9b's socket, 9d's TCP and Bonjour), the pairing screens,
+        // the token store, the client transport's attachment.
+        .target(
+            name: "KajoAppDevelopment",
+            dependencies: ["KajoApp", "KajoDev", "KajoVM"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
+        // Module 11a: `kajo new`, the app project generator (a library so
+        // the Mac app's wizard can call it). Foundation only.
+        .target(
+            name: "KajoGenerator",
+            swiftSettings: [.strictMemorySafety()]
+        ),
         // Module 9a: the Swift both native shells share (apps/): launch
-        // options, output, device telemetry, the frame account, the modes
-        // (tests, golden, scenario, demo) over the host surface. No AppKit or
-        // UIKit: the platform's views and display link are behind a protocol.
+        // options, output, device telemetry, the modes (tests, golden,
+        // scenario, demo, dev, devsession, serve) over KajoApp's runtime.
         .target(
             name: "KajoShellCore",
-            dependencies: ["KajoVM", "KajoCompiler", "KajoDev"],
+            dependencies: ["KajoApp", "KajoAppDevelopment", "KajoVM", "KajoCompiler", "KajoDev"],
             swiftSettings: [.strictMemorySafety()]
         ),
         // Module 9b: the development protocol outside the VM: its JSON and
@@ -50,7 +84,7 @@ let package = Package(
         // development protocol. No UI here.
         .executableTarget(
             name: "kajo",
-            dependencies: ["KajoVM", "KajoCompiler", "KajoDev"]
+            dependencies: ["KajoVM", "KajoCompiler", "KajoDev", "KajoGenerator"]
         ),
         // libFuzzer targets for the kasm and snapshot loaders (`just fuzz`).
         // Built plainly they replay a corpus and mutate it.
@@ -83,7 +117,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KajoCompilerTests",
-            dependencies: ["KajoVM", "KajoCompiler", "KajoShellCore", "KajoDev"],
+            dependencies: ["KajoVM", "KajoCompiler", "KajoShellCore", "KajoDev", "KajoApp", "KajoAppDevelopment", "KajoGenerator"],
             exclude: ["Fixtures"]
         ),
     ]

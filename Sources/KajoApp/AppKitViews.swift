@@ -7,8 +7,8 @@
 // menus; window frames. Binding code only: every op is one call from the
 // image, and what the toolkit holds is not mirrored in Smalltalk.
 
+#if os(macOS)
 import AppKit
-import KajoShellCore
 import KajoVM
 
 /// An NSTextView that reports the keys the image bound before handling
@@ -29,7 +29,7 @@ final class KajoTextView: NSTextView {
     }
 
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
-        if window?.firstResponder === self, let k = boundKey(e) {
+        if unsafe window?.firstResponder === self, let k = boundKey(e) {
             onKey?(handle, k)
             return true
         }
@@ -375,7 +375,7 @@ final class KajoTextView: NSTextView {
 /// posted), else now.
 @MainActor func eventTime() -> UInt64 { NSApp.currentEvent.map { UInt64($0.timestamp * 1e9) } ?? ShellVM.now() }
 
-extension MacPlatform: NSTextViewDelegate {
+extension AppKitHost: NSTextViewDelegate {
     /// The second round's kinds (nil: not one of them).
     func make9c(_ kind: String, _ h: Int) -> Entry? {
         let post: (ShellEvent) -> Void = { [weak self] e in self?.eventHandler?(e) }
@@ -391,8 +391,8 @@ extension MacPlatform: NSTextViewDelegate {
             t.isVerticallyResizable = true
             t.isHorizontallyResizable = false
             t.autoresizingMask = [.width]
-            t.textContainer?.containerSize = NSSize(width: size.width, height: CGFloat.greatestFiniteMagnitude)
-            t.textContainer?.widthTracksTextView = true
+            unsafe t.textContainer?.containerSize = NSSize(width: size.width, height: CGFloat.greatestFiniteMagnitude)
+            unsafe t.textContainer?.widthTracksTextView = true
             t.isEditable = false
             t.isRichText = false
             t.allowsUndo = true
@@ -416,7 +416,7 @@ extension MacPlatform: NSTextViewDelegate {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("0"))
             c.resizingMask = .autoresizingMask
             o.addTableColumn(c)
-            o.outlineTableColumn = c
+            unsafe o.outlineTableColumn = c
             o.headerView = nil
             o.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
             let src = OutlineSource(handle: h)
@@ -494,7 +494,7 @@ extension MacPlatform: NSTextViewDelegate {
         case "text" where kajoText(e) != nil:
             let t = kajoText(e)!
             t.string = v.string ?? "\(v)"
-            t.textStorage?.setAttributes([.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.textColor],
+            unsafe t.textStorage?.setAttributes([.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.textColor],
                                          range: NSRange(location: 0, length: (t.string as NSString).length))
         case "vertical":
             guard let s = e.view as? NSSplitView else { return nil }
@@ -549,7 +549,7 @@ extension MacPlatform: NSTextViewDelegate {
         switch (m, e.object) {
         case ("appendLine", let t as KajoTextView):
             let line = a.first?.string ?? ""
-            t.textStorage?.append(NSAttributedString(string: t.string.isEmpty ? line : "\n" + line,
+            unsafe t.textStorage?.append(NSAttributedString(string: t.string.isEmpty ? line : "\n" + line,
                                                      attributes: [.font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular), .foregroundColor: NSColor.textColor]))
             t.scrollToEndOfDocument(nil)
         case ("clear", let t as KajoTextView):
@@ -561,9 +561,9 @@ extension MacPlatform: NSTextViewDelegate {
             guard let s = a.first?.int, let r = TextOffsets.nsRange(t.string, start: Int(s), stop: Int(s) - 1) else { return nil }
             t.scrollRangeToVisible(r)
         case ("focus", let t as KajoTextView):
-            t.window?.makeFirstResponder(t)
+            unsafe t.window?.makeFirstResponder(t)
         case ("setStyles", let t as KajoTextView):
-            guard a.count % 3 == 0, let storage = t.textStorage else { return nil }
+            guard a.count % 3 == 0, let storage = unsafe t.textStorage else { return nil }
             var triples: [(Int64?, Int64?, String?)] = []
             var k = 0
             while k + 2 < a.count { triples.append((a[k].int, a[k + 1].int, a[k + 2].string)); k += 3 }
@@ -654,15 +654,15 @@ extension MacPlatform: NSTextViewDelegate {
         }
     }
 
-    func textDidChange(_ n: Notification) {
+    public func textDidChange(_ n: Notification) {
         guard let t = n.object as? KajoTextView else { return }
         eventHandler?(ShellEvent(kind: .textChanged, target: t.handle, timeNs: eventTime()))
     }
 
     /// The typing measurement: a key typed into the text view `handle` as
     /// the window server would deliver it.
-    func typeKey(_ handle: Int, _ text: String) -> Bool {
-        guard let e = entries[handle], let t = kajoText(e), let w = t.window else { return false }
+    public func typeKey(_ handle: Int, _ text: String) -> Bool {
+        guard let e = entries[handle], let t = kajoText(e), let w = unsafe t.window else { return false }
         if w.firstResponder !== t { w.makeFirstResponder(t) }
         guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: Double(ShellVM.now()) / 1e9,
                                         windowNumber: w.windowNumber, context: nil, characters: text,
@@ -671,3 +671,4 @@ extension MacPlatform: NSTextViewDelegate {
         return true
     }
 }
+#endif

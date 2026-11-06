@@ -42,6 +42,10 @@ targets:
       - package: kajo
         product: KajoShellCore
       - package: kajo
+        product: KajoApp
+      - package: kajo
+        product: KajoAppDevelopment
+      - package: kajo
         product: KajoVM
     postBuildScripts:
       - name: Bundle images

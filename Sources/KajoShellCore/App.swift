@@ -1,5 +1,7 @@
 import Dispatch
 import Foundation
+import KajoApp
+import KajoAppDevelopment
 import KajoVM
 
 /// `mode=demo`: the window ShellDemo builds in Smalltalk; Transcript lines
@@ -11,7 +13,10 @@ import KajoVM
     var transcriptView = 0
     let pending = PendingLines()
 
-    public init(_ options: LaunchOptions, platform: ShellPlatform) {
+    let pairing: PairingPresenter?
+
+    public init(_ options: LaunchOptions, platform: ShellPlatform, pairing: PairingPresenter? = nil) {
+        self.pairing = pairing
         self.options = options
         self.platform = platform
     }
@@ -24,8 +29,8 @@ import KajoVM
         // records only (their sums cover the whole run).
         o.logCapacity = options.int("logs", Headless.Options.appLogCapacity)
         do {
-            let rt = try ShellRuntime(imagePath: resources.shellImage, options: o, platform: platform,
-                                      events: demoSink(pending))
+            let rt = try makeShellRuntime(imagePath: resources.shellImage, options: o, platform: platform,
+                                       events: demoSink(pending), pairing: pairing)
             runtime = rt
             rt.start()
             guard let p = rt.vm.spawn("open", receiver: "ShellDemo", main: true, priority: 2) else {
@@ -85,15 +90,18 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
 @MainActor public final class ShellApp {
     public let options: LaunchOptions
     public let platform: ShellPlatform
+    /// Module 11a: the platform's pairing screen (KajoAppDevelopment's).
+    public let pairing: PairingPresenter?
     public private(set) var scenario: ScenarioMode?
     public private(set) var demo: DemoMode?
     var tests: TestsMode?
     var dev: DevMode?
     var devSession: DevSessionMode?
 
-    public init(platform: ShellPlatform, options: LaunchOptions = LaunchOptions()) {
+    public init(platform: ShellPlatform, pairing: PairingPresenter?, options: LaunchOptions = LaunchOptions()) {
         self.options = options
         self.platform = platform
+        self.pairing = pairing
         Output.shared.setDirectory(options.string("outdir", Output.defaultDirectory), file: options.string("out", "results.txt"))
     }
 
@@ -107,23 +115,23 @@ nonisolated func demoSink(_ p: PendingLines) -> @Sendable ([UInt8]) -> Void {
             startGolden(o)
         case "tests":
             platform.showStatus("tests \(o.summary)")
-            let t = TestsMode(o, platform: platform)
+            let t = TestsMode(o, platform: platform, pairing: pairing)
             tests = t
             t.start()
         case "scenario", "serve":
-            let s = ScenarioMode(o, platform: platform)
+            let s = ScenarioMode(o, platform: platform, pairing: pairing)
             scenario = s
             s.start()
         case "dev":
-            let d = DevMode(o, platform: platform)
+            let d = DevMode(o, platform: platform, pairing: pairing)
             dev = d
             d.start()
         case "devsession":
-            let d = DevSessionMode(o, platform: platform)
+            let d = DevSessionMode(o, platform: platform, pairing: pairing)
             devSession = d
             d.start()
         default:
-            let d = DemoMode(o, platform: platform)
+            let d = DemoMode(o, platform: platform, pairing: pairing)
             demo = d
             d.start()
         }

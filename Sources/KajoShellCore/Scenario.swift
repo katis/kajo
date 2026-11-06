@@ -2,6 +2,8 @@ import Darwin
 import Dispatch
 import Foundation
 import KajoDev
+import KajoApp
+import KajoAppDevelopment
 import KajoVM
 
 /// `mode=scenario scenario=storm|ring|share|idle gc=cm|stw young=stw|local|offload
@@ -84,7 +86,10 @@ import KajoVM
     var thermalStart = ""
     var startNs: UInt64 = 0
 
-    public init(_ options: LaunchOptions, platform: ShellPlatform) {
+    let pairing: PairingPresenter?
+
+    public init(_ options: LaunchOptions, platform: ShellPlatform, pairing: PairingPresenter? = nil) {
+        self.pairing = pairing
         self.options = options
         self.platform = platform
         name = options.string("scenario", "idle")
@@ -110,8 +115,8 @@ import KajoVM
         thermalStart = Telemetry.thermal()
         mainTid = Telemetry.threadID()
         do {
-            runtime = try ShellRuntime(imagePath: resources.shellImage, options: o, platform: platform,
-                                       events: transcriptSink())
+            runtime = try makeShellRuntime(imagePath: resources.shellImage, options: o, platform: platform,
+                                       events: transcriptSink(), pairing: pairing)
         } catch {
             Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
             finish(2)
@@ -127,7 +132,7 @@ import KajoVM
         if let port = servePort {
             do {
                 tcpServer = try runtime.serveTCP(port: port, store: pairingTokenStore(options), imageName: "shell.img",
-                                                 serviceName: options["bonjour"])
+                                                 serviceName: options["bonjour"], pairing: pairing)
             } catch {
                 Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=protocol_\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
                 finish(2)
@@ -449,8 +454,7 @@ nonisolated func startDebugClient(path: String, token: String, until: UInt64, re
 /// the phone's is copied from its container).
 func pairingTokenStore(_ options: LaunchOptions) -> PairingTokenStore? {
     #if os(iOS)
-    guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else { return nil }
-    return PairingTokenStore(directory: dir.path)
+    return PairingTokenStore.applicationSupport()
     #else
     return options["tokendir"].map { PairingTokenStore(directory: $0) }
     #endif
