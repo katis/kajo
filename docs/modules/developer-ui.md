@@ -101,7 +101,10 @@ read, or a `client.error` object naming why (not JSON, not an object, too
 long); never a trap. Lines arrive as **`line` events** on 9a's event
 queue (target the connection); a line longer than 16 KiB as `linePart`
 events of at most 16 KiB cut between scalars, then the `line` event with
-the last piece (no String of the image can pass one heap block); the end
+the last piece (no String of the image can pass one heap block; since the
+large-bytes follow-up a line arrives as one String up to 16 MiB - 1,
+measured cheaper for the image, and only a longer one in pieces of that
+size: docs/modules/large-bytes.md, part 3); the end
 of the connection is a **`lost` event** with the reason. When the
 connection was opened with a project directory, the `files` of every
 reply are written there by 9b's `ProjectWriter` (file names only), as the

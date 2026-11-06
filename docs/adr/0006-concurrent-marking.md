@@ -212,3 +212,40 @@ each change and logs the QoS it marked at per cycle. In the storm with a
 cycles. The escalation itself is still unmeasured on a phone (module 9).
 The marker waits untimed (0 ns of CPU and 0 wakeups in a parked second;
 cycles after idling finish in under 2 ms).
+
+## Built (large bytes): the policy watches the entry table and waits (2026-11-06)
+
+On the iPhone 13 Pro and the iPad Pro the plain allocation storm fell
+back to a stop-the-world full collection (41 to 84 ms, 4 to 10 frames)
+in about half the launches at 7 workers and a tenth at 5, and the large
+churn in 8 to 9 of 10 (docs/modules/large-bytes.md, part 2). The storm ran
+out of **entries** while the lazy sweep, at utility on efficiency cores,
+still held the entries it had freed (pending until the apply); old space
+had headroom, so the policy, which looked at old space only and only at
+the initial mark, never raised the marker. The large churn ran out of
+old space while a cycle was still marking. The trigger itself did not
+fire late (the entries and floor triggers fired every time) and is
+unchanged. What changed:
+
+- The QoS policy raises the marker when the headroom of old space **or
+  of the entry table** (old entries, the ones a sweep has freed but not
+  applied counted as used) is under `escalateBelow`, decided at the
+  initial mark and now also at every young collection's end while a
+  cycle runs; the apply lowers it when both are above.
+- A young allocation that finds the table empty during a sweep, and an
+  old allocation that finds no room, finish the sweep in their stop and
+  apply it instead of a full collection (counted, `sweepsForEntries`,
+  `sweepsForOld`).
+- An old allocation that finds no room, or a young one that finds the
+  entry table empty, while a cycle marks raises the marker and waits for
+  the final mark, at most 100 ms, on a background worker (`allocWaits`).
+
+After (the final code, ten launches of each row on each device): no
+fallback in 80 launches (storm at 5 and 7 workers, the large churn, the
+photo churn), three frames missed in two iPhone storm launches at thermal
+serious behind final marks of 8 and 20 ms (not fallbacks), the main
+thread's stopped time within the earlier rows but for the iPad's large
+churn (166 against 160 ms per 10 s), and on the iPhone the process's CPU
+energy 4 to 14 percent lower while the marker's own rose by 7 percent to
+3.5 times (it now finishes the cycles the fallbacks used to abandon). The headroom
+condition stands; the fallback is still counted where it remains.

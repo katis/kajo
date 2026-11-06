@@ -331,6 +331,13 @@ keeps them with its trigger.
 
 ### Fallback
 
+Since the large-bytes follow-up a young allocation that finds the entry
+table empty and an old allocation that finds no room first finish a
+pending sweep in their stop (and apply it), and while a cycle marks first
+wait for its final mark (at most `MarkingConfig.allocationWaitMs`, a
+background worker only); what remains is the fallback below, counted by
+cause and recorded with its circumstances (`fallbackLog`).
+
 Module 4's rule stands: a scavenge that leaves old space past its soft
 limit requests module 1's full collection in a stop of its own (the next
 poll or the next scavenge request). With concurrent marking configured that
@@ -351,6 +358,15 @@ what the policy wants with `pthread_set_qos_class_self_np` at its next
 poll and when it starts and ends a work period, and counts each change
 (`qosEscalations`, `qosLowerings`); every cycle's record logs the QoS it
 marked at (`qos_class_self` when it requested the final mark).
+
+Since the large-bytes follow-up (docs/modules/large-bytes.md, part 2) the
+policy also watches the entry table (old entries over its capacity, the
+entries a sweep freed but has not applied counted as used), is decided at
+the end of every module 7 young collection while a cycle runs, and is
+raised by an allocation that finds no room while a cycle marks; the apply
+lowers it only when both headrooms are above the threshold. On the
+devices the storm's table ran out while the marker, still at utility on
+efficiency cores, swept.
 
 ### The untimed wait and its audit
 

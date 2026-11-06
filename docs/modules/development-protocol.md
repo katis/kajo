@@ -856,7 +856,9 @@ class tree in one request), **`package.list`** and
 event longer than one heap object (32 KiB) could not be written at all,
 so the kernel writes replies and events in pieces (`Json writePieces:`,
 primitive 161 taking an Array of Strings and ByteArrays it joins), and
-the client's transport hands a long line to the image in pieces as well;
+the client's transport hands a long line to the image in pieces as well
+(since the large-bytes follow-up as one String up to 16 MiB - 1, measured
+cheaper; the replies keep their pieces, docs/modules/large-bytes.md part 3);
 and the session token never enters the client image (the host's
 `ClientHost` opens the session). The `files` of every reply are written
 by the client's transport into the project directory given at connect, as

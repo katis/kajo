@@ -293,3 +293,27 @@ checks every run before the heap verifier runs. One cost is new: a large
 object's slots are one body, so a remembered large object is scanned
 whole by a scavenge (no card table), and the stop-the-world collector
 marks it whole; the concurrent marker scans it in chunks of 4096 slots.
+
+## Built (large bytes): byte objects past the count field (2026-11-06)
+
+The large-bytes follow-up (docs/modules/large-bytes.md) lets a byte object
+be up to 2 GiB - 1 bytes without a new header bit or a wider field. The
+header's count field keeps its meaning for every object below 2^24 - 8
+bytes and for every pointer object; a byte object of 2^24 - 8 bytes or
+more holds the **sentinel** `2^24 - 8 | n & 7` there, and its length is
+its back reference's words (32 bits of words) less the padding the
+sentinel's low three bits leave. Such an object is always large (a run),
+old and never moved, so the back reference is where the length can live
+without a side table. The field is never more than the length, so the
+interpreter's bounds check `i < count` is unchanged and only its failure,
+already out of line, asks for the length; the special-send tier's `size`
+arm gained one compare for a ByteArray at or past the sentinel. Measured:
+`interpret` identical instruction for instruction against the starting
+commit (page offsets of `adrp` aside), the aligned A/B of every kernel at
+1 and 8 workers 0.966 to 1.056 with overlapping ranges. The alternative,
+a count in words for every byte object with the padding in moved header
+bits, cost three instructions on every byte bounds check
+(experiments/large-bytes). Snapshot version 5, image format 6. Pointer
+objects keep the 24-bit limit (16 777 215 slots); the same sentinel could
+lift it at a cost to the marker's and the scavenge's scans of a long one,
+left to the owner.

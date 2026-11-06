@@ -667,12 +667,16 @@ release builds (`just arc-check`'s), normalized for addresses
   it; not built and not measured beyond this estimate.
 - **The stop-the-world collector marks a large object whole**: in a pause,
   so it only lengthens that pause.
-- **Filling a large object does not poll**: a 16 MiB fill is 0.6 ms a stop
+- **Filling a large object does not poll** (a byte object's fill polls
+  since the large-bytes follow-up, every 256 KiB; a pointer object's still
+  does not): a 16 MiB fill is 0.6 ms a stop
   may wait for, a 128 MiB one about 5 ms.
 - **Runs are never moved**, so fragmentation between them is permanent
   until they die (Measurements). The owner's question below.
 - **LargeIntegers** stay at most one block.
-- **The transport still carries long lines in pieces** both ways.
+- **The transport still carries long lines in pieces** both ways (since
+  the large-bytes follow-up only the replies the image writes; a received
+  line is one String up to 16 MiB - 1, docs/modules/large-bytes.md part 3).
 - **The device**: nothing in this module ran on the iPhone (the attached
   phone was not touched; its build waits on signing since 9d).
 
@@ -700,7 +704,9 @@ release builds (`just arc-check`'s), normalized for addresses
 1. **16 MiB is too little** if images or photos are held in a ByteArray.
    The byte limit is to be lifted in a follow-up (how is that module's
    to measure: a count in words with the odd bytes beside it, or an
-   overflow count word for large objects).
+   overflow count word for large objects). Built in the large-bytes
+   follow-up: a sentinel count with the length in the back reference, up
+   to 2 GiB - 1 bytes (docs/modules/large-bytes.md).
 2. **No relocation of runs.**
 3. **The pieces**: the owner asked whether keeping them is right. The
    reason to keep them is that a line past one block as one String is old

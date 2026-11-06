@@ -827,7 +827,11 @@ thread actually had (`*_pri`, `*_qos_got`).
   the mark, is what the allocation outran. This is the same provisioning
   failure as the large churn's `fallbacksIdle`, in the plain storm, and
   it costs frames; the large-bytes follow-up
-  (`docs/modules/large-bytes.md`, part 2) traces and removes both.
+  (`docs/modules/large-bytes.md`, part 2) traces and removes both. It
+  found the storm's to be the entry table, not old space, running out
+  while the starved utility-QoS marker still swept, and reproduced them
+  at about half the launches at 7 workers; after it, no fallback in 40
+  storm launches on the two devices.
 
 ### Drift and thermal
 
@@ -963,7 +967,10 @@ at **thermal serious** in every launch). The iPhone had not run it before.
   run with as many stop-the-world scavenges, none of them costing a frame.
   The Mac's runs counted none. A churn of large objects at a phone's
   speed can outrun the trigger on old space now and then; it is counted,
-  as module 5 requires, and left for the owner (open questions).
+  as module 5 requires, and left for the owner (open questions). The
+  large-bytes follow-up traced them (old space full while a cycle was
+  still marking) and removed them: 0 in 20 such launches after
+  (docs/modules/large-bytes.md, part 2).
 
 ### The kernels against the starting commit
 

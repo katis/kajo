@@ -50,7 +50,7 @@ the oop. Entries above the high water mark were never used and are zero.
 | bits | field | module 1 |
 |---|---|---|
 | 0..21 | class index (0 is never a class) | used |
-| 22..45 | count: slots, or bytes for a byte object | used |
+| 22..45 | count: slots, or bytes for a byte object (large bytes: from 2^24 - 8 bytes a sentinel, the length in the back reference) | used |
 | 46 | mark, full collection | **reserved**: module 1 marks in a side byte map |
 | 47 | byte object | used |
 | 48..51 | unused | **reserved** |

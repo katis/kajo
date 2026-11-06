@@ -534,8 +534,9 @@ as they are understood.
   tools connected to its own socket: Kajo develops Kajo.
 - **Client transport**: the host's side of a DevClient's connection
   (primitive 164, `ClientHost`): it owns the socket and the token, checks
-  every line and posts it as a `line` event (a long one in `linePart`
-  pieces) and the end as a `lost` event.
+  every line and posts it as a `line` event (one String up to 16 MiB - 1
+  since the large-bytes follow-up; a longer one in `linePart` pieces) and
+  the end as a `lost` event.
 - **Hand-over**: the event loop giving the events to a new loop Process
   when a tool's error stops the old one for the debugger.
 - **Push and on-demand** (a data source's forms): the image gives a
