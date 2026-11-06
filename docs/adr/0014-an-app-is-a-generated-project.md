@@ -79,5 +79,5 @@ development half against 5.4 and 5.0 MB Debug; a change landed in the
 running Debug app 68 to 70 ms after the compile request from the CLI and
 in 5 to 6 ms per step from the tools, with 0 of 3780 frames missed over
 the window; cold launch to the first frame 213 to 255 ms Debug and 190
-to 231 ms Release. The device rows of the round trip wait for the
+to 235 ms Release. The device rows of the round trip wait for the
 owner's signing account.

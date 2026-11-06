@@ -267,17 +267,22 @@ the project files, which the snapshot would hold but `src/` would not.
 
 ### On the Mac
 
-Mac mini (M2 Pro), macOS 27.2, Xcode 27.2, the 120 Hz display, thermal
-nominal (0) on every line, 2026-11-06 12:35 to 12:45; `rt-mac/` and
-`rt-mac2/` under the gate directory's parent.
+Mac mini (M2 Pro), macOS 27.2, Xcode 27.2, the 120 Hz display. Three
+runs of `scripts/app-roundtrip.sh mac`: two on 3b04240 and its working
+tree (2026-11-06 12:35 to 12:45, thermal nominal on every line; the
+second with the App Nap fix below, its last steps lost to an edit of the
+script it was running) and one complete run on 25a7332, the final code
+(16:23 to 16:30, after the gates, thermal fair on every line). Ranges
+below cover all three; `rt-mac/`, `rt-mac2/`, `rt-mac3/` beside the
+gates' directory.
 
 | | Debug | Release |
 |---|--:|--:|
-| build from clean (packages, image phase, app) | 31.6 to 32.4 s | 42.6 s |
+| build from clean (packages, image phase, app) | 30.1 to 32.4 s | 42.6 to 42.7 s |
 | build again, nothing changed | 2.9 to 3.0 s | |
 | build after the tools' change to `src/` | 3.9 to 4.2 s | |
-| cold launch to first frame, launches 2 to 5 (ms) | 213 to 255 | 190 to 231 |
-| cold launch, first after a build (ms) | 584 to 678 | 594 |
+| cold launch to first frame, launches 2 to 5 (ms) | 213 to 255 | 190 to 235 |
+| cold launch, first after a build (ms) | 584 to 678 | 560 to 594 |
 | app bundle | 10 264 KiB | 7 032 KiB |
 | binary | 40 528 B stub + 5 358 896 B debug dylib | 2 121 296 B |
 | image | 5 062 784 B (development) | 5 063 256 B (release) |
@@ -295,20 +300,23 @@ other configuration's image.
 | | ms |
 |---|--:|
 | `kajo eval` as a process (resolve, connect, open, request), 2nd to 5th | 30 to 38 |
-| `kajo eval`, the first after the app started | 67, 1031 |
+| `kajo eval`, the first after the app started | 67, 1022, 1031 |
 | `kajo compile` as a process | 32 to 33 |
 | compile request to a press showing the change (two processes) | 68 to 70 |
 | tools: `method.compile` request | 3.5 |
-| tools: `evaluate` request (a press and the label read back through the view hop) | 4.7 to 5.2 |
-| tools: `class.hierarchy`, `package.list`, `class.selectors`, `method.source` | 28, 9 to 11, 3.7 to 4.1, 1.0 to 1.1 |
-| tools: the select step (class side, method shown) | 26.5 |
-| tools: the compile step (accept to "compiled") | 5.4 to 6.0 |
-| tools: the live step (the press answering the new text) | 5.3 to 6.1 |
+| tools: `evaluate` request (a press and the label read back through the view hop) | 1.3 to 5.2 |
+| tools: `class.hierarchy`, `package.list`, `class.selectors`, `method.source` | 28 to 31, 6 to 11, 3.7 to 4.2, 1.0 to 2.1 |
+| tools: the select step (class side, method shown) | 26.5 to 28.0 |
+| tools: the compile step (accept to "compiled") | 5.4 to 7.7 |
+| tools: the live step (the press answering the new text) | 5.3 to 7.2 |
 
 **Frames of the app** (Debug, `kajo-frames`): with no client 0 of 1260
 missed in 10.5 s; over the 31.5 s window in which the CLI and the tools
 made 8 sessions and 17 requests and two changes landed, 0 of 3780
-missed; after the relaunch 0 of 1008. In the first run the window
+missed; after the relaunch 0 of 1008 (runs 2 and 3 alike). The first
+`kajo eval` after a launch takes about a second where the next take 33
+to 38 ms: Bonjour's first resolution, as 9d measured (0.3 to 0.4 s
+there). In the first run the window
 measured 13 of 1260 frames idle and missed 333 of 3779 over the live
 window, one gap of 2.8 s: the app, launched from a script and not made
 frontmost (macOS 14's cooperative activation), was napped by App Nap
@@ -394,6 +402,14 @@ ranges, which overlap in every row.
 
 ## Changes to earlier modules
 
+- 9a, a latent bug: a turn that left work scheduled its follow-up on the
+  main queue holding the runtime strongly, and the runtime's platform is
+  `unowned`; a runtime whose host was gone before the queue ran the turn
+  trapped ("Attempted to read an unowned reference but object ... was
+  already destroyed"). The shells' hosts live for the process, so only
+  this module's tests met it, in the gate's ThreadSanitizer run, in a
+  later test of the same process. The follow-up holds the runtime weakly;
+  `aTurnLeftForLaterDoesNotOutliveItsHost` traps without the rule.
 - 9a: `ShellRuntime`, `ShellPlatform`, the AppKit and UIKit hosts and
   9c's views moved into `KajoApp`; `ShellRuntime.init` takes the client
   transport's callback (`client:`), no longer makes a `ClientHost`, and
@@ -458,14 +474,15 @@ ranges, which overlap in every row.
   refused and the link's target untouched, a refused spec writes
   nothing); the generated Tonel compiles with the kernel with no warning,
   its package is the app's, and its SUnit test passes.
-- `AppServingTests` (5), at ShellTests' level on a host that keeps the
+- `AppServingTests` (6), at ShellTests' level on a host that keeps the
   views' properties: a development build serves at launch with no
   argument (the store's token on the pairing screen, the file 0600, a
   loopback client reads the label through the view hop after a press, a
   wrong token is refused); a development half over a release image does
   not serve, makes no token, reports why, and the app runs; a release
   build has no transport; an app that cannot open says why; the service
-  name tells apps apart and fits Bonjour.
+  name tells apps apart and fits Bonjour; a turn left for later does not
+  outlive its host.
 - `just new-check` (the gate): part 1's and 3's binary and plist checks
   on all four products, and the Debug VM's compile line.
 
@@ -478,6 +495,9 @@ ranges, which overlap in every row.
 - The generated project without `link: false`: the Release Mac binary has
   1224 `KajoDev` and 345 `KajoAppDevelopment` symbols and imports
   `DNSServiceRegister`; `just new-check`'s release check fails on it.
+- The follow-up turn holding its runtime strongly: `aTurnLeftForLaterDoesNotOutliveItsHost`
+  traps the test process with the message the gate's ThreadSanitizer run
+  hit.
 - The pin without the trait (`linkexp/E`, before the module's code): the
   Debug compile line of `KajoVM` is `-Onone -DDEBUG` only, the gate's
   Debug VM check fails, and fib did not finish in two minutes.
@@ -533,11 +553,36 @@ none added.
 
 ## Gates
 
-On 7835ac0 (the last commit that changes code); every output in the
+On 25a7332 (the last commit that changes code; the first run of the
+sequence, on 7835ac0, stopped at the ThreadSanitizer gate on the trap in
+"Changes to earlier modules", and every gate ran again after the fix); every output in the
 scratchpad's `m11a/gates/`, `gates.log` records the commit and exit
 status of each.
 
-(Filled in from the gate run.)
+Mac mini (M2 Pro), swift.org 6.4.2 first on PATH, Xcode 27.2 for the
+apps, 2026-11-06 13:33 to 16:22. "Load" is twelve `yes` busy loops, topped
+up every 20 s while ThreadSanitizer under load outlasted their 1500 s.
+
+| gate | result |
+|---|---|
+| clean build (`--scratch-path .build/clean-check`, removed first) | exit 0, 0 warnings, 18 s (the toolchain's compilation cache, as in 8e and 9d; the full strict-memory-safety compile of KajoApp and KajoAppDevelopment from nothing is in `just apps` and `just new-check`, whose DerivedData start empty, 0 warnings) |
+| `swift test` | 352 + 99 passed, 291 + 88 s |
+| under load | 352 + 99 passed, 347 + 108 s |
+| ThreadSanitizer | 352 + 99 passed, 0 reports, 496 + 2224 s |
+| ThreadSanitizer under load | 352 + 99 passed, 0 reports, 686 + 2726 s |
+| `just ios-check` | exit 0, 0 errors, 0 warnings |
+| `just arc-check` | OK: no retain or release on the checked paths, `interpret` 1056 instructions, one indirect branch and one jump table |
+| `just golden` | 12 of 12 checksums |
+| `just test-release` | 352 + 99 passed |
+| `just model-check` | 28 + 5 + 15 passed |
+| `just soak` | 27 configurations of 1000 seeds each, no failing seed; the resumed modes saving 897 to 990 of 1000 |
+| `just fuzz kasm 600` | libFuzzer build ok, 2.48 million runs, no crash |
+| `just fuzz snapshot 600` | libFuzzer build ok, 2.42 million runs, no crash |
+| `just fuzz syntax 600` | libFuzzer build ok, 0.62 million runs, no crash |
+| `just fuzz protocol 600` | libFuzzer build ok, 1.62 million runs, no crash |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| `just kernel-test` | 202 of 202 |
+| `just new-check` | ok: four builds from clean, exit 0, 0 errors, 0 warnings each (Mac Debug 31 s, Release 43 s; iOS Debug 14 s, Release 39 s); Release binaries 2 115 888 B (Mac) and 1 981 648 B (iOS) with 0 symbols of KajoDev, KajoAppDevelopment, KajoCompiler and KajoShellCore, no `_kajo-dev._tcp`, no `kajo-pairing-token`, no `DNSServiceRegister` import, no local-network key, a release image that refuses to serve; Debug products with all of them and a VM compiled with the trait and `-O`; the image phase 13.0 s first, 1.3 s again, 2.5 s touched |
 
 ## Commands
 
