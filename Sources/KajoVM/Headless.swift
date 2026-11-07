@@ -547,6 +547,55 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
+    ] + finalMarkReport(stops: stops, log: log)
+}
+
+/// The final mark on the devices (docs/modules/final-mark.md): the final
+/// mark's stop split as its record has it. `finalStopped` is what the world
+/// stands still for (the request to the release); `finalBeforeRequest` the
+/// wait before the request (another stop, module 7's open collections),
+/// with the world running; `finalPark` the request to the last park;
+/// `finalWork` the work. The initial mark's stop (module 7's pause) the
+/// same. `finalLog`: per final mark the log kept, before the request/park
+/// wait/work/relocation selection/sweep setup (ms), collections open at
+/// the request, the last parker and how it came (p poll, w wait, s
+/// stopper), parkers from waits, the stopper's QoS before the raise, its
+/// share of CPU on performance cores and its clock there (GHz) from the
+/// request to the end of the work, and the thermal state.
+func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, String)] {
+    func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
+    func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
+    func pct(_ xs: [UInt64], _ q: Double) -> String {
+        let s = xs.sorted()
+        return s.isEmpty ? "-" : ms(s[min(s.count - 1, Int(Double(s.count) * q))])
+    }
+    func mx(_ xs: [UInt64]) -> String { xs.max().map(ms) ?? "-" }
+    let fm = stops.filter { $0.kind == .finalMark }
+    let im = stops.filter { $0.kind == .initialMark }
+    let stopped = fm.map(\.stoppedNs)
+    let done = log.filter { $0.finalWorkNs > 0 }
+    let via = ["p", "w", "s"]
+    let rows = done.map { r -> String in
+        let c = r.finalStopperCore
+        let cpu = c.pCpuNs &+ c.eCpuNs
+        let pf = c.ok && cpu > 0 ? unsafe String(format: "%.2f", Double(c.pCpuNs) / Double(cpu)) : "-"
+        let ghz = c.ok && c.pCpuNs > 0 ? unsafe String(format: "%.2f", Double(c.pCycles) / Double(c.pCpuNs)) : "-"
+        return [unsafe String(format: "%.2f", Double(r.finalBeforeRequestNs) / 1e6), unsafe String(format: "%.2f", Double(r.finalParkWaitNs) / 1e6),
+                unsafe String(format: "%.2f", Double(r.finalWorkNs) / 1e6), unsafe String(format: "%.2f", Double(r.relocationAtFinalNs) / 1e6),
+                unsafe String(format: "%.2f", Double(r.sweepSetupNs) / 1e6), "\(r.finalCollectionsOpen)",
+                "\(r.finalSlowest)\(via[Int(r.finalSlowestVia.rawValue)])", "\(r.finalParkedFromWaits)", "\(r.finalStopperQoS)",
+                pf, ghz, "\(r.finalThermal)"].joined(separator: "/")
+    }
+    return [
+        ("finalStoppedP50ms", pct(stopped, 0.5)), ("finalStoppedP99ms", pct(stopped, 0.99)), ("finalStoppedMaxMs", mx(stopped)),
+        ("finalBeforeRequestP50ms", pct(fm.map(\.beforeRequestNs), 0.5)), ("finalBeforeRequestMaxMs", mx(fm.map(\.beforeRequestNs))),
+        ("finalParkP50ms", pct(fm.map(\.parkWaitNs), 0.5)), ("finalParkMaxMs", mx(fm.map(\.parkWaitNs))),
+        ("finalWorkP50ms", pct(done.map(\.finalWorkNs), 0.5)), ("finalWorkMaxMs", mx(done.map(\.finalWorkNs))),
+        ("finalRelocMaxMs", mx(done.map(\.relocationAtFinalNs))), ("finalSweepSetupMaxMs", mx(done.map(\.sweepSetupNs))),
+        ("finalCollectionsOpenMax", fm.map(\.collectionsOpen).max().map { "\($0)" } ?? "-"),
+        ("initialStoppedMaxMs", mx(im.map(\.stoppedNs))), ("initialBeforeRequestMaxMs", mx(im.map(\.beforeRequestNs))),
+        ("initialParkMaxMs", mx(im.map(\.parkWaitNs))),
+        ("finalLog", rows.isEmpty ? "-" : rows.joined(separator: ",")),
     ]
 }
 

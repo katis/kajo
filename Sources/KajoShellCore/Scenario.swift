@@ -80,6 +80,11 @@ import KajoVM
     var vmNs: UInt64 = 0, parkNs: UInt64 = 0, stopNs: UInt64 = 0, waitNs: UInt64 = 0, collectorNs: UInt64 = 0
     var youngNs: UInt64 = 0, cpuNs: UInt64 = 0
     var maxTurnNs: UInt64 = 0, maxTurnKind = "-"
+    /// The final mark on the devices: the longest turn's park, enter and
+    /// leave waits and young-collection time, and the longest of each in
+    /// any one turn.
+    var maxTurnParts = (park: UInt64(0), wait: UInt64(0), young: UInt64(0))
+    var maxParkNs: UInt64 = 0, maxWaitNs: UInt64 = 0
 
     // events
     var eventTimer: DispatchSourceTimer?
@@ -254,7 +259,12 @@ import KajoVM
         if t.preempted { preempted += 1 }
         vmNs &+= t.ns; cpuNs &+= t.cpuNs; parkNs &+= t.parkNs; stopNs &+= t.stopNs
         waitNs &+= t.enterWaitNs &+ t.leaveWaitNs; collectorNs &+= t.collectorNs; youngNs &+= t.youngNs
-        if t.ns > maxTurnNs { maxTurnNs = t.ns; maxTurnKind = k.rawValue }
+        if t.ns > maxTurnNs {
+            maxTurnNs = t.ns; maxTurnKind = k.rawValue
+            maxTurnParts = (t.parkNs, t.enterWaitNs &+ t.leaveWaitNs, t.youngNs)
+        }
+        maxParkNs = max(maxParkNs, t.parkNs)
+        maxWaitNs = max(maxWaitNs, t.enterWaitNs &+ t.leaveWaitNs)
     }
 
     func noteView(_ c: ViewCall) {
@@ -388,6 +398,8 @@ import KajoVM
         line += " gap_p50_ms=\(f3(fa.gapP50Ms)) gap_p99_ms=\(f3(fa.gapP99Ms)) gap_max_ms=\(f3(fa.gapMaxMs))"
         line += " cb_late_p50_ms=\(f3(percentile(callbackLate, 0.5))) cb_late_p99_ms=\(f3(percentile(callbackLate, 0.99))) cb_late_max_ms=\(f3(callbackLate.max() ?? 0))"
         line += " turns=\(turns) slices=\(slices) preempted_turns=\(preempted) max_turn_ms=\(ms(maxTurnNs)) max_turn_kind=\(maxTurnKind)"
+        line += " max_turn_park_ms=\(ms(maxTurnParts.park)) max_turn_wait_ms=\(ms(maxTurnParts.wait)) max_turn_young_ms=\(ms(maxTurnParts.young))"
+        line += " max_park_ms=\(ms(maxParkNs)) max_enter_leave_wait_ms=\(ms(maxWaitNs))"
         line += " main_vm_ms_per10s=\(per10(vmNs)) main_cpu_ms_per10s=\(per10(cpuNs))"
         // ADR 0008's attribution: stopped because another worker allocated
         // (parked in stops, rounds of other nurseries' collections, polls that
@@ -399,6 +411,7 @@ import KajoVM
         line += " main_acks_other=\(m.acksOther) main_acks_other_ms_per10s=\(per10(m.acksOtherNs)) main_ack_other_mean_us=\(m.acksOther == 0 ? "-" : f1(Double(m.acksOtherNs) / Double(m.acksOther) / 1e3))"
         line += " main_ack_max_ms=\(ms(m.ackMaxNs)) main_acks_own=\(m.acksOwn) main_flips=\(m.flips) main_flip_max_ms=\(ms(m.flipMaxNs))"
         line += " main_own_collections=\(m.ownCollections) main_own_max_ms=\(ms(m.ownMaxNs)) main_collector_waits=\(m.collectorWaits) main_collector_wait_ms=\(ms(m.collectorWaitNs))"
+        line += " main_stop_wait_ms_per10s=\(per10(m.stopWaitNs)) main_stop_wait_max_ms=\(ms(m.stopWaitMaxNs)) main_drain_wait_ms_per10s=\(per10(m.drainWaitNs))"
         if eventRate > 0 {
             line += " events_posted=\(eventsPosted) label_updates=\(labelUpdates) ev_n=\(latencies.count)"
             line += " ev_lat_p50_ms=\(f3(percentile(latencies, 0.5))) ev_lat_p99_ms=\(f3(percentile(latencies, 0.99))) ev_lat_max_ms=\(f3(latencies.max() ?? 0))"

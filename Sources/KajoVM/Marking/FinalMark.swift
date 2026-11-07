@@ -9,10 +9,11 @@ import Synchronization
 
 /// The final mark of cycle `cycle` (world stopped; the stopper is the
 /// marker participant). Nothing happens if that cycle is no longer marking.
-func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cycle: UInt64) {
+func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cycle: UInt64,
+                  context: FinalMarkContext = FinalMarkContext()) {
     guard unsafe mk.phaseNow == .marking && mk.cycleNow == cycle else { return }
     unsafe markStop(vm, .finalMark)
-    let t0 = nanoseconds()
+    let t0 = stop.workStartNs == 0 ? nanoseconds() : stop.workStartNs
     let om = unsafe mk.pointee.om
     let m = unsafe mk.pointee.marker
     let log = unsafe mk.pointee.log
@@ -149,6 +150,14 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
         r.markerQoS = unsafe m.pointee.qos
         r.floatingObjects = verdict.floatingObjects
         r.floatingBytes = verdict.floatingBytes
+        r.finalBeforeRequestNs = stop.beforeRequestNs
+        r.finalCollectionsOpen = stop.collectionsOpen
+        r.finalParkWaitNs = stop.parkWaitNs
+        r.finalSlowest = stop.slowest
+        r.finalSlowestVia = stop.slowestVia
+        r.finalParkedFromWaits = stop.parkedFromWaits
+        r.finalStopperQoS = context.qos
+        r.finalThermal = context.thermal
         unsafe log.pointee.currentRecord = r
     }
     unsafe log.pointee.counters.finalMarkNs &+= t5 &- t0
@@ -174,6 +183,7 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     }
     // Module 6: the relocation set and the frame pins.
     unsafe relocationAtFinalMark(vm, mk, cycle: cycle)
+    let t6 = nanoseconds()
     // The sweep may start: pending-dead entries are skipped by the
     // verifiers until it has passed them.
     om.setPendingDead(unsafe mk.pointee.snapshot)
@@ -186,6 +196,14 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
         unsafe m.pointee.sweepLive = RawArray(repeating: 0, count: blocks)
     } else if let base = unsafe m.pointee.sweepLive.baseAddress {
         unsafe base.update(repeating: 0, count: blocks)
+    }
+    let t7 = nanoseconds()
+    if var r = unsafe log.pointee.currentRecord {
+        r.relocationAtFinalNs = t6 &- t5
+        r.sweepSetupNs = t7 &- t6
+        r.finalWorkNs = t7 &- t0
+        if context.core.ok { r.finalStopperCore = CoreTime.now().since(context.core) }
+        unsafe log.pointee.currentRecord = r
     }
     unsafe pthread_mutex_lock(mk.pointee.lock)
     unsafe mk.setPhase(.sweeping)

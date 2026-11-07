@@ -66,14 +66,17 @@ func park(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) {
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 }
 
-/// Mutex held: wait out the current stop, if any.
-func parkLocked(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) {
+/// Mutex held: wait out the current stop, if any. `via`: where the parker
+/// was (the stop's record names the last one's).
+func parkLocked(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, via: ParkVia = .poll) {
     let sp = unsafe vm.pointee.safepoint
     guard unsafe sp.pointee.requested else { return }
     let t0 = nanoseconds()
     let epoch = unsafe sp.pointee.epoch
     unsafe sp.pointee.parked += 1
     unsafe sp.pointee.lastParker = w.pointee.index
+    unsafe sp.pointee.lastParkerVia = via
+    if via == .wait { unsafe sp.pointee.parkedFromWaits += 1 }
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     var seen = unsafe sp.pointee.phaseSeq
     while unsafe sp.pointee.epoch == epoch {
@@ -123,6 +126,15 @@ private func noteEpoch(_ w: WorkerPointer, _ epoch: UInt64) {
     let vm: UnsafeMutablePointer<VMState>
     let keeping: [Oop]
     var timeToSafepointNs: UInt64 = 0
+    /// The final mark on the devices: the split of `timeToSafepointNs`
+    /// (`StopRecord`), and when the stop's work began (uptime ns).
+    var beforeRequestNs: UInt64 = 0
+    var collectionsOpen = 0
+    var parkWaitNs: UInt64 = 0
+    var slowest = -1
+    var slowestVia = ParkVia.poll
+    var parkedFromWaits = 0
+    var workStartNs: UInt64 = 0
 
     /// Every root outside the object memory's own: live records' Processes
     /// and stacks, the workers' oop registers, ready queues, pending roots,
@@ -146,9 +158,10 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     let raised = unsafe raiseStopperQoS(vm, w)
     defer { if let q = raised { pthread_set_qos_class_self_np(q, 0) } }
     unsafe lockCounted(vm.pointee.safepointLock, vm, contended: .safepointContended)
+    let collectionsOpen = unsafe sp.pointee.ycActive
     while true {
         while unsafe sp.pointee.requested {
-            unsafe parkLocked(vm, w)
+            unsafe parkLocked(vm, w, via: .stopper)
             if !retry {
                 unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
                 return false
@@ -157,9 +170,12 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
         // Module 7: stops and young collections never interleave.
         if unsafe waitForCollectionsLocked(vm, w) { break }
     }
+    let tr = nanoseconds()
     unsafe sp.pointee.requested = true
     unsafe sp.pointee.stopper = w.pointee.index
     unsafe sp.pointee.lastParker = -1
+    unsafe sp.pointee.lastParkerVia = .poll
+    unsafe sp.pointee.parkedFromWaits = 0
     unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .relaxed)
     // Module 7: participants blocked in a wait inside the VM (`waitServicing`:
     // an opener waiting for `stwWanted`, a collector, an eden wait) must wake
@@ -171,12 +187,16 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     let t1 = nanoseconds()
     let wakeups = unsafe sp.pointee.wakeups
     let slowest = unsafe sp.pointee.lastParker
+    let slowestVia = unsafe sp.pointee.lastParkerVia
+    let fromWaits = unsafe sp.pointee.parkedFromWaits
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 
     // The world is stopped. Module 6: pending blocks are freed first, the
     // relocation verifier runs after the work.
     unsafe relocationAtPauseStart(vm)
-    work(unsafe StopContext(vm: vm, keeping: keeping, timeToSafepointNs: t1 &- t0))
+    work(unsafe StopContext(vm: vm, keeping: keeping, timeToSafepointNs: t1 &- t0, beforeRequestNs: tr &- t0,
+                            collectionsOpen: collectionsOpen, parkWaitNs: t1 &- tr, slowest: slowest, slowestVia: slowestVia,
+                            parkedFromWaits: fromWaits, workStartNs: nanoseconds()))
     unsafe relocationAtPauseEnd(vm)
     if unsafe vm.pointee.config.verifyStops { unsafe verifySchedule(vm) }
     // A full collection fired ephemerons: signal the finalization
@@ -205,7 +225,8 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     let i = unsafe sp.pointee.stopCount
     unsafe sp.pointee.stops[i & (SafepointState.stopLog - 1)] = StopRecord(
         timeToSafepointNs: t1 &- t0, pauseNs: t2 &- t0, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind,
-        atNs: t0)
+        atNs: t0, beforeRequestNs: tr &- t0, collectionsOpen: collectionsOpen, parkWaitNs: t1 &- tr, slowestVia: slowestVia,
+        parkedFromWaits: fromWaits)
     unsafe sp.pointee.kind = .other
     unsafe sp.pointee.stopCount = i &+ 1
     let epoch = unsafe sp.pointee.epoch

@@ -27,7 +27,9 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
     let tw = nanoseconds()
     unsafe waitServicing(vm, w) { unsafe sp.pointee.stwWanted > 0 || sp.pointee.requested }
-    unsafe y.counters(k).pointee.stopWaitNs &+= nanoseconds() &- tw
+    let waited = nanoseconds() &- tw
+    unsafe y.counters(k).pointee.stopWaitNs &+= waited
+    if unsafe waited > y.counters(k).pointee.stopWaitMaxNs { unsafe y.counters(k).pointee.stopWaitMaxNs = waited }
     // The reserve's rule: everything in Y may be promoted, in blocks that
     // lose at most a large object's worth each to their tails (bodies past
     // `largeLimit` are allocated old), plus the block being filled.

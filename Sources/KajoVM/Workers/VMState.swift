@@ -139,6 +139,22 @@ struct WorkerShared: ~Copyable {
     /// (no collection opens while nonzero), and the collections open.
     var stwWanted = 0
     var ycActive = 0
+    /// The final mark on the devices: how the last parker reached its park
+    /// (`ParkVia`), and how many of the current stop's parkers came from a
+    /// wait inside the VM rather than a poll.
+    var lastParkerVia = ParkVia.poll
+    var parkedFromWaits = 0
+}
+
+/// The final mark on the devices: where a parker was when the stop found it.
+enum ParkVia: UInt8, Sendable {
+    /// At a poll (it was running Smalltalk or a long primitive).
+    case poll
+    /// In a wait inside the VM (`waitServicing`: an eden wait, an opener's
+    /// wait, a round's wait): it had to be woken and scheduled to park.
+    case wait
+    /// Another stopper that found this stop requested first.
+    case stopper
 }
 
 /// What a stop did, in its record.
@@ -165,6 +181,19 @@ struct StopRecord: Sendable {
     var kind = StopKind.other
     /// Module 8b: when the stop was requested (uptime ns), for the `gc` events.
     var atNs: UInt64 = 0
+    /// The final mark on the devices: the split of `timeToSafepointNs`.
+    /// Before the request (other stops parked for, and module 7's wait for
+    /// every open young collection, during which the world runs but no
+    /// collection opens), with the collections open when it began; then from
+    /// the request to the last park (the world stands still from here), with
+    /// how the last parker came and how many came from a wait.
+    var beforeRequestNs: UInt64 = 0
+    var collectionsOpen = 0
+    var parkWaitNs: UInt64 = 0
+    var slowestVia = ParkVia.poll
+    var parkedFromWaits = 0
+    /// What the world stands still for: the request to the release.
+    var stoppedNs: UInt64 { pauseNs &- beforeRequestNs }
 }
 
 /// Guarded by the scheduler lock.

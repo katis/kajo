@@ -251,6 +251,9 @@ struct YoungWorkerCounters: Sendable {
     /// collection to end before a stop (stwWanted).
     var stopWaitNs: UInt64 = 0
     var drainWaitNs: UInt64 = 0
+    /// The final mark on the devices: the longest single wait of each kind.
+    var stopWaitMaxNs: UInt64 = 0
+    var drainWaitMaxNs: UInt64 = 0
     var deletionRecords: UInt64 = 0
     var resumeScans: UInt64 = 0
     var blockingRegions: UInt64 = 0

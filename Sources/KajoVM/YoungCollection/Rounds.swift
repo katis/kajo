@@ -255,7 +255,7 @@ func waitServicing(_ vm: VMPointer, _ w: WorkerPointer, _ cond: () -> Bool) {
             continue
         }
         if unsafe sp.pointee.requested && sp.pointee.inside[i] && sp.pointee.stopper != i {
-            unsafe parkLocked(vm, w)
+            unsafe parkLocked(vm, w, via: .wait)
             continue
         }
         unsafe epochQuiesce(vm, w)
@@ -384,7 +384,12 @@ func waitForCollectionsLocked(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
     // Openers wait while a stop is wanted: wake them (they wait again if
     // another requester still wants one, or park in this stop).
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
-    if unsafe isRoundParticipant(vm, w) { unsafe y.counters(w.pointee.index).pointee.drainWaitNs &+= nanoseconds() &- t0 }
+    if unsafe isRoundParticipant(vm, w) {
+        let waited = nanoseconds() &- t0
+        let c = unsafe y.counters(w.pointee.index)
+        unsafe c.pointee.drainWaitNs &+= waited
+        if unsafe waited > c.pointee.drainWaitMaxNs { unsafe c.pointee.drainWaitMaxNs = waited }
+    }
     return unsafe !sp.pointee.requested
 }
 

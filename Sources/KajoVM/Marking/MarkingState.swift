@@ -127,6 +127,29 @@ struct CycleRecord: Sendable {
     var weakNs: UInt64 = 0
     var verifyNs: UInt64 = 0
     var ephemeronItems: UInt64 = 0
+    /// The final mark on the devices (docs/modules/final-mark.md): the
+    /// stop's time to safepoint split (`StopRecord`): before the request
+    /// (the wait for open young collections, the world running), the
+    /// collections open then, and from the request to the last park; the
+    /// last parker and how it came, and how many came from a wait.
+    var finalBeforeRequestNs: UInt64 = 0
+    var finalCollectionsOpen = 0
+    var finalParkWaitNs: UInt64 = 0
+    var finalSlowest = -1
+    var finalSlowestVia = ParkVia.poll
+    var finalParkedFromWaits = 0
+    /// The stop's work from its start to the phase change, and the two
+    /// parts after the verifier: module 6's selection and pins, and the
+    /// sweep's setup.
+    var finalWorkNs: UInt64 = 0
+    var relocationAtFinalNs: UInt64 = 0
+    var sweepSetupNs: UInt64 = 0
+    /// The stopper: its QoS before the stop raised it, the thermal state,
+    /// and its CPU by core type from just before the request to the end of
+    /// the work (`CoreTime`; cycles over CPU time is its clock).
+    var finalStopperQoS: UInt32 = 0
+    var finalThermal: UInt8 = 0
+    var finalStopperCore = CoreTime()
     /// Marking: marker CPU and wall time, what it marked.
     var markCpuNs: UInt64 = 0
     var markWallNs: UInt64 = 0

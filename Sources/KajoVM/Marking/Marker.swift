@@ -244,7 +244,8 @@ func markCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe perturb(vm, mw)  // before the final-mark request
     unsafe m.pointee.qos = qos_class_self().rawValue
     unsafe mk.pointee.qosNow.pointee.store(m.pointee.qos, ordering: .relaxed)
-    unsafe stopWorld(vm, mw, retry: true) { stop in unsafe runFinalMark(vm, mk, stop, cycle: cycle) }
+    let context = FinalMarkContext.take()
+    unsafe stopWorld(vm, mw, retry: true) { stop in unsafe runFinalMark(vm, mk, stop, cycle: cycle, context: context) }
 }
 
 // MARK: - QoS
