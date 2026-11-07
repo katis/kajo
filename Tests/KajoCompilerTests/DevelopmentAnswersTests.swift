@@ -254,6 +254,8 @@ func probeUntil(_ vm: ShellVM, _ selector: String, _ cond: (ShellValue?) -> Bool
                                 development: development)
         #expect(app.start(imagePath: answersImageFile("app")))
         defer { closeApp(app) }
+        // A launch tells the development half after the first frame.
+        app.startDevelopment()
         let server = try #require(development.server)
         let port = try #require(server.port)
         let token = store.load()
