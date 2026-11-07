@@ -1142,7 +1142,7 @@ pass 202 of 202 and miss 0 of 1200 frames in every scenario on both
 devices; the sample app's device rows did not run: `xcodebuild` answers
 "No Accounts" for the new bundle identifier `dev.katajamaki.kajo.sample`
 (the account the owner signed in that morning is no longer seen; the main
-session's own attempt got the same answer; the owner signed Xcode in again and built the sample from Xcode's window on 2026-11-07, after which its profile exists), and its six open questions answered by the owner on 2026-11-07: the Release VM ships as a prebuilt xcframework in the dmg so development builds run it, generated projects pin a checkout the dmg carries (copied to `~/Library/Application Support/Kajo/<version>/`; the public repository with tags later), the paid Developer Program is renewed so Developer ID signing and notarization are available, pairing via shake and ⇧⌘P, object-name linking and the Mac sandbox off stay as built). ADRs
+session's own attempt got the same answer; the owner signed Xcode in again and built the sample from Xcode's window on 2026-11-07, after which its profile exists), and its six open questions answered by the owner on 2026-11-07: the Release VM ships as a prebuilt xcframework in the dmg so development builds run it, generated projects pin a checkout the dmg carries (copied to `~/Library/Application Support/Kajo/<version>/`; the public repository with tags later), the paid Developer Program is renewed so Developer ID signing and notarization are available, pairing via shake and ⇧⌘P, object-name linking and the Mac sandbox off stay as built; the sample's device rows ran on 2026-11-07, `docs/modules/app-project.md`: the CLI changes a method live on the phone in 140 ms and on the iPad in 174 ms, the Release app does not serve, and three things were found for a follow-up: the generated iOS plist lacks `CADisableMinimumFrameDurationOnPhone` so the sample runs at 60 Hz on the iPhone, the Debug build takes 35 s to its first frame on both devices where Release takes 0.1 to 0.2 s, and `app-roundtrip.sh`'s by-address fallback keeps the first launch's port); the runtime comparison and the performance report (2026-11-07, `experiments/runtime-comparison/`, `docs/performance/README.md`, `just perf` and `just perf-report`, `scripts/perf-report.py` with a fixture test): the same five programs (fib, dispatch, binarytrees, collections, arith) with one checksum each in Kajo (kasm and Smalltalk, 1 and 8 workers), Pharo 12's Cog, C, LuaJIT with and without its JIT, Lua 5.4, Node with and without, Java G1, `-Xint` and ZGC, Ruby with and without YJIT and CPython, five interleaved rounds on the mini, 341 runs none refused at thermal nominal; on one thread Kajo is level with Java `-Xint` on fib (47 M calls/s), ahead of Node `--jitless`, Ruby, Lua and CPython on binarytrees (14 M objects/s), behind every interpreter but CPython on dispatch (15 M sends/s) and arith (675 M bytecodes/s), and LuaJIT's interpreter is 2.3 to 2.6 times faster on all but binarytrees; 8 workers scale 6.1 to 7.4 times; the kernel's collections take 4.3 times Pharo's; the report's part 0 says what kind of VM and collector this is and what each choice costs; found on the way: the 8-worker rows' 19 to 30 ms stops are the finished sweeps for an empty entry table (`sweepsForEntries`), a collector follow-up in `docs/PLAN.md`). ADRs
 0003, 0006 and 0008 carry device measurements from an iPhone 17 Pro
 (experiments/device-measurement and entry-locality) and energy measurements
 (experiments/power: marker at utility, young collector at user-initiated on
@@ -1263,6 +1263,9 @@ cover.
    generates an app, builds its four products from clean and checks the
    Release binaries and the Debug VM's compile line, and
    `app-roundtrip.sh mac|device` runs the generated app's live round trip;
+   `perf-report.py` (the runtime comparison, 2026-11-07) writes the generated
+   blocks and SVGs of `docs/performance/README.md` from
+   `experiments/runtime-comparison/bench-raw.txt` and `slices-raw.txt`;
    `link-probe.sh` with `link-probe.py` (the devices investigation) times
    one small request against several serving targets in the same window
    beside each target's own serve times; the shells' `mode=spin` runs N
@@ -1337,7 +1340,8 @@ cover.
  * `references/` contains prior art and other references we might benefit from
    in the design. Gitignored; see `references/MANIFEST.md`.
  * `justfile` has the common commands: `just build`, `just test`, `just run`,
-   `just bench`, `just ios-check`, `just build-image`, `just kernel-test`,
+   `just bench`, `just perf` (the runtime comparison and the report), `just
+   perf-report`, `just ios-check`, `just build-image`, `just kernel-test`,
    `just fuzz <target> <seconds>`, `just apps`, `just new-check`, `just
    mac-shell`, `just device`, `just shell-matrix`; `kajo new <Name>
    --bundle-id <id> --kajo <path>`; `kajo run --protocol <socket> --project
