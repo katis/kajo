@@ -143,9 +143,12 @@ final class TestClock: Sendable {
         #expect(v.bytesWritten > 0)
         // The end of the pause is reported on a global queue: under
         // ThreadSanitizer, with the suite's other targets busy, it came
-        // later than 10 s once (module 10's gate run), so the bound is the
-        // sanitizer's there (AGENTS.md: a bound the sanitizer inflates).
-        let end = ShellVM.now() + (compilerTestsUnderThreadSanitizer ? 120 : 10) * 1_000_000_000
+        // later than 10 s once (module 10's gate run), and under twelve
+        // busy loops without the sanitizer too (the development answers'
+        // first gate run, 87e63fa): the queue's thread waits behind the
+        // loops. The wait is for the report, not a bound on how fast it
+        // comes, so it is 120 s everywhere (the assertion is unchanged).
+        let end = ShellVM.now() + 120 * 1_000_000_000
         while ShellVM.now() < end && refusals.withLock({ $0.count }) < 2 { usleep(2000) }
         #expect(refusals.withLock { $0 } == [true, false])
     }
