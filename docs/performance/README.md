@@ -11,7 +11,100 @@ Measured 2026-11-07 12:03 EET at commit `a02c70b` on Apple M2 Pro, 8 P-cores + 4
 
 ## 0. What kind of VM this is
 
-_Written by hand; see the module docs meanwhile._
+Kajo is a Smalltalk virtual machine written in Swift (ADR 0001) that runs
+the same on macOS and iOS. iOS forbids a JIT, so Kajo is an **interpreter
+by design, not as a first step**: every number in this report is bytecode
+interpretation, and the runtimes it is compared with are shown both with
+their JIT and, where they have one, with it turned off, because the second
+figure is the one Kajo can be held to on a phone. The design question the
+VM answers is not "how fast can Smalltalk run" but "how fast can it run
+while a 120 Hz user interface on the same heap never waits for it".
+
+**Execution.** A stack bytecode set (v1, ADR 0009: 50 opcodes with an
+`ext` prefix, special sends for arithmetic and comparison, compiled closures
+with temp vectors, Contexts materialized only when something reflects on a
+frame) runs through one `switch` that compiles to a single jump table and a
+single indirect branch, which `just arc-check` asserts on the release
+disassembly. The interpreter's state is a struct in raw memory passed as
+scalars; there is no reference counting, no existential and no class on the
+dispatch, send, primitive or allocation paths. Sends go through a per-worker
+direct-mapped method cache keyed by class and selector; there are no
+per-site inline caches yet, no superinstructions and no register bytecode
+(the interpreter-speed module that follows this report's baseline adds the
+first two and measures the gap). On the same kernels the Swift VM runs
+within 1 to 8 percent of a Rust implementation of the same design
+(`experiments/vm-language-bench/RESULTS.md`). Smalltalk Processes run on OS
+threads, several at once, over one shared heap: the kernels below report one
+worker and eight, and the eight-worker rows are real parallelism, not time
+slicing.
+
+**Object representation.** Objects are reached through an **object table**
+(ADR 0003): a reference is an index into a table of entries, and the entry
+holds the body's address. This costs about 2x per cache-missing hop and 1.8
+to 2x in marking time against direct pointers, measured on both the Mac and
+the phone before the decision was made, and it buys the one thing the rest
+of the design rests on: an object can be moved by changing one word, so
+compaction and relocation run concurrently with the program and the
+interpreter never holds a raw body pointer it has not pinned. SmallIntegers,
+SmallFloats and Characters are immediates and never touch the table.
+Objects past one 32 KiB block live in a large-object space of block runs
+that are never moved (module 10); byte objects may be 2 GiB - 1 long.
+
+**Memory management.** Generational, with a **nursery per worker** (ADR
+0005): allocation is a bump of a thread-local pointer, and a young
+collection copies survivors with an age field into survivor spaces before
+promoting them. Old space is collected by a **concurrent marker** with a
+snapshot-at-the-beginning barrier and a **lazy sweep** (ADR 0006), and
+compacted by **concurrent relocation** through the entry table (ADR 0007):
+old-space work happens on collector threads while Processes run, and the
+program stops only for the collector's handshakes. The young generation is
+collected **without stopping the world** (ADR 0008): a background worker
+collects its own nursery while the others run, and the main thread's
+nursery is collected by a collector thread on its behalf, so the main
+thread's stops are acknowledgements of 28 to 44 µs rather than copies. Stop
+times are measured from the request and recorded per stop kind; on the
+iPhone 13 Pro and the iPad Pro every stop kind stays under 1.1 ms in every
+launch of the allocation storm, and the main thread misses no frame under
+the shells' default mode at 5 workers (`docs/modules/final-mark.md`).
+
+**The user interface.** Smalltalk UI code runs on the main thread under
+**budgeted preemption** (ADR 0004): a turn of Smalltalk on the main thread
+is given a slice of the frame and preempted at its next poll when the slice
+is spent, so a runaway loop in UI code costs frames in the shell's logs, not
+a frozen app. The native views are AppKit and UIKit wrappers reached through
+one primitive, and no object reference crosses to the host side (module 9a).
+
+**Safety.** The VM core builds with Swift's strict memory safety on, so
+every unsafe construct is written down and countable; ThreadSanitizer runs
+as a gate, not a report; the stop-the-world collector is kept as an oracle
+every random program is checked against; the concurrent protocols (relocation,
+young collection, the image save) have exhaustive interleaving models
+(`docs/models/`); the image loader, the assembler, the compiler's parser and
+the development protocol each have a libFuzzer target. A method installed
+from Smalltalk goes through the one bytecode verifier the image build uses,
+so a program cannot make the interpreter execute what the verifier has not
+seen.
+
+**What the choices cost, measured.** The object table's hop and marking
+costs above; the SATB barrier 1.4 percent on an instance-variable kernel
+with marking off; the relocation post-store check within noise on the hot
+kernels and 5 to 10 percent on cache-missing stores; the read-only bit's
+header test about two cycles per store (7 to 10 percent on a kernel that
+does nothing but store); a global method cache that is flushed at every
+pause; frames with five header words whose code and literal bases are
+re-derived through the table on every activation and return. The first
+three are the price of a UI thread that does not wait; the last two are
+what the interpreter-speed module is for, and the "after" run of this
+report says what it recovered.
+
+**What is not here.** No JIT and no ahead-of-time compilation (a later
+module may compile release images ahead of time); no polymorphic inline
+caches; the kernel's collections are unsynchronized Smalltalk code, not
+primitives, so the library comparison against Pharo in section 5 compares
+two Smalltalk libraries on two interpreters, with Pharo's Cog running a
+JIT. Where a gap below is a JIT's, a register bytecode's or an inline
+cache's, the paragraph under the table says so with the evidence it has;
+where it does not know, it says that.
 
 ## 1. How to read these numbers
 
@@ -122,6 +215,16 @@ Collector pauses where the runtime reports them (medians over the rounds of each
 | Kajo (kasm), 8 workers (aggregate) | 1280 young, 31 stops | 0.215 | 29.571 | 29.571 | 2.149 / 4.397 |
 | Kajo (Smalltalk), 8 workers (aggregate) | 1280 young, 31 stops | 0.228 | 19.261 | 19.261 | 2.157 / 4.416 |
 <!-- /generated -->
+
+The 19 to 30 ms stops in Kajo's 8-worker rows are seven stops a run of the
+kind the large-bytes follow-up added: an allocation that finds the entry
+table empty finishes the lazy sweep in a stop of its own (`sweepsForEntries`,
+42 ms of sweeping in stops over a 1.8 s run) instead of falling back to a
+full collection. On one worker the same program's longest stop is 0.33 ms.
+The run line's `stopsByKind` files these under `other` today; naming the
+kind and bounding the stop (apply what is swept, wait for the rest with the
+world running) is a collector follow-up listed in `docs/PLAN.md`. Every other stop kind in these runs is
+under 0.4 ms.
 
 ## 4. Bytecodes
 
