@@ -14,6 +14,10 @@
 //        copied count) made into a CompiledMethod of aBehavior, or a String
 //        saying why not; fails in a release image
 //   144  Smalltalk isReleaseImage
+//   166  CompiledMethod plainBytecodes (interpreter speed): a new ByteArray
+//        of the method's bytecodes with every fused opcode replaced by its
+//        first part, what the compilers emitted before the peephole
+//        (`fuseBytecodes`); the compiler tests compare against it
 //
 // The make primitive is the trust boundary, not the compiler: whatever the
 // CompiledCode says, the method it answers passed the one bytecode
@@ -52,6 +56,7 @@ enum MakeLimits {
 enum LiveMethodPrimitives {
     static let table: [(number: Int, selector: String, argc: Int)] = [
         (143, "CompiledCode primMakeMethodIn:", 1), (144, "Smalltalk isReleaseImage", 0),
+        (166, "CompiledMethod plainBytecodes", 0),
     ]
 }
 
@@ -60,6 +65,7 @@ func liveMethodPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     switch n {
     case 143: return primMakeMethod(m, c)
     case 144: return c.argc == 0 ? m.boolean(m.om.isReleaseImage) : .none
+    case 166: return primPlainBytecodes(m, c)
     default: return .none
     }
 }
@@ -364,4 +370,23 @@ struct LiveMethodHeap: MethodHeap {
     }
 
     mutating func keep(_ o: Oop) { if o.isObject { roots.append(o) } }
+}
+
+/// Primitive 166: the receiver's bytecodes as the compilers emitted them,
+/// before the fusion peephole (`fuseBytecodes` only rewrites first bytes,
+/// each to a fused opcode whose first part it was).
+func primPlainBytecodes(_ m: Machine, _ c: PrimitiveCall) -> Oop {
+    let om = m.om
+    guard c.argc == 0, c.receiver.isObject, om.classIndex(of: c.receiver) == WellKnown.method else { return .none }
+    let bc = om.load(c.receiver, MethodLayout.bytecodes)
+    var bytes = om.bytes(of: bc)
+    var off = 0
+    while off < bytes.count, let d = decodeInstruction(bytes, at: off) {
+        if d.fused != nil { bytes[off] = d.op.rawValue }
+        off += d.length
+    }
+    let out = m.allocateBytes(WellKnown.byteArray, count: bytes.count)
+    if out == .none { return .none }
+    for (i, b) in bytes.enumerated() { om.storeByte(out, i, b) }
+    return out
 }

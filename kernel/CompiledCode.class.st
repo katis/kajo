@@ -53,7 +53,7 @@ CompiledCode >> matches: aCompiledMethod [
 	| theirs |
 	(aCompiledMethod isKindOf: CompiledMethod) ifFalse: [^ 'not a CompiledMethod'].
 	self isBlock ifFalse: [selector == aCompiledMethod selector ifFalse: [^ 'selector']].
-	bytecodes = aCompiledMethod bytecodes ifFalse: [^ 'bytecodes ' , bytecodes printString , ' against ' , aCompiledMethod bytecodes printString].
+	bytecodes = aCompiledMethod plainBytecodes ifFalse: [^ 'bytecodes ' , bytecodes printString , ' against ' , aCompiledMethod plainBytecodes printString].
 	numArgs = aCompiledMethod numArgs ifFalse: [^ 'argument count'].
 	numTemps = aCompiledMethod numTemps ifFalse: [^ 'temps ' , numTemps printString , ' against ' , aCompiledMethod numTemps printString].
 	maxStack = aCompiledMethod frameSize ifFalse: [^ 'maxStack ' , maxStack printString , ' against ' , aCompiledMethod frameSize printString].

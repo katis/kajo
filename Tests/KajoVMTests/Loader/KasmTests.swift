@@ -24,10 +24,12 @@ private func rejection(_ src: String) -> LoadError.Kind? {
 // MARK: - opcode table
 
 @Test func theOpcodeTableIsContiguous() {
-    // bytecode set v1: v0's 27 opcodes unchanged, then ADR 0009's.
-    #expect(Opcode.allCases.count == 50)
+    // bytecode set v1: v0's 27 opcodes unchanged, then ADR 0009's, then
+    // (interpreter speed) the 17 fused opcodes from 50 (the count was 50).
+    #expect(Opcode.allCases.count == 67)
     for (i, op) in Opcode.allCases.enumerated() { #expect(Int(op.rawValue) == i && Opcode.decode(UInt8(i)) == op) }
-    for b in 50...255 { #expect(Opcode.decode(UInt8(b)) == nil) }
+    for b in 67...255 { #expect(Opcode.decode(UInt8(b)) == nil) }
+    #expect(Opcode.allCases.filter { $0.fusedParts != nil }.map(\.rawValue) == Array(50...66))
     #expect(Opcode.send.rawValue == 0x0C && Opcode.jump.rawValue == 0x0F && Opcode.identical.rawValue == 0x1A)
     #expect(Opcode(mnemonic: "push_temp") == .pushTemp && Opcode(mnemonic: "jump_if_false") == .jumpIfFalse)
     #expect(Opcode.send.length == 3 && Opcode.jump.length == 3 && Opcode.pushInt.length == 2 && Opcode.add.length == 1)

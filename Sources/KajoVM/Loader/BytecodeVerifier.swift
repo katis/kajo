@@ -13,7 +13,9 @@
 /// closures carry a home returns non-locally; and the stack-depth tracer:
 /// a dataflow pass giving every reachable instruction one depth, never
 /// underflowing, never falling off the end, counting each slow path's
-/// transient words, and answering `maxStack`.
+/// transient words, and answering `maxStack`. A fused instruction
+/// (interpreter speed) is checked as its first part, with its second part
+/// required to follow it.
 
 /// What the verifier needs to know of a literal.
 enum LiteralInfo: Equatable {
@@ -77,6 +79,14 @@ func verifyBytecodes(_ bytes: [UInt8], _ shape: CodeShape, literal: (Int) -> Lit
     var nonLocal = false
     for (k, d) in ins.enumerated() {
         let o = d.offset
+        // Interpreter speed: a fused instruction is its first part, and its
+        // second part follows as a plain, unextended instruction: the loop
+        // reads that instruction's operands at fixed offsets.
+        if let f = d.fused, let (_, second) = f.fusedParts {
+            guard k + 1 < ins.count, ins[k + 1].op == second, ins[k + 1].fused == nil, ins[k + 1].length == second.length else {
+                throw fail(.badOperand, "\(f.mnemonic) is not followed by \(second.mnemonic)", o)
+            }
+        }
         switch d.op {
         case .pushTemp, .storeTemp:
             if d.a >= shape.addressableTemps { throw fail(.badOperand, "temp \(d.a) of \(shape.addressableTemps)", o) }

@@ -223,6 +223,139 @@ func interpret(_ s: StatePointer, _ start: Regs) {
             r = unsafe nonLocalReturn(s, r.pc, r.sp, r.fp, r.hdr)
         case .ext?:
             r = unsafe extendedInstruction(s, r.pc, r.sp, r.fp, r.hdr)
+        // Interpreter speed: fused instructions. `pc` is past the fused
+        // opcode, at the first part's operands; the second part's operands
+        // follow at fixed offsets (the verifier checked it is there). When
+        // a fast path does not apply, the first part runs alone exactly as
+        // its plain case would and the loop goes on at the second part.
+        case .pushTempPushTemp?:
+            let a = unsafe Int(r.pc[0]), b = unsafe Int(r.pc[2])
+            unsafe r.pc += 3
+            unsafe push(&r, r.fp[1 &+ a])
+            unsafe push(&r, r.fp[1 &+ b])
+        case .pushTempPushInt?:
+            let a = unsafe Int(r.pc[0])
+            let k = unsafe OperandDecoding.int8(r.pc[2])
+            unsafe r.pc += 3
+            unsafe push(&r, r.fp[1 &+ a])
+            push(&r, tagged(Int(k)))
+        case .pushSelfPushTemp?:
+            let b = unsafe Int(r.pc[1])
+            unsafe r.pc += 2
+            unsafe push(&r, r.fp.pointee)
+            unsafe push(&r, r.fp[1 &+ b])
+        case .pushSelfPushInt?:
+            let k = unsafe OperandDecoding.int8(r.pc[1])
+            unsafe r.pc += 2
+            unsafe push(&r, r.fp.pointee)
+            push(&r, tagged(Int(k)))
+        case .pushIntAdd?:
+            let k = unsafe OperandDecoding.int8(r.pc[0])
+            let a = unsafe r.sp.pointee
+            if a & 1 != 0 {
+                let (v, o) = Int64(bitPattern: a).addingReportingOverflow(k &<< 1)
+                if !o {
+                    unsafe r.sp.pointee = UInt64(bitPattern: v)
+                    unsafe r.pc += 2
+                    continue
+                }
+            }
+            unsafe r.pc += 1
+            push(&r, tagged(Int(k)))
+        case .pushIntSub?:
+            let k = unsafe OperandDecoding.int8(r.pc[0])
+            let a = unsafe r.sp.pointee
+            if a & 1 != 0 {
+                let (v, o) = Int64(bitPattern: a).subtractingReportingOverflow(k &<< 1)
+                if !o {
+                    unsafe r.sp.pointee = UInt64(bitPattern: v)
+                    unsafe r.pc += 2
+                    continue
+                }
+            }
+            unsafe r.pc += 1
+            push(&r, tagged(Int(k)))
+        case .addStoreTemp?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                let (v, o) = Int64(bitPattern: a).addingReportingOverflow(Int64(bitPattern: b) &- 1)
+                if !o {
+                    let n = unsafe Int(r.pc[1])
+                    unsafe r.fp[1 &+ n] = UInt64(bitPattern: v)
+                    unsafe r.sp -= 2
+                    unsafe r.pc += 2
+                    continue
+                }
+            }
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 0 &<< 8 | 1)
+        case .subStoreTemp?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                let (v, o) = Int64(bitPattern: a).subtractingReportingOverflow(Int64(bitPattern: b) &- 1)
+                if !o {
+                    let n = unsafe Int(r.pc[1])
+                    unsafe r.fp[1 &+ n] = UInt64(bitPattern: v)
+                    unsafe r.sp -= 2
+                    unsafe r.pc += 2
+                    continue
+                }
+            }
+            r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 1 &<< 8 | 1)
+        case .storeTempJump?:
+            let n = unsafe Int(r.pc[0])
+            unsafe r.fp[1 &+ n] = r.sp.pointee
+            unsafe r.sp -= 1
+            let off = unsafe OperandDecoding.jumpOffset(r.pc[2], r.pc[3])
+            unsafe r.pc += 4 &+ off
+            if off < 0, unsafe pollDue(s, flag) {
+                r = unsafe pollAtJump(s, r.pc, r.sp, r.fp, r.hdr)
+            }
+        case .dupStoreTemp?:
+            let n = unsafe Int(r.pc[1])
+            unsafe r.fp[1 &+ n] = r.sp.pointee
+            unsafe r.pc += 2
+        case .popPushTemp?:
+            let n = unsafe Int(r.pc[1])
+            unsafe r.sp.pointee = r.fp[1 &+ n]
+            unsafe r.pc += 2
+        case .ltJumpIfFalse?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                r = unsafe compareAndJump(s, flag, r, Int64(bitPattern: a) < Int64(bitPattern: b))
+            } else {
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 3 &<< 8 | 1)
+            }
+        case .gtJumpIfFalse?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                r = unsafe compareAndJump(s, flag, r, Int64(bitPattern: a) > Int64(bitPattern: b))
+            } else {
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 4 &<< 8 | 1)
+            }
+        case .leJumpIfFalse?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                r = unsafe compareAndJump(s, flag, r, Int64(bitPattern: a) <= Int64(bitPattern: b))
+            } else {
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 5 &<< 8 | 1)
+            }
+        case .geJumpIfFalse?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                r = unsafe compareAndJump(s, flag, r, Int64(bitPattern: a) >= Int64(bitPattern: b))
+            } else {
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 6 &<< 8 | 1)
+            }
+        case .eqJumpIfFalse?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & b & 1 != 0 {
+                r = unsafe compareAndJump(s, flag, r, a == b)
+            } else {
+                r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 7 &<< 8 | 1)
+            }
+        case .identicalJumpIfFalse?:
+            let b = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            r = unsafe compareAndJump(s, flag, r, a == b)
         case nil:
             // The leave code, or a byte outside the set.
             if unsafe s.pointee.exit != .running { return }
@@ -242,6 +375,25 @@ func storeRefused(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMut
     let om = unsafe s.pointee.om
     if isReadOnlySlot(om, o, n) { return unsafe modificationForbiddenFromStore(s, pc, sp, fp, hdr, o, n + 1) }
     return unsafe failAt(s, pc, sp, fp, hdr, length, .invalidSlotAccess, 0, o)
+}
+
+/// A fused compare and `jump_if_false` whose compare had its answer
+/// without a send: the two operands go, and the jump is taken when the
+/// answer is false. `r.pc` is past the fused opcode (the jump's offset is
+/// at 1 and 2).
+@_transparent
+func compareAndJump(_ s: StatePointer, _ flag: UnsafeMutablePointer<Atomic<UInt32>>, _ r: Regs, _ answer: Bool) -> Regs {
+    var r = r
+    let off = unsafe OperandDecoding.jumpOffset(r.pc[1], r.pc[2])
+    unsafe r.sp -= 2
+    unsafe r.pc += 3
+    if !answer {
+        unsafe r.pc += off
+        if off < 0, unsafe pollDue(s, flag) {
+            return unsafe pollAtJump(s, r.pc, r.sp, r.fp, r.hdr)
+        }
+    }
+    return r
 }
 
 /// The poll at a backward jump: count down; due when the budget check is

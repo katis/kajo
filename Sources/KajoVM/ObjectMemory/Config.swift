@@ -132,6 +132,9 @@ struct TestSwitches: Sendable {
     /// Module 10: one reader of a body treats a run of blocks as ordinary
     /// blocks, as module 1 did, so its test shows the run rule matters.
     var runBlind: RunReader? = nil
+    /// Interpreter speed: methods are made without the fusion peephole
+    /// (`fuseBytecodes`), so a test can run the same program fused and plain.
+    var noFusion = false
 }
 
 /// Module 10: the readers of a body that know runs, each with a broken

@@ -51,7 +51,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 39: return primSlowPeek(m, c)  // module 7, YoungCollection/Mutator.swift (tests)
     case 75, 78, 117...119, 140, 141: return kernelPrimitive(n, m, c)  // module 8b, ObjectModel/KernelPrimitives.swift
     case 142: return savePrimitive(m, c)  // module 8c, Processes/SavedProcesses.swift
-    case 143, 144: return liveMethodPrimitive(n, m, c)  // module 8d, ObjectModel/LiveMethods.swift
+    case 143, 144, 166: return liveMethodPrimitive(n, m, c)  // module 8d and interpreter speed, ObjectModel/LiveMethods.swift
     case 145...149, 163: return liveClassPrimitive(n, m, c)  // modules 8e and 9b, ObjectModel/LiveClasses.swift
     case 150...154, 159...161, 164, 165: return shellPrimitive(n, m, c)  // modules 9a to 9c and the development answers, Shell/ShellPrimitives.swift
     case 155...158, 162: return debuggingPrimitive(n, m, c)  // module 9b, Processes/Debugging.swift

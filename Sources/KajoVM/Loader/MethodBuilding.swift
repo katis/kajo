@@ -114,7 +114,7 @@ func makeMethodObjects<H: MethodHeap>(_ top: MethodParts, blocks: [MethodParts],
             lits[k] = po
             pragmas.append(po)
         }
-        let bytes = try heap.bytes(WellKnown.byteArray, a.bytecodes)
+        let bytes = try heap.bytes(WellKnown.byteArray, om.config.testSwitches.noFusion ? a.bytecodes : fuseBytecodes(a.bytecodes))
         readOnlyPinned(bytes)
         heap.keep(bytes)
         let litArray = try heap.pointers(WellKnown.array, lits.count)
@@ -144,4 +144,41 @@ func makeMethodObjects<H: MethodHeap>(_ top: MethodParts, blocks: [MethodParts],
     }
     let m = try build(top, selector: selector)
     return (m, made)
+}
+
+/// Interpreter speed: the fusion peephole every method passes through on
+/// its way into the heap (the image build, the kasm loader, the make
+/// primitive, a reshape's remade methods), so both compilers emit plain
+/// bytecodes and every installed method is fused the same way. Left to
+/// right, each pair of plain, unextended instructions that has a fused
+/// opcode (`Opcode.fused`) gets that opcode in its first byte and nothing
+/// else changes: every offset, operand, jump target and source-map entry
+/// stays, which is why no jump target needs care (a jump to the second
+/// part runs it alone). Already fused instructions are kept with their
+/// second part, so the peephole is idempotent. Bytes that do not decode
+/// are left as they are for the verifier to refuse.
+func fuseBytecodes(_ bytes: [UInt8]) -> [UInt8] {
+    var ins: [DecodedInstruction] = []
+    var off = 0
+    while off < bytes.count {
+        guard let d = decodeInstruction(bytes, at: off) else { return bytes }
+        ins.append(d)
+        off += d.length
+    }
+    var out = bytes
+    var k = 0
+    while k + 1 < ins.count {
+        let a = ins[k], b = ins[k + 1]
+        if a.fused != nil {
+            k += 2
+            continue
+        }
+        if b.fused == nil, a.length == a.op.length, b.length == b.op.length, let f = Opcode.fused(a.op, b.op) {
+            out[a.offset] = f.rawValue
+            k += 2
+        } else {
+            k += 1
+        }
+    }
+    return out
 }

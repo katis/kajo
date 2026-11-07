@@ -65,6 +65,70 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
     case blockReturn          // return the top from a block to its caller
     case nonlocalReturn       // return the top from the block's home method
     case ext                  // u8 hi: the next instruction's first operand is hi << 8 | operand
+    // Interpreter speed: fused instructions (superinstructions). Each
+    // replaces only the opcode byte of the first of two plain instructions
+    // and keeps every operand and the second instruction as they were, so
+    // offsets, jump targets, the pc-to-source map, saved pcs and the
+    // traced depths are those of the plain code; the dispatch loop runs
+    // both at once, or the first alone when its fast path does not apply.
+    // `fusedParts` names the two; the verifier checks the second follows.
+    case pushTempPushTemp     // push_temp a; push_temp b
+    case pushTempPushInt      // push_temp a; push_int k
+    case pushSelfPushTemp     // push_self; push_temp b
+    case pushSelfPushInt      // push_self; push_int k
+    case pushIntAdd           // push_int k; add
+    case pushIntSub           // push_int k; sub
+    case addStoreTemp         // add; store_temp n
+    case subStoreTemp         // sub; store_temp n
+    case storeTempJump        // store_temp n; jump off
+    case dupStoreTemp         // dup; store_temp n
+    case popPushTemp          // pop; push_temp n
+    case ltJumpIfFalse        // lt; jump_if_false off
+    case gtJumpIfFalse
+    case leJumpIfFalse
+    case geJumpIfFalse
+    case eqJumpIfFalse
+    case identicalJumpIfFalse
+
+    /// The two plain instructions a fused opcode stands for, nil for a
+    /// plain opcode.
+    package var fusedParts: (Opcode, Opcode)? {
+        switch self {
+        case .pushTempPushTemp: (.pushTemp, .pushTemp)
+        case .pushTempPushInt: (.pushTemp, .pushInt)
+        case .pushSelfPushTemp: (.pushSelf, .pushTemp)
+        case .pushSelfPushInt: (.pushSelf, .pushInt)
+        case .pushIntAdd: (.pushInt, .add)
+        case .pushIntSub: (.pushInt, .sub)
+        case .addStoreTemp: (.add, .storeTemp)
+        case .subStoreTemp: (.sub, .storeTemp)
+        case .storeTempJump: (.storeTemp, .jump)
+        case .dupStoreTemp: (.dup, .storeTemp)
+        case .popPushTemp: (.pop, .pushTemp)
+        case .ltJumpIfFalse: (.lt, .jumpIfFalse)
+        case .gtJumpIfFalse: (.gt, .jumpIfFalse)
+        case .leJumpIfFalse: (.le, .jumpIfFalse)
+        case .geJumpIfFalse: (.ge, .jumpIfFalse)
+        case .eqJumpIfFalse: (.eq, .jumpIfFalse)
+        case .identicalJumpIfFalse: (.identical, .jumpIfFalse)
+        default: nil
+        }
+    }
+
+    /// The plain instruction a fused opcode's own bytes are: its first part
+    /// (itself for a plain opcode). Lengths, operands and stack effects are
+    /// the base's.
+    package var base: Opcode { fusedParts?.0 ?? self }
+
+    /// The fused opcode for two plain instructions, if there is one (the
+    /// peephole's table).
+    static func fused(_ a: Opcode, _ b: Opcode) -> Opcode? { fusedByParts[Int(a.rawValue) &* 256 &+ Int(b.rawValue)] }
+
+    private static let fusedByParts: [Int: Opcode] = {
+        var out: [Int: Opcode] = [:]
+        for op in allCases { if let (a, b) = op.fusedParts { out[Int(a.rawValue) * 256 + Int(b.rawValue)] = op } }
+        return out
+    }()
 
     package enum Operands: Sendable, Equatable {
         case none
@@ -85,7 +149,8 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
     }
 
     package var operands: Operands {
-        switch self {
+        if let (a, _) = fusedParts { return a.operands }
+        return switch self {
         case .pushTemp, .pushLiteral, .pushIvar, .storeTemp, .storeIvar, .pushNewArray: .index
         case .pushInt: .int8
         case .send, .sendSuper: .send
@@ -108,6 +173,8 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
 
     /// The first operand may be extended by `ext`.
     package var isExtensible: Bool {
+        // A fused instruction's operands are one byte each: the peephole
+        // never fuses an extended instruction.
         switch self {
         case .pushTemp, .pushLiteral, .pushIvar, .storeTemp, .storeIvar, .pushNewArray, .send, .sendSuper,
              .pushClosure, .pushTempVectorSlot, .storeTempVectorSlot: true
@@ -168,6 +235,23 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
         case .blockReturn: "block_return"
         case .nonlocalReturn: "nonlocal_return"
         case .ext: "ext"
+        case .pushTempPushTemp: "fused_push_temp_push_temp"
+        case .pushTempPushInt: "fused_push_temp_push_int"
+        case .pushSelfPushTemp: "fused_push_self_push_temp"
+        case .pushSelfPushInt: "fused_push_self_push_int"
+        case .pushIntAdd: "fused_push_int_add"
+        case .pushIntSub: "fused_push_int_sub"
+        case .addStoreTemp: "fused_add_store_temp"
+        case .subStoreTemp: "fused_sub_store_temp"
+        case .storeTempJump: "fused_store_temp_jump"
+        case .dupStoreTemp: "fused_dup_store_temp"
+        case .popPushTemp: "fused_pop_push_temp"
+        case .ltJumpIfFalse: "fused_lt_jump_if_false"
+        case .gtJumpIfFalse: "fused_gt_jump_if_false"
+        case .leJumpIfFalse: "fused_le_jump_if_false"
+        case .geJumpIfFalse: "fused_ge_jump_if_false"
+        case .eqJumpIfFalse: "fused_eq_jump_if_false"
+        case .identicalJumpIfFalse: "fused_identical_jump_if_false"
         }
     }
 
@@ -193,7 +277,8 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
     /// not apply (the inline ones, `==`, `~~`, `class`, `isNil`, `notNil`,
     /// have one too, for the compiler and the tables).
     package var specialSelector: String? {
-        switch self {
+        if fusedParts != nil { return nil }  // a decoded instruction is its base
+        return switch self {
         case .add: "+"
         case .sub: "-"
         case .mul: "*"
@@ -248,7 +333,8 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
     /// stack-depth verifier. A send's effect depends on its argc, a
     /// closure's on its copied count (both passed as `argc`).
     func stackEffect(argc: Int) -> (pops: Int, pushes: Int) {
-        switch self {
+        if let (a, _) = fusedParts { return a.stackEffect(argc: argc) }
+        return switch self {
         case .pushTemp, .pushLiteral, .pushSelf, .pushIvar, .pushNil, .pushTrue, .pushFalse, .pushInt,
              .pushNewArray, .pushTempVectorSlot, .pushThisContext: (0, 1)
         case .storeTemp, .storeIvar, .pop, .jumpIfTrue, .jumpIfFalse, .storeTempVectorSlot: (1, 0)
@@ -260,6 +346,7 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
         case .add, .sub, .mul, .lt, .gt, .le, .ge, .eq, .identical, .div, .intDiv, .mod, .ne, .notIdentical, .at,
              .atPut, .size, .classOf, .value, .value1, .value2, .isNil, .notNil:
             (specialArgc + 1, 1)
+        default: (0, 0)
         }
     }
 
@@ -273,7 +360,7 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
     /// a store primitive's `modificationForbiddenAt:value:` fit the one word
     /// every frame reserves.)
     var transientDepth: Int {
-        switch self {
+        switch base {
         case .storeIvar, .storeTempVectorSlot: 2
         case .nonlocalReturn: 2
         default: 0
@@ -282,10 +369,11 @@ package enum Opcode: UInt8, CaseIterable, Sendable {
 
     /// Control leaves the instruction other than by falling through.
     var endsBlock: Bool {
-        self == .returnTop || self == .returnSelf || self == .jump || self == .blockReturn || self == .nonlocalReturn
+        let s = base
+        return s == .returnTop || s == .returnSelf || s == .jump || s == .blockReturn || s == .nonlocalReturn
     }
     package var isJump: Bool { operands == .jump }
-    var isReturn: Bool { self == .returnTop || self == .returnSelf || self == .blockReturn || self == .nonlocalReturn }
+    var isReturn: Bool { let s = base; return s == .returnTop || s == .returnSelf || s == .blockReturn || s == .nonlocalReturn }
 }
 
 /// The special selectors in intern order: the special-send bytecodes in
@@ -311,6 +399,7 @@ enum OperandDecoding {
 /// A decoded instruction (the image loader's verifier and the tests read
 /// bytecodes through this; the dispatch loop decodes inline).
 struct DecodedInstruction: Equatable {
+    /// The plain instruction (a fused opcode's base).
     let op: Opcode
     let offset: Int
     /// Bytes, the `ext` prefix included.
@@ -318,6 +407,10 @@ struct DecodedInstruction: Equatable {
     /// The first operand, extended; the second (argc, copied count, temp).
     let a: Int
     let b: Int
+    /// The fused opcode the byte holds, nil for a plain one (interpreter
+    /// speed): every reader sees the plain instruction, the verifier checks
+    /// the fused one's second part follows.
+    var fused: Opcode? = nil
 }
 
 /// Decode the instruction at `offset`, or nil if it is not one (an unknown
@@ -325,6 +418,11 @@ struct DecodedInstruction: Equatable {
 /// another prefix).
 func decodeInstruction(_ bytes: [UInt8], at offset: Int) -> DecodedInstruction? {
     guard offset < bytes.count, var op = Opcode.decode(bytes[offset]) else { return nil }
+    var fused: Opcode? = nil
+    if op.fusedParts != nil {
+        fused = op
+        op = op.base
+    }
     var at = offset
     var hi = 0
     if op == .ext {
@@ -345,7 +443,7 @@ func decodeInstruction(_ bytes: [UInt8], at offset: Int) -> DecodedInstruction? 
     case .jump: a = OperandDecoding.jumpOffset(bytes[at + 1], bytes[at + 2])
     }
     if hi != 0 || at != offset { a |= hi << 8 }
-    return DecodedInstruction(op: op, offset: offset, length: at - offset + op.length, a: a, b: b)
+    return DecodedInstruction(op: op, offset: offset, length: at - offset + op.length, a: a, b: b, fused: fused)
 }
 
 /// Arguments a selector takes: binary (first character not a letter) 1,

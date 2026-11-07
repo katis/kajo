@@ -174,7 +174,9 @@ func lower(_ m: KasmMethod, limits: LoaderLimits = LoaderLimits()) throws(LoadEr
                     return n
                 }
                 let c: AsmLine.Content
-                switch op {
+                // A fused mnemonic (interpreter speed) takes its first
+                // part's operands; its second part is the next line.
+                switch op.base {
                 case .pushLiteral:
                     guard let lit = parseLiteral(args[0]) else { throw fail(.badOperand, "bad literal '\(args[0])'", l.line) }
                     c = .pushLiteral(lit)
@@ -372,7 +374,10 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
                     maxIvar = max(maxIvar, a)
                     minIvar = minIvar < 0 ? a : min(minIvar, a)
                 }
-                if op == .pushInt && !(-128...127).contains(a) { throw fail(.badOperand, "push_int's operand must be -128...127", l.line) }
+                if op.base == .pushInt && !(-128...127).contains(a) { throw fail(.badOperand, "push_int's operand must be -128...127", l.line) }
+                if op != op.base && op.operands == .index && !(0...255).contains(a) {
+                    throw fail(.badOperand, "\(op.mnemonic)'s operand must be 0...255 (a fused instruction is never extended)", l.line)
+                }
                 if op.operands != .int8 && op.operands != .none && !(0...0xFFFF).contains(a) {
                     throw fail(.badOperand, "operand \(a) out of range", l.line)
                 }

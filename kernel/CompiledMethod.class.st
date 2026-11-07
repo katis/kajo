@@ -177,3 +177,10 @@ CompiledMethod >> valueWithReceiver: anObject arguments: anArray [
 	<primitive: 85>
 	^ self error: 'cannot run ' , self printString , ' on ' , anObject printString , ' with ' , anArray size printString , ' argument(s)'
 ]
+
+{ #category : #accessing }
+CompiledMethod >> plainBytecodes [
+	"The bytecodes as the compilers emitted them: the VM makes every method through a peephole that writes fused opcodes into some first bytes (interpreter speed); this answers a new ByteArray with each one back as its first part."
+	<primitive: 166>
+	^ self primitiveFailed
+]
