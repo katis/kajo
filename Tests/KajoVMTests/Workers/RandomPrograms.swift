@@ -328,6 +328,10 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     /// nurseries; the stop verifier checks the shared barrier word at every
     /// stop, and the slow path must still be taken.
     case youngBarrierAlwaysOn
+    /// Interpreter speed: the programs made without the fusion peephole
+    /// (every other configuration runs them fused), eight workers: the
+    /// plain bytecodes keep their own runs against the same model.
+    case plainBytecodes
 
     var testDescription: String { rawValue }
 
@@ -361,6 +365,8 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
+        var switches = TestSwitches()
+        switches.noFusion = self == .plainBytecodes
         let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
         return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2 : longBytes ? 4096 : 256,
                            reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
@@ -419,7 +425,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
                                default: break
                                }
-                           }, after: { img in
+                           }, switches: switches, after: { img in
                                // Module 8's image ends in a block with pinned
                                // classes and symbols, which no relocation moves:
                                // fill it (and part of the next, as garbage) so

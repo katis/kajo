@@ -1,0 +1,58 @@
+; Interpreter speed: every fused mnemonic written by hand, each followed by
+; its second part (the fuzzer mutates the pairs apart).
+method UndefinedObject fused: temps=2
+  fused_push_temp_push_temp 0
+  push_temp 0
+  fused_add_store_temp
+  store_temp 1
+  fused_push_temp_push_int 1
+  push_int 3
+  fused_lt_jump_if_false
+  jump_if_false a
+a:
+  fused_push_self_push_temp
+  push_temp 1
+  fused_gt_jump_if_false
+  jump_if_false b
+b:
+  fused_push_self_push_int
+  push_int 7
+  fused_le_jump_if_false
+  jump_if_false c
+c:
+  push_temp 1
+  fused_push_int_add 1
+  add
+  fused_push_int_sub 2
+  sub
+  fused_dup_store_temp
+  store_temp 2
+  fused_pop_push_temp
+  push_temp 2
+  push_int 9
+  fused_ge_jump_if_false
+  jump_if_false d
+d:
+  push_temp 2
+  push_temp 1
+  fused_sub_store_temp
+  store_temp 1
+  push_temp 1
+  push_int 0
+  fused_eq_jump_if_false
+  jump_if_false e
+e:
+  push_nil
+  push_nil
+  fused_identical_jump_if_false
+  jump_if_false f
+f:
+  push_temp 1
+  push_int 1
+  sub
+  fused_store_temp_jump 1
+  jump g
+g:
+  push_temp 1
+  return_top
+end
