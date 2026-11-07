@@ -612,7 +612,27 @@ func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, Strin
         ("initialP50ms", pct(im.map(\.pauseNs), 0.5)), ("initialMaxMs", mx(im.map(\.pauseNs))),
         ("initialTtspMaxMs", mx(im.map(\.timeToSafepointNs))), ("initialBeforeRequestMaxMs", mx(im.map(\.beforeRequestNs))),
         ("finalLog", rows.isEmpty ? "-" : rows.joined(separator: ",")),
+        ("stopsByKind", stopsByKind(stops)),
     ]
+}
+
+/// Every stop kind's count, longest stop and longest time to safepoint
+/// (from the request), as kind:count/max ms/ttsp max ms, comma separated.
+func stopsByKind(_ stops: [StopRecord]) -> String {
+    var by: [UInt8: (n: Int, max: UInt64, ttsp: UInt64)] = [:]
+    for s in stops {
+        var e = by[s.kind.rawValue] ?? (0, 0, 0)
+        e.n += 1
+        e.max = Swift.max(e.max, s.pauseNs)
+        e.ttsp = Swift.max(e.ttsp, s.timeToSafepointNs)
+        by[s.kind.rawValue] = e
+    }
+    if by.isEmpty { return "-" }
+    return by.keys.sorted().map { k in
+        let e = by[k]!
+        let times = unsafe String(format: "%.2f/%.2f", Double(e.max) / 1e6, Double(e.ttsp) / 1e6)
+        return "\(StopKind(rawValue: k).map { "\($0)" } ?? "\(k)"):\(e.n)/" + times
+    }.joined(separator: ",")
 }
 
 /// Large bytes, part 2: each recorded fallback as
