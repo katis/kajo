@@ -533,7 +533,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             }
             guard port != 0, kr == KERN_SUCCESS else { ok = false; continue }
             unsafe memset(buf, 0, bytes)
-            let r = unsafe proc_pidinfo(getpid(), 34, info.thread_id, buf, Int32(bytes))
+            let r = unsafe threadCountsInfo(getpid(), 34, info.thread_id, buf, Int32(bytes))
             guard r > 8 else { ok = false; continue }
             for k in 0..<min(levels, (Int(r) - 8) / (recWords * 8)) {
                 let w = unsafe buf.advanced(by: 8 + k * recWords * 8).assumingMemoryBound(to: UInt64.self)
@@ -587,3 +587,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         return c
     }
 }
+
+/// `proc_pidinfo` by its symbol: libproc.h is not in the iOS SDK (the
+/// shells' telemetry declares it the same way).
+@_silgen_name("proc_pidinfo")
+private func threadCountsInfo(_ pid: Int32, _ flavor: Int32, _ arg: UInt64, _ buffer: UnsafeMutableRawPointer?, _ size: Int32) -> Int32
