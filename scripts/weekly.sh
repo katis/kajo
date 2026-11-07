@@ -17,7 +17,8 @@
 # <date>-quick/ (the plumbing end to end). KAJO_WEEKLY_DEVICES=0|1 turns
 # the device rows off or on whatever the mode. KAJO_WEEKLY_ONLY="<gate>..."
 # runs only the named steps (gate names as in scripts/gates-lib.sh,
-# matrix-mac, devices). KAJO_WEEKLY_ROOT moves ~/kajo-weekly.
+# matrix-mac, devices for every attached device, matrix-iphone or
+# matrix-ipad for one). KAJO_WEEKLY_ROOT moves ~/kajo-weekly.
 set -uo pipefail
 root=${0:A:h:h}
 WROOT=${KAJO_WEEKLY_ROOT:-$HOME/kajo-weekly}
@@ -69,7 +70,8 @@ wants matrix-mac && gl_gate matrix-mac
 
 # Every attached device (`devicectl list devices`, state connected).
 devices=()
-if (( DEVICES )) && wants devices; then
+device_wanted() { [[ -z $ONLY || " $ONLY " == *" devices "* || " $ONLY " == *" matrix-$1 "* ]] }
+if (( DEVICES )) && [[ -z $ONLY || " $ONLY " == *" devices "* || " $ONLY " == *" matrix-"* ]]; then
   gtimeout 60 xcrun devicectl list devices > $out/devices.txt 2>&1
   while read -r line; do
     udid=$(print -r -- "$line" | grep -oE '[0-9A-F]{8}-[0-9A-F]{16}')
@@ -81,7 +83,7 @@ if (( DEVICES )) && wants devices; then
     devices+=($label)
   done < $out/devices.txt
   gl_log "devices: ${devices:-none attached}"
-  for d in $devices; do gl_gate matrix-$d; done
+  for d in $devices; do device_wanted $d && gl_gate matrix-$d; done
 fi
 
 # summary.md: one line per gate from gates.log, then each matrix's bar.

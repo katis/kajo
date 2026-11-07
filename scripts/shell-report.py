@@ -101,7 +101,8 @@ def bar(d):
             continue
         failed = sum(1 for r in rows if r.get("_failed"))
         ok_rows = [r for r in rows if not r.get("_failed")]
-        bad_sum = sum(1 for r in ok_rows if "ok" in r and r.get("ok") != "1")
+        notok = lambda r: r.get("ok") == "0" or r.get("checksum", "").startswith("error:")  # ok=-1: no published checksum at that worker count
+        bad_sum = sum(1 for r in ok_rows if notok(r))
         framed = [r for r in ok_rows if "missed" in r]
         missing = [r for r in framed if (num(r.get("missed")) or 0) > 0]
         missed = sum(num(r.get("missed")) or 0 for r in framed)
@@ -123,7 +124,7 @@ def bar(d):
         for r in rows:
             if r.get("_failed"):
                 notes.append(f"- {f}: launch failed: {' '.join(k + '=' + v for k, v in r.items() if not k.startswith('_'))}")
-        for r in bad_sum and [r for r in ok_rows if "ok" in r and r.get("ok") != "1"] or []:
+        for r in [r for r in ok_rows if notok(r)]:
             notes.append(f"- {f}: checksum ok={r.get('ok')}: {row_name(r)} checksum={r.get('checksum')}")
         for r in missing:
             notes.append(f"- {f}: missed {r.get('missed')} of {r.get('expected')}: {row_name(r)} fallbacks={r.get('gc_fallbacks', '-')} longest stop {longest_stop(r)}")
