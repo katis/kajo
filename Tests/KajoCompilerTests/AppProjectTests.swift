@@ -54,6 +54,9 @@ func scratchDirectory(_ tag: String) -> String {
             let debug = f.path.contains("Debug")
             #expect(f.text.contains("NSBonjourServices") == debug, "\(f.path)")
             #expect(f.text.contains("NSLocalNetworkUsageDescription") == debug, "\(f.path)")
+            // An iPhone app renders at 120 Hz only with this key, in both
+            // configurations; the Mac has no such cap.
+            #expect(f.text.contains("<key>CADisableMinimumFrameDurationOnPhone</key>\n\t<true/>") == f.path.contains("iOS"), "\(f.path)")
             #expect(try PropertyListSerialization.propertyList(from: Data(f.text.utf8), format: nil) is [String: Any])
         }
         let yml = try #require(files.first { $0.path == "project.yml" }).text

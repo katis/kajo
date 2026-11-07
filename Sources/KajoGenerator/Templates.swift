@@ -232,13 +232,15 @@ struct Templates {
         """
     }
 
-    var plistHead: String {
+    /// The plist's opening and the keys both platforms share; `first` are
+    /// keys that sort before them.
+    func plistHead(_ first: String = "") -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0">
         <dict>
-        \t<key>CFBundleDevelopmentRegion</key>
+        \(first)\t<key>CFBundleDevelopmentRegion</key>
         \t<string>$(DEVELOPMENT_LANGUAGE)</string>
         \t<key>CFBundleDisplayName</key>
         \t<string>\(name)</string>
@@ -261,7 +263,9 @@ struct Templates {
     }
 
     func iosPlist(debug: Bool) -> String {
-        plistHead + developmentKeys(debug) + """
+        // ProMotion: without the key an iPhone app's frames are capped at
+        // 60 Hz (an iPad renders 120 Hz either way); the shell's spec has it.
+        plistHead("\t<key>CADisableMinimumFrameDurationOnPhone</key>\n\t<true/>\n") + developmentKeys(debug) + """
         \t<key>UIApplicationSceneManifest</key>
         \t<dict>
         \t\t<key>UIApplicationSupportsMultipleScenes</key>
@@ -294,7 +298,7 @@ struct Templates {
     }
 
     func macPlist(debug: Bool) -> String {
-        plistHead + developmentKeys(debug) + """
+        plistHead() + developmentKeys(debug) + """
         \t<key>LSMinimumSystemVersion</key>
         \t<string>15.0</string>
         \t<key>NSHighResolutionCapable</key>
