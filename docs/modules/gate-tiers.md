@@ -443,4 +443,5 @@ This module's own diff is tier 2 without a fuzzer, and its gates are the
 tier 2 run above, made by its own `scripts/check-tier.sh` on 3f2acdd: every
 gate passed. `scripts/check-tier-test.sh` passes 36 of 36. The docs-only
 case on the real diff: `just check 3f2acdd` with this doc committed on top
-DOCSONLY
+(fad3bdf) printed `tier: none`, the one file and "nothing owed: docs
+only", exit 0 in 0.10 s.
