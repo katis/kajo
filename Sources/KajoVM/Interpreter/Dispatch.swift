@@ -183,6 +183,18 @@ func interpret(_ s: StatePointer, _ start: Regs) {
         case .notIdentical?:
             r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .at?:
+            // Interpreter speed, part 3: an Array with a SmallInteger index
+            // in bounds inline (one header load, the slot); anything else
+            // out of line as before.
+            let i = unsafe r.sp.pointee, a = unsafe (r.sp - 1).pointee
+            if a & Oop.objectTagMask == 0 && i & 1 != 0 {
+                let h = om.headerWord(a)
+                let k = UInt64(bitPattern: Int64(bitPattern: i) &>> 1) &- 1
+                if h & Header.classMask == WellKnown.array && k < (h & Header.countMask) &>> Header.countShift {
+                    binaryResult(&r, om.load(Oop(raw: a), Int(truncatingIfNeeded: k)).raw)
+                    continue
+                }
+            }
             r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
         case .atPut?:
             r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 15 &<< 8 | 2)
@@ -197,9 +209,10 @@ func interpret(_ s: StatePointer, _ start: Regs) {
         case .value2?:
             r = unsafe specialSend(s, r.pc, r.sp, r.fp, r.hdr, 20 &<< 8 | 2)
         case .isNil?:
-            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
+            // Part 3: inline, nil loaded where used.
+            unsafe r.sp.pointee = r.sp.pointee == s.pointee.nilObject.raw ? trueObject : falseObject
         case .notNil?:
-            r = unsafe v1Instruction(s, r.pc, r.sp, r.fp, r.hdr)
+            unsafe r.sp.pointee = r.sp.pointee == s.pointee.nilObject.raw ? falseObject : trueObject
         case .sendSuper?:
             let lit = unsafe Int(r.pc[0])
             let argc = unsafe Int(r.pc[1])
