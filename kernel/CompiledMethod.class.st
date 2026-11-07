@@ -93,6 +93,13 @@ CompiledMethod >> numTemps [
 ]
 
 { #category : #accessing }
+CompiledMethod >> plainBytecodes [
+	"The bytecodes as the compilers emitted them: the VM makes every method through a peephole that writes fused opcodes into some first bytes (interpreter speed); this answers a new ByteArray with each one back as its first part."
+	<primitive: 166>
+	^ self primitiveFailed
+]
+
+{ #category : #accessing }
 CompiledMethod >> pragmaAt: aSymbol [
 	^ self pragmas detect: [:p | p selector == aSymbol] ifNone: [nil]
 ]
@@ -176,11 +183,4 @@ CompiledMethod >> valueWithReceiver: anObject arguments: anArray [
 	"Run the method once on anObject, as if a send had found it, without installing it (module 8d: what Compiler evaluate: does with a doit). The receiver must be an instance of the method's class or of a subclass, anArray its arguments; a method with a primitive does not run this way."
 	<primitive: 85>
 	^ self error: 'cannot run ' , self printString , ' on ' , anObject printString , ' with ' , anArray size printString , ' argument(s)'
-]
-
-{ #category : #accessing }
-CompiledMethod >> plainBytecodes [
-	"The bytecodes as the compilers emitted them: the VM makes every method through a peephole that writes fused opcodes into some first bytes (interpreter speed); this answers a new ByteArray with each one back as its first part."
-	<primitive: 166>
-	^ self primitiveFailed
 ]
