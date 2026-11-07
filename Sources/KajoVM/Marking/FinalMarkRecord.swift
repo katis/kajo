@@ -8,6 +8,11 @@ import Foundation
 // apart from the marker's loop: Foundation's object and the syscall stay
 // off every path `just arc-check` covers.
 
+/// libproc's `proc_pidinfo`, which the iOS SDK does not declare (the
+/// shells' telemetry declares it the same way).
+@_silgen_name("proc_pidinfo")
+private func kajoProcPidinfo(_ pid: Int32, _ flavor: Int32, _ arg: UInt64, _ buffer: UnsafeMutableRawPointer?, _ size: Int32) -> Int32
+
 /// The calling thread's CPU time and cycles on performance and efficiency
 /// cores, from proc_pidinfo(PROC_PIDTHREADCOUNTS = 34), the private flavor
 /// experiments/power read on iOS (level 0 the performance cores). `ok` is
@@ -27,13 +32,13 @@ struct CoreTime: Sendable {
         var buf = (UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0),
                    UInt64(0), UInt64(0), UInt64(0), UInt64(0), UInt64(0))
         let bytes = Int32(MemoryLayout.size(ofValue: buf))
-        let r = unsafe withUnsafeMutableBytes(of: &buf) { unsafe proc_pidinfo(getpid(), 34, tid, $0.baseAddress, bytes) }
+        let r = withUnsafeMutableBytes(of: &buf) { unsafe kajoProcPidinfo(getpid(), 34, tid, $0.baseAddress, bytes) }
         var out = CoreTime()
         guard r > 8 else { return out }
         let levels = Swift.min(2, (Int(r) - 8) / 40)
         var tb = mach_timebase_info_data_t()
         unsafe mach_timebase_info(&tb)
-        unsafe withUnsafeBytes(of: &buf) { raw in
+        withUnsafeBytes(of: &buf) { raw in
             for i in 0..<levels {
                 let w = { (k: Int) -> UInt64 in unsafe raw.load(fromByteOffset: 8 + i * 40 + k * 8, as: UInt64.self) }
                 let cpu = (w(2) &+ w(3)) &* UInt64(tb.numer) / UInt64(Swift.max(1, tb.denom))
