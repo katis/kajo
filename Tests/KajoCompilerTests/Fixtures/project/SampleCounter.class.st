@@ -13,7 +13,8 @@ SampleCounter >> count [
 	^ count ifNil: [0]
 ]
 
-{ #category : #accessing, #author : #'agent:fixture' }
+{ #category : #accessing }
 SampleCounter >> increment [
+	<author: #'agent:fixture'>
 	count := self count + 1
 ]
