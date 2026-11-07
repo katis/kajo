@@ -386,11 +386,12 @@ The sample app on the devices: see "The sample on the devices" below.
 
 Signing was cleared by the owner on 2026-11-07 and the sample's round trip
 (`scripts/app-roundtrip.sh device`) ran on both devices that morning
-(11:30 to 11:45, every line thermal nominal, raw rows in the scratchpad's
+(11:25 to 11:43, every line thermal nominal, raw rows in the scratchpad's
 `sample-iphone/` and `sample-ipad/`). It found three things, fixed the
 same day (b440924, c8c18ba, 684e78c) and run again on both devices from
-the fixed commit (13:16 to 13:46, every line thermal nominal,
-`sample-followup/after-iphone/` and `after-ipad/`).
+the fixed commit (13:08 to 13:17, every line thermal nominal,
+`sample-followup/after-iphone/` and `after-ipad/`; the traced launches
+before the fix at 13:02 to 13:04, `before-iphone/`).
 
 **The generated iOS app rendered at 60 Hz on the iPhone.** Every frame
 row of the Debug sample read `frames=63 expected=126` per 1.05 s, gaps
