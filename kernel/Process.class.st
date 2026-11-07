@@ -52,16 +52,8 @@ Process >> state [
 
 { #category : #accessing }
 Process >> terminate [
-	"Ends the Process after running its pending ensure: and ifCurtailed: blocks in it, innermost first (module 9b). The active Process unwinds at once. Another one is interrupted (ready, waiting or running elsewhere) to unwind itself when it next runs, and the sender waits for it to end, at most about Process unwindBudgetMs; past that it is ended where it stands."
-	| waited |
-	self == ProcessorScheduler activeProcess ifTrue: [^ self terminateUnwinding].
-	self isTerminated ifTrue: [^ self].
-	(self primInterrupt: 1) ifFalse: [^ self primTerminate].
-	waited := 0.
-	[self isTerminated or: [waited >= Process unwindBudgetMs]] whileFalse: [
-		(Delay forMilliseconds: 1) wait.
-		waited := waited + 1].
-	self isTerminated ifFalse: [self primTerminate]
+	"Ends the Process after running its pending ensure: and ifCurtailed: blocks in it, innermost first (module 9b). The active Process unwinds at once. Another one is interrupted (ready, waiting or running elsewhere) to unwind itself when it next runs, and the sender waits for it to end, at most about Process unwindBudgetMs; past that it is ended where it stands. Answers whether the unwinding ran to its end (the development answers): false when it was cut off, which is counted (Unwinding cutOffCount) and written on the Transcript with the block it stood in."
+	^ self terminateReporting == true
 ]
 
 { #category : #debugging }
@@ -84,6 +76,19 @@ Process >> stopForDebuggerAfterSend [
 ]
 
 { #category : #terminating }
+Process >> awaitUnwinding [
+	"The receiver is unwinding itself (terminateUnwinding) to its end: wait for that at most about Process unwindBudgetMs of 1 ms Delays, then end it where it stands. Answers true when it ended by itself, else the cut-off's description; a cut-off is counted and reported (Unwinding cutOff:after:)."
+	| waited |
+	waited := 0.
+	[self isTerminated or: [waited >= Process unwindBudgetMs]] whileFalse: [
+		(Delay forMilliseconds: 1) wait.
+		waited := waited + 1].
+	self isTerminated ifTrue: [Unwinding forget: self. ^ true].
+	self primTerminate.
+	^ Unwinding cutOff: self after: waited
+]
+
+{ #category : #terminating }
 Process >> primInterrupt: aKind [
 	"Ask the receiver, another Process that has started, to run terminateUnwinding (aKind 1) or stopForDebugger (2) when it is next resumed: false when nothing was asked (the active Process, a terminated one, one not started)."
 	<primitive: 155>
@@ -98,8 +103,17 @@ Process >> primTerminate [
 ]
 
 { #category : #terminating }
+Process >> terminateReporting [
+	"terminate, answering true when the unwinding ran to its end and otherwise the cut-off's description (the Transcript's line without the count): what the development protocol's process.terminate answers."
+	self == ProcessorScheduler activeProcess ifTrue: [^ self terminateUnwinding].
+	self isTerminated ifTrue: [^ true].
+	(self primInterrupt: 1) ifFalse: [self primTerminate. ^ true].
+	^ self awaitUnwinding
+]
+
+{ #category : #terminating }
 Process >> terminateUnwinding [
-	"Run by the Process itself (the active one, or an interrupted one: primitive 155): every pending ensure: and ifCurtailed: block from here down, innermost first, then the end. An error in an unwind block is reported and the unwinding goes on."
+	"Run by the Process itself (the active one, or an interrupted one: primitive 155): every pending ensure: and ifCurtailed: block from here down, innermost first, then the end. An error in an unwind block is reported and the unwinding goes on. Each block is noted (Unwinding note:for:) so a Process waiting for this one can say where it stood if the bound cuts it off."
 	| ctx unwindBlock |
 	ctx := thisContext findNextUnwindContextUpTo: nil.
 	[ctx isNil] whileFalse: [
@@ -107,8 +121,10 @@ Process >> terminateUnwinding [
 			ctx tempAt: 2 put: true.
 			unwindBlock := ctx tempAt: 1.
 			thisContext terminateTo: ctx.
-			[unwindBlock value] on: Error do: [:e | Transcript show: 'Error in an unwind block while terminating: ' , e printString; cr]].
+			Unwinding note: unwindBlock for: self.
+			[unwindBlock value] on: Error do: [:e | Transcript showLine: 'Error in an unwind block while terminating: ' , e printString]].
 		ctx := ctx findNextUnwindContextUpTo: nil].
+	Unwinding forget: self.
 	self primTerminate
 ]
 

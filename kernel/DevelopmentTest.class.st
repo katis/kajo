@@ -15,6 +15,13 @@ DevelopmentTest >> tearDown [
 ]
 
 { #category : #samples }
+DevelopmentTest >> authorMarkSample [
+	"Both compilers agree on a method with an author pragma (CompilerTest compiles every method of the image with both)."
+	<author: #'agent:sample'>
+	^ 42
+]
+
+{ #category : #samples }
 DevelopmentTest >> restartSample: n log: log [
 	^ self restartedSample: n log: log
 ]
@@ -57,6 +64,35 @@ DevelopmentTest >> testARemovedClassStillNamedIsKept [
 ]
 
 { #category : #tests }
+DevelopmentTest >> testAnAgentsAuthorMarkIsOnePragma [
+	"The rule a session follows (TonelWriter source:author:, the development answers): an agent's compile leaves exactly one author pragma, its own, after the pattern, the comment and the pragmas before the temporaries; a developer's source is compiled as written."
+	| lf tab mark |
+	lf := String lf.
+	tab := String tab.
+	mark := tab , '<author: #''agent:a''>' , lf.
+	self assert: (TonelWriter source: 'foo' , lf , tab , '^ 1' , lf author: 'agent:a')
+		equals: 'foo' , lf , mark , tab , '^ 1' , lf.
+	self assert: (TonelWriter source: 'foo: x' , lf , tab , '"c"' , lf , tab , '<bar>' , lf , tab , '| t |' , lf , tab , '^ x' , lf author: 'agent:a')
+		equals: 'foo: x' , lf , tab , '"c"' , lf , tab , '<bar>' , lf , mark , tab , '| t |' , lf , tab , '^ x' , lf.
+	"Another agent's mark is replaced; the same agent's stays one."
+	self assert: (TonelWriter source: 'foo' , lf , tab , '<author: #''agent:b''>' , lf , tab , '^ 1' , lf author: 'agent:a')
+		equals: 'foo' , lf , mark , tab , '^ 1' , lf.
+	self assert: (TonelWriter source: 'foo' , lf , mark , tab , '^ 1' , lf author: 'agent:a')
+		equals: 'foo' , lf , mark , tab , '^ 1' , lf.
+	"A mark after the temporaries moves before them; one sharing its line keeps the line."
+	self assert: (TonelWriter source: 'foo' , lf , tab , '| t |' , lf , tab , '<author: #x>' , lf , tab , '^ t' , lf author: 'agent:a')
+		equals: 'foo' , lf , mark , tab , '| t |' , lf , tab , '^ t' , lf.
+	self assert: (TonelWriter source: 'foo' , lf , tab , '<author: #x> <bar>' , lf , tab , '^ 1' , lf author: 'agent:a')
+		equals: 'foo' , lf , tab , '<bar>' , lf , mark , tab , '^ 1' , lf.
+	"A developer's source, a mark included, is compiled as written; so is one the scanner cannot read."
+	self assert: (TonelWriter source: 'foo' , lf , tab , '<author: #''agent:b''>' , lf , tab , '^ 1' , lf author: 'developer')
+		equals: 'foo' , lf , tab , '<author: #''agent:b''>' , lf , tab , '^ 1' , lf.
+	self assert: (TonelWriter source: 'foo' , lf , tab , '<author: ' author: 'agent:a') equals: 'foo' , lf , tab , '<author: '.
+	"An empty body."
+	self assert: (TonelWriter source: 'foo' , lf author: 'agent:a') equals: 'foo' , lf , mark
+]
+
+{ #category : #tests }
 DevelopmentTest >> testEvaluateInAContextReadsAndWritesItsVariables [
 	| x y r |
 	Smalltalk isReleaseImage ifTrue: [^ self].
@@ -71,21 +107,38 @@ DevelopmentTest >> testEvaluateInAContextReadsAndWritesItsVariables [
 
 { #category : #tests }
 DevelopmentTest >> testExtensionFilesAndAuthorMarks [
-	"A method of another package than its class's is written in that package's extension file, with its author in the metadata; the class file leaves it out."
-	| text |
+	"A method of another package than its class's is written in that package's extension file; the class file leaves it out. An agent's author mark is a pragma in the source (the development answers): the metadata holds the category only, the pragma index finds the method, and a file still carrying the old #author key reads with the key ignored."
+	| text doc |
 	Smalltalk isReleaseImage ifTrue: [^ self].
-	Object compile: 'developmentPackageSample ^ 42' classified: 'samples'.
+	Object compile: (TonelWriter source: (TonelWriter canonicalSource: 'developmentPackageSample ^ 42') author: 'agent:test') classified: 'samples'.
 	Smalltalk notePackage: 'DevelopmentSamples' of: #developmentPackageSample in: Object.
-	Smalltalk noteAuthor: 'agent:test' of: #developmentPackageSample in: Object.
 	self assert: (Smalltalk packageOfSelector: #developmentPackageSample in: Object) = 'DevelopmentSamples'.
+	self assert: (Smalltalk authorOfSelector: #developmentPackageSample in: Object) = 'agent:test'.
+	self assert: ((Pragma allNamed: #author:) anySatisfy: [:p | p method == (Object >> #developmentPackageSample)]).
 	self assert: (TonelWriter fileNameOf: Object package: 'DevelopmentSamples') = 'Object.extension.st'.
 	text := TonelWriter sourceOf: Object package: 'DevelopmentSamples'.
 	self assert: (text beginsWith: 'Extension { #name : #Object }').
-	self assert: (text includesSubstring: '{ #category : #samples, #author : #''agent:test'' }').
-	self assert: (text includesSubstring: 'Object >> developmentPackageSample').
+	self assert: (text includesSubstring: '{ #category : #samples }
+Object >> developmentPackageSample [
+	<author: #''agent:test''>
+	^ 42
+]').
+	self deny: (text includesSubstring: '#author :').
 	self deny: ((TonelWriter sourceOf: Object) includesSubstring: 'developmentPackageSample').
-	self assert: ((TonelReader read: text) methods first at: 4) = 'agent:test'.
+	doc := TonelReader read: text.
+	self assert: doc methods first size = 3.
+	self assert: ((doc methods first at: 3) includesSubstring: '<author: #''agent:test''>').
+	doc := TonelReader read: 'Extension { #name : #Object }
+
+{ #category : #samples, #author : #''agent:old'' }
+Object >> developmentOldMark [
+	^ 1
+]
+'.
+	self assert: (doc methods first at: 2) = 'samples'.
+	self assert: doc methods first size = 3.
 	Object removeSelector: #developmentPackageSample.
+	self assert: (Smalltalk authorOfSelector: #developmentPackageSample in: Object) isNil.
 	self assert: (Smalltalk packageOfSelector: #developmentPackageSample in: Object) = 'Kernel'
 ]
 
@@ -157,13 +210,18 @@ DevelopmentTest >> testSendBeforePcAndTheSourceMap [
 
 { #category : #tests }
 DevelopmentTest >> testTerminateEndsAProcessWhoseUnwindBlockHangs [
+	"The bound stays, and a cut-off is never silent (the development answers): terminate answers false, the cut-off is counted, and the Transcript names the Process and the block it stood in."
 	<slow>
-	| p s |
-	s := Semaphore new.
-	p := [[Semaphore new wait] ensure: [Semaphore new wait]] fork.
-	ProcessorScheduler yield.
-	p terminate.
-	self assert: p isTerminated
+	| p before hang |
+	before := Unwinding cutOffCount.
+	hang := [Semaphore new wait].
+	p := [[Semaphore new wait] ensure: hang] fork.
+	[p state == #waiting] whileFalse: [ProcessorScheduler yield].
+	self deny: p terminate.
+	self assert: p isTerminated.
+	self assert: Unwinding cutOffCount equals: before + 1.
+	self assert: (Unwinding blockOf: p) isNil.
+	self assert: (Unwinding describe: hang) equals: '[] in DevelopmentTest>>testTerminateEndsAProcessWhoseUnwindBlockHangs'
 ]
 
 { #category : #tests }
@@ -174,7 +232,7 @@ DevelopmentTest >> testTerminateRunsTheUnwindBlocksOfARunningProcess [
 	n := 0.
 	p := [[started := true. [true] whileTrue: [n := n + 1]] ensure: [log add: #ensure]] fork.
 	[started] whileFalse: [ProcessorScheduler yield].
-	p terminate.
+	self assert: p terminate.
 	self assert: p isTerminated.
 	self assert: log asArray = #(#ensure)
 ]
@@ -186,7 +244,7 @@ DevelopmentTest >> testTerminateRunsTheUnwindBlocksOfAWaitingProcess [
 	s := Semaphore new.
 	p := [[[s wait] ifCurtailed: [log add: #curtailed]] ensure: [log add: #ensure]] fork.
 	[p state == #waiting] whileFalse: [ProcessorScheduler yield].
-	p terminate.
+	self assert: p terminate.
 	self assert: p isTerminated.
 	self assert: log asArray = #(#curtailed #ensure)
 ]

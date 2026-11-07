@@ -151,7 +151,7 @@ func projectCopy(_ name: String) throws -> URL {
         try s.waitForResult("16")
         // Every change is in the project, marked with the agent.
         let shape = try String(contentsOf: dir.appendingPathComponent("SampleShape.class.st"), encoding: .utf8)
-        #expect(shape.contains("#author : #'agent:mcp-test'") && shape.contains("SampleShape >> area ["))
+        #expect(shape.contains("SampleShape >> area [\n\t<author: #'agent:mcp-test'>\n") && !shape.contains("#author :"))
         #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("SampleShapeTest.class.st").path))
     }
 }

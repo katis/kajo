@@ -185,3 +185,20 @@ ShellBench class >> spin: n [
 	1 to: n do: [:i | acc := acc + i \\ 7].
 	^ acc
 ]
+
+{ #category : #debugging }
+ShellBench class >> breakEventLoopOnce [
+	"The development answers' scenario (debugstop=noclient): the next frame event's handler fails once, a doesNotUnderstand: in an app's handler; where the host says a debugger can come, the loop hands itself over and the old loop's Process stands stopped with no client. Answers the loop's Process id before."
+	| fired id |
+	fired := false.
+	id := UIEventLoop process id.
+	UIEventLoop onFrame: [:e | fired ifFalse: [fired := true. self noSuchFrameHandler]].
+	^ id
+]
+
+{ #category : #debugging }
+ShellBench class >> failInProcesses: n [
+	"n background Processes that each die in an unhandled error (stops standing with no client, up to Debugger stopCap). Answers n."
+	1 to: n do: [:i | [self noSuchWork] forkAt: 1].
+	^ n
+]

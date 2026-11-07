@@ -41,6 +41,14 @@ import Darwin
 //        Fails with no client host, on an argument it cannot decode and
 //        when the host answers nil.
 //
+// The development answers (docs/modules/development-answers.md):
+//
+//   165  Debugger class primHostStopsErrors: whether the host asked that an
+//        unhandled error stop its Process for the debugger
+//        (`ShellVM.stopsForDebugger`, set before the image resumes); false
+//        in a release image. Fails with no shell (`kajo run`, `kajo test`,
+//        the image build: the kernel answers false).
+//
 // Each checks its receiver and arguments and fails cleanly. None of them is
 // on a hot path: they are out of line from `primitive`.
 
@@ -50,6 +58,7 @@ enum ShellPrimitives {
         (153, "eventSemaphore:", 1), (154, "nextEvent", 0),
         (159, "DevProtocol class primRegister:", 1), (160, "DevProtocol class primNextRequest", 0),
         (161, "DevProtocol class primEmit:", 1), (164, "ClientTransport class primCall:handle:with:", 3),
+        (165, "Debugger class primHostStopsErrors", 0),
     ]
 }
 
@@ -143,6 +152,9 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         unsafe vm.count(.protocolReplies)
         if let f = bridge.callbacks.events { f(bytes) }
         return c.receiver
+    case 165:
+        guard c.argc == 0, let bridge else { return .none }
+        return bridge.stopsForDebugger.load(ordering: .acquiring) && !m.om.isReleaseImage ? m.trueObject : m.falseObject
     case 164:
         guard c.argc == 3, let bridge, let host = bridge.callbacks.client, let call = decodeViewCall(m, c) else { return .none }
         unsafe blockingBegin(vm, w)

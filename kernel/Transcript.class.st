@@ -67,6 +67,14 @@ Transcript class >> show: anObject [
 ]
 
 { #category : #accessing }
+Transcript class >> showLine: aString [
+	"aString and the end of the line as one transcript event, whatever other Processes show meanwhile (show: then cr are two steps another Process's line can fall between: the development answers' reports come from many Processes at once)."
+	| line |
+	lock critical: [stream nextPutAll: aString. line := stream contents. stream resetContents].
+	self emitEvent: 'transcript' fields: {'text'. line}
+]
+
+{ #category : #accessing }
 Transcript class >> space [
 	self show: ' '
 ]

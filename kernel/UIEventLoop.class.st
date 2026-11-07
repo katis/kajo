@@ -1,4 +1,4 @@
-"The kernel's event loop (module 9a, ADR 0004): one main-affine Process at the highest priority waits on a Semaphore the shell's event queue signals once per event, takes the event (primitive 154) and dispatches it to the wrapper of its target handle, synchronously on the main thread in the turn the shell runs after posting. A native callback only enqueues and returns. Frame events go to the frame actions (the display-link probe), synthetic ones to the synthetic action (the latency measurement), the kinds that name no view (module 9c: a protocol connection's line and lost, a timer) to the action registered for the kind, and timer events to the block after:do: registered. An error in a handler is written on the Transcript and the loop goes on; while the debugger is enabled (the development protocol serves, module 9b) the loop instead hands itself over to a new Process and lets the erring one stop for the debugger (module 9c), so an error in a tool never stops the tools. With no shell, start answers false and nothing runs."
+"The kernel's event loop (module 9a, ADR 0004): one main-affine Process at the highest priority waits on a Semaphore the shell's event queue signals once per event, takes the event (primitive 154) and dispatches it to the wrapper of its target handle, synchronously on the main thread in the turn the shell runs after posting. A native callback only enqueues and returns. Frame events go to the frame actions (the display-link probe), synthetic ones to the synthetic action (the latency measurement), the kinds that name no view (module 9c: a protocol connection's line and lost, a timer) to the action registered for the kind, and timer events to the block after:do: registered. An error in a handler is written on the Transcript and the loop goes on; where an unhandled error would stop its Process for the debugger (Debugger canStop: the host said a debugger can come, module 9b and the development answers, and the stops are under their cap) the loop instead hands itself over to a new Process and lets the erring one stop for the debugger (module 9c), so an error in a tool or an app's handler never stops the loop, with or without a client. With no shell, start answers false and nothing runs."
 Class {
 	#name : #UIEventLoop,
 	#superclass : #Object,
@@ -101,13 +101,13 @@ UIEventLoop class >> deliver: anEvent [
 
 { #category : #running }
 UIEventLoop class >> dispatch: anEvent [
-	"Handle one event: frame and synthetic events by their actions, timers by their blocks, the kinds registered with on:do: by theirs, the rest by the wrapper of the target handle. An error goes to the Transcript; while the debugger is enabled it stops the loop's Process for the debugger after a new loop Process has taken over (module 9c)."
+	"Handle one event: frame and synthetic events by their actions, timers by their blocks, the kinds registered with on:do: by theirs, the rest by the wrapper of the target handle. An error goes to the Transcript; where it would stop for the debugger (Debugger canStop) it stops the loop's Process after a new loop Process has taken over (module 9c)."
 	handled := handled + 1.
 	[self deliver: anEvent]
 		on: Error
 		do: [:e |
 			errors := errors + 1.
-			(Debugger isEnabled and: [process == ProcessorScheduler activeProcess])
+			(process == ProcessorScheduler activeProcess and: [Debugger canStop])
 				ifTrue: [
 					self handOver.
 					e pass]

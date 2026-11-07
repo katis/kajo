@@ -22,9 +22,6 @@ TonelLoader class >> load: aDocument [
 		(methods at: ((m at: 1) ifTrue: [cls class] ifFalse: [cls])) add: (Array with: (m at: 3) with: ((m at: 2) isEmpty ifTrue: [nil] ifFalse: [(m at: 2) asSymbol]))].
 	ClassBuilder redefine: cls instanceVariableNames: aDocument instVarNames classVariableNames: aDocument classVarNames
 		classInstanceVariableNames: aDocument classInstVarNames methods: methods.
-	aDocument methods do: [:m |
-		(m size >= 4 and: [(m at: 4) notNil]) ifTrue: [
-			Smalltalk noteAuthor: (m at: 4) of: (Parser parse: (m at: 3)) selector in: ((m at: 1) ifTrue: [cls class] ifFalse: [cls])]].
 	^ cls
 ]
 
@@ -32,9 +29,8 @@ TonelLoader class >> load: aDocument [
 TonelLoader class >> loadExtension: aDocument [
 	| cls |
 	cls := Smalltalk at: aDocument name asSymbol ifAbsent: [^ ClassDefinitionError new signal: 'an extension of unknown class ' , aDocument name].
-	aDocument methods do: [:m | | b sel |
+	aDocument methods do: [:m | | b |
 		b := (m at: 1) ifTrue: [cls class] ifFalse: [cls].
-		sel := b compile: (m at: 3) classified: ((m at: 2) isEmpty ifTrue: [nil] ifFalse: [m at: 2]).
-		(m size >= 4 and: [(m at: 4) notNil]) ifTrue: [Smalltalk noteAuthor: (m at: 4) of: sel in: b]].
+		b compile: (m at: 3) classified: ((m at: 2) isEmpty ifTrue: [nil] ifFalse: [m at: 2])].
 	^ cls
 ]

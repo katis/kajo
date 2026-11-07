@@ -144,16 +144,26 @@ Context >> primResend: anArray [
 { #category : #debugging }
 Context >> restartSendWith: anArray [
 	"Unwind to the receiver, running every pending ensure: and ifCurtailed: block above it, then run the send the receiver's pc is after again with anArray (its receiver, then its arguments): a frame restart re-enters the current version of the method, a send retried after doesNotUnderstand: is looked up again (module 9b). Never returns here."
-	| ctx unwindBlock |
+	^ self restartSendWith: anArray afterUnwinding: nil
+]
+
+{ #category : #debugging }
+Context >> restartSendWith: anArray afterUnwinding: aBlockOrNil [
+	"restartSendWith:, and aBlockOrNil runs once the blocks above have run, before the send (the debugger's restart and retry answer then: the development answers). Each unwind block is noted (Unwinding note:for:) so a Process waiting for this one can say where it stands."
+	| ctx unwindBlock me |
+	me := ProcessorScheduler activeProcess.
 	ctx := thisContext findNextUnwindContextUpTo: self.
 	[ctx isNil] whileFalse: [
 		(ctx tempAt: 2) isNil ifTrue: [
 			ctx tempAt: 2 put: true.
 			unwindBlock := ctx tempAt: 1.
 			thisContext terminateTo: ctx.
+			Unwinding note: unwindBlock for: me.
 			unwindBlock value].
 		ctx := ctx findNextUnwindContextUpTo: self].
+	Unwinding forget: me.
 	thisContext terminateTo: self.
+	aBlockOrNil isNil ifFalse: [aBlockOrNil value].
 	^ self primResend: anArray
 ]
 

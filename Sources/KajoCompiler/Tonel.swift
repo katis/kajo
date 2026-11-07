@@ -39,9 +39,6 @@ public struct TonelMethod: Sendable {
     /// The method's source: the message pattern, then the body.
     public let source: [UInt8]
     public let line: Int
-    /// Module 9b: who made the method, when a session of the development
-    /// protocol did (`{ #category : ..., #author : ... }`), else nil.
-    public var author: String? = nil
 }
 
 public struct TonelClass: Sendable {
@@ -278,11 +275,14 @@ struct TonelReader {
             _ = try space()
             if i >= b.count { break }
             var category = ""
-            var author: String? = nil
             if b[i] == 123 {
+                // A method's metadata is read for its category; any other
+                // key (an `#author` of a file written before the
+                // development answers among them: the mark is a pragma in
+                // the source now) is read and ignored, as Pharo's Tonel
+                // ignores keys it does not know.
                 let meta = try map()
                 category = meta.first { $0.0 == "category" }?.1.text ?? ""
-                author = meta.first { $0.0 == "author" }?.1.text
                 _ = try space()
             }
             let methodLine = line
@@ -323,8 +323,7 @@ struct TonelReader {
             guard owner == name else {
                 throw CompileError("a method of \(owner) in \(name)'s file", file: file, line: methodLine)
             }
-            cls.methods.append(TonelMethod(className: name, classSide: classSide, category: category, source: src, line: patternLine,
-                                           author: author))
+            cls.methods.append(TonelMethod(className: name, classSide: classSide, category: category, source: src, line: patternLine))
         }
         return cls
     }

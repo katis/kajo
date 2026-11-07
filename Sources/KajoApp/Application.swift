@@ -92,6 +92,11 @@ public struct KajoAppConfiguration: Sendable {
         // An app runs for days: the collectors' logs keep the last records
         // only (their sums cover the whole run).
         o.logCapacity = Headless.Options.appLogCapacity
+        // The development answers: a development build is a host a debugger
+        // can come to (it serves from launch), so from before the image
+        // resumes an unhandled error stops its Process, the app's own
+        // start-up included; a release build reports and ends it.
+        o.stopsForDebugger = development != nil
         let rt: ShellRuntime
         do {
             rt = try ShellRuntime(imagePath: imagePath ?? configuration.imagePath, options: o, platform: platform,
@@ -107,10 +112,32 @@ public struct KajoAppConfiguration: Sendable {
             return false
         }
         let end = ShellVM.now() + 10_000_000_000
-        while rt.vm.state(of: p) != .terminated && ShellVM.now() < end { rt.turn(.wake) }
+        while rt.vm.state(of: p) != .terminated && ShellVM.now() < end {
+            rt.turn(.wake)
+            // An error in `open` stopped it for the debugger: serving starts
+            // anyway (it does not depend on that Process), and a client
+            // that connects finds the stop.
+            if o.stopsForDebugger && rt.vm.state(of: p) == .waiting && rt.vm.isStoppedForDebugger(p) {
+                appLog("\(configuration.name): \(configuration.appClass) open stopped for the debugger (process \(p.id))")
+                break
+            }
+        }
         rt.vm.release(p)
         development?.started(self)
         return true
+    }
+}
+
+extension ShellVM {
+    /// The development answers: whether `p` stands stopped for the
+    /// debugger (asked of the kernel in a Process of its own, waited for at
+    /// most two seconds). For a host waiting for a Process it spawned.
+    public func isStoppedForDebugger(_ p: ShellProcess) -> Bool {
+        guard let q = spawn("isStoppedProcessId:", receiver: "Debugger", arguments: [.int(p.id)]) else { return false }
+        defer { release(q) }
+        let end = ShellVM.now() + 2_000_000_000
+        while state(of: q) != .terminated && ShellVM.now() < end { usleep(200) }
+        return result(of: q) == .bool(true)
     }
 }
 

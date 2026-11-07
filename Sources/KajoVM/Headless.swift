@@ -78,6 +78,17 @@ public enum Headless {
         /// Module 8e: the directory Smalltalk's file primitives may read
         /// and write under (`--sources`); nil, they fail.
         public var sourcesDirectory: String? = nil
+        /// The development answers (docs/modules/development-answers.md):
+        /// whether an unhandled error in a development image stops its
+        /// Process for a debugger that can still come (primitive 165,
+        /// `Debugger hostStopsErrors`), or is reported and ends it. Only a
+        /// `ShellVM` reads it, set by its host before the image resumes:
+        /// hosts that serve the development protocol, or will (a
+        /// development app, the shells' developer modes, `kajo run
+        /// --protocol`). False, the batch hosts' answer, is the default;
+        /// `kajo run`, `kajo test` and the image build have no shell and
+        /// always answer false.
+        public var stopsForDebugger = false
 
         public init() {}
     }

@@ -42,6 +42,10 @@ public final class DevTarget: @unchecked Sendable {
         if Headless.isReleaseImage(image) == true { throw Failure(description: "a release image serves no development protocol") }
         let box = ServerBox()
         let w = wake
+        // A serving target is a host a debugger can still come to: an
+        // unhandled error stops its Process (the development answers).
+        var options = options
+        options.stopsForDebugger = true
         var callbacks = ShellCallbacks()
         callbacks.wakeMain = { w.signal() }
         callbacks.events = { line in

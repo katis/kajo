@@ -44,6 +44,9 @@ func devSocketPath(_ options: LaunchOptions) -> String {
         var o = Headless.Options()
         o.workers = options.int("workers", 2)
         o.heapMiB = options.int("heap", 512)
+        // The developer UI serves its own protocol: errors stop for the
+        // debugger from before the image resumes (the development answers).
+        o.stopsForDebugger = true
         // The developer UI runs for days: the collectors' logs keep the last
         // records only (their sums cover the whole run).
         o.logCapacity = options.int("logs", Headless.Options.appLogCapacity)
@@ -149,6 +152,9 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         var o = Headless.Options()
         o.workers = options.int("workers", 5)
         o.heapMiB = options.int("heap", 1024)
+        // A developer's session (the development answers: a host a
+        // debugger can come to).
+        o.stopsForDebugger = true
         o.nurseryKB = options.int("nursery", 4096)
         let classes = options.int("classes", 2000)
         let image = options.string("image", classes > 0 ? resources.dev2000Image : resources.devImage)

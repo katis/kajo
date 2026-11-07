@@ -273,7 +273,6 @@ Behavior >> removeSelector: aSymbol [
 	Smalltalk forgetSourceOf: old.
 	Smalltalk forgetCategoryOf: aSymbol in: self.
 	Smalltalk notePackage: nil of: aSymbol in: self.
-	Smalltalk noteAuthor: nil of: aSymbol in: self.
 	^ old
 ]
 

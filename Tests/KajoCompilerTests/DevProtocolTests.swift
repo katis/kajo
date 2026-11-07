@@ -182,8 +182,11 @@ extension ProtocolClient {
                                                   ("category", .string("accessing"))])
         #expect(try project.apply(r1) == ["SampleCounter.class.st"])
         let text = try String(contentsOf: dir.appendingPathComponent("SampleCounter.class.st"), encoding: .utf8)
-        #expect(text.contains("{ #category : #accessing, #author : #'agent:claude' }\nSampleCounter >> reset ["))
-        #expect(text.contains("{ #category : #accessing, #author : #'agent:fixture' }\nSampleCounter >> increment ["))
+        // The development answers: the agent's mark is a pragma in the
+        // source, the metadata the category only.
+        #expect(text.contains("{ #category : #accessing }\nSampleCounter >> reset [\n\t<author: #'agent:claude'>\n\tcount := 0\n]"))
+        #expect(text.contains("{ #category : #accessing }\nSampleCounter >> increment [\n\t<author: #'agent:fixture'>\n"))
+        #expect(!text.contains("#author :"))
         // A method into a kernel class: the package's extension file.
         let r2 = try s.request("method.compile", [("className", .string("Object")), ("source", .string("sampleThrice: x ^ x * 3")),
                                                   ("category", .string("*Sample"))])

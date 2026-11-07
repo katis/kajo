@@ -83,9 +83,9 @@ public struct KernelBuild: Sendable {
             }
             // Every method's source and category, kept in the image
             // (Smalltalk sourceOf:, Behavior>>categoryOf:), in Arrays of at
-            // most 2000 Strings: "Class[ class]\nselector\ncategory\npackage\nauthor\nsource"
-            // (module 9b: the package when it is not the class's, the
-            // author when the file names one; empty otherwise).
+            // most 2000 Strings: "Class[ class]\nselector\ncategory\npackage\nsource"
+            // (module 9b: the package when it is not the class's, empty
+            // otherwise; an agent's author mark is a pragma in the source).
             let sources = plan.sources
             var start = 0
             while start < sources.count {
@@ -108,7 +108,7 @@ struct Plan {
     var classes: [TonelClass] = []
     var definitions: [KernelClassDefinition] = []
     var compiled: [AssembledMethod] = []
-    /// "Class[ class]\nselector\ncategory\npackage\nauthor\nsource" per compiled method.
+    /// "Class[ class]\nselector\ncategory\npackage\nsource" per compiled method.
     var sources: [String] = []
     /// Module 8e: per class, in definition order (superclasses first),
     /// "name\nsuperclass\ninstVars\nclassInstVars\ncategory\nkind\npackage\ncomment"
@@ -225,7 +225,7 @@ struct Plan {
                                    classVariables: pools[m.className] ?? [:])
             let (am, pragmas) = try compileMethod(m.source, file: file, line: m.line, in: ctx)
             compiled.append(am)
-            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n\(m.category)\n\(package)\n\(m.author ?? "")\n"
+            sources.append("\(m.className)\(m.classSide ? " class" : "")\n\(am.selector)\n\(m.category)\n\(package)\n"
                            + String(decoding: m.source, as: UTF8.self))
             for p in pragmas {
                 if p.selector == "consumesPragmas:", m.classSide, case .array(let xs) = p.arguments[0] {

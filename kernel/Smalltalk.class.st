@@ -9,7 +9,6 @@ Class {
 		'organizations',
 		'undeclared',
 		'packages',
-		'authors',
 		'resumes'
 	],
 	#category : #'Kernel-System'
@@ -271,18 +270,12 @@ Smalltalk class >> initializeKernel [
 
 { #category : #packages }
 Smalltalk class >> authorOfSelector: aSelector in: aBehavior [
-	"Who made the method, when a development session did (module 9b: 'developer', 'agent:<name>'), else nil."
-	authors isNil ifTrue: [^ nil].
-	^ (authors at: aBehavior ifAbsent: [^ nil]) at: aSelector ifAbsent: [nil]
-]
-
-{ #category : #packages }
-Smalltalk class >> noteAuthor: aStringOrNil of: aSelector in: aBehavior [
-	aStringOrNil isNil ifTrue: [
-		authors isNil ifFalse: [(authors at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSelector ifAbsent: [nil]]].
-		^ nil].
-	authors isNil ifTrue: [authors := IdentityDictionary new].
-	(authors at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aStringOrNil asString
+	"The agent that made the method, from its <author: #'agent:<name>'> pragma (the development answers: the mark is part of the method's source; Pragma allNamed: #author: answers every method an agent wrote), else nil."
+	| m p |
+	m := aBehavior compiledMethodAt: aSelector ifAbsent: [^ nil].
+	p := m pragmaAt: #author:.
+	p isNil ifTrue: [^ nil].
+	^ p arguments first asString
 ]
 
 { #category : #packages }
@@ -449,7 +442,6 @@ Smalltalk class >> forgetClass: aClass [
 	sources isNil ifFalse: [sources removeKey: aClass ifAbsent: [nil]. sources removeKey: aClass class ifAbsent: [nil]].
 	organizations isNil ifFalse: [organizations removeKey: aClass ifAbsent: [nil]. organizations removeKey: aClass class ifAbsent: [nil]].
 	packages isNil ifFalse: [packages removeKey: aClass ifAbsent: [nil]. packages removeKey: aClass class ifAbsent: [nil]].
-	authors isNil ifFalse: [authors removeKey: aClass ifAbsent: [nil]. authors removeKey: aClass class ifAbsent: [nil]].
 	undeclared isNil ifFalse: [undeclared removeKey: aClass ifAbsent: [nil]].
 	classNames := nil
 ]
@@ -527,28 +519,25 @@ Smalltalk class >> recordDefinitions: anArray [
 
 { #category : #sources }
 Smalltalk class >> recordSources: anArray [
-	"The image build hands every method's source over: 'Class[ class]', the selector, the category, the package (module 9b: when it is not the class's, else empty), the author (empty when none) and the source, a line each (the source last)."
+	"The image build hands every method's source over: 'Class[ class]', the selector, the category, the package (module 9b: when it is not the class's, else empty) and the source, a line each (the source last). An agent's author mark is a pragma in the source (the development answers)."
 	| lf |
 	lf := String with: Character lf.
-	anArray do: [:s | | i j k p a spec sel cls m cat pkg author |
+	anArray do: [:s | | i j k p spec sel cls m cat pkg |
 		i := s indexOf: Character lf.
 		j := s indexOfSubstring: lf startingAt: i + 1.
 		k := s indexOfSubstring: lf startingAt: j + 1.
 		p := s indexOfSubstring: lf startingAt: k + 1.
-		a := s indexOfSubstring: lf startingAt: p + 1.
 		spec := s copyFrom: 1 to: i - 1.
 		sel := (s copyFrom: i + 1 to: j - 1) asSymbol.
 		cat := s copyFrom: j + 1 to: k - 1.
 		pkg := s copyFrom: k + 1 to: p - 1.
-		author := s copyFrom: p + 1 to: a - 1.
 		cls := (spec endsWith: ' class')
 			ifTrue: [(self at: (spec copyFrom: 1 to: spec byteSize - 6) asSymbol) class]
 			ifFalse: [self at: spec asSymbol].
 		m := cls compiledMethodAt: sel.
-		self noteSource: (s copyFrom: a + 1 to: s byteSize) of: m.
+		self noteSource: (s copyFrom: p + 1 to: s byteSize) of: m.
 		cat isEmpty ifFalse: [self noteCategory: cat asSymbol of: sel in: cls].
-		pkg isEmpty ifFalse: [self notePackage: pkg of: sel in: cls].
-		author isEmpty ifFalse: [self noteAuthor: author of: sel in: cls]]
+		pkg isEmpty ifFalse: [self notePackage: pkg of: sel in: cls]]
 ]
 
 { #category : #sources }

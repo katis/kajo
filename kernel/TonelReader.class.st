@@ -169,13 +169,12 @@ TonelReader >> readDocument [
 
 { #category : #reading }
 TonelReader >> readMethodInto: aDocument [
-	| category author owner classSide patternStart open close end src body meta |
+	"A method's metadata is read for its category; any other key (an #author of a file written before the development answers among them) is read and ignored, as Pharo's Tonel ignores keys it does not know, so the next write leaves it out."
+	| category owner classSide patternStart open close end src body meta |
 	category := ''.
-	author := nil.
 	self byte = 123 ifTrue: [
 		meta := self map: 0.
 		category := (self text: 'category' in: meta) ifNil: [''].
-		author := self text: 'author' in: meta.
 		self space].
 	owner := self identifier.
 	owner isEmpty ifTrue: [^ self fail: 'expected a method: Class >> selector [ ... ]'].
@@ -203,7 +202,7 @@ TonelReader >> readMethodInto: aDocument [
 	src := src , body.
 	position := close + 1.
 	owner = aDocument name ifFalse: [^ self fail: 'a method of ' , owner , ' in ' , aDocument name , '''s file'].
-	aDocument methods add: (Array with: classSide with: category with: src with: author)
+	aDocument methods add: (Array with: classSide with: category with: src)
 ]
 
 { #category : #reading }

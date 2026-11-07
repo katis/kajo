@@ -223,7 +223,7 @@ DevProtocol class >> serve [
 
 { #category : #serving }
 DevProtocol class >> start [
-	"Serve the development protocol when the host opened a transport (kajo run --protocol, the macOS shell): the protocol Process at the highest priority, and unhandled errors stop their Process for the debugger from now on. Answers whether it serves; false in a release image or without a transport."
+	"Serve the development protocol when the host opened a transport (kajo run --protocol, the macOS shell, a development app): the protocol Process at the highest priority. Whether unhandled errors stop their Process is the host's setting (Debugger stopsErrors), which a serving host makes; it does not depend on this Process. Answers whether it serves; false in a release image or without a transport."
 	Smalltalk isReleaseImage ifTrue: [^ false].
 	process notNil ifTrue: [^ true].
 	lock := Mutex new.
@@ -232,18 +232,16 @@ DevProtocol class >> start [
 	kinds := nil.
 	semaphore := Semaphore new.
 	(self primRegister: semaphore) == self ifFalse: [semaphore := nil. ^ false].
-	Debugger enable.
 	process := [self serve] forkAt: 2.
 	^ true
 ]
 
 { #category : #sources }
 DevProtocol class >> noteChangeOf: aSelector in: aBehavior [
-	"A method was compiled (Behavior>>compile:): when a development session's request did it, the method's author is the session's client and its package the session's (module 9b)."
+	"A method was compiled (Behavior>>compile:): when a development session's request did it, the method's package is the session's (module 9b). Its author mark is in its source (DevSession>>methodCompile:...: the development answers)."
 	| session |
 	session := self sessionOfActive.
 	session isNil ifTrue: [^ nil].
-	Smalltalk noteAuthor: session client of: aSelector in: aBehavior.
 	Smalltalk notePackage: session package of: aSelector in: aBehavior
 ]
 

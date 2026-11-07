@@ -128,12 +128,13 @@ DebuggerModel >> proceed [
 
 { #category : #commands }
 DebuggerModel >> restart [
-	self request: 'process.restart' args: {'process'. process. 'frame'. frameIndex} then: [:r | self after: 'restarted frame ' , frameIndex printString]
+	self request: 'process.restart' args: {'process'. process. 'frame'. frameIndex} then: [:r |
+		self after: 'restarted frame ' , frameIndex printString , (self unwindingOf: r)]
 ]
 
 { #category : #commands }
 DebuggerModel >> retrySend [
-	self request: 'process.retrySend' args: {'process'. process} then: [:r | self after: 'retried the send']
+	self request: 'process.retrySend' args: {'process'. process} then: [:r | self after: 'retried the send' , (self unwindingOf: r)]
 ]
 
 { #category : #commands }
@@ -157,8 +158,15 @@ DebuggerModel >> step: aMode [
 DebuggerModel >> terminate [
 	self request: 'process.terminate' args: {'process'. process} then: [:r |
 		state := #ended.
-		self status: 'terminated'.
+		self status: 'terminated' , (self unwindingOf: r).
 		self changed: #state]
+]
+
+{ #category : #commands }
+DebuggerModel >> unwindingOf: aResult [
+	"The development answers: an unwinding that did not run to its end within the bound is said, never silent."
+	((aResult isKindOf: JsonObject) and: [(aResult at: 'unwound') == false]) ifFalse: [^ ''].
+	^ '; ' , ((aResult at: 'cutOff') ifNil: ['its unwinding did not run to its end'])
 ]
 
 { #category : #events }

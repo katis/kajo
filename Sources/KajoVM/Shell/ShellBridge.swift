@@ -25,8 +25,16 @@ import Synchronization
     private var semaphore: Oop? = nil  // under lock
     private var pendingHandle = -1  // under lock: the Semaphore's pending-root slot
     var ref: VMRef? = nil  // set once, before any worker starts
+    /// The development answers: the host's setting read by primitive 165
+    /// (whether an unhandled error stops its Process for the debugger). Set
+    /// by the host before the image resumes, and by a host that starts
+    /// serving; read by any worker.
+    let stopsForDebugger: Atomic<Bool>
 
-    init(_ callbacks: ShellCallbacks) { self.callbacks = callbacks }
+    init(_ callbacks: ShellCallbacks, stopsForDebugger: Bool = false) {
+        self.callbacks = callbacks
+        self.stopsForDebugger = Atomic(stopsForDebugger)
+    }
 
     deinit {
         unsafe freeMutex(lock)

@@ -12,7 +12,8 @@ Class {
 		'mutex',
 		'resumeValue',
 		'resuming',
-		'atSend'
+		'atSend',
+		'noted'
 	],
 	#category : #'Kernel-Development'
 }
@@ -27,6 +28,18 @@ DebugStop >> atSend: aBoolean [
 DebugStop >> errorText [
 	exception isNil ifTrue: [^ reason].
 	^ [exception class name , ': ' , exception messageText] on: Error do: [:e | exception class name]
+]
+
+{ #category : #accessing }
+DebugStop >> noteSummary [
+	"Run by the stopped Process itself when it parks, where its Contexts are live: the summary another Process reads later (session.open's list of standing stops) is this one."
+	noted := self summary
+]
+
+{ #category : #accessing }
+DebugStop >> notedSummary [
+	"The summary the stopped Process made when it parked (its frames read by itself); any Process may read it."
+	^ noted ifNil: [(JsonObject new) at: 'process' put: process id; at: 'reason' put: reason; at: 'error' put: self errorText; yourself]
 ]
 
 { #category : #accessing }
@@ -60,6 +73,35 @@ DebugStop >> summary [
 	o at: 'process' put: process id; at: 'reason' put: reason; at: 'error' put: self errorText;
 		at: 'frames' put: ((1 to: (frames size min: 32)) collect: [:i | self frameSummary: i]) asArray.
 	^ o
+]
+
+{ #category : #commands }
+DebugStop >> answer: aReplyTo with: anObject [
+	"A command's answer: to a waiting request's holder (await:arguments:, terminate), else as the request's reply."
+	(aReplyTo isKindOf: OrderedCollection) ifTrue: [^ aReplyTo add: anObject].
+	anObject isString ifTrue: [^ DevProtocol reply: aReplyTo error: anObject].
+	^ DevProtocol reply: aReplyTo result: anObject
+]
+
+{ #category : #commands }
+DebugStop >> await: aSelector arguments: anArray [
+	"From a request's Process (the development answers): queue a command whose answer the stopped Process puts in a holder once its unwinding has run (restart, retry), and wait for it at most about Process unwindBudgetMs. Answers what the request answers: whether the unwinding ran to its end and, if not, where it stands; a refusal is signalled as the error it was."
+	| holder waited answer |
+	holder := OrderedCollection new.
+	mutex critical: [commands add: (Array with: aSelector with: anArray with: (Array with: holder with: nil))].
+	semaphore signal.
+	waited := 0.
+	[holder notEmpty or: [waited >= Process unwindBudgetMs]] whileFalse: [
+		(Delay forMilliseconds: 1) wait.
+		waited := waited + 1].
+	holder isEmpty ifTrue: [ | text |
+		text := 'Process ' , process id printString , ' has not finished unwinding after ' , waited printString , ' ms: '
+			, (Unwinding describe: (Unwinding blockOf: process)).
+		Transcript showLine: text.
+		^ self class unwound: text process: process].
+	answer := holder first.
+	(answer isString) ifTrue: [^ self error: answer].
+	^ self class unwound: true process: process
 ]
 
 { #category : #commands }
@@ -107,9 +149,8 @@ DebugStop >> restart: anIndex replyTo: aReplyTo session: aSession [
 			operands add: f receiver].
 	1 to: f method numArgs do: [:i | operands add: (f tempAt: i)].
 	operands size = (send last + 1) ifFalse: [^ self error: 'the send takes ' , send last printString , ' arguments, the frame ' , f method numArgs printString].
-	DevProtocol reply: aReplyTo result: true.
 	self leave.
-	s restartSendWith: operands asArray
+	s restartSendWith: operands asArray afterUnwinding: [self answer: aReplyTo with: true]
 ]
 
 { #category : #commands }
@@ -123,9 +164,8 @@ DebugStop >> retrySendReplyTo: aReplyTo session: aSession [
 	msg := exception message.
 	send := s isNil ifTrue: [nil] ifFalse: [s sendBeforePc].
 	(send notNil and: [send first == msg selector]) ifFalse: [^ self error: 'the message was not sent by a send of ' , msg selector printString].
-	DevProtocol reply: aReplyTo result: true.
 	self leave.
-	s restartSendWith: (Array with: exception receiver) , msg arguments
+	s restartSendWith: (Array with: exception receiver) , msg arguments afterUnwinding: [self answer: aReplyTo with: true]
 ]
 
 { #category : #commands }
@@ -145,8 +185,16 @@ DebugStop >> step: aMode frame: anIndex replyTo: aReplyTo session: aSession [
 ]
 
 { #category : #commands }
+DebugStop >> terminate [
+	"From a request's Process: the stopped Process runs its unwind blocks and ends (terminateUnwinding, on its own stack), and this Process waits for that as Process>>terminate does, bounded the same way: past Process unwindBudgetMs the Process is ended where it stands, counted and reported. Answers whether its unwinding ran to its end."
+	mutex critical: [commands add: (Array with: #terminateReplyTo:session: with: #() with: (Array with: OrderedCollection new with: nil))].
+	semaphore signal.
+	^ self class unwound: process awaitUnwinding process: process
+]
+
+{ #category : #commands }
 DebugStop >> terminateReplyTo: aReplyTo session: aSession [
-	DevProtocol reply: aReplyTo result: true.
+	"The stopped Process ends after its unwind blocks; the request's Process that queued this waits for it (terminate)."
 	self leave.
 	process terminateUnwinding
 ]
@@ -207,7 +255,7 @@ DebugStop >> serve [
 		cmd := self nextCommand.
 		cmd isNil ifFalse: [
 			[self perform: cmd first withArguments: (cmd at: 2) , (Array with: (cmd at: 3) first with: (cmd at: 3) last)]
-				on: Error do: [:e | DevProtocol reply: (cmd at: 3) first error: e printString].
+				on: Error do: [:e | self answer: (cmd at: 3) first with: e printString].
 			resuming ifTrue: [
 				(cmd first == #step:frame:replyTo:session:) ifFalse: [self leave].
 				^ resumeValue]]]
@@ -216,4 +264,14 @@ DebugStop >> serve [
 { #category : #'instance creation' }
 DebugStop class >> process: aProcess exception: anException reason: aString frames: anArray [
 	^ self new setProcess: aProcess exception: anException reason: aString frames: anArray
+]
+
+{ #category : #'instance creation' }
+DebugStop class >> unwound: aReport process: aProcess [
+	"process.terminate's, process.restart's and process.retrySend's answer (the development answers): whether the unwinding ran to its end (aReport true), and otherwise what aReport says of where it stood (cutOff)."
+	| o |
+	o := JsonObject new.
+	o at: 'process' put: aProcess id; at: 'unwound' put: aReport == true.
+	aReport == true ifFalse: [o at: 'cutOff' put: aReport asString].
+	^ o
 ]

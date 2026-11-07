@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import Synchronization
 
 // Module 9a: the VM's public surface for native shells (docs/modules/shells.md
 // "The host surface"). A shell opens a VM over an image, gives it the main
@@ -297,7 +298,7 @@ public final class ShellVM: @unchecked Sendable {
             image.destroy()
             throw .image("the image names no entry point")
         }
-        bridge = ShellBridge(callbacks)
+        bridge = ShellBridge(callbacks, stopsForDebugger: options.stopsForDebugger)
         vm = VM(image: image, config: vc)
         bridge.ref = vm.ref
         let ctx = unsafe Unmanaged.passUnretained(bridge).toOpaque()
@@ -362,8 +363,15 @@ public final class ShellVM: @unchecked Sendable {
     /// A host serving the development protocol (a transport: KajoDev's
     /// `ProtocolServer`) opens the inbox before the kernel's protocol
     /// Process registers (`DevProtocol start`); without it primitive 159
-    /// fails and the image serves nothing. Any thread.
-    public func openProtocol() { bridge.openProtocol() }
+    /// fails and the image serves nothing. Any thread. A host that opens it
+    /// is a host a debugger can come to, so it also turns
+    /// `stopsForDebugger` on (the development answers: hosts that serve
+    /// ask for it before the image resumes; this covers one that starts
+    /// serving later or did not ask).
+    public func openProtocol() {
+        stopsForDebugger = true
+        bridge.openProtocol()
+    }
 
     /// Any thread: one request the transport parsed and checked, as the
     /// canonical JSON object the kernel's reader takes, and the connection
@@ -373,6 +381,17 @@ public final class ShellVM: @unchecked Sendable {
 
     /// Requests posted and not yet taken by the protocol Process.
     public var queuedRequests: Int { bridge.queuedRequests }
+
+    /// The development answers (docs/modules/development-answers.md): an
+    /// unhandled error in this development image stops its Process for the
+    /// debugger (a client can still come) rather than being reported and
+    /// ending it. The host's one setting, `Headless.Options.stopsForDebugger`
+    /// at the open; a host that starts serving sets it too. A release image
+    /// never stops whatever it says. Any thread.
+    public var stopsForDebugger: Bool {
+        get { bridge.stopsForDebugger.load(ordering: .acquiring) }
+        set { bridge.stopsForDebugger.store(newValue, ordering: .releasing) }
+    }
 
     // MARK: turns
 

@@ -22,6 +22,18 @@ import KajoVM
 /// every 50 ms meanwhile; then lets it go on and checks it handles the
 /// events that queued. The frames are the window's, the event loop stopped.
 ///
+/// The development answers: `debugstop=noclient` runs the window with the
+/// host's setting on (an unhandled error stops its Process for a debugger
+/// that can still come) and no protocol: at the window's start a frame
+/// handler fails once, the event loop hands itself over and the old loop's
+/// Process stands stopped with nobody connected (`stops=N` forks N more
+/// background Processes that die the same way, up to `Debugger stopCap`);
+/// after `seconds` the shell starts serving on loopback, a client on a
+/// thread of its own finds the stops in session.open's answer, reads the
+/// loop's frames and lets it go on, and the frames are counted for `after`
+/// seconds more. The result line has both windows' frames, the stops and
+/// the footprint they hold.
+///
 /// Module 9d: `protocol=tcp[:port]` (and `mode=serve`, which defaults to it
 /// and to `scenario=idle`) serves the development protocol over TCP with
 /// Bonjour and the pairing screen while the scenario runs; whoever connects
@@ -40,6 +52,15 @@ import KajoVM
     let hog: Bool
     let budgetOff: Bool
     let debugStop: Bool
+    let noClient: Bool
+    let afterSeconds: Double
+    let stopsAsked: Int
+    let noClientResult = NoClientBox()
+    var noClientServer: ProtocolServer?
+    var serveAtTs = 0.0
+    var footprintBefore: UInt64 = 0
+    var footprintStopped: UInt64 = 0
+    var loopBefore: Int64 = 0
     let servePort: Int?
     var protocolServer: ProtocolServer?
     var tcpServer: ProtocolServer?
@@ -108,7 +129,10 @@ import KajoVM
         eventRate = options.int("events", 0)
         hog = options.int("hog", 0) == 1
         budgetOff = options.string("budget", "on") == "off"
-        debugStop = options.int("debugstop", 0) == 1
+        debugStop = options.string("debugstop", "0") == "1"
+        noClient = options.string("debugstop", "0") == "noclient"
+        afterSeconds = noClient ? options.double("after", 5) : 0
+        stopsAsked = options.int("stops", 0)
         servePort = tcpPort(options.string("protocol", options.mode == "serve" ? "tcp" : ""))
     }
 
@@ -122,6 +146,10 @@ import KajoVM
         o.gc = options.string("gc", "cm")
         o.young = options.string("young", "offload")
         o.relocation = options.string("reloc", "on")
+        // The development answers: a scenario that serves (debugstop=1,
+        // protocol=, mode=serve) is a host a debugger can come to; every
+        // other scenario reports and ends an unhandled error.
+        o.stopsForDebugger = debugStop || servePort != nil || noClient
         thermalStart = Telemetry.thermal()
         mainTid = Telemetry.threadID()
         mainQoS = Telemetry.qosName(qos_class_self().rawValue)
@@ -180,11 +208,14 @@ import KajoVM
         startNs = ShellVM.now()
         let t0 = Double(startNs) / 1e9
         measureStart = t0 + warmup
-        measureEnd = measureStart + seconds
+        measureEnd = measureStart + seconds + afterSeconds
         platform.startDisplayLink { [unowned self] ts, target in self.tick(ts, target) }
         if eventRate > 0 { startEvents() }
         DispatchQueue.main.asyncAfter(deadline: .now() + warmup) { MainActor.assumeIsolated { self.begin() } }
-        DispatchQueue.main.asyncAfter(deadline: .now() + warmup + seconds + (debugStop ? 2.5 : 0.05)) { MainActor.assumeIsolated { self.end() } }
+        if noClient {
+            DispatchQueue.main.asyncAfter(deadline: .now() + warmup + seconds) { MainActor.assumeIsolated { self.serveNoClient() } }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + warmup + seconds + afterSeconds + (debugStop ? 2.5 : 0.05)) { MainActor.assumeIsolated { self.end() } }
         platform.showStatus("scenario \(name) \(options.summary)" + (protocolServer.map { " protocol \($0.path) token \($0.token)" } ?? ""))
     }
 
@@ -295,6 +326,42 @@ import KajoVM
         if let server = protocolServer {
             startDebugClient(path: server.path, token: server.token, until: UInt64(measureEnd * 1e9), result: debugResult)
         }
+        if noClient { breakEventLoop() }
+    }
+
+    /// `debugstop=noclient`: a frame handler fails once (the loop hands
+    /// itself over and the old loop stops), and `stops` background
+    /// Processes die in errors; nobody is connected.
+    func breakEventLoop() {
+        footprintBefore = Telemetry.footprint().now
+        if let p = vm.spawn("breakEventLoopOnce", receiver: "ShellBench", main: true, priority: 2) {
+            let end = ShellVM.now() + 2_000_000_000
+            while vm.state(of: p) != .terminated && ShellVM.now() < end { _ = vm.runTurn(budgetNs: 2_000_000) }
+            loopBefore = vm.result(of: p)?.int ?? 0
+            vm.release(p)
+        }
+        if stopsAsked > 0, let p = vm.spawn("failInProcesses:", receiver: "ShellBench", arguments: [.int(Int64(stopsAsked))]) {
+            vm.waitUntilTerminated(p)
+            vm.release(p)
+        }
+    }
+
+    /// `debugstop=noclient` after `seconds`: serve on loopback and let a
+    /// client find the stops and let the loop's go on.
+    func serveNoClient() {
+        footprintStopped = Telemetry.footprint().now
+        serveAtTs = Double(ShellVM.now()) / 1e9
+        do {
+            noClientServer = try runtime.serveTCP(port: 0, loopbackOnly: true, advertise: false, store: nil, imageName: "shell.img",
+                                                  serviceName: nil, pairing: nil)
+        } catch {
+            noClientResult.withLock { $0.error = "serve: \(error)" }
+        }
+        guard let s = noClientServer, let port = s.port else {
+            noClientResult.withLock { $0.error = $0.error.isEmpty ? "no server" : $0.error }
+            return
+        }
+        startNoClientClient(port: port, token: s.token, loop: loopBefore, result: noClientResult)
     }
 
     func end() {
@@ -346,6 +413,22 @@ import KajoVM
             line += " debug_stopped=\(r.stopped ? 1 : 0) debug_reason=\(r.reason) debug_process=\(r.process) debug_stopped_s=\(f3(r.stoppedSeconds))"
             line += " protocol_replies=\(r.rtts.count) protocol_errors=\(r.errors) protocol_rtt_p50_ms=\(f3(percentile(r.rtts, 0.5))) protocol_rtt_p99_ms=\(f3(percentile(r.rtts, 0.99))) protocol_rtt_max_ms=\(f3(r.rtts.max() ?? 0))"
             line += " debug_resumed=\(r.resumed ? 1 : 0) handled_while_stopped=\(r.handledWhileStopped) handled_after_resume=\(r.handledAfterResume) debug_error=\(r.error.isEmpty ? "-" : r.error.replacingOccurrences(of: " ", with: "_"))"
+            runtime.stopProtocol()
+        }
+        if noClient {
+            let r = noClientResult.withLock { $0 }
+            let stoppedEnd = serveAtTs > 0 ? serveAtTs : measureEnd
+            let fs = FrameAccount(timestamps: frameTimes, start: measureStart, end: stoppedEnd, nominalHz: nominal)
+            let resumedAt = r.proceededAtNs > 0 ? Double(r.proceededAtNs) / 1e9 : measureEnd
+            let fr = FrameAccount(timestamps: frameTimes, start: resumedAt, end: measureEnd, nominalHz: nominal)
+            line += " noclient=1 stops_asked=\(stopsAsked) loop_before=\(loopBefore) stopped_s=\(f3(stoppedEnd - measureStart))"
+            line += " frames_stopped=\(fs.frames) expected_stopped=\(fs.expected) missed_stopped=\(fs.missed) gap_max_stopped_ms=\(f3(fs.gapMaxMs))"
+            line += " frames_after=\(fr.frames) expected_after=\(fr.expected) missed_after=\(fr.missed) gap_max_after_ms=\(f3(fr.gapMaxMs)) after_s=\(f3(measureEnd - resumedAt))"
+            line += " footprint_before_mb=\(f1(Double(footprintBefore) / 1_048_576)) footprint_stopped_mb=\(f1(Double(footprintStopped) / 1_048_576))"
+            line += " stops_delta_kb=\(footprintStopped >= footprintBefore ? f1(Double(footprintStopped - footprintBefore) / 1024) : "-")"
+            line += " info_stops=\(r.infoStops) loop_found=\(r.loopFound ? 1 : 0) loop_frames=\(r.frames) refused=\(r.refused) hand_overs=\(r.handOvers)"
+            line += " open_ms=\(f3(r.openMs)) frames_ms=\(f3(r.framesMs)) proceed_ms=\(f3(r.proceedMs)) loop_ended=\(r.loopEnded ? 1 : 0)"
+            line += " noclient_error=\(r.error.isEmpty ? "-" : r.error.replacingOccurrences(of: " ", with: "_"))"
             runtime.stopProtocol()
         }
         if let s = tcpServer {
@@ -545,6 +628,78 @@ nonisolated func startDebugClient(path: String, token: String, until: UInt64, re
                 $0.handledWhileStopped = handled1 - handled0
                 $0.handledAfterResume = handled2 - handled1
                 $0.resumed = handled2 > handled1
+            }
+        } catch {
+            result.withLock { $0.error = "\(error)" }
+        }
+    }
+}
+
+final class NoClientBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = NoClientResult()
+    func withLock<T>(_ f: (inout NoClientResult) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return f(&value)
+    }
+}
+
+/// What the client of `debugstop=noclient` saw.
+struct NoClientResult: Sendable {
+    var infoStops = -1
+    var loopFound = false
+    var frames = -1
+    var refused: Int64 = -1
+    var handOvers: Int64 = -1
+    var openMs = 0.0, framesMs = 0.0, proceedMs = 0.0
+    var proceededAtNs: UInt64 = 0
+    var loopEnded = false
+    var error = ""
+}
+
+/// The client of `debugstop=noclient`, on a thread of its own: connect
+/// after the stops, find them in session.open's answer, read the stopped
+/// loop's frames, let it go on, see it end (its generation is no longer the
+/// loop's).
+nonisolated func startNoClientClient(port: Int, token: String, loop: Int64, result: NoClientBox) {
+    onBackgroundThread {
+        do {
+            let c = try ProtocolClient(address: .tcp(host: "127.0.0.1", port: port))
+            defer { c.close() }
+            var t0 = ShellVM.now()
+            let info = try c.open(token: token, client: "agent:noclient", timeout: 10)
+            let openMs = Double(ShellVM.now() - t0) / 1e6
+            let stops = info["stopped"]?.array ?? []
+            let found = stops.contains { $0["process"] == .int(loop) }
+            t0 = ShellVM.now()
+            let frames = try c.request("process.frames", [("process", .int(loop))], timeout: 10).array?.count ?? -1
+            let framesMs = Double(ShellVM.now() - t0) / 1e6
+            t0 = ShellVM.now()
+            _ = try c.request("process.proceed", [("process", .int(loop))], timeout: 10)
+            let done = ShellVM.now()
+            func eval(_ s: String) throws -> String { try c.request("evaluate", [("source", .string(s))], timeout: 10)["value"]?.string ?? "" }
+            var ended = false
+            for _ in 0..<2000 {
+                if try eval("(Debugger processWithId: \(loop)) isNil or: [(Debugger processWithId: \(loop)) isTerminated]") == "true" {
+                    ended = true
+                    break
+                }
+                usleep(1000)
+            }
+            let refused = Int64(try eval("Debugger refusedStops")) ?? -1
+            let hand = Int64(try eval("UIEventLoop handOverCount")) ?? -1
+            result.withLock {
+                $0.infoStops = stops.count
+                $0.loopFound = found
+                $0.frames = frames
+                $0.openMs = openMs
+                $0.framesMs = framesMs
+                $0.proceedMs = Double(done - t0) / 1e6
+                $0.proceededAtNs = done
+                $0.loopEnded = ended
+                $0.refused = refused
+                $0.handOvers = hand
             }
         } catch {
             result.withLock { $0.error = "\(error)" }

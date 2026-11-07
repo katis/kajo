@@ -24,11 +24,13 @@ DevSession >> conn [
 
 { #category : #accessing }
 DevSession >> info [
+	"session.open's answer: the protocol, the client, the package, the image kind, the number of requests, and every standing stop as its process.stopped event said (the development answers: a client that connects after a Process stopped, with no client or another one, finds it here and opens its debugger)."
 	| o |
 	o := JsonObject new.
 	o at: 'protocol' put: 1; at: 'client' put: client; at: 'package' put: package;
 		at: 'image' put: (Smalltalk isReleaseImage ifTrue: ['release'] ifFalse: ['development']);
-		at: 'requests' put: DevProtocol describe size.
+		at: 'requests' put: DevProtocol describe size;
+		at: 'stopped' put: ((Debugger stops sort: [:a :b | a process id <= b process id]) collect: [:s | s notedSummary]).
 	^ o
 ]
 
@@ -304,11 +306,11 @@ DevSession >> classRemove: className [
 
 { #category : #'requests-change' }
 DevSession >> methodCompile: className source: source category: category side: side [
-	"Compile and install a method (side: instance, the default, or class); its author is the session's client, its package the session's; its source is kept in the form its file reads back as. Answers the selector and the files to write."
+	"Compile and install a method (side: instance, the default, or class); its package is the session's; an agent's session marks it with <author: #'agent:<name>'> (TonelWriter source:author:, the development answers), a developer's compiles the source as written; the source is kept in the form its file reads back as. Answers the selector and the files to write."
 	<devProtocol>
 	| b sel o |
 	b := self behaviorNamed: className side: side.
-	sel := b compile: (TonelWriter canonicalSource: source) classified: category.
+	sel := b compile: (TonelWriter source: (TonelWriter canonicalSource: source) author: client) classified: category.
 	o := self changed: b.
 	o at: 'selector' put: sel.
 	^ o
@@ -406,20 +408,16 @@ DevSession >> processProceed: process value: value [
 
 { #category : #'requests-processes' }
 DevSession >> processRestart: process frame: frame [
-	"Restart a frame of a stopped Process: the frames above it unwind (their ensure: blocks run) and its send runs again, finding the method's current version."
+	"Restart a frame of a stopped Process: the frames above it unwind (their ensure: blocks run) and its send runs again, finding the method's current version. Answers once the unwinding has run (unwound: true), or, past Process unwindBudgetMs, where it still stands (unwound: false, cutOff)."
 	<devProtocol>
-	(self stopOf: process) command: #restart:replyTo:session: arguments: (Array with: frame)
-		replyTo: (DevProtocol takeReplyOf: ProcessorScheduler activeProcess).
-	^ nil
+	^ (self stopOf: process) await: #restart:replyTo:session: arguments: (Array with: frame)
 ]
 
 { #category : #'requests-processes' }
 DevSession >> processRetrySend: process [
-	"For a Process stopped at doesNotUnderstand:, send the message again to the same receiver with the same arguments (after the method was defined)."
+	"For a Process stopped at doesNotUnderstand:, send the message again to the same receiver with the same arguments (after the method was defined). Answers as process.restart does."
 	<devProtocol>
-	(self stopOf: process) command: #retrySendReplyTo:session: arguments: #()
-		replyTo: (DevProtocol takeReplyOf: ProcessorScheduler activeProcess).
-	^ nil
+	^ (self stopOf: process) await: #retrySendReplyTo:session: arguments: #()
 ]
 
 { #category : #'requests-processes' }
@@ -443,17 +441,14 @@ DevSession >> processSuspend: process [
 
 { #category : #'requests-processes' }
 DevSession >> processTerminate: process [
-	"End a Process, running its ensure: blocks: a stopped one unwinds itself, another is interrupted to (Process>>terminate)."
+	"End a Process, running its ensure: blocks: a stopped one unwinds itself, another is interrupted to (Process>>terminate); at most about Process unwindBudgetMs, then it is ended where it stands. Answers whether its unwinding ran to its end (unwound) and, when it was cut off, where it stood (cutOff)."
 	<devProtocol>
 	| stop p |
 	stop := Debugger stopWithId: process.
-	stop isNil ifFalse: [
-		stop command: #terminateReplyTo:session: arguments: #() replyTo: (DevProtocol takeReplyOf: ProcessorScheduler activeProcess).
-		^ nil].
+	stop isNil ifFalse: [^ stop terminate].
 	p := Debugger processWithId: process.
 	p isNil ifTrue: [^ self error: 'no Process ' , process printString].
-	p terminate.
-	^ p isTerminated
+	^ DebugStop unwound: p terminateReporting process: p
 ]
 
 { #category : #'requests-tests' }

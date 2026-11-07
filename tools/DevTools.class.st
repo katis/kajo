@@ -55,7 +55,9 @@ DevTools class >> register: aClient [
 	clients at: aClient name put: aClient.
 	aClient on: 'process.stopped' do: [:e :c | self stopped: e client: c].
 	aClient on: 'process.resumed' do: [:e :c | self resumed: e client: c].
-	aClient on: 'connection.open' do: [:e :c | c reconnects > 0 ifTrue: [self reconnected: c]].
+	aClient on: 'connection.open' do: [:e :c |
+		c reconnects > 0 ifTrue: [self reconnected: c].
+		self standingStops: e client: c].
 	self transcript listenTo: aClient
 ]
 
@@ -85,6 +87,15 @@ DevTools class >> reconnected: aClient [
 { #category : #debugging }
 DevTools class >> resumed: anEvent client: aClient [
 	(self debuggerFor: (anEvent at: 'process') client: aClient) ifNotNil: [:w | w model resumed]
+]
+
+{ #category : #debugging }
+DevTools class >> standingStops: anInfo client: aClient [
+	"The development answers: session.open's answer lists the Processes that stood stopped when the session opened (an error before any client came, or while the link was down); each gets its debugger as a process.stopped event would open it."
+	| stops |
+	stops := [anInfo at: 'stopped'] on: Error do: [:e | nil].
+	stops isNil ifTrue: [^ self].
+	stops do: [:s | self stopped: s client: aClient]
 ]
 
 { #category : #debugging }
