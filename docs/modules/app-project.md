@@ -477,7 +477,7 @@ round trip connects by address; once allowed, the `service` row shows
 
 **The owner allowed Local Network for the sample on both devices** the
 same evening and the round trip ran once more on each from the final
-commit's tree (21:26 to 21:42, thermal nominal on every line,
+commit's tree (19:26 to 19:32, thermal nominal on every line,
 `sample-bonjour/iphone/` and `ipad/`): the `service` row reads
 `Sample_on_iPhone` and `Sample_on_iPad`, every connection went by name
 (`addr=bonjour:Sample on iPhone`, `bonjour:Sample on iPad`) and the
