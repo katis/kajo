@@ -14,6 +14,9 @@ func interpret(_ s: StatePointer, _ start: Regs) {
     let flag = unsafe s.pointee.safepointFlag
     while true {
         let byte = unsafe r.pc.pointee
+        #if KAJO_COUNT_OPCODES
+        unsafe countOpcode(byte, r.pc)
+        #endif
         unsafe r.pc += 1
         switch Opcode.decode(byte) {
         case .pushTemp?:

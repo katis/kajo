@@ -93,6 +93,9 @@ func makeMethodObjects<H: MethodHeap>(_ top: MethodParts, blocks: [MethodParts],
         }
     }
     func build(_ a: MethodParts, selector: Oop) throws(LoadError) -> Oop {
+        #if KAJO_COUNT_OPCODES
+        countStaticOpcodes(a.bytecodes)
+        #endif
         var lits: [Oop] = []
         for l in a.literals { lits.append(try value(l)) }
         var pragmas: [Oop] = []

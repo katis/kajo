@@ -329,6 +329,7 @@ public enum Headless {
             vm.waitUntilAllTerminated()
             vm.release(s)
         }
+        let counts0 = vm.workerInstructionsAndCycles()
         let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         var processes: [Oop] = []
         for i in 0..<n {
@@ -353,6 +354,7 @@ public enum Headless {
         }
         vm.waitUntilAllTerminated()
         let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
+        let counts1 = vm.workerInstructionsAndCycles()
         vm.shutdown()
         if let path = options.snapshotTo {
             guard let b = vm.takeSavedImages().first else { return failed(.unsupported("--snapshot-at \(options.snapshotAt): the run ended first")) }
@@ -379,6 +381,11 @@ public enum Headless {
             ("qos", qos), ("stops", "\(stops.count)"), ("pauseP50ms", pct(0.5)), ("pauseP99ms", pct(0.99)),
             ("pauseMaxMs", pauses.last.map { unsafe String(format: "%.3f", Double($0) / 1e6) } ?? "-"),
             ("slowestParticipant", worst.map { "\($0.slowest)" } ?? "-"),
+            // Interpreter speed: the workers' own instructions and cycles
+            // over the timed run (per send and per bytecode in the bench).
+            ("workerCountersOk", counts0.ok && counts1.ok ? "1" : "0"),
+            ("workerInstructions", "\(counts1.instructions &- counts0.instructions)"),
+            ("workerCycles", "\(counts1.cycles &- counts0.cycles)"),
         ]
         report += nurseryReport(vm, stops: stops, ms: ms)
         report += markingReport(vm, stops: stops)

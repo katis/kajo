@@ -511,6 +511,39 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         }
     }
 
+    /// Interpreter speed: instructions and cycles the background workers'
+    /// threads have retired so far, summed over the workers and over both
+    /// core types, from the per-thread counters
+    /// (proc_pidinfo(PROC_PIDTHREADCOUNTS = 34), the flavor the shells'
+    /// telemetry reads; zero where it does not read). `ok` is false when a
+    /// worker's record could not be read.
+    func workerInstructionsAndCycles() -> (ok: Bool, instructions: UInt64, cycles: UInt64) {
+        var ok = true, ins: UInt64 = 0, cyc: UInt64 = 0
+        let levels = 2, recWords = 5, bytes = 8 + levels * recWords * 8
+        let buf = UnsafeMutableRawPointer.allocate(byteCount: bytes, alignment: 8)
+        defer { unsafe buf.deallocate() }
+        for i in 1...max(1, config.backgroundWorkers) where i <= config.backgroundWorkers {
+            let port = unsafe state.shared(i).pointee.machThread.load(ordering: .relaxed)
+            var info = thread_identifier_info()
+            var count = mach_msg_type_number_t(MemoryLayout<thread_identifier_info>.size / MemoryLayout<integer_t>.size)
+            let kr = withUnsafeMutablePointer(to: &info) {
+                unsafe $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    unsafe thread_info(port, thread_flavor_t(THREAD_IDENTIFIER_INFO), $0, &count)
+                }
+            }
+            guard port != 0, kr == KERN_SUCCESS else { ok = false; continue }
+            unsafe memset(buf, 0, bytes)
+            let r = unsafe proc_pidinfo(getpid(), 34, info.thread_id, buf, Int32(bytes))
+            guard r > 8 else { ok = false; continue }
+            for k in 0..<min(levels, (Int(r) - 8) / (recWords * 8)) {
+                let w = unsafe buf.advanced(by: 8 + k * recWords * 8).assumingMemoryBound(to: UInt64.self)
+                ins &+= unsafe w[0]
+                cyc &+= unsafe w[1]
+            }
+        }
+        return (ok, ins, cyc)
+    }
+
     /// Every stop so far (the last 65 536): time to safepoint, pause, the
     /// slowest participant.
     var stops: [StopRecord] {
