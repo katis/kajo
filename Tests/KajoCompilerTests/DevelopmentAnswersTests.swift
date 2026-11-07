@@ -410,4 +410,46 @@ func probeUntil(_ vm: ShellVM, _ selector: String, _ cond: (ShellValue?) -> Bool
         #expect(r5["unwound"] == .bool(true))
         #expect(Int(try count()) == before + 2)
     }
+
+    /// The development answers' measurement (`KAJO_MEASURE=1`, release
+    /// build): the memory standing stops hold and the cost of a full cap,
+    /// in a VM of its own each round (the process's physical footprint
+    /// after a full collection, before and after 32 Processes stop; the
+    /// time from forking them to the last one standing; the time an error
+    /// past the cap takes to be reported and ended).
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["KAJO_MEASURE"] != nil))
+    func standingStopsMeasured() throws {
+        func footprint() -> UInt64 {
+            var info = task_vm_info_data_t()
+            var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
+            let kr = withUnsafeMutablePointer(to: &info) {
+                unsafe $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                    unsafe task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
+                }
+            }
+            return kr == KERN_SUCCESS ? info.phys_footprint : 0
+        }
+        var lines: [String] = []
+        for round in 1...5 {
+            let vm = try answersVM(stops: true)
+            defer { vm.close() }
+            _ = probe(vm, "stopCount")
+            if let p = vm.spawn("garbageCollect", receiver: "Smalltalk") { vm.waitUntilTerminated(p); vm.release(p) }
+            let f0 = footprint()
+            let cap = Int64(probe(vm, "stopCap")?.int ?? 32)
+            let t0 = ShellVM.now()
+            _ = probe(vm, "fill:", [.int(cap)])
+            #expect(probeUntil(vm, "stoppedErrorCount") { $0 == .int(cap) })
+            let fillMs = Double(ShellVM.now() - t0) / 1e6
+            if let p = vm.spawn("garbageCollect", receiver: "Smalltalk") { vm.waitUntilTerminated(p); vm.release(p) }
+            let f1 = footprint()
+            let t1 = ShellVM.now()
+            #expect(probe(vm, "forkFailureAndWait") == .bool(true))
+            let refusedMs = Double(ShellVM.now() - t1) / 1e6
+            lines.append("round=\(round) stops=\(cap) footprint_delta_kb=\((Int64(f1) - Int64(f0)) / 1024) per_stop_kb=\((Int64(f1) - Int64(f0)) / cap / 1024) fill_ms=\(String(format: "%.2f", fillMs)) refused_error_ms=\(String(format: "%.2f", refusedMs))")
+        }
+        let r = lines.joined(separator: "\n")
+        print(r)
+        if let f = ProcessInfo.processInfo.environment["KAJO_MEASURE_OUT"] { try? (r + "\n").write(toFile: f, atomically: true, encoding: .utf8) }
+    }
 }

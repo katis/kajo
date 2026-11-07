@@ -418,9 +418,11 @@ import KajoVM
         if noClient {
             let r = noClientResult.withLock { $0 }
             let stoppedEnd = serveAtTs > 0 ? serveAtTs : measureEnd
-            let fs = FrameAccount(timestamps: frameTimes, start: measureStart, end: stoppedEnd, nominalHz: nominal)
+            let fs = FrameAccount(timestamps: frameTimes.filter { $0 >= measureStart && $0 <= stoppedEnd }, start: measureStart,
+                                  end: stoppedEnd, nominalHz: nominal)
             let resumedAt = r.proceededAtNs > 0 ? Double(r.proceededAtNs) / 1e9 : measureEnd
-            let fr = FrameAccount(timestamps: frameTimes, start: resumedAt, end: measureEnd, nominalHz: nominal)
+            let fr = FrameAccount(timestamps: frameTimes.filter { $0 >= resumedAt && $0 <= measureEnd }, start: resumedAt,
+                                  end: measureEnd, nominalHz: nominal)
             line += " noclient=1 stops_asked=\(stopsAsked) loop_before=\(loopBefore) stopped_s=\(f3(stoppedEnd - measureStart))"
             line += " frames_stopped=\(fs.frames) expected_stopped=\(fs.expected) missed_stopped=\(fs.missed) gap_max_stopped_ms=\(f3(fs.gapMaxMs))"
             line += " frames_after=\(fr.frames) expected_after=\(fr.expected) missed_after=\(fr.missed) gap_max_after_ms=\(f3(fr.gapMaxMs)) after_s=\(f3(measureEnd - resumedAt))"
