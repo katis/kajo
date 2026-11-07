@@ -12,8 +12,9 @@ records the decision.
 signed the mini's Xcode in again ("The sample on the devices" in
 Measurements): the round trip on both devices, three findings fixed the
 same day (60 Hz on the iPhone, 35 s to a Debug build's first frame, the
-script's by-address fallback), the Bonjour name still not seen from the
-Mac until the owner allows Local Network for the sample on each device.
+script's by-address fallback), the Bonjour name seen from the Mac and
+the round trip run by name on both devices once the owner allowed Local
+Network for the sample on each (the same evening).
 What follows was written on 2026-11-06. Everything on the Mac
 ran: the generator, both targets in both configurations from clean with
 0 warnings, the Debug app serving from launch, the CLI and the tools
@@ -460,7 +461,7 @@ before them, from the morning's run, beside them where they differ):
 | tools: `class.hierarchy`, `method.compile` requests (ms) | 65.0, 9.9 | 382.0, 28.8 |
 | the change in `src/`, the rebuilt app starts with it | yes, yes | yes, yes |
 | Release serves | no (no Bonjour service, no serving line) | no |
-| Bonjour name seen from the Mac | no | no |
+| Bonjour name seen from the Mac | no, then yes (below) | no, then yes |
 
 The tools' own window (the macOS shell's devsession) missed 15 to 20
 frames in its 0.3 to 1.2 s of windows opening, as the module's Mac rows
@@ -473,6 +474,25 @@ nothing here answered or dismissed a prompt, and whether one is showing
 was not looked at. Until then the
 round trip connects by address; once allowed, the `service` row shows
 "Sample on iPhone" and "Sample on iPad".
+
+**The owner allowed Local Network for the sample on both devices** the
+same evening and the round trip ran once more on each from the final
+commit's tree (21:26 to 21:42, thermal nominal on every line,
+`sample-bonjour/iphone/` and `ipad/`): the `service` row reads
+`Sample_on_iPhone` and `Sample_on_iPad`, every connection went by name
+(`addr=bonjour:Sample on iPhone`, `bonjour:Sample on iPad`) and the
+rebuilt app answered `starts_with_change=1` on both; Debug first frame
+112.3 to 129.5 ms on the iPhone and 243.3 to 251.1 on the iPad (942.4
+on its first launch after install), Release 97.9 to 117.9 and 211.8 to
+248.1; 0 frames missed in the idle, live and rebuilt windows on both (0
+of 1264, 3647 and 1012 on the iPhone; 0 of 1263, 3783 and 1012 on the
+iPad); `kajo eval` first request 143 ms on the iPhone and 899 on the
+iPad (the first resolution of the name), then 56 to 60 and 74 to 80;
+compile to live 153 and 185 ms; the tools' steps open, select,
+compile, live 83.6, 24.0, 12.1, 17.8 ms on the iPhone and 297.0, 481.4,
+29.4, 15.2 on the iPad. The by-name rows match the by-address rows above
+within their ranges but for the first request, which pays the name's
+resolution as 9d measured (0.3 to 0.4 s Mac to Mac).
 
 ### The kernels against the starting commit
 
@@ -630,15 +650,13 @@ none added.
 
 ## Not done
 
-- **The sample on the iPhone and the iPad** ran on 2026-11-07
-  (Measurements); what is left is the Bonjour row, which needs the
-  owner's Local Network permission for the sample on each device. The
-  commands, with the project the script generates:
+- Nothing of the devices' rows: the sample ran on the iPhone and the
+  iPad on 2026-11-07, by address and, once the owner allowed Local
+  Network for the sample, by Bonjour name (Measurements). The commands:
   `scripts/app-roundtrip.sh device <out>` for the iPhone and
   `DEVICE=00008027-0012592C0185002E DD=$TMPDIR/kajo-sample-ipad
-  scripts/app-roundtrip.sh device <out>` for the iPad. Until the
-  permission is granted the Bonjour row fails and the script goes on by
-  address.
+  scripts/app-roundtrip.sh device <out>` for the iPad; without the
+  permission the Bonjour row fails and the script goes on by address.
 - The Mac app as a sandboxed or notarized app; the Release build's
   signing for distribution.
 - A Debug VM as fast as Release (a prebuilt binary of the Kajo libraries
