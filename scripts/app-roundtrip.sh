@@ -21,7 +21,12 @@
 #     mode=devsession session=app) doing the same with another source;
 #     frames missed over the window
 #  5. the project's src/ holds the tools' change; build Debug again (timed)
-#     and the relaunched app starts with it
+#     and the relaunched app starts with it (no reply from it is a FAILED
+#     line, never starts_with_change=0)
+#
+# When no Bonjour name is seen the Mac connects by the address on its own
+# network and the port, both read from the console of the launch it is
+# about to talk to: every launch listens on a new port.
 #  6. build Release (timed), <launches> cold launches, and the Release app
 #     does not serve (no Bonjour service, no serving line; on the Mac no
 #     listening socket)
@@ -64,6 +69,7 @@ case $host in
     # launch <config> <tag> args...: one launch, its result lines to $res
     launch() {
       local c=$1 tag=$2; shift 2
+      rm -f $out/console-$tag.log  # a reused <outdir>: no earlier launch's lines
       gtimeout ${TIMEOUT:-90} $(app $c)/Contents/MacOS/Sample "$@" > $out/console-$tag.log 2>&1
       grep -E '^mode=app run=' $out/console-$tag.log | sed "s/^/host=mac tag=$tag /" >> $res
     }
@@ -84,6 +90,7 @@ case $host in
     app() { print $DD/Build/Products/$1-iphoneos/Sample.app }
     launch() {
       local c=$1 tag=$2; shift 2
+      rm -f $out/lines-$tag.txt $out/lines-$tag-console.log  # a reused <outdir>: no earlier launch's lines
       TIMEOUT=${TIMEOUT:-90} $root/scripts/device.sh run $out/lines-$tag.txt "$@"
       sed "s/^/host=device tag=$tag /" $out/lines-$tag.txt 2>/dev/null | grep 'mode=app run=' >> $res
       cp $out/lines-$tag-console.log $out/console-$tag.log 2>/dev/null
@@ -115,6 +122,36 @@ service() {
   print -r -- $name
 }
 
+# The console of launch <tag> as far as it has come: on a device the last
+# launch's block of its streamed console (device.sh appends every launch to
+# one file, each after a "== " line), on the Mac the launch's own file.
+console_of() {
+  local f=$out/lines-$1-console.log
+  if [[ $host == device ]]; then
+    [[ -f $f ]] && awk '/^== /{l=""} {l=l $0 "\n"} END{printf "%s", l}' $f
+  else
+    cat $out/console-$1.log 2>/dev/null
+  fi
+}
+
+# Wait (60 s at most) for launch <tag>'s serving line.
+wait_serving() {
+  for i in {1..300}; do console_of $1 | grep -q "^serving=tcp" && return 0; sleep 0.2; done
+  return 1
+}
+
+# The address to reach launch <tag> at: its Bonjour name when one was seen
+# ($name), else the address on this Mac's network and the port from that
+# launch's own serving line (every launch listens on a new port).
+address_of() {
+  if [[ -n $name ]]; then print -r -- "bonjour:$name"; return; fi
+  local mine=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1)
+  local line=$(console_of $1 | grep "^serving=tcp" | head -1)
+  local port=$(print -r -- $line | sed -n 's/.*port=\([0-9]*\).*/\1/p')
+  local ip=$(print -r -- $line | sed -n 's/.*addresses=\([^ ]*\).*/\1/p' | tr ',' '\n' | grep -F "${mine%.*}." | head -1)
+  [[ -n $ip && -n $port ]] && print -r -- "tcp://$ip:$port"
+}
+
 # 1. Debug, first and again.
 build Debug first || exit 1
 build Debug unchanged || exit 1
@@ -129,23 +166,16 @@ launch Debug debug-idle kajo-frames=10
 # 4. The live window.
 launch Debug debug-live kajo-frames=30 &
 lpid=$!
-for i in {1..150}; do grep -q "^serving=tcp" $out/console-debug-live.log $out/lines-debug-live-console.log 2>/dev/null && break; sleep 0.2; done
+wait_serving debug-live || note "FAILED host=$host step=live (no serving line in 60 s)"
 name=$(service "Sample on")
 note "service host=$host name=${name// /_}"
-addr=""
-if [[ -n $name ]]; then
-  addr="bonjour:$name"
-else
+if [[ -z $name ]]; then
   # No advertisement seen (on a device, iOS's local-network prompt waits
   # for the owner): by the address on this Mac's network, from the console.
   note "FAILED host=$host step=bonjour (no Sample service seen; trying the address)"
-  mine=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1)
-  line=$(grep -h "^serving=tcp" $out/console-debug-live.log $out/lines-debug-live-console.log 2>/dev/null | head -1)
-  port=$(print -r -- $line | sed -n 's/.*port=\([0-9]*\).*/\1/p')
-  ip=$(print -r -- $line | sed -n 's/.*addresses=\([^ ]*\).*/\1/p' | tr ',' '\n' | grep -F "${mine%.*}." | head -1)
-  [[ -n $ip && -n $port ]] && addr="tcp://$ip:$port"
-  note "address host=$host addr=$addr"
 fi
+addr=$(address_of debug-live)
+[[ -z $name ]] && note "address host=$host tag=debug-live addr=$addr"
 if [[ -n $addr ]]; then
   gettoken "$addr" || note "FAILED host=$host step=token"
   for k in 1 2 3 4 5; do
@@ -184,10 +214,22 @@ note "src host=$host tools_change_written=$(grep -c 'Changed by the tools' $proj
 build Debug changed || exit 1
 launch Debug debug-rebuilt kajo-frames=8 &
 lpid=$!
-for i in {1..150}; do grep -q "^serving=tcp" $out/console-debug-rebuilt.log $out/lines-debug-rebuilt-console.log 2>/dev/null && break; sleep 0.2; done
+wait_serving debug-rebuilt || note "FAILED host=$host step=rebuilt (no serving line in 60 s)"
 sleep 1
-v=$(gtimeout 30 $kajo eval --target app 'SampleApp pressed. SampleApp labelText' 2>&1)
-note "rebuilt host=$host starts_with_change=$([[ $v == *"Changed by the tools: 1"* ]] && print 1 || print 0)"
+# The rebuilt app listens on a new port: its own address, not the live one's.
+raddr=$(address_of debug-rebuilt)
+[[ -z $name ]] && note "address host=$host tag=debug-rebuilt addr=$raddr"
+v=""
+if [[ -n $raddr ]]; then
+  gettoken "$raddr" || note "FAILED host=$host step=token"
+  v=$(gtimeout 30 $kajo eval --target app 'SampleApp pressed. SampleApp labelText' 2>&1)
+fi
+if [[ $v == *'"class":"String"'* ]]; then
+  note "rebuilt host=$host addr=$raddr starts_with_change=$([[ $v == *"Changed by the tools: 1"* ]] && print 1 || print 0)"
+else
+  # No answer is not "started without the change".
+  note "FAILED host=$host step=rebuilt (no reply from ${raddr:-no address}: $(print -r -- $v | head -1 | cut -c1-120))"
+fi
 wait $lpid
 
 # 6. Release.
