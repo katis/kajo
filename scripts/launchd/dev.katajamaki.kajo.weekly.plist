@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Kajo's weekly run (docs/modules/gate-tiers.md): scripts/weekly.sh on
+  Sundays at 02:00 as a user LaunchAgent. `just weekly-install` replaces
+  __HOME__ and __REPO__, copies the result to ~/Library/LaunchAgents/ and
+  prints the launchctl command; nothing loads it but the owner.
+  PATH puts the swiftly toolchain first, as the owner's shell does.
+  ProcessType Interactive keeps launchd from treating the run as a
+  background job (its matrix measures frames and QoS).
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>dev.katajamaki.kajo.weekly</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/zsh</string>
+    <string>__REPO__/scripts/weekly.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>__HOME__/.swiftly/bin:/opt/homebrew/bin:/opt/homebrew/sbin:__HOME__/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>SWIFTLY_HOME_DIR</key>
+    <string>__HOME__/.swiftly</string>
+    <key>SWIFTLY_BIN_DIR</key>
+    <string>__HOME__/.swiftly/bin</string>
+    <key>SWIFTLY_TOOLCHAINS_DIR</key>
+    <string>__HOME__/Library/Developer/Toolchains</string>
+  </dict>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>0</integer>
+    <key>Hour</key>
+    <integer>2</integer>
+    <key>Minute</key>
+    <integer>0</integer>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>RunAtLoad</key>
+  <false/>
+  <key>StandardOutPath</key>
+  <string>__HOME__/kajo-weekly/launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/kajo-weekly/launchd.log</string>
+</dict>
+</plist>

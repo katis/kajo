@@ -99,3 +99,34 @@ device *ARGS:
 # Module 9a: the measurement matrix on the Mac's display or the iPhone (`just shell-matrix mac <outdir>`)
 shell-matrix TARGET OUT *PARTS:
     scripts/shell-matrix.sh {{TARGET}} {{OUT}} {{PARTS}}
+
+# Gate tiers: the gates a diff owes against BASE (origin/master), decided from the files it touches and run one after another (`scripts/check-tier.sh --dry-run|--tier`; KAJO_CHECK_OUT, default .build/check/<date>/)
+check *ARGS:
+    scripts/check-tier.sh {{ARGS}}
+
+# Gate tiers: the weekly run by hand (every gate with its load loops, the Mac and device matrices, ~/kajo-weekly/<date>/summary.md; KAJO_WEEKLY_QUICK=1 for the quick mode)
+weekly:
+    scripts/weekly.sh
+
+# Gate tiers: the weekly LaunchAgent (Sundays 02:00) copied to ~/Library/LaunchAgents/ with this checkout's paths; prints the launchctl command, loads nothing
+weekly-install:
+    #!/bin/zsh
+    set -euo pipefail
+    src=scripts/launchd/dev.katajamaki.kajo.weekly.plist
+    dst=$HOME/Library/LaunchAgents/dev.katajamaki.kajo.weekly.plist
+    mkdir -p $HOME/kajo-weekly $HOME/Library/LaunchAgents
+    sed -e "s|__HOME__|$HOME|g" -e "s|__REPO__|$PWD|g" $src > $dst
+    plutil -lint $dst
+    print "installed $dst (not loaded). To load it:"
+    print "  launchctl bootstrap gui/$(id -u) $dst"
+    print "To unload it:"
+    print "  launchctl bootout gui/$(id -u)/dev.katajamaki.kajo.weekly"
+
+# Gate tiers: launchd's view of the weekly LaunchAgent (loaded or not, last exit, next run)
+weekly-status:
+    -launchctl print gui/$(id -u)/dev.katajamaki.kajo.weekly
+    -tail -5 $HOME/kajo-weekly/weekly.log
+
+# Gate tiers: a release tarball of the Release kajo CLI and the development image, with its SHA-256; prints the gh command, uploads nothing
+release-tarball TAG:
+    scripts/release.sh {{TAG}}
