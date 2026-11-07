@@ -700,6 +700,26 @@ up every 20 s while ThreadSanitizer under load outlasted their 1500 s.
 | `just kernel-test` | 202 of 202 |
 | `just new-check` | ok: four builds from clean, exit 0, 0 errors, 0 warnings each (Mac Debug 31 s, Release 43 s; iOS Debug 14 s, Release 39 s); Release binaries 2 115 888 B (Mac) and 1 981 648 B (iOS) with 0 symbols of KajoDev, KajoAppDevelopment, KajoCompiler and KajoShellCore, no `_kajo-dev._tcp`, no `kajo-pairing-token`, no `DNSServiceRegister` import, no local-network key, a release image that refuses to serve; Debug products with all of them and a VM compiled with the trait and `-O`; the image phase 13.0 s first, 1.3 s again, 2.5 s touched |
 
+### Gates of the devices' follow-up
+
+On 6ffdb6d (the last commit that changes code; nothing under
+`Sources/KajoVM` changed, so the tier for Swift outside the core), one
+after another and after the device runs, swift.org 6.4.2 first on PATH,
+2026-11-07 13:30 to 14:39, the scratchpad's `sample-followup/gates/`. A
+first run on b5ea15e stopped at `swift test`: the development answers'
+start-up test expected `start` to serve and now calls `startDevelopment`
+(6ffdb6d).
+
+| gate | result |
+|---|---|
+| clean build (`--scratch-path .build/clean-check`, removed first) | exit 0, 0 warnings, 25 s (the compilation cache; the strict-memory-safety compile of KajoApp and KajoAppDevelopment from nothing is in `just apps` and `just new-check`, 0 warnings) |
+| `swift test` | 381 + 115 passed, 418 s |
+| ThreadSanitizer | 381 + 115 passed, 0 reports, 681 + 2450 s |
+| `just kernel-test` | 205 of 205 |
+| `just apps` | macOS and iOS: exit 0, 0 errors, 0 warnings |
+| `just new-check` | ok: four builds from clean, 0 errors, 0 warnings each; Release binaries 2 215 424 B (Mac) and 2 066 080 B (iOS) with 0 symbols of KajoDev, KajoAppDevelopment, KajoCompiler and KajoShellCore, no Bonjour string or import, no local-network key, a release image that refuses to serve; the Debug VM with the trait and `-O` |
+| `just fuzz protocol 120` | libFuzzer build ok, 366 718 runs, no crash |
+
 ## Commands
 
 ```
