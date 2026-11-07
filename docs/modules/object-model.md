@@ -195,6 +195,15 @@ Opcodes 0 to 26 are module 2's v0 encoding unchanged; v1 appends 23:
 `store_ivar`'s transient depth is +3 too. The dispatch loop is one switch,
 one case per opcode, one jump table (`just arc-check`).
 
+Since the interpreter-speed module (`docs/modules/interpreter-speed.md`)
+opcodes 50 to 66 are **fused**: each stands in the first byte of a pair
+of plain instructions (`fused_push_temp_push_temp`, `fused_lt_jump_if_false`
+and 15 more), the rest of the pair as it was; the loop runs both or the
+first alone. Every method is made through the fusion peephole
+(`fuseBytecodes`); the compilers, the map and the pcs know only plain
+instructions, and the verifier checks each fused opcode's second part.
+`at:` on Arrays, `isNil` and `notNil` are inline in the loop since then.
+
 **Special sends.** The fast path is inline only where it is a handful of
 instructions (SmallInteger arithmetic and comparison as in module 2, `ne`,
 `at:` and `size` on Arrays); everything else goes to `specialSend`, one

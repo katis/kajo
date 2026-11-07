@@ -126,6 +126,13 @@ reports `invalidBytecode`.
 bytes, slot below the count): the loader checked the index against the
 class, but `become:` can change a running method's receiver.
 
+Since the interpreter-speed module (`docs/modules/interpreter-speed.md`)
+17 more cases run **fused instructions**: a pair of plain instructions
+whose first byte the method-building peephole replaced with a fused
+opcode, run at once (or the first part alone when its fast path does
+not apply; the second part is intact behind it). The loop is still one
+jump table and the register map is unchanged.
+
 ## Send and the lookup cache (`Interpreter/Send.swift`)
 
 `send` is `@_transparent` into the loop: poll; class index (SmallInteger
@@ -147,6 +154,12 @@ primitive out of line, else an inline activation. A miss is one call
 - **doesNotUnderstand**: if the receiver's class understands
   `doesNotUnderstand:`, the arguments go into an Array, a Message replaces
   them on the stack and it is sent; else the error.
+- The interpreter-speed module measured and kept out a per-site inline
+  cache (its ceiling was 2 percent of `fib`'s cycles), an activation from
+  the cache line with the frame holding its bases (7 percent on `fib`,
+  6 to 8 percent lost elsewhere to the register allocation, nothing on
+  top of fused instructions) and a poll without its countdown (1
+  percent): the send and the cache are as described here.
 - **Safepoint poll** at every bytecode send and backward jump: one relaxed
   load of an `Atomic<UInt32>` the interpreter is given. Module 3 wires it to
   the safepoint protocol; here it is a test switch

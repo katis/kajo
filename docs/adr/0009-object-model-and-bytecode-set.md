@@ -536,6 +536,35 @@ Module 9b (`docs/modules/development-protocol.md`):
   the frames above unwound in Smalltalk first; section 3's frames-as-indices
   made it one register change.
 
+## Built (interpreter speed, 2026-11-07)
+
+`docs/modules/interpreter-speed.md`:
+
+- **17 fused opcodes, 50 to 66** (the set has 67): pairs chosen from the
+  dynamic opcode-pair counts of the kernels and the kernel tests
+  (`push_temp`/`push_self` with `push_temp` or `push_int`, `push_int`
+  with `add` or `sub`, `add`/`sub` with `store_temp`, `store_temp jump`,
+  `dup store_temp`, `pop push_temp`, and `lt`, `gt`, `le`, `ge`, `eq`,
+  `identical` with `jump_if_false`). A fused opcode is only the first
+  byte of its pair: the first part's operands and the second instruction
+  stay as they were, so offsets, jump targets, the pc-to-source map,
+  saved pcs and traced depths are the plain code's. The loop runs both,
+  or the first alone when its fast path does not apply.
+- **The compilers emit plain bytecodes**; `makeMethodObjects` fuses every
+  method it makes (the image build, the kasm loader, the make
+  primitive). The verifier decodes a fused instruction as its first part
+  and requires its second part to follow, plain and unextended. kasm
+  takes the fused mnemonics (`fused_<first>_<second>`), the second part on
+  its own line.
+- **Primitive 166, `CompiledMethod>>plainBytecodes`**: the bytecodes with
+  every fused opcode back as its first part (what the compilers emitted).
+- `at:` on an Array with a SmallInteger index in bounds, `isNil` and
+  `notNil` are inline in the loop; the image version is unchanged (an
+  older VM refuses a fused method at its verifier).
+- Measured: cycles per send `fib` 0.815, `sends` 0.638, `st-sends` 0.605,
+  `arith` 0.717 per iteration on the M2 Pro; on the iPhone 13 Pro 0.811,
+  0.832, 0.605 and 0.720.
+
 ## Consequences
 
 - Modules 4 to 7 implement weak slots and ephemerons as they are built, and
