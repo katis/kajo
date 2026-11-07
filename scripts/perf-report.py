@@ -6,8 +6,9 @@
 
 Reads the runtime comparison's raw runs (experiments/runtime-comparison/
 bench-raw.txt, one key=value line per run under `# key: value` header
-lines), the language experiment's raw lines (experiments/vm-language-bench/
-bench-raw.txt, `just bench`) and, when given, device matrix directories
+lines), the language experiment's raw lines (`just bench` with OUT set to
+experiments/runtime-comparison/slices-raw.txt, so the experiment's own
+published bench-raw.txt is not overwritten) and, when given, device matrix directories
 (scripts/shell-matrix.sh's output: scenarios.txt, one line per launch).
 
 Writes one SVG per graph into --svg-dir and replaces, in --readme, the text
@@ -541,7 +542,7 @@ def rel(path):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--raw", default=str(ROOT / "experiments/runtime-comparison/bench-raw.txt"))
-    ap.add_argument("--slices", default=str(ROOT / "experiments/vm-language-bench/bench-raw.txt"))
+    ap.add_argument("--slices", default=str(ROOT / "experiments/runtime-comparison/slices-raw.txt"))
     ap.add_argument("--device", action="append", default=[])
     ap.add_argument("--readme", default=str(ROOT / "docs/performance/README.md"))
     ap.add_argument("--svg-dir", default=None)

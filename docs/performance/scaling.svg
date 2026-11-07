@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="246" viewBox="0 0 760 246" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" role="img" aria-label="Kajo: 8 workers against 1 (the same total work)">
+<title>Kajo: 8 workers against 1 (the same total work)</title>
+<g fill="currentColor"><text x="200" y="18" font-size="14" font-weight="600">Kajo: 8 workers against 1 (the same total work)</text></g>
+<rect x="200" y="28" width="12" height="12" fill="#2563eb"/>
+<text x="217" y="38.5" fill="currentColor">Kajo (no JIT)</text>
+<g stroke="currentColor" stroke-opacity="0.18">
+<line x1="200.0" y1="52" x2="200.0" y2="202"/>
+<line x1="317.5" y1="52" x2="317.5" y2="202"/>
+<line x1="435.0" y1="52" x2="435.0" y2="202"/>
+<line x1="552.5" y1="52" x2="552.5" y2="202"/>
+<line x1="670.0" y1="52" x2="670.0" y2="202"/>
+</g>
+<line x1="200" y1="202" x2="670" y2="202" stroke="currentColor" stroke-opacity="0.6"/>
+<g fill="currentColor" fill-opacity="0.8" text-anchor="middle">
+<text x="200.0" y="218">0</text>
+<text x="317.5" y="218">2</text>
+<text x="435.0" y="218">4</text>
+<text x="552.5" y="218">6</text>
+<text x="670.0" y="218">8</text>
+</g>
+<text x="435.0" y="236" fill="currentColor" text-anchor="middle">speedup, process wall time (the line is 8×)</text>
+<line x1="670.0" y1="52" x2="670.0" y2="202" stroke="currentColor" stroke-opacity="0.6"/>
+<text x="192" y="73.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm) fib</text>
+<rect x="200.0" y="62" width="435.5" height="16" fill="#2563eb"/>
+<text x="641.5" y="73.5" fill="currentColor">7.41×</text>
+<text x="192" y="97.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk) fib</text>
+<rect x="200.0" y="86" width="431.7" height="16" fill="#2563eb"/>
+<text x="637.7" y="97.5" fill="currentColor">7.35×</text>
+<text x="192" y="121.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm) dispatch</text>
+<rect x="200.0" y="110" width="425.0" height="16" fill="#2563eb"/>
+<text x="631.0" y="121.5" fill="currentColor">7.23×</text>
+<text x="192" y="145.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk) dispatch</text>
+<rect x="200.0" y="134" width="418.9" height="16" fill="#2563eb"/>
+<text x="624.9" y="145.5" fill="currentColor">7.13×</text>
+<text x="192" y="169.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm) binarytrees</text>
+<rect x="200.0" y="158" width="359.9" height="16" fill="#2563eb"/>
+<text x="565.9" y="169.5" fill="currentColor">6.13×</text>
+<text x="192" y="193.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk) binarytrees</text>
+<rect x="200.0" y="182" width="360.4" height="16" fill="#2563eb"/>
+<text x="566.4" y="193.5" fill="currentColor">6.13×</text>
+</svg>

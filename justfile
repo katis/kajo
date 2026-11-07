@@ -23,10 +23,10 @@ run *ARGS:
 bench:
     experiments/vm-language-bench/bench.sh
 
-# The runtime comparison (about an hour, nothing else running), then `just bench`, then the performance report (docs/performance/)
+# The runtime comparison (about an hour, nothing else running), then `just bench` into the comparison's slices-raw.txt (the language experiment's own raw file stays as published), then the performance report (docs/performance/)
 perf:
     experiments/runtime-comparison/bench.sh
-    just bench
+    OUT=$PWD/experiments/runtime-comparison/slices-raw.txt just bench
     just perf-report
 
 # The performance report's tables and SVGs regenerated from the raw files alone (docs/performance/README.md)
