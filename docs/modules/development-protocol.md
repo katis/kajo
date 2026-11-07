@@ -207,6 +207,25 @@ changes (the protocol never starts there), and without the protocol
 (`kajo test`, plain `kajo run`, the shells' other modes) the error is
 reported and the Process ends as before.
 
+**Since the development answers** (`docs/modules/development-answers.md`)
+the rule is the host's setting, not the protocol serving: an unhandled
+error stops its Process in a development image whose host said a debugger
+can still come (`Headless.Options.stopsForDebugger`, made before the
+image resumes and read by primitive 165; `ShellVM.openProtocol` turns it
+on too), with or without a client, at most 32 error stops at once
+(`Debugger stopCap`; past it the error is reported and ended, counted and
+written on the Transcript), and `session.open`'s answer lists the
+standing stops for a client that connects later. The hosts:
+
+| host | an unhandled error |
+|---|---|
+| `kajo build-image`, `kajo test`, `kajo run` without `--protocol`, the golden mode, the fuzz targets (no shell) | reported, the Process ends |
+| the shells' tests, scenario, spin modes, the demo without `protocol=` (a shell with the default setting) | reported, the Process ends |
+| any release image | reported, the Process ends |
+| `kajo run --protocol` (`DevTarget`) | stops |
+| an app's development build, from before its `open` | stops |
+| the shells' `mode=dev`, `devsession`, `serve`, `debugstop=1`, `debugstop=noclient`, and any shell once it serves | stops |
+
 The stopped Process runs every command itself, on its own stack: the
 request's Process queues `{selector. arguments. replyTo}` in the DebugStop
 and signals it, and the stopped Process wakes, runs the command, answers
@@ -352,13 +371,14 @@ of that class; `fileNameOf:package:` names `Foo.class.st` or
 "No Extensions are written" deviation closes. The kernel's files are
 unchanged byte for byte (every kernel method is the Kernel package's).
 
-**Author marks** are method metadata: `{ #category : #accessing, #author :
-#'agent:claude' }`, written only for a method a session made, read by both
-Tonel readers (Swift: `TonelMethod.author`, recorded by the build;
-Smalltalk: the document's fourth method field, noted by the loader), so
-`git diff` and the browser show what an agent changed. A metadata key is
-byte-stable where a pragma would have changed the method's bytecodes and
-literals. The class definition carries no author (Deviations).
+**Author marks** were method metadata here (`{ #category : #accessing,
+#author : #'agent:claude' }`). Since the development answers they are a
+pragma in the method's source, `<author: #'agent:claude'>`, written by an
+agent's session (a developer's compiles the source as written), read from
+the method (`Smalltalk authorOfSelector:in:`, `Pragma allNamed:
+#author:`); both Tonel readers ignore the old key
+(`docs/modules/development-answers.md`, part 2). The class definition
+carries no author (Deviations).
 
 **Written on every change.** Every accepted change answers `files`: the
 session's package's file of the class it touched, `{path, text}`, or
@@ -403,7 +423,8 @@ test events come back with the result), evaluates a doit that stops at
 doesNotUnderstand: (the `process.stopped` event comes back), defines the
 method, retries the send (the doit's result arrives) and runs the test
 again (it passes); every change is in the project directory with
-`#author : #'agent:mcp-test'`.
+`#author : #'agent:mcp-test'` (since the development answers the pragma
+`<author: #'agent:mcp-test'>`).
 
 **What an agent may never do**, enforced in the target: nothing in a
 release image (no protocol); no file outside the project directory (the
@@ -677,7 +698,8 @@ the source maps (89 KB), the tests. `kajo test` runs 192 kernel tests
 - **Requests are methods of `DevSession`**, not of any class: the
   dispatcher reads the `<devProtocol>` methods of that class (an extension
   from another package adds one). Arguments a request leaves out are nil.
-- **Stopping is enabled by the protocol**, not by the image being a
+- **Stopping is enabled by the protocol** (until the development answers
+  made it the host's setting), not by the image being a
   development image: without a serving protocol (`kajo test`, plain `kajo
   run`, the shells' other modes) an unhandled error still reports and
   ends the Process, because nothing could ever act on a stopped one there

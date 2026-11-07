@@ -141,3 +141,28 @@ per-install token, and its pairing screen is a shake away on iOS and in
 the app menu on the Mac. A Release build links none of the transport
 (checked on the binary by `just new-check`) on top of its image refusing
 to serve. The shells keep serving by launch argument.
+
+## Built (development answers)
+
+The owner's answers to 9b (2026-11-06), built 2026-11-07
+(`docs/modules/development-answers.md`). An unhandled error now stops its
+Process in a development image wherever the host says a debugger can
+still come, with or without a client: one setting the host makes before
+the image resumes (`Headless.Options.stopsForDebugger`, primitive 165;
+serving turns it on too), false by default, so `kajo test`, `kajo run`,
+the image build and the shells' measurement modes report and end, each
+with a test that the host ends. A client that connects later finds the
+standing stops in `session.open`'s answer (the tools open a debugger for
+each); an app's development build stops an error in its own `open` and
+serves anyway; at most 32 error stops stand (about half a megabyte), past
+which an error is reported, ended, counted and written on the
+Transcript. The author mark is a pragma, `<author: #'agent:<name>'>`,
+which an agent's session writes into the source (a developer's compiles
+the source as written); the Tonel metadata holds the category only and
+both readers ignore other keys. A `terminate` answers whether its
+unwinding ran to its end; a cut-off at the 1 s bound is counted, written
+on the Transcript with the block it stood in, and said in
+`process.terminate`'s answer. On the Mac mini and the iPhone 13 Pro an
+event loop stopped with no client for 10 s, alone or with a full cap,
+cost no frame, nor did a client connecting and proceeding it.
+

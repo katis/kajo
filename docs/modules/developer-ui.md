@@ -151,7 +151,8 @@ kind), so the UI's one event loop handles a reply like a click.
 
 The development image serves its own protocol and its tools connect to
 that socket: Kajo develops Kajo through the same requests a remote target
-gets. While the protocol serves, an unhandled error stops its Process for
+gets. While the protocol serves (since the development answers: wherever
+the host says a debugger can come), an unhandled error stops its Process for
 the debugger (9b). The tools run in the event loop's Process, so an error
 in a tool would stop the event loop itself, and nothing could then show
 the debugger. `UIEventLoop dispatch:` therefore, while the debugger is

@@ -498,12 +498,17 @@ as they are understood.
 - **Package**: the project a class or method belongs to (a directory of
   Tonel files, Kernel for `kernel/`); a method of another package than its
   class's is an **extension**, written to `<Class>.extension.st`.
-- **Author mark**: who made a method, in its Tonel metadata
-  (`#author : #'agent:claude'`).
+- **Author mark**: which agent made a method, a pragma in its source
+  (`<author: #'agent:claude'>`; until the development answers, Tonel
+  metadata).
 - **Stopped Process** (a **DebugStop**): a Process waiting for the
-  debugger with its stack intact (an unhandled error while the protocol
-  serves, a step's end, a suspend); it runs the debugger's commands on its
-  own stack.
+  debugger with its stack intact (an unhandled error where the host says
+  a debugger can come, a step's end, a suspend); it runs the debugger's
+  commands on its own stack. At most 32 error stops stand (the **stop
+  cap**).
+- **Cut-off**: a `terminate` that ended a Process where it stood after the
+  unwind bound (1 s), its unwind blocks not run to their end; counted and
+  reported.
 - **Frame restart**: re-running the send a frame's sender made, with the
   frame's receiver and arguments, after unwinding the frames above; the
   method is looked up again. **Retry a send**: the same for the send that

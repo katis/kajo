@@ -76,3 +76,15 @@ poll.
   Array) do not poll and are not stopping points, and an operand pushed
   before the stop is not re-read: assigning a variable in a frame stopped
   at a send changes its later uses, not the pending send's operand.
+
+## Built (development answers)
+
+`docs/modules/development-answers.md`, 2026-11-07. Stepping is unchanged;
+what changed around it: a stop no longer needs a serving protocol (the
+host's setting decides, and step and suspend stops count toward the cap
+of 32 standing stops without being refused), the debugger's terminate is
+bounded as `Process>>terminate` is and answers whether its unwinding ran
+to its end, and restart and retry answer after their unwinding, saying
+where it stands when it has not finished within 1 s. `interpret` and the
+poll's slow path are unchanged (the A/B in the module doc).
+

@@ -231,8 +231,9 @@ built: the re-entrancy guard (the shells run no modal loop).
 ## Built (module 9b, 2026-11-04): the debugger lands
 
 The stuck report and an unhandled error now reach a debugger instead of
-only a report. While the development protocol serves (ADR 0011), an
-unhandled error stops its Process: it waits on a Semaphore with its stack
+only a report. While the development protocol serves (ADR 0011; since
+the development answers, wherever the host says a debugger can come,
+with or without a client), an unhandled error stops its Process: it waits on a Semaphore with its stack
 intact until a client acts (no timeout in development; a release image
 never stops), and a client may also stop a running or waiting Process
 (`process.suspend`). A stopped main-affine Process just waits, so the
