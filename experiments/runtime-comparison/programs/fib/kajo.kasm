@@ -1,0 +1,56 @@
+; fib for the runtime comparison: Kajo's fib kernel (Tests/KajoVMTests/Fixtures/kernels/fib.kasm)
+; with REPS (the literal pushed first in run:of:) set for the comparison.
+; fib: recursive SmallInteger>>fib, REPS repetitions split between workers.
+; Repetition r computes fib of (27 + (r \\ 2)); reps per worker stay even so
+; total work is identical for 1 and 8 workers.
+method SmallInteger fib temps=0
+  push_self
+  push_int 2
+  lt
+  jump_if_false rec
+  push_self
+  return_top
+rec:
+  push_self
+  push_int 1
+  sub
+  send fib 0
+  push_self
+  push_int 2
+  sub
+  send fib 0
+  add
+  return_top
+end
+
+; args: t0 = w, t1 = n. temps: t2 = reps, t3 = sum
+method UndefinedObject run:of: temps=2
+  push_lit 960
+  push_temp 1
+  send // 1
+  store_temp 2
+  push_int 0
+  store_temp 3
+loop:
+  push_temp 2
+  push_int 0
+  gt
+  jump_if_false done
+  push_temp 3
+  push_int 27
+  push_temp 2
+  push_int 2
+  send \\ 1
+  add
+  send fib 0
+  add
+  store_temp 3
+  push_temp 2
+  push_int 1
+  sub
+  store_temp 2
+  jump loop
+done:
+  push_temp 3
+  return_top
+end

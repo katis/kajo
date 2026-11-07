@@ -13,3 +13,7 @@ DerivedData/
 
 # Module 9c: the development image `just dev-image` builds
 /dev.img
+
+# The runtime comparison: Pharo's download and the builds of its runs
+/experiments/runtime-comparison/pharo/
+/experiments/runtime-comparison/work/

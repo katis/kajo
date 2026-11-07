@@ -1,0 +1,3 @@
+scenario=storm young=offload missed=0 expected=1200 main_stopped_others_ms_per10s=48.2 thermal_end=fair
+scenario=storm young=offload missed=2 expected=1200 main_stopped_others_ms_per10s=51.0 thermal_end=serious
+scenario=ring young=stw missed=1 expected=1200 main_stopped_others_ms_per10s=1250.0 thermal_end=serious

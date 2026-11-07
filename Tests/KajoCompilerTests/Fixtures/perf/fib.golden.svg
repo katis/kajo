@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="438" viewBox="0 0 760 438" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" role="img" aria-label="fib: recursive Fibonacci">
+<title>fib: recursive Fibonacci</title>
+<g fill="currentColor"><text x="200" y="18" font-size="14" font-weight="600">fib: recursive Fibonacci</text></g>
+<rect x="200" y="28" width="12" height="12" fill="#2563eb"/>
+<text x="217" y="38.5" fill="currentColor">Kajo (no JIT)</text>
+<rect x="316.55" y="28.75" width="10.5" height="10.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="332.8" y="38.5" fill="currentColor">interpreter, JIT off</text>
+<rect x="478.55" y="28.75" width="10.5" height="10.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="494.8" y="38.5" fill="currentColor">JIT</text>
+<rect x="528.35" y="28.75" width="10.5" height="10.5" fill="#059669" fill-opacity="0.18" stroke="#059669" stroke-width="1.5"/>
+<text x="544.6" y="38.5" fill="currentColor">native code</text>
+<g stroke="currentColor" stroke-opacity="0.18">
+<line x1="200.0" y1="52" x2="200.0" y2="394"/>
+<line x1="356.7" y1="52" x2="356.7" y2="394"/>
+<line x1="513.3" y1="52" x2="513.3" y2="394"/>
+<line x1="670.0" y1="52" x2="670.0" y2="394"/>
+</g>
+<line x1="200" y1="394" x2="670" y2="394" stroke="currentColor" stroke-opacity="0.6"/>
+<g fill="currentColor" fill-opacity="0.8" text-anchor="middle">
+<text x="200.0" y="410">0.01</text>
+<text x="356.7" y="410">0.1</text>
+<text x="513.3" y="410">1</text>
+<text x="670.0" y="410">10</text>
+</g>
+<text x="435.0" y="428" fill="currentColor" text-anchor="middle">seconds per run, median of the rounds (shorter is faster), log scale (each gridline 10×)</text>
+<text x="192" y="73.5" fill="currentColor" text-anchor="end">Java (G1)</text>
+<rect x="200.8" y="62.75" width="155.6" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="363.1" y="73.5" fill="currentColor">0.101 s</text>
+<text x="192" y="97.5" fill="currentColor" text-anchor="end">LuaJIT</text>
+<rect x="200.8" y="86.75" width="182.2" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="389.7" y="97.5" fill="currentColor">0.149 s</text>
+<text x="192" y="121.5" fill="currentColor" text-anchor="end">Node (V8)</text>
+<rect x="200.8" y="110.75" width="206.9" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="414.4" y="121.5" fill="currentColor">0.214 s</text>
+<text x="192" y="145.5" fill="currentColor" text-anchor="end">C (clang -O2)</text>
+<rect x="200.8" y="134.75" width="211.9" height="14.5" fill="#059669" fill-opacity="0.18" stroke="#059669" stroke-width="1.5"/>
+<text x="419.4" y="145.5" fill="currentColor">0.230 s</text>
+<text x="192" y="169.5" fill="currentColor" text-anchor="end">Pharo 12 (Cog JIT)</text>
+<rect x="200.8" y="158.75" width="228.5" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="436.0" y="169.5" fill="currentColor">0.294 s</text>
+<text x="192" y="193.5" fill="currentColor" text-anchor="end">Ruby --yjit</text>
+<rect x="200.8" y="182.75" width="234.7" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="442.2" y="193.5" fill="currentColor">0.322 s</text>
+<text x="192" y="217.5" fill="currentColor" text-anchor="end">LuaJIT -joff</text>
+<rect x="200.8" y="206.75" width="283.7" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="491.2" y="217.5" fill="currentColor">0.661 s</text>
+<text x="192" y="241.5" fill="currentColor" text-anchor="end">Lua 5.4</text>
+<rect x="200.8" y="230.75" width="329.5" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="537.0" y="241.5" fill="currentColor">1.30 s</text>
+<text x="192" y="265.5" fill="currentColor" text-anchor="end">Ruby</text>
+<rect x="200.8" y="254.75" width="332.0" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="539.5" y="265.5" fill="currentColor">1.34 s</text>
+<text x="192" y="289.5" fill="currentColor" text-anchor="end">Java -Xint</text>
+<rect x="200.8" y="278.75" width="347.4" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="554.9" y="289.5" fill="currentColor">1.69 s</text>
+<text x="192" y="313.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm)</text>
+<rect x="200.0" y="302" width="350.5" height="16" fill="#2563eb"/>
+<text x="556.5" y="313.5" fill="currentColor">1.73 s</text>
+<text x="192" y="337.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk)</text>
+<rect x="200.0" y="326" width="353.6" height="16" fill="#2563eb"/>
+<text x="559.6" y="337.5" fill="currentColor">1.81 s</text>
+<text x="192" y="361.5" fill="currentColor" text-anchor="end">CPython</text>
+<rect x="200.8" y="350.75" width="364.5" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="572.0" y="361.5" fill="currentColor">2.17 s</text>
+<text x="192" y="385.5" fill="currentColor" text-anchor="end">Node --jitless</text>
+<rect x="200.8" y="374.75" width="365.6" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="573.1" y="385.5" fill="currentColor">2.21 s</text>
+</svg>

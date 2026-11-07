@@ -23,6 +23,16 @@ run *ARGS:
 bench:
     experiments/vm-language-bench/bench.sh
 
+# The runtime comparison (about an hour, nothing else running), then `just bench`, then the performance report (docs/performance/)
+perf:
+    experiments/runtime-comparison/bench.sh
+    just bench
+    just perf-report
+
+# The performance report's tables and SVGs regenerated from the raw files alone (docs/performance/README.md)
+perf-report:
+    scripts/perf-report.py
+
 # Check that the VM core compiles for iOS (every file under Sources/KajoVM), in the package's language mode (6)
 ios-check:
     xcrun swiftc -typecheck -target arm64-apple-ios18.0 -sdk $(xcrun --sdk iphoneos --show-sdk-path) -swift-version 6 \

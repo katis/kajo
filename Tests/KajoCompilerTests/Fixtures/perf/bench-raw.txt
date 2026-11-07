@@ -1,0 +1,107 @@
+# runtime-comparison raw runs (experiments/runtime-comparison/bench.sh)
+# fixture: the probe run at the kernels' earlier sizes and one refused run added by hand, for scripts/perf-report.py's test only
+# date: 2026-11-07 11:54 EET
+# commit: 0459db7
+# machine: Apple M2 Pro, 8 P-cores + 4 E-cores, 32 GB, Mac14,12
+# macos: 27.2 (26B123)
+# rounds: 1
+# timeout: 120 s
+# missing: -
+# version kajo: 0459db7 release -enable-testing aligned, Swift 6.4.2
+# version kajo-st: 0459db7 release -enable-testing aligned, Swift 6.4.2
+# version pharo: Pharo12.0.0SNAPSHOT / v10.3.12+0.4b0622446 - Commit: 4b0622446 - Date: 2026-10-23 12:16:05 +0200
+# version c: Apple clang version 21.0.0 (clang-2100.4.1.1), -O2
+# version luajit: LuaJIT 2.1.1710088188
+# version luajit-joff: LuaJIT 2.1.1710088188
+# version lua: Lua 5.4.6
+# version node: Node v24.5.0 (V8 13.6.233.10-node.21)
+# version node-jitless: Node v24.5.0 (V8 13.6.233.10-node.21)
+# version java: OpenJDK Runtime Environment Homebrew (build 21.0.2)
+# version java-int: OpenJDK Runtime Environment Homebrew (build 21.0.2)
+# version java-zgc: OpenJDK Runtime Environment Homebrew (build 21.0.2)
+# version ruby: ruby 3.3.0
+# version ruby-yjit: ruby 3.3.0
+# version python: Python 3.12.2
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=1 round=1 ms=1726.5 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=1708.3 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=8 round=1 ms=255.5 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=237.0 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=1 round=1 ms=1807.0 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=1756.7 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=8 round=1 ms=313.4 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=261.5 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=pharo version=Pharo12.0.0SNAPSHOT_/_v10.3.12+0.4b0622446_-_Commit:_4b0622446_-_Date:_2026-10-23_12:16:05_+0200 kernel=fib workers=1 round=1 ms=293.8 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- full=0 full_ms=0 scavenges=0 scavenge_ms=0
+runtime=c version=Apple_clang_version_21.0.0_(clang-2100.4.1.1),_-O2 kernel=fib workers=1 round=1 ms=230.1 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=luajit version=LuaJIT_2.1.1710088188 kernel=fib workers=1 round=1 ms=148.7 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=luajit-joff version=LuaJIT_2.1.1710088188 kernel=fib workers=1 round=1 ms=661.4 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=lua version=Lua_5.4.6 kernel=fib workers=1 round=1 ms=1297.1 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=node version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=fib workers=1 round=1 ms=214.0 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=node-jitless version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=fib workers=1 round=1 ms=2205.0 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=java version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=fib workers=1 round=1 ms=100.6 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=java-int version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=fib workers=1 round=1 ms=1686.4 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=ruby version=ruby_3.3.0 kernel=fib workers=1 round=1 ms=1344.6 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=ruby-yjit version=ruby_3.3.0 kernel=fib workers=1 round=1 ms=321.7 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=python version=Python_3.12.2 kernel=fib workers=1 round=1 ms=2168.7 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=dispatch workers=1 round=1 ms=2623.6 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- kernel_ms=2602.6 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=dispatch workers=8 round=1 ms=407.5 checksum=133333335000001 want=133333335000001 thermal=nominal ok=yes reason=- kernel_ms=382.4 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=dispatch workers=1 round=1 ms=2364.6 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- kernel_ms=2312.1 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=dispatch workers=8 round=1 ms=381.5 checksum=133333335000001 want=133333335000001 thermal=nominal ok=yes reason=- kernel_ms=334.9 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=pharo version=Pharo12.0.0SNAPSHOT_/_v10.3.12+0.4b0622446_-_Commit:_4b0622446_-_Date:_2026-10-23_12:16:05_+0200 kernel=dispatch workers=1 round=1 ms=338.6 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- full=0 full_ms=0 scavenges=0 scavenge_ms=0
+runtime=c version=Apple_clang_version_21.0.0_(clang-2100.4.1.1),_-O2 kernel=dispatch workers=1 round=1 ms=246.3 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=luajit version=LuaJIT_2.1.1710088188 kernel=dispatch workers=1 round=1 ms=48.2 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=luajit-joff version=LuaJIT_2.1.1710088188 kernel=dispatch workers=1 round=1 ms=1117.5 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=lua version=Lua_5.4.6 kernel=dispatch workers=1 round=1 ms=1643.9 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=node version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=dispatch workers=1 round=1 ms=119.6 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=node-jitless version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=dispatch workers=1 round=1 ms=1774.5 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=java version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=dispatch workers=1 round=1 ms=174.0 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=java-int version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=dispatch workers=1 round=1 ms=1103.6 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=ruby version=ruby_3.3.0 kernel=dispatch workers=1 round=1 ms=1913.1 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=ruby-yjit version=ruby_3.3.0 kernel=dispatch workers=1 round=1 ms=1558.5 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=python version=Python_3.12.2 kernel=dispatch workers=1 round=1 ms=6795.0 checksum=1066666666666668 want=1066666666666668 thermal=nominal ok=yes reason=- 
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=binarytrees workers=1 round=1 ms=2989.2 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- kernel_ms=2964.4 stops=9 pause_p50=0.113 pause_p99=0.264 pause_max=0.264 young=320 young_p50=1.673 young_p99=1.911 cycles=3 fallbacks=0
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=binarytrees workers=8 round=1 ms=562.6 checksum=42008248 want=42008248 thermal=nominal ok=yes reason=- kernel_ms=536.2 stops=6 pause_p50=0.248 pause_p99=21.304 pause_max=21.304 young=320 young_p50=2.499 young_p99=19.155 cycles=2 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=binarytrees workers=1 round=1 ms=3081.6 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- kernel_ms=3023.4 stops=9 pause_p50=0.103 pause_p99=0.297 pause_max=0.297 young=320 young_p50=1.684 young_p99=1.961 cycles=3 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=binarytrees workers=8 round=1 ms=589.8 checksum=42008248 want=42008248 thermal=nominal ok=yes reason=- kernel_ms=529.8 stops=6 pause_p50=0.291 pause_p99=22.812 pause_max=22.812 young=320 young_p50=2.588 young_p99=4.964 cycles=2 fallbacks=0
+runtime=pharo version=Pharo12.0.0SNAPSHOT_/_v10.3.12+0.4b0622446_-_Commit:_4b0622446_-_Date:_2026-10-23_12:16:05_+0200 kernel=binarytrees workers=1 round=1 ms=521.8 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- full=0 full_ms=0 scavenges=65 scavenge_ms=48
+runtime=c version=Apple_clang_version_21.0.0_(clang-2100.4.1.1),_-O2 kernel=binarytrees workers=1 round=1 ms=747.8 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=luajit version=LuaJIT_2.1.1710088188 kernel=binarytrees workers=1 round=1 ms=1566.0 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=luajit-joff version=LuaJIT_2.1.1710088188 kernel=binarytrees workers=1 round=1 ms=2412.5 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=lua version=Lua_5.4.6 kernel=binarytrees workers=1 round=1 ms=5338.1 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=node version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=binarytrees workers=1 round=1 ms=748.6 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=node-jitless version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=binarytrees workers=1 round=1 ms=3511.0 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=java version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=binarytrees workers=1 round=1 ms=200.3 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- pauses=4 pause_p50=0.546 pause_p99=1.115 pause_max=1.115
+runtime=java-int version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=binarytrees workers=1 round=1 ms=2407.7 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- pauses=4 pause_p50=0.593 pause_p99=0.983 pause_max=0.983
+runtime=java-zgc version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=binarytrees workers=1 round=1 ms=299.9 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- pauses=5 pause_p50=0.005 pause_p99=0.006 pause_max=0.006
+runtime=ruby version=ruby_3.3.0 kernel=binarytrees workers=1 round=1 ms=4762.1 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=ruby-yjit version=ruby_3.3.0 kernel=binarytrees workers=1 round=1 ms=2780.9 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=python version=Python_3.12.2 kernel=binarytrees workers=1 round=1 ms=9461.6 checksum=41950911 want=41950911 thermal=nominal ok=yes reason=- 
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=collections workers=1 round=1 ms=7109.7 checksum=4673800361484 want=4673800361484 thermal=nominal ok=yes reason=- kernel_ms=7055.0 stops=200000 pause_p50=0.001 pause_p99=0.004 pause_max=0.016 young=71 young_p50=0.285 young_p99=4.672 cycles=0 fallbacks=0
+runtime=pharo version=Pharo12.0.0SNAPSHOT_/_v10.3.12+0.4b0622446_-_Commit:_4b0622446_-_Date:_2026-10-23_12:16:05_+0200 kernel=collections workers=1 round=1 ms=1655.5 checksum=4673800361484 want=4673800361484 thermal=nominal ok=yes reason=- full=5 full_ms=196 scavenges=12 scavenge_ms=92
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=arith workers=1 round=1 ms=2570.6 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- kernel_ms=2552.3 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=arith workers=1 round=1 ms=2491.9 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- kernel_ms=2442.4 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=pharo version=Pharo12.0.0SNAPSHOT_/_v10.3.12+0.4b0622446_-_Commit:_4b0622446_-_Date:_2026-10-23_12:16:05_+0200 kernel=arith workers=1 round=1 ms=395.0 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- full=0 full_ms=0 scavenges=0 scavenge_ms=0
+runtime=c version=Apple_clang_version_21.0.0_(clang-2100.4.1.1),_-O2 kernel=arith workers=1 round=1 ms=262.0 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=luajit version=LuaJIT_2.1.1710088188 kernel=arith workers=1 round=1 ms=92.3 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=luajit-joff version=LuaJIT_2.1.1710088188 kernel=arith workers=1 round=1 ms=1255.7 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=lua version=Lua_5.4.6 kernel=arith workers=1 round=1 ms=1293.3 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=node version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=arith workers=1 round=1 ms=126.9 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=node-jitless version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=arith workers=1 round=1 ms=1450.0 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=java version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=arith workers=1 round=1 ms=99.0 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=java-int version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=arith workers=1 round=1 ms=1571.0 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=ruby version=ruby_3.3.0 kernel=arith workers=1 round=1 ms=1849.8 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=ruby-yjit version=ruby_3.3.0 kernel=arith workers=1 round=1 ms=1846.8 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=python version=Python_3.12.2 kernel=arith workers=1 round=1 ms=9751.6 checksum=372800000 want=372800000 thermal=nominal ok=yes reason=- 
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=1 round=repeat ms=1728.3 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=1707.6 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=8 round=repeat ms=256.2 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=238.9 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=1 round=repeat ms=1815.0 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=1762.4 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=kajo-st version=0459db7_release_-enable-testing_aligned,_Swift_6.4.2 kernel=fib workers=8 round=repeat ms=306.3 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- kernel_ms=259.7 stops=0 pause_p50=- pause_p99=- pause_max=- young=0 young_p50=- young_p99=- cycles=0 fallbacks=0
+runtime=pharo version=Pharo12.0.0SNAPSHOT_/_v10.3.12+0.4b0622446_-_Commit:_4b0622446_-_Date:_2026-10-23_12:16:05_+0200 kernel=fib workers=1 round=repeat ms=296.8 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- full=0 full_ms=0 scavenges=0 scavenge_ms=0
+runtime=c version=Apple_clang_version_21.0.0_(clang-2100.4.1.1),_-O2 kernel=fib workers=1 round=repeat ms=81.9 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=luajit version=LuaJIT_2.1.1710088188 kernel=fib workers=1 round=repeat ms=143.0 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=luajit-joff version=LuaJIT_2.1.1710088188 kernel=fib workers=1 round=repeat ms=664.9 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=lua version=Lua_5.4.6 kernel=fib workers=1 round=repeat ms=1297.1 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=node version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=fib workers=1 round=repeat ms=217.8 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=node-jitless version=Node_v24.5.0_(V8_13.6.233.10-node.21) kernel=fib workers=1 round=repeat ms=2220.3 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=java version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=fib workers=1 round=repeat ms=102.3 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=java-int version=OpenJDK_Runtime_Environment_Homebrew_(build_21.0.2) kernel=fib workers=1 round=repeat ms=1689.7 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- pauses=0 pause_p50=- pause_p99=- pause_max=-
+runtime=ruby version=ruby_3.3.0 kernel=fib workers=1 round=repeat ms=1331.4 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=ruby-yjit version=ruby_3.3.0 kernel=fib workers=1 round=repeat ms=323.4 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+runtime=python version=Python_3.12.2 kernel=fib workers=1 round=repeat ms=2166.9 checksum=24682992 want=24682992 thermal=nominal ok=yes reason=- 
+# end: 2026-11-07 11:56 EET
+runtime=python version=Python_3.12.2 kernel=arith workers=1 round=1 ms=120000.0 checksum=- want=684800000 thermal=fair ok=no reason=timeout
