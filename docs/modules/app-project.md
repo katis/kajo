@@ -8,7 +8,13 @@ developer's development build installed with Xcode, and serving the
 development protocol is a property of that build. ADR 0014 (proposed)
 records the decision.
 
-**The devices' sample rows wait for the owner.** Everything on the Mac
+**The devices' sample rows ran on 2026-11-07** once the owner had
+signed the mini's Xcode in again ("The sample on the devices" in
+Measurements): the round trip on both devices, three findings fixed the
+same day (60 Hz on the iPhone, 35 s to a Debug build's first frame, the
+script's by-address fallback), the Bonjour name still not seen from the
+Mac until the owner allows Local Network for the sample on each device.
+What follows was written on 2026-11-06. Everything on the Mac
 ran: the generator, both targets in both configurations from clean with
 0 warnings, the Debug app serving from launch, the CLI and the tools
 connecting by its Bonjour name, a change landing live and written to the
@@ -104,7 +110,9 @@ Hide, Quit and Edit; on iOS `UIApplicationMain` with `KajoAppDelegate`
 and the `KajoSceneDelegate` the Info.plist names), the host, and after
 the first frame a `KajoAppRunner`: the bundled `kajo/app.img` opened with
 two workers and 256 MiB, the app class's `open` run as a main Process at
-UI priority, then the development half told. The runtime runs without a
+UI priority, and at the app's second frame (or after a second when no
+frame comes) the development half told: the window comes first, and
+nothing serving does can hold it ("On the devices" below). The runtime runs without a
 display link (turns on wakes and events, ADR 0004's account renewed by
 the clock), as the shells' demo mode does. The Transcript goes to
 standard output.
@@ -201,9 +209,13 @@ The shells in `apps/` keep `mode=serve` by argument.
   `ShellRuntime.serveTCP` on port 0 with the per-install token of 9d
   (Application Support, mode 0600; on the Mac the app's own folder in it,
   named by its bundle identifier), advertised with Bonjour as
-  "**<app> on <device>**" (the Mac's localized name; on iOS the host
-  name, since `UIDevice.name` is the model's without an entitlement),
-  at most 63 bytes. The TXT record names the image, as in 9d. One line
+  "**<app> on <device>**" (the Mac's localized name; on iOS the model's,
+  "iPhone" or "iPad": the user's name for the device needs an
+  entitlement, `gethostname` answers "localhost", and
+  `ProcessInfo.hostName` answered "localhost" after 35 s on the main
+  thread; Bonjour renames a second device of one model, "Sample on
+  iPhone (2)", and the pairing screen shows the name it took), at most 63
+  bytes. The TXT record names the image, as in 9d. One line
   goes to standard output, `serving=tcp port=.. addresses=.. name=..`,
   never the token.
 - **The pairing screen is reached from the running app and closed
@@ -248,10 +260,17 @@ Release build: cold launches and no serving. The device form goes
 through `scripts/device.sh` (extended: `PROJECT`, `SCHEME`, `CONFIG`,
 `PRODUCT`, `BUNDLE`, which accepts only the shell's and the sample's
 identifiers) and falls back to the address on the Mac's network when no
-Bonjour name shows. A Debug launch with `kajo-frames=<s>` counts the
-display's frames beside the app for that long and quits; any launch with
-`kajo-launch-report` prints the time from the process's start (its
-`kinfo_proc` start time) to the first frame after `open`.
+Bonjour name shows, reading the address and the port from the console of
+the launch it is about to talk to (each launch listens on a new port; a
+rebuilt app that does not answer is a `FAILED` line). A Debug launch with
+`kajo-frames=<s>` counts the display's frames beside the app for that
+long and quits; any launch with `kajo-launch-report` prints the time from
+the process's start (its `kinfo_proc` start time) to the first frame
+after `open`, and before it one `launch step=<name> ms=<ms>` line per
+step of the launch (window, host-ready, image-opened, app-opened, and in
+a development build development-due, pairing-screen, device-name, token,
+listener, protocol-started, advertised, development-started), each
+stamped when the step ended.
 
 After a relaunch the app starts from the bundled image, so a change that
 was not written to the project is gone. A snapshot on the phone (a later
@@ -361,7 +380,98 @@ interleaved with this one's (251 to 379), so that number is today's
 machine, not the refactor (the reserve-and-depth note's 143 was measured
 before the collectors review).
 
-The sample app on the devices: not built (the signing account, above).
+The sample app on the devices: see "The sample on the devices" below.
+
+### The sample on the devices
+
+Signing was cleared by the owner on 2026-11-07 and the sample's round trip
+(`scripts/app-roundtrip.sh device`) ran on both devices that morning
+(11:30 to 11:45, every line thermal nominal, raw rows in the scratchpad's
+`sample-iphone/` and `sample-ipad/`). It found three things, fixed the
+same day (b440924, c8c18ba, 684e78c) and run again on both devices from
+the fixed commit (13:16 to 13:46, every line thermal nominal,
+`sample-followup/after-iphone/` and `after-ipad/`).
+
+**The generated iOS app rendered at 60 Hz on the iPhone.** Every frame
+row of the Debug sample read `frames=63 expected=126` per 1.05 s, gaps
+16.668 ms: the generated Info.plist lacked
+`CADisableMinimumFrameDurationOnPhone`, which the shell's spec has; an
+iPhone app without it is capped at 60 Hz. Both iOS plists carry it now
+(b440924). The iPad rendered at 120 Hz without the key and still does.
+
+**The Debug sample took 35.2 to 35.6 s to its first frame** (iPhone
+35 180 to 35 306 ms, iPad 35 332 to 35 593, five launches each; Release
+100 to 130 ms on the iPhone and 221 to 233 on the iPad). The launch trace
+(`kajo-launch-report`'s `launch step=` lines, added for this) placed it on
+the iPhone in five more launches (35 183 to 35 214 ms): window 44 to 79
+ms, image opened 98 to 126, the app's `open` done 100 to 128, and then
+`ProcessInfo.processInfo.hostName`, for the service name, on the main
+thread for 35.0 s in every launch (35 036 to 35 041 ms), answering
+"localhost"; token, listener, the protocol's start and the Bonjour
+registration together 23 to 28 ms after it. Not the Local Network permission
+and not the token store. Two changes (c8c18ba): the device's part of the
+name is the model's on iOS ("Sample on iPhone"; `gethostname` also
+answers "localhost", and the user's name for the device needs an
+entitlement) and never waits, and the development half starts at the
+app's second frame, or after 1 s if no frame comes, so nothing serving
+does can come before the window. The iPad's trace was not taken before
+the fix; its 35.3 to 35.6 s has the same shape and went with the change.
+
+| | before | after |
+|---|--:|--:|
+| iPhone Debug, first frame, five launches (ms) | 35 180 to 35 306 | 102.7 to 156.5 |
+| iPhone Release (ms) | 100.6 to 129.8 | 101.2 to 114.6 |
+| iPad Debug (ms) | 35 331.5 to 35 592.9 | 229.5 to 254.4, 615.6 first after install |
+| iPad Release (ms) | 221.0 to 233.4 | 213.9 to 247.0 |
+| iPhone, development half started (trace, ms) | 35 160 to 35 190 | 116.0 to 181.0, after the first frame in every launch (due by frame 9 to 26 ms after `open`) |
+
+**The script's by-address fallback kept the first launch's port.** With
+no Bonjour name seen, step 5 talked to the live launch's port while the
+rebuilt app listened on a new one, so `starts_with_change=0` was the
+script connecting to nothing. The fallback now reads the address and port
+from the console of the launch it is about to talk to, and no reply is a
+`FAILED` line (684e78c). After the fix: `starts_with_change=1` on both
+devices, by address.
+
+The Mac's round trip from the same commit (`after-mac/`, three launches,
+thermal nominal) is unchanged by the deferred start: Debug first frame
+219.5 and 232.5 ms after the first launch (583.8), Release 193.3 to 232.6
+(582.8 first), 0 frames missed in every window, by Bonjour name
+throughout, the rebuilt app starting with the change, Release not
+serving and no listening socket.
+
+The rows after the fixes (the build times and the iPhone's live rows
+before them, from the morning's run, beside them where they differ):
+
+| | iPhone 13 Pro (iOS 27) | iPad Pro 12.9 3rd gen (iPadOS 26.7.2) |
+|---|---|---|
+| Debug build from clean, again unchanged, after the tools' change (s) | 34.0, 4.6, 5.8 (morning: 32.7, 8.4, 5.4) | 31.6, 5.2, 6.1 (morning: 34.6, 9.3, 6.0) |
+| Release build from clean (s) | 42.2 (46.4) | 42.3 (46.8) |
+| app bundle Debug / Release (KiB) | 10 536 / 7 184 | 10 536 / 7 184 |
+| first frame Debug / Release (ms) | 102.7 to 156.5 / 101.2 to 114.6 | 229.5 to 615.6 / 213.9 to 247.0 |
+| frames, five 1 s windows after launch | 128 to 130 of as many, 0 missed, gaps 8.334 ms | 0 missed of 124 to 128 |
+| frames, 10.5 s serving with no client | 0 of 1264 missed | 0 of 1264 |
+| frames, the 30 s live window (8 sessions, 17 requests) | 0 of 3647 | 0 of 3782 (2 short of expected at the edges, 0 counted missed) |
+| frames, the rebuilt app (8.4 s) | 0 of 1012 | 0 of 1012 |
+| `kajo eval` by address, first / 2nd to 5th (ms) | 302 / 56 to 70 (morning 254 / 56 to 66) | 237 / 70 to 80 (399 / 69 to 75) |
+| compile from the CLI, then a press shows it (ms) | 73, 151 (82, 140) | 98, 166 (91, 174) |
+| tools: open, select, compile, live steps (ms) | 71.9, 27.1, 16.1, 11.6 (74.2, 16.7, 11.6, 9.7) | 388.7, 30.1, 29.3, 12.4 (592.7, 321.4, 23.4, 14.3) |
+| tools: `class.hierarchy`, `method.compile` requests (ms) | 65.0, 9.9 | 382.0, 28.8 |
+| the change in `src/`, the rebuilt app starts with it | yes, yes | yes, yes |
+| Release serves | no (no Bonjour service, no serving line) | no |
+| Bonjour name seen from the Mac | no | no |
+
+The tools' own window (the macOS shell's devsession) missed 15 to 20
+frames in its 0.3 to 1.2 s of windows opening, as the module's Mac rows
+did for the first windows (9c). **The Bonjour name was not seen** on
+either device in any run: the sample's `_kajo-dev._tcp` never appeared in
+`dns-sd -B`. The likely cause, as for the shells in 9d, is iOS's
+Local Network permission for the sample, which is the owner's to grant
+on each device (Settings > Privacy & Security > Local Network > Sample);
+nothing here answered or dismissed a prompt, and whether one is showing
+was not looked at. Until then the
+round trip connects by address; once allowed, the `service` row shows
+"Sample on iPhone" and "Sample on iPad".
 
 ### The kernels against the starting commit
 
@@ -457,7 +567,8 @@ ranges, which overlap in every row.
   builds; the trait removes the checks and most of the cost, not all.
 - **One Swift file serves both targets** (`Sources/App.swift`), not one
   per target: the code is the same and the plists differ.
-- **The device rows of part 4 did not run** (signing, above).
+- **The device rows of part 4 did not run** with the module (signing,
+  above); they ran on 2026-11-07 ("The sample on the devices").
 
 ## Tests
 
@@ -474,7 +585,10 @@ ranges, which overlap in every row.
   refused and the link's target untouched, a refused spec writes
   nothing); the generated Tonel compiles with the kernel with no warning,
   its package is the app's, and its SUnit test passes.
-- `AppServingTests` (6), at ShellTests' level on a host that keeps the
+- `AppServingTests` (7 since the devices' follow-up: a runner's `start`
+  serves nothing until `startDevelopment`, told once; the development half
+  starts within its bound when no frame comes; the device's part of the
+  name never waits), at ShellTests' level on a host that keeps the
   views' properties: a development build serves at launch with no
   argument (the store's token on the pairing screen, the file 0600, a
   loopback client reads the label through the view hop after a press, a
@@ -515,14 +629,15 @@ none added.
 
 ## Not done
 
-- **The sample on the iPhone and the iPad.** Once the owner signs the
-  mini's Xcode in to team BDN6M642M2 again (Xcode > Settings > Accounts),
-  with the project the script generates:
+- **The sample on the iPhone and the iPad** ran on 2026-11-07
+  (Measurements); what is left is the Bonjour row, which needs the
+  owner's Local Network permission for the sample on each device. The
+  commands, with the project the script generates:
   `scripts/app-roundtrip.sh device <out>` for the iPhone and
   `DEVICE=00008027-0012592C0185002E DD=$TMPDIR/kajo-sample-ipad
-  scripts/app-roundtrip.sh device <out>` for the iPad. The first launch on
-  each shows iOS's local-network prompt; until the owner answers it the
-  Bonjour row fails and the script goes on by address.
+  scripts/app-roundtrip.sh device <out>` for the iPad. Until the
+  permission is granted the Bonjour row fails and the script goes on by
+  address.
 - The Mac app as a sandboxed or notarized app; the Release build's
   signing for distribution.
 - A Debug VM as fast as Release (a prebuilt binary of the Kajo libraries
