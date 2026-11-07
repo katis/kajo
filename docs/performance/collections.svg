@@ -22,9 +22,9 @@
 </g>
 <text x="435.0" y="140" fill="currentColor" text-anchor="middle">seconds per run, median of the rounds (shorter is faster)</text>
 <text x="192" y="73.5" fill="currentColor" text-anchor="end">Pharo 12 (Cog JIT)</text>
-<rect x="200.8" y="62.75" width="94.8" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="302.3" y="73.5" fill="currentColor">1.64 s</text>
+<rect x="200.8" y="62.75" width="94.1" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="301.6" y="73.5" fill="currentColor">1.63 s</text>
 <text x="192" y="97.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk)</text>
-<rect x="200.0" y="86" width="417.0" height="16" fill="#2563eb"/>
-<text x="623.0" y="97.5" fill="currentColor">7.10 s</text>
+<rect x="200.0" y="86" width="366.9" height="16" fill="#2563eb"/>
+<text x="572.9" y="97.5" fill="currentColor">6.25 s</text>
 </svg>
