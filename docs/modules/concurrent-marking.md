@@ -281,6 +281,15 @@ last item, and their partial buffers), the remembered buffers' length, the
 listed weak holders' and ephemerons' slots, and the verifier. Each is
 timed in the cycle's record.
 
+Since the final mark on the devices (2026-11-07,
+`docs/modules/final-mark.md`): the marking bit is cleared after the
+ephemerons' traced-key loop rather than first; the filter (step 3) runs
+after the ephemerons (step 4), since their tracing marks holders too; and
+the drain and the ephemerons' loop are bounded in units of work
+(`finalMarkWork`): past the bound, or with a young-root scan still owed,
+the stop gives up before anything is decided and the marker asks again,
+at most `finalMarkGiveUps` times a cycle.
+
 ### Lazy sweep (`sweepCycle`) and apply (`applyInStop`)
 
 The marker, after the final mark, walks the snapshot map in chunks of 64

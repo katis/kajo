@@ -180,7 +180,9 @@ T1. T1 claims every parked unscanned record under the scheduler lock.
 No stop interleaves a collection: `stopWorld` first parks for any requested
 stop, then (`waitForCollectionsLocked`) counts itself in `stwWanted` and
 waits, servicing rounds (the collector thread also runs its queue), until
-`ycActive` is 0; openers wait while `stwWanted` or a stop is pending. So at
+`ycActive` is 0; openers wait while `stwWanted` or a stop is pending (the
+main worker, since the final mark on the devices, only for a pending stop
+and for `stwWanted` once it has opened one collection under it). So at
 every pause no entry is RELOCATING, every nursery is quiescent, and the
 young-root scan finds every young body in an active eden or survivor-from.
 A stop-the-world scavenge (the oracle, `vm.scavenge()`, module 1's
@@ -197,7 +199,13 @@ In the young modes the cycle starts with `initialMarkPause` (no scavenge):
 module 5's bookkeeping, then `initialMark`, whose survivor scan is replaced
 by `youngRootScan`: every nursery's eden (or current half) `[edenStart,
 top)` and survivor-from walked by back references, every slot of a body
-whose entry leads to it greyed. The snapshot is the old map, which never
+whose entry leads to it greyed. Since the final mark on the devices
+(2026-11-07, `docs/modules/final-mark.md`) the pause only records those
+ranges and marks each nursery's scan owed; the marker, the nursery's
+collector before it moves anything, or a scavenge's stop does the walk,
+and until then the SATB barrier records stores into that nursery's young
+holders (`youngRootsInStop` is module 7's in-pause scan, kept as a test
+switch). The snapshot is the old map, which never
 holds a young entry or a deferred free: amendment 17's exclusion is
 structural (counted: `snapshotExclusions`). `vm.startCycle()` still
 scavenges first (the oracle path); `vm.startYoungCycle()` is the pause
@@ -870,7 +878,10 @@ are safe, so the tests need none.
   module 4's weak pass is not ported to the concurrent collector.
 - The young-root scan at the initial mark is single-threaded (1.1 ms mean
   at eight 4 MiB nurseries in the storm, 2.7 ms in the ring; ADR 0008's
-  budget 2 to 3 ms); making it parallel is not built.
+  budget 2 to 3 ms); making it parallel is not built. (Since the final
+  mark on the devices, 2026-11-07, it is not in the pause at all: the
+  pause records each nursery's ranges and the marker or the nursery's
+  collector scans them outside it, `docs/modules/final-mark.md`.)
 - Acknowledgements on the main worker cost 28 to 38 µs each (a stack scan
   and a buffer hand-over under the safepoint mutex), accepted for v0 and
   measured (Measurements).

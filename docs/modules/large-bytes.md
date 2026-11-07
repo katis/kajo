@@ -336,7 +336,12 @@ beside it). Main thread stopped by others, ms per 10 s, p50 [range]:
   waited in either. These are the final mark's length under the storm
   (module 9a's iPhone rows: max 7.4 to 17.3 ms with young collection on,
   "not investigated"), not this follow-up's fallbacks, which before cost
-  4 to 10 frames each.
+  4 to 10 frames each. (The final mark on the devices, 2026-11-07, found
+  that "final mark" to be the stopper's wait for open young collections
+  before its request, the world running, and the stop 0.2 to 0.5 ms; the
+  frames went to the initial mark's young-root scan, a main-thread flip
+  that waited with that stopper, and in local mode the main worker's own
+  collections: `docs/modules/final-mark.md`.)
 - **The storm needed only the policy**: the marker was raised 1 to 17
   times a launch; no allocation waited and no sweep was finished in a
   stop. **The large churn needed the rest on the iPad**: 72 to 95 waits a

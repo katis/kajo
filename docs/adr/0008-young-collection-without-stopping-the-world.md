@@ -389,6 +389,9 @@ modes of a scenario ran back to back in each run.
   ms (p50 0.3 to 6.7) under local and offload against 0.18 to 0.59 under
   the stop-the-world scavenge. It cost no frame (the longest main-thread
   turn under local and offload was 7.7 ms) and was not investigated here.
+  (The final mark on the devices, 2026-11-07, found these figures to be
+  the stopper's wait for open young collections before its request, with
+  the world running; the stop itself is 0.16 to 0.5 ms in every mode.)
 - Energy is the process's CPU only (`ri_energy_nj`; no DRAM, display or
   render server): 1.8 to 3.4 W with five busy workers, the oracle the
   highest under the storm.
@@ -410,3 +413,23 @@ workers ran 74 to 77 percent on performance cores. At 7 workers (every
 core busy) local and offload still missed nothing while the ring under
 the oracle missed 23 (7 to 30): storm 475 / 65 / 80, ring 1418 / 119 /
 117, share 79 / 79 / 78.
+
+## Built (final mark): the young-root scan leaves the pause (2026-11-07)
+
+The consequence above ("the young-root scan at the initial mark must
+become parallel or move out of the pause") is built as the second: on
+the devices under the storm the initial-mark pause was 3.4 to 8.4 ms at
+most per row, and the stop that cost frames in the young modes
+(docs/modules/final-mark.md). The pause now records each nursery's eden
+and survivor-from ranges and marks its scan owed; the marker scans them
+at the start of its cycle (the main worker's nursery first), a nursery's
+collector scans its own before anything moves (handing candidates to the
+marker's queue), and module 4's scavenge scans any left in its stop.
+Until a nursery is scanned the SATB barrier records stores into its
+young holders. The pause is now at most 0.95 ms on both devices. Also
+changed: the main worker opens one collection while a stop is wanted
+instead of waiting with the stopper for every open collection (a 14 ms
+flip had cost a frame); the model checks it (`mainOpensWhileWanted`). In
+young local mode the main worker's own collections still cost frames on
+the iPhone at 7 workers (6 to 21 ms behind background acknowledgements);
+offload, the shells' default, missed none.

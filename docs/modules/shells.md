@@ -553,7 +553,10 @@ What the phone showed that the Mac did not:
   ms and max 7.4 to 17.3 ms under local and offload, against 0.14 to 0.51
   p50 and 0.18 to 0.59 max with the stop-the-world scavenge. It cost no
   frame (the longest main-thread turn under local and offload was 7.7 ms)
-  and was not investigated further here.
+  and was not investigated further here. (The final mark on the devices,
+  2026-11-07, `docs/modules/final-mark.md`: these figures were the
+  stopper's wait for open young collections before its request, with the
+  world running; the stop itself is 0.16 to 0.5 ms.)
 - **The idle main thread runs on efficiency cores**: with no load and no
   events the main thread's P share was 0.00, its turns up to 3.3 ms (the
   frame load, 3.7 s of VM per 10 s), and the process drew 0.016 W; with
@@ -642,7 +645,8 @@ What the iPad showed:
   back (0 fallbacks, 0 aborts in all 60 scenario runs).
 - The final mark with young collection on: max 4.8 to 8.6 ms at 5
   workers (8.4 to 16.5 at 7), against 0.26 to 0.56 under the oracle; as on
-  the iPhone it cost no frame and was not investigated.
+  the iPhone it cost no frame and was not investigated (the wait before
+  the stop's request, as on the iPhone: `docs/modules/final-mark.md`).
 - Power (`ri_energy_nj`, process CPU only): 0.5 to 1.2 W with five busy
   workers, about a third to a half of the iPhone's 1.8 to 3.4 W (which ran
   at serious; these rows at nominal and fair). Neither counts DRAM, the
@@ -1054,6 +1058,10 @@ switch.
 - Why the final mark is 7 to 17 ms at most on the phone with young
   collection on, against under 0.6 ms with the stop-the-world scavenge.
   The iPad shows the same (4.8 to 8.6 ms at 5 workers, 8.4 to 16.5 at 7).
+  Done since (the final mark on the devices, 2026-11-07,
+  `docs/modules/final-mark.md`): the stop record counted the stopper's
+  wait for open young collections before its request; the stop is 0.16
+  to 0.5 ms.
 - Done since (2026-11-06 evening, "Where the 2.2 ms went" and "The
   iPad's energy reading"): the iPad's event p50 under the storm is its
   throttled cluster clock making the main thread busy more than half the

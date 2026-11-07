@@ -126,7 +126,8 @@ share at 5 and at 7 busy workers and never fell
 back (0 fallbacks, 0 aborts in 60 scenario runs); the large-object churn
 counted 1 fallback in 3 runs (the iPhone 13 Pro 3 in 3 runs); the final mark
 max 4.8 to 8.6 ms with young collection on at 5 workers
-(docs/modules/shells.md).
+(docs/modules/shells.md; the final mark on the devices found that figure
+to be the wait before the stop's request, below).
 
 ## Energy on device (2026-11-02)
 
@@ -243,9 +244,35 @@ unchanged. What changed:
 After (the final code, ten launches of each row on each device): no
 fallback in 80 launches (storm at 5 and 7 workers, the large churn, the
 photo churn), three frames missed in two iPhone storm launches at thermal
-serious behind final marks of 8 and 20 ms (not fallbacks), the main
+serious behind final marks of 8 and 20 ms (not fallbacks; read below as
+waits before the request, with the world running), the main
 thread's stopped time within the earlier rows but for the iPad's large
 churn (166 against 160 ms per 10 s), and on the iPhone the process's CPU
 energy 4 to 14 percent lower while the marker's own rose by 7 percent to
 3.5 times (it now finishes the cycles the fallbacks used to abandon). The headroom
 condition stands; the fallback is still counted where it remains.
+
+## Built (final mark): the stop was never long; its record was (2026-11-07)
+
+The final mark's 7 to 20 ms on the iPhone 13 Pro and the iPad Pro with
+young collection on (docs/modules/shells.md, docs/modules/large-bytes.md)
+were the stopper's wait for every open young collection before its
+request, with the world running, which module 3's stop record counted as
+time to safepoint. The record now splits it: the stop itself, from the
+request to the release, is 0.16 to 0.54 ms in every mode on both devices
+at every thermal state, its time to safepoint at most 0.37 ms, its work
+at most 0.40 (module 6's selection the largest part). No phase of the
+final mark grew. The stops that cost frames were the initial mark's
+young-root scan (ADR 0008's note) and a main-thread flip that waited with
+the stopper. Bound anyway, as the brief asked: the final mark's tracing
+is bounded in work (`finalMarkWork`, 16 384 units); past the bound, or
+with a young-root scan still owed, the stop gives up before anything is
+decided and the marker drains concurrently and asks again (at most eight
+times a cycle, then it finishes, counted). Under the storm no final mark
+came near it (the largest 10 units). The remembered filter now runs
+after the ephemerons: a holder marked only by a fired ephemeron lost its
+remembered bit and its young referents (a test fails on the starting
+commit). After, with young offload: 0 frames missed in 80 storm launches
+at 5 and 7 workers on both devices, the main thread's stopped time no
+worse than the large-bytes follow-up's final block
+(docs/modules/final-mark.md).
