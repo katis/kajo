@@ -153,6 +153,13 @@ public struct Configuration: Sendable {
     /// Deferred entry frees belong to their nursery: the snapshot excludes
     /// them and a full collection leaves them used (amendment 17). Claim 5.
     public var deferredEntriesBelongToTheirNursery = true
+    /// The final mark on the devices (docs/modules/final-mark.md): worker 0
+    /// is the main worker, whose flip or collect waits for a stop only once
+    /// it is requested; while O merely wants one (`stwWanted`) it may open
+    /// one collection, and O then waits for that one too. Off: module 7's
+    /// rule, every opener waits while a stop is wanted. Liveness only: O
+    /// still stops only once no collection is open.
+    public var mainOpensWhileWanted = true
 
     public init(name: String, mode: Mode, nurseries: Int, objects: [ObjectSpec], workerNames: [String],
                 registers: [[Int?]], programs: [[Instruction]], oldSpace: [OldSpaceStep] = []) {

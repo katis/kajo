@@ -547,24 +547,44 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
-    ] + finalMarkReport(stops: stops, log: log)
+    ] + finalMarkReport(stops: stops, log: log) + [
+        ("finalGiveUps", "\(c.finalGiveUps)"), ("finalOverruns", "\(c.finalOverruns)"),
+        ("finalUnitsMax", log.map(\.finalWorkUnitsMax).max().map { "\($0)" } ?? "-"),
+    ] + rootScanReport(vm.rootScanStats)
 }
 
-/// The final mark on the devices (docs/modules/final-mark.md): the final
-/// mark's stop split as its record has it. `finalStopped` is what the world
-/// stands still for (the request to the release); `finalBeforeRequest` the
-/// wait before the request (another stop, module 7's open collections),
-/// with the world running; `finalPark` the request to the last park;
-/// `finalWork` the work. The initial mark's stop (module 7's pause) the
-/// same. `finalLog`: per final mark the log kept, before the request/park
-/// wait/work/relocation selection/sweep setup (ms), collections open at
-/// the request, the last parker and how it came (p poll, w wait, s
-/// stopper), parkers from waits, the stopper's QoS before the raise, its
-/// share of CPU on performance cores and its clock there (GHz) from the
-/// request to the end of the work, and the thermal state.
+/// The final mark on the devices: the young-root scans outside the initial
+/// mark's stop, by who did them (the marker, a nursery's collector, a
+/// stop), the marker's claims a stop finished, their mean and longest
+/// time, the slots read, and the collections that waited for the marker.
+func rootScanReport(_ s: [UInt64]) -> [(String, String)] {
+    func ms(_ ns: UInt64) -> String { unsafe String(format: "%.3f", Double(ns) / 1e6) }
+    let n = s[RootScanStat.byMarker] &+ s[RootScanStat.byCollector] &+ s[RootScanStat.inStop]
+    return [
+        ("rootScansMarker", "\(s[RootScanStat.byMarker])"), ("rootScansCollector", "\(s[RootScanStat.byCollector])"),
+        ("rootScansInStop", "\(s[RootScanStat.inStop])"), ("rootScansVoided", "\(s[RootScanStat.voided])"),
+        ("rootScanMeanMs", n == 0 ? "-" : ms(s[RootScanStat.ns] / n)), ("rootScanMaxMs", ms(s[RootScanStat.maxNs])),
+        ("rootScanWords", "\(s[RootScanStat.words])"),
+        ("rootScanWaits", "\(s[RootScanStat.waits])"), ("rootScanWaitMs", ms(s[RootScanStat.waitNs])),
+    ]
+}
+
+/// The final mark on the devices (docs/modules/final-mark.md): the
+/// stopper's wait before its request (another stop, module 7's open young
+/// collections; the world runs), `finalBeforeRequest`, beside module 5's
+/// `final` keys, which count from the request since this follow-up; the
+/// work to the phase change; the initial mark's stop the same.
+/// `finalLog`: per final mark the log kept, the wait before the request/
+/// time to safepoint/work/relocation selection/sweep setup (ms),
+/// collections open when the wait began, the last parker and how it came
+/// (p poll, w wait, s stopper), parkers from waits, the stopper's QoS
+/// before the raise, its share of CPU on performance cores and its clock
+/// there (GHz) from just before the wait to the end of the work, and the
+/// thermal state (0 nominal to 3 critical).
 func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, String)] {
     func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
     func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
+    func f2(_ ns: UInt64) -> String { unsafe String(format: "%.2f", Double(ns) / 1e6) }
     func pct(_ xs: [UInt64], _ q: Double) -> String {
         let s = xs.sorted()
         return s.isEmpty ? "-" : ms(s[min(s.count - 1, Int(Double(s.count) * q))])
@@ -572,7 +592,6 @@ func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, Strin
     func mx(_ xs: [UInt64]) -> String { xs.max().map(ms) ?? "-" }
     let fm = stops.filter { $0.kind == .finalMark }
     let im = stops.filter { $0.kind == .initialMark }
-    let stopped = fm.map(\.stoppedNs)
     let done = log.filter { $0.finalWorkNs > 0 }
     let via = ["p", "w", "s"]
     let rows = done.map { r -> String in
@@ -580,21 +599,18 @@ func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, Strin
         let cpu = c.pCpuNs &+ c.eCpuNs
         let pf = c.ok && cpu > 0 ? unsafe String(format: "%.2f", Double(c.pCpuNs) / Double(cpu)) : "-"
         let ghz = c.ok && c.pCpuNs > 0 ? unsafe String(format: "%.2f", Double(c.pCycles) / Double(c.pCpuNs)) : "-"
-        return [unsafe String(format: "%.2f", Double(r.finalBeforeRequestNs) / 1e6), unsafe String(format: "%.2f", Double(r.finalParkWaitNs) / 1e6),
-                unsafe String(format: "%.2f", Double(r.finalWorkNs) / 1e6), unsafe String(format: "%.2f", Double(r.relocationAtFinalNs) / 1e6),
-                unsafe String(format: "%.2f", Double(r.sweepSetupNs) / 1e6), "\(r.finalCollectionsOpen)",
-                "\(r.finalSlowest)\(via[Int(r.finalSlowestVia.rawValue)])", "\(r.finalParkedFromWaits)", "\(r.finalStopperQoS)",
-                pf, ghz, "\(r.finalThermal)"].joined(separator: "/")
+        return [f2(r.finalBeforeRequestNs), f2(r.finalTtspNs), f2(r.finalWorkNs), f2(r.relocationAtFinalNs), f2(r.sweepSetupNs),
+                "\(r.finalCollectionsOpen)", "\(r.finalSlowest)\(via[Int(r.finalSlowestVia.rawValue)])", "\(r.finalParkedFromWaits)",
+                "\(r.finalStopperQoS)", pf, ghz, "\(r.finalThermal)"].joined(separator: "/")
     }
     return [
-        ("finalStoppedP50ms", pct(stopped, 0.5)), ("finalStoppedP99ms", pct(stopped, 0.99)), ("finalStoppedMaxMs", mx(stopped)),
         ("finalBeforeRequestP50ms", pct(fm.map(\.beforeRequestNs), 0.5)), ("finalBeforeRequestMaxMs", mx(fm.map(\.beforeRequestNs))),
-        ("finalParkP50ms", pct(fm.map(\.parkWaitNs), 0.5)), ("finalParkMaxMs", mx(fm.map(\.parkWaitNs))),
+        ("finalTtspMaxMs", mx(fm.map(\.timeToSafepointNs))),
         ("finalWorkP50ms", pct(done.map(\.finalWorkNs), 0.5)), ("finalWorkMaxMs", mx(done.map(\.finalWorkNs))),
         ("finalRelocMaxMs", mx(done.map(\.relocationAtFinalNs))), ("finalSweepSetupMaxMs", mx(done.map(\.sweepSetupNs))),
         ("finalCollectionsOpenMax", fm.map(\.collectionsOpen).max().map { "\($0)" } ?? "-"),
-        ("initialStoppedMaxMs", mx(im.map(\.stoppedNs))), ("initialBeforeRequestMaxMs", mx(im.map(\.beforeRequestNs))),
-        ("initialParkMaxMs", mx(im.map(\.parkWaitNs))),
+        ("initialP50ms", pct(im.map(\.pauseNs), 0.5)), ("initialMaxMs", mx(im.map(\.pauseNs))),
+        ("initialTtspMaxMs", mx(im.map(\.timeToSafepointNs))), ("initialBeforeRequestMaxMs", mx(im.map(\.beforeRequestNs))),
         ("finalLog", rows.isEmpty ? "-" : rows.joined(separator: ",")),
     ]
 }

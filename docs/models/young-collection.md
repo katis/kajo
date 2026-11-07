@@ -213,7 +213,10 @@ pointer between instructions; a worker still in the VM at its end leaves):
   offload, in the new half: not in Y), slot 0 initialised with a plain
   relaxed store and no barrier (amendment 13).
 - `flip` (offload) and `collect` (local): wait while `stwWanted` or the
-  nursery's collection is active (servicing rounds, quiescent); under the
+  nursery's collection is active (servicing rounds, quiescent); worker 0,
+  the main worker, waits while `stwWanted` only after it has opened one
+  collection since O set it (`mainOpensWhileWanted`, the final mark on the
+  devices; cleared at O's stop); under the
   mutex set `collecting[k]`, raise the barrier word, `ycActive += 1`, Y_k :=
   every object young in k. `flip` queues k for C; `collect` runs it.
 - `waitDone` (offload): the wait at the start of the owner's next flip.
@@ -370,10 +373,23 @@ machine; they are indicative.
 | new half (offload): W allocates N, stores X into N, publishes N in G; A reads and cuts | 34,093 | 98,409 | 97 | 7 | 0.18 s |
 | new half, initialising store | 27,688 | 80,018 | 86 | 6 | 0.14 s |
 | epochs (offload, body pointers): M reads Q through pointers, in a blocking region, leaves and re-enters; W waits for done | 9,120 | 24,863 | 71 | 2 | 0.04 s |
-| ownership, snapshot and sweep: nurseries 0 and 1 local, H deferred and re-armed, O snapshot and sweep | 171,691 | 493,911 | 155 | 6 | 0.93 s |
-| ownership, full collection | 128,527 | 348,019 | 154 | 6 | 0.65 s |
+| ownership, snapshot and sweep: nurseries 0 and 1 local, H deferred and re-armed, O snapshot and sweep | 213,969 | 594,806 | 155 | 6 | 1.87 s |
+| ownership, full collection | 170,836 | 449,005 | 154 | 6 | 1.47 s |
 
-All claims hold in all nine; no deadlock. The ownership configurations
+All claims hold in all nine; no deadlock. The two ownership rows are the
+final mark on the devices' (2026-11-07, docs/modules/final-mark.md):
+worker 0 is the main worker and may open one collection while O wants its
+stop (`mainOpensWhileWanted`, on by default); with module 7's rule, every
+opener waiting while a stop is wanted, they had 171,691 and 128,527
+states and hold as well (`withTheMainWorkersOpenWhileAStopIsWanted` runs
+both). The change is liveness only, as expected: O stops only once
+`ycActive` is 0 (`worldCanStop`), so a collection the main worker opens
+while O waits is one more collection O waits for, never one a stop
+interleaves. The same follow-up moved the young-root scan out of the
+initial mark's stop and bounded the final mark's tracing; neither is
+modelled here (O's marking is its result, "the snapshot entries reachable
+at the pause are marked", not its work), and the module doc says why each
+is sound and which tests show each rule. The ownership configurations
 reach witness states (4 and 2): runs in which the deferred entry was kept
 across a pause, freed by its nursery and reused by a worker, so the rule's
 case happened and nothing broke.

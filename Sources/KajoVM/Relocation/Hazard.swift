@@ -150,7 +150,7 @@ func copySlots(_ vm: VMPointer, _ w: WorkerPointer, _ om: ObjectMemory, _ o: UIn
             let b = unsafe mk.buffer(w.pointee.index)
             unsafe b.pointee.slowCalls &+= 1
             if unsafe mk.phaseNow == .marking && !mk.pointee.config.testSwitches.satbOff
-                && (mk.pointee.config.testSwitches.literal || ho & Header.youngBit == 0) {
+                && (mk.pointee.config.testSwitches.literal || ho & Header.youngBit == 0 || youngHolderScanOwed(mk, ho)) {
                 unsafe satbPushIfCandidate(mk, om, w, om.loadAtomic(bodyOffset: d, i &+ k))
             }
         }

@@ -80,6 +80,22 @@ func holds(_ r: Report) {
         holds(r)
         #expect(r.witnesses > 0)
     }
+
+    /// The final mark on the devices: the configurations above run with
+    /// worker 0 as the main worker that may open one collection while O
+    /// wants its stop (the default); with module 7's rule, every opener
+    /// waiting while a stop is wanted, they hold as well, in fewer states.
+    @Test func withTheMainWorkersOpenWhileAStopIsWanted() {
+        for steps in [[OldSpaceStep.snapshot, .sweep], [.fullCollection]] {
+            var off = Configuration.ownership(steps)
+            off.mainOpensWhileWanted = false
+            let on = check("ownership, main opens while wanted", .ownership(steps))
+            let without = check("ownership, every opener waits", off)
+            holds(on)
+            holds(without)
+            #expect(on.states > without.states, "\(on.states) against \(without.states)")
+        }
+    }
 }
 
 // MARK: - each rule is needed

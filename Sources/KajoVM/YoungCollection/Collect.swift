@@ -13,7 +13,13 @@ import Synchronization
 
 /// Owner `w` of nursery `k`, inside the VM at its allocation slow path
 /// (registers flushed): open collection `k`. Waits (servicing rounds,
-/// parking) while a stop is wanted or requested. `offload`: the full eden
+/// parking) while a stop is wanted or requested. The final mark on the
+/// devices: the main worker waits only for a requested stop, and opens at
+/// most one collection while a stop is wanted (`mainOpenedWhileWanted`,
+/// cleared at the request): a stopper waits for every open collection, 5
+/// to 20 ms on the devices under the storm, and a main worker that waited
+/// with it missed frames; one collection more delays the stop, with the
+/// world running, by one collection at most. `offload`: the full eden
 /// half and its stash go to the collection, the owner flips to the other
 /// half (its pause is this flip). False, with nothing opened, when the
 /// promotion room the collection may need cannot be promised.
@@ -26,7 +32,14 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
     let h = unsafe y.handshake(k)
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
     let tw = nanoseconds()
-    unsafe waitServicing(vm, w) { unsafe sp.pointee.stwWanted > 0 || sp.pointee.requested }
+    let mainMayPass = unsafe w.pointee.isMain && !y.pointee.config.testSwitches.mainWaitsForWantedStops
+    unsafe waitServicing(vm, w) {
+        unsafe sp.pointee.requested || (sp.pointee.stwWanted > 0 && !(mainMayPass && !sp.pointee.mainOpenedWhileWanted))
+    }
+    if unsafe mainMayPass && sp.pointee.stwWanted > 0 {
+        unsafe sp.pointee.mainOpenedWhileWanted = true
+        unsafe y.counters(k).pointee.opensWhileWanted &+= 1
+    }
     let waited = nanoseconds() &- tw
     unsafe y.counters(k).pointee.stopWaitNs &+= waited
     if unsafe waited > y.counters(k).pointee.stopWaitMaxNs { unsafe y.counters(k).pointee.stopWaitMaxNs = waited }
@@ -111,6 +124,10 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe v.pointee.nextCarried.removeAll()
     unsafe work.pointee.grey.removeAll()
     var col = unsafe Collector(vm: vm, y: y, c: c, k: k, ctx: c.pointee.interp.context)
+
+    // The final mark on the devices: the nursery's young-root scan, if
+    // still owed for a marking cycle, before anything of it moves.
+    unsafe collectorFinishesRootScan(vm, c, k) { unsafe col.servicePoint() }
 
     // H0, H1.
     if let hk = unsafe sw.hook { unsafe hk(sw.hookContext, k, 0) }

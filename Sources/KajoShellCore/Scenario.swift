@@ -411,7 +411,7 @@ import KajoVM
         line += " main_acks_other=\(m.acksOther) main_acks_other_ms_per10s=\(per10(m.acksOtherNs)) main_ack_other_mean_us=\(m.acksOther == 0 ? "-" : f1(Double(m.acksOtherNs) / Double(m.acksOther) / 1e3))"
         line += " main_ack_max_ms=\(ms(m.ackMaxNs)) main_acks_own=\(m.acksOwn) main_flips=\(m.flips) main_flip_max_ms=\(ms(m.flipMaxNs))"
         line += " main_own_collections=\(m.ownCollections) main_own_max_ms=\(ms(m.ownMaxNs)) main_collector_waits=\(m.collectorWaits) main_collector_wait_ms=\(ms(m.collectorWaitNs))"
-        line += " main_stop_wait_ms_per10s=\(per10(m.stopWaitNs)) main_stop_wait_max_ms=\(ms(m.stopWaitMaxNs)) main_drain_wait_ms_per10s=\(per10(m.drainWaitNs))"
+        line += " main_stop_wait_ms_per10s=\(per10(m.stopWaitNs)) main_stop_wait_max_ms=\(ms(m.stopWaitMaxNs)) main_opens_while_wanted=\(m.opensWhileWanted) main_drain_wait_ms_per10s=\(per10(m.drainWaitNs))"
         if eventRate > 0 {
             line += " events_posted=\(eventsPosted) label_updates=\(labelUpdates) ev_n=\(latencies.count)"
             line += " ev_lat_p50_ms=\(f3(percentile(latencies, 0.5))) ev_lat_p99_ms=\(f3(percentile(latencies, 0.99))) ev_lat_max_ms=\(f3(latencies.max() ?? 0))"

@@ -162,6 +162,9 @@ public struct State: Hashable {
     var queue: [Int] = []
     var ycActive = 0
     var stwWanted = false
+    /// Worker 0 opened a collection while O wanted its stop (once; cleared
+    /// at the stop).
+    var mainOpenedWhileWanted = false
     var oldSpacePc = 0
     var oldSpaceStep = 0
 }
@@ -574,8 +577,10 @@ struct Model {
                 collectorSteps(s, c, participant: w, emit)
                 return
             }
-            let ready = !s.stwWanted && !s.nurseries[k].active
+            let mainPasses = config.mainOpensWhileWanted && w == 0 && !s.mainOpenedWhileWanted
+            let ready = (!s.stwWanted || mainPasses) && !s.nurseries[k].active
             guard waitSteps(s, w, ready: ready, tag, emit), s.memory.isDrained(w) else { return }
+            if s.stwWanted { n.mainOpenedWhileWanted = true }
             let young = s.objects.indices.filter { youngIn(s, $0) == k }
             for o in young {
                 n.objects[o].inY = true
@@ -1301,6 +1306,7 @@ struct Model {
             let reach = reachable(s)
             for o in 0..<N where isDeferred(o) { n.objects[o].deferredAcrossPause = true }
             n.stwWanted = false
+            n.mainOpenedWhileWanted = false
             next(&n)
             if step == .snapshot {
                 var snap: [Int] = []

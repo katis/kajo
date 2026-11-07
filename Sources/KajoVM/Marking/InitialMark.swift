@@ -195,9 +195,16 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
         // deferred entry free (amendment 17), except under the test switch
         // that brings the experiment's bug back.
         if unsafe !literal && y.pointee.config.testSwitches.youngRoots {
-            let ts = nanoseconds()
-            let words = unsafe youngRootScan(vm, mk)
-            unsafe noteYoungRootScan(y, nanoseconds() &- ts, words)
+            if unsafe mk.pointee.config.testSwitches.youngRootsInStop {
+                let ts = nanoseconds()
+                let words = unsafe youngRootScan(vm, mk)
+                unsafe noteYoungRootScan(y, nanoseconds() &- ts, words)
+            } else {
+                // The final mark on the devices: the ranges only; the scan
+                // runs outside the stop (`RootScans.swift`).
+                unsafe recordYoungRoots(vm, mk)
+                unsafe y.pointee.log.pointee.initialMarks &+= 1
+            }
         }
         unsafe snapshotDeferred(vm, y, mk)
     } else if unsafe !literal && !mk.pointee.config.testSwitches.noSurvivorRoots, let n = unsafe vm.pointee.nursery {

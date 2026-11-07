@@ -125,12 +125,13 @@ private func noteEpoch(_ w: WorkerPointer, _ epoch: UInt64) {
 @safe struct StopContext {
     let vm: UnsafeMutablePointer<VMState>
     let keeping: [Oop]
+    /// From the request to the last park (`StopRecord`).
     var timeToSafepointNs: UInt64 = 0
-    /// The final mark on the devices: the split of `timeToSafepointNs`
-    /// (`StopRecord`), and when the stop's work began (uptime ns).
+    /// The final mark on the devices: the stopper's wait before its
+    /// request and the collections open when it began, the last parker and
+    /// how it came, and when the stop's work began (uptime ns).
     var beforeRequestNs: UInt64 = 0
     var collectionsOpen = 0
-    var parkWaitNs: UInt64 = 0
     var slowest = -1
     var slowestVia = ParkVia.poll
     var parkedFromWaits = 0
@@ -176,6 +177,7 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe sp.pointee.lastParker = -1
     unsafe sp.pointee.lastParkerVia = .poll
     unsafe sp.pointee.parkedFromWaits = 0
+    unsafe sp.pointee.mainOpenedWhileWanted = false
     unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .relaxed)
     // Module 7: participants blocked in a wait inside the VM (`waitServicing`:
     // an opener waiting for `stwWanted`, a collector, an eden wait) must wake
@@ -194,8 +196,8 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     // The world is stopped. Module 6: pending blocks are freed first, the
     // relocation verifier runs after the work.
     unsafe relocationAtPauseStart(vm)
-    work(unsafe StopContext(vm: vm, keeping: keeping, timeToSafepointNs: t1 &- t0, beforeRequestNs: tr &- t0,
-                            collectionsOpen: collectionsOpen, parkWaitNs: t1 &- tr, slowest: slowest, slowestVia: slowestVia,
+    work(unsafe StopContext(vm: vm, keeping: keeping, timeToSafepointNs: t1 &- tr, beforeRequestNs: tr &- t0,
+                            collectionsOpen: collectionsOpen, slowest: slowest, slowestVia: slowestVia,
                             parkedFromWaits: fromWaits, workStartNs: nanoseconds()))
     unsafe relocationAtPauseEnd(vm)
     if unsafe vm.pointee.config.verifyStops { unsafe verifySchedule(vm) }
@@ -224,8 +226,8 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     let t2 = nanoseconds()
     let i = unsafe sp.pointee.stopCount
     unsafe sp.pointee.stops[i & (SafepointState.stopLog - 1)] = StopRecord(
-        timeToSafepointNs: t1 &- t0, pauseNs: t2 &- t0, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind,
-        atNs: t0, beforeRequestNs: tr &- t0, collectionsOpen: collectionsOpen, parkWaitNs: t1 &- tr, slowestVia: slowestVia,
+        timeToSafepointNs: t1 &- tr, pauseNs: t2 &- tr, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind,
+        atNs: tr, beforeRequestNs: tr &- t0, collectionsOpen: collectionsOpen, slowestVia: slowestVia,
         parkedFromWaits: fromWaits)
     unsafe sp.pointee.kind = .other
     unsafe sp.pointee.stopCount = i &+ 1
@@ -233,10 +235,13 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     unsafe noteEpoch(w, epoch)
+    // The stopper's own time includes its wait before the request; the
+    // counters are the world's (from the request).
     unsafe w.pointee.stopNs &+= t2 &- t0
     unsafe vm.count(.stops)
-    unsafe vm.count(.stopNs, t2 &- t0)
-    unsafe vm.count(.timeToSafepointNs, t1 &- t0)
+    unsafe vm.count(.stopNs, t2 &- tr)
+    unsafe vm.count(.timeToSafepointNs, t1 &- tr)
+    unsafe vm.count(.stopRequestWaitNs, tr &- t0)
     return true
 }
 

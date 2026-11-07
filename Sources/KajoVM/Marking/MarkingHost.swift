@@ -28,6 +28,13 @@ extension MarkingShared {
         let markerWorker = unsafe Worker.make(image: vm.pointee.image, vm: vm, index: count, isMain: false,
                                               flag: vm.pointee.flag, pollEvery: vm.pointee.config.pollEvery,
                                               seed: (vm.pointee.config.perturb?.seed ?? 0x5EED) &* 0x9E37_79B9 | 1)
+        let nurseries = unsafe vm.pointee.nursery.unsafelyUnwrapped.pointee.count
+        let rootScans = UnsafeMutablePointer<Atomic<UInt8>>.allocate(capacity: Swift.max(1, nurseries))
+        for k in 0..<Swift.max(1, nurseries) { unsafe (rootScans + k).initialize(to: Atomic(0)) }
+        let ranges = UnsafeMutablePointer<UInt64>.allocate(capacity: 4 * Swift.max(1, nurseries))
+        unsafe ranges.initialize(repeating: 0, count: 4 * Swift.max(1, nurseries))
+        let stats = UnsafeMutablePointer<Atomic<UInt64>>.allocate(capacity: RootScanStat.count)
+        for k in 0..<RootScanStat.count { unsafe (stats + k).initialize(to: Atomic(0)) }
         let mk = unsafe lined(MarkingShared(
             config: config, om: om, workerCount: count, snapshot: snapshot, satb: satb, queue: lined(queue),
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
@@ -35,7 +42,8 @@ extension MarkingShared {
             wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
             waits: lined(AllocationWaits()), waitsLock: makeMutex(), qosNow: lined(Atomic<UInt32>(0)),
             stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
-            barrier: barrierWord(vm.pointee.flag)))
+            barrier: barrierWord(vm.pointee.flag), rootScans: rootScans, rootScanRanges: ranges,
+            rootScanCount: nurseries, rootScanStats: stats))
         if config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOn(mk) }
         unsafe vm.pointee.marking = mk
     }
@@ -71,6 +79,11 @@ extension MarkingShared {
         unsafe freeMutex(s.lock)
         unsafe freeCond(s.cond)
         unsafe s.snapshot.release()
+        unsafe s.rootScans.deinitialize(count: Swift.max(1, s.rootScanCount))
+        unsafe s.rootScans.deallocate()
+        unsafe s.rootScanRanges.deallocate()
+        unsafe s.rootScanStats.deinitialize(count: RootScanStat.count)
+        unsafe s.rootScanStats.deallocate()
         unsafe unlined(mk)
         unsafe vm.pointee.marking = nil
     }
@@ -140,6 +153,19 @@ extension VM {
         return inspect { _ in unsafe mk.pointee.log.pointee.fallbackRecords.records }
     }
 
+    /// The final mark on the devices: the young-root scans' counters
+    /// (`RootScanStat`), read outside stops (atomics).
+    var rootScanStats: [UInt64] {
+        guard let mk = unsafe state.pointee.marking else { return Array(repeating: 0, count: RootScanStat.count) }
+        return (0..<RootScanStat.count).map { unsafe mk.rootScanStat($0).pointee.load(ordering: .relaxed) }
+    }
+
+    /// The final mark on the devices: nursery `k`'s young-root scan state.
+    func rootScanState(_ k: Int) -> UInt8 {
+        guard let mk = unsafe state.pointee.marking, unsafe k < mk.pointee.rootScanCount else { return RootScanState.none }
+        return unsafe mk.rootScan(k).pointee.load(ordering: .acquiring)
+    }
+
     /// Sums and maxima over every cycle, and the records the log dropped.
     var cycleTotals: CycleTotals {
         guard let mk = unsafe state.pointee.marking else { return CycleTotals() }
@@ -173,7 +199,9 @@ extension VM {
         unsafe enterVM(state, mw)
         let m = unsafe mk.pointee.marker
         let before = unsafe m.pointee.markedObjects
-        _ = unsafe markSome(state, mk, limit: objects)
+        // The final mark on the devices: the owed young-root scans first, as
+        // the marker thread does.
+        if unsafe markerScansYoungRoots(state, mk, cycle: mk.cycleNow) { _ = unsafe markSome(state, mk, limit: objects) }
         let n = unsafe Int(m.pointee.markedObjects &- before)
         unsafe leaveVM(state, mw)
         return n
@@ -186,6 +214,7 @@ extension VM {
         let mk = unsafe manualMarker()
         let mw = unsafe mk.pointee.markerWorker
         unsafe enterVM(state, mw)
+        _ = unsafe markerScansYoungRoots(state, mk, cycle: mk.cycleNow)
         let outcome = unsafe markSome(state, mk, limit: objects)
         unsafe leaveVM(state, mw)
         return outcome == .done

@@ -203,14 +203,17 @@ public struct MainThreadCounters: Sendable {
     /// The final mark on the devices: the longest single wait before
     /// opening a collection while a stop was wanted or pending.
     public var stopWaitMaxNs: UInt64 = 0
+    /// Collections the main worker opened while a stop was wanted.
+    public var opensWhileWanted: UInt64 = 0
 
     public init() {}
 
     init(acksOwn: UInt64, acksOwnNs: UInt64, acksOther: UInt64, acksOtherNs: UInt64, ackMaxNs: UInt64, serviceNs: UInt64,
          ownCollections: UInt64, ownNs: UInt64, ownMaxNs: UInt64, flips: UInt64, flipNs: UInt64, flipMaxNs: UInt64,
          collectorWaits: UInt64, collectorWaitNs: UInt64, edenWaits: UInt64, edenWaitNs: UInt64, stopWaitNs: UInt64,
-         drainWaitNs: UInt64, stopWaitMaxNs: UInt64 = 0) {
+         drainWaitNs: UInt64, stopWaitMaxNs: UInt64 = 0, opensWhileWanted: UInt64 = 0) {
         self.stopWaitMaxNs = stopWaitMaxNs
+        self.opensWhileWanted = opensWhileWanted
         self.acksOwn = acksOwn; self.acksOwnNs = acksOwnNs; self.acksOther = acksOther; self.acksOtherNs = acksOtherNs
         self.ackMaxNs = ackMaxNs; self.serviceNs = serviceNs; self.ownCollections = ownCollections; self.ownNs = ownNs
         self.ownMaxNs = ownMaxNs; self.flips = flips; self.flipNs = flipNs; self.flipMaxNs = flipMaxNs
@@ -234,6 +237,7 @@ public struct MainThreadCounters: Sendable {
         d.flips &-= e.flips; d.flipNs &-= e.flipNs; d.collectorWaits &-= e.collectorWaits
         d.collectorWaitNs &-= e.collectorWaitNs; d.edenWaits &-= e.edenWaits; d.edenWaitNs &-= e.edenWaitNs
         d.stopWaitNs &-= e.stopWaitNs; d.drainWaitNs &-= e.drainWaitNs
+        d.opensWhileWanted &-= e.opensWhileWanted
         return d
     }
 }
@@ -545,7 +549,8 @@ public final class ShellVM: @unchecked Sendable {
             ackMaxNs: y.ackMaxNs, serviceNs: y.serviceNs, ownCollections: y.ownCollections, ownNs: y.ownNs,
             ownMaxNs: y.ownMaxNs, flips: y.flips, flipNs: y.flipNs, flipMaxNs: y.flipMaxNs,
             collectorWaits: y.collectorWaits, collectorWaitNs: y.collectorWaitNs, edenWaits: y.edenWaits,
-            edenWaitNs: y.edenWaitNs, stopWaitNs: y.stopWaitNs, drainWaitNs: y.drainWaitNs, stopWaitMaxNs: y.stopWaitMaxNs)
+            edenWaitNs: y.edenWaitNs, stopWaitNs: y.stopWaitNs, drainWaitNs: y.drainWaitNs, stopWaitMaxNs: y.stopWaitMaxNs,
+            opensWhileWanted: y.opensWhileWanted)
     }
 
     /// Every stop so far (the last 65 536).

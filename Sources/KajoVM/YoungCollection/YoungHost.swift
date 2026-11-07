@@ -288,6 +288,13 @@ extension VM {
         return unsafe state.pointee.safepoint.pointee.stwWanted
     }
 
+    /// Test: young collections open now.
+    var collectionsOpen: Int {
+        unsafe pthread_mutex_lock(state.pointee.safepointLock)
+        defer { unsafe pthread_mutex_unlock(state.pointee.safepointLock) }
+        return unsafe state.pointee.safepoint.pointee.ycActive
+    }
+
     /// Test: is worker `i` inside the VM?
     func isInside(worker i: Int) -> Bool {
         unsafe pthread_mutex_lock(state.pointee.safepointLock)

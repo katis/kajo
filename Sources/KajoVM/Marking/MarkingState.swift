@@ -117,7 +117,8 @@ struct CycleRecord: Sendable {
     var rootsNs: UInt64 = 0
     var survivorsNs: UInt64 = 0
     var snapshotEntries: UInt64 = 0
-    /// The final mark's pause and its split.
+    /// The final mark's pause (from its request: the time to safepoint and
+    /// the work to the verifier's end) and its split.
     var finalPauseNs: UInt64 = 0
     var finalTtspNs: UInt64 = 0
     var drainNs: UInt64 = 0
@@ -127,14 +128,20 @@ struct CycleRecord: Sendable {
     var weakNs: UInt64 = 0
     var verifyNs: UInt64 = 0
     var ephemeronItems: UInt64 = 0
+    /// The final mark on the devices: the units of tracing work the
+    /// successful final mark's stop did (`finalWorkUnits`), the most any of
+    /// this cycle's attempts did, and the attempts that gave up at the
+    /// bound (`MarkingConfig.finalMarkWork`), for work or for an owed
+    /// young-root scan.
+    var finalWorkUnits: UInt64 = 0
+    var finalWorkUnitsMax: UInt64 = 0
+    var finalGiveUps: UInt64 = 0
     /// The final mark on the devices (docs/modules/final-mark.md): the
-    /// stop's time to safepoint split (`StopRecord`): before the request
-    /// (the wait for open young collections, the world running), the
-    /// collections open then, and from the request to the last park; the
+    /// stopper's wait before its request (module 7's open young
+    /// collections, the world running) and the collections open then; the
     /// last parker and how it came, and how many came from a wait.
     var finalBeforeRequestNs: UInt64 = 0
     var finalCollectionsOpen = 0
-    var finalParkWaitNs: UInt64 = 0
     var finalSlowest = -1
     var finalSlowestVia = ParkVia.poll
     var finalParkedFromWaits = 0
@@ -243,6 +250,12 @@ struct MarkingCounters: Sendable {
     /// Large bytes, part 2: `AllocationWaits`, copied in on read.
     var allocationWaits = AllocationWaits()
     var sweepsFinishedForEntriesNs: UInt64 = 0
+    /// The final mark on the devices: final marks that gave up at the work
+    /// bound (or found a young-root scan owed) and released the world with
+    /// marking still on, and those that finished past the bound because a
+    /// cycle had given up `finalMarkGiveUps` times already.
+    var finalGiveUps: UInt64 = 0
+    var finalOverruns: UInt64 = 0
 }
 
 /// Large bytes, part 2: old allocations that found no room while a cycle
@@ -404,6 +417,15 @@ struct MarkingLog {
     let machThread: UnsafeMutablePointer<Atomic<UInt32>>
     /// The VM-wide barrier word (module 3's flag line, word 2).
     let barrier: UnsafeMutablePointer<Atomic<UInt32>>
+    /// The final mark on the devices: each nursery's young-root scan for
+    /// the current cycle (`RootScanState`), the ranges the initial mark
+    /// recorded for it (four words: eden start and top, survivor-from start
+    /// and top), and the scans' counters (`RootScanStat`), all read and
+    /// written outside stops. `rootScanCount` nurseries (0 without module 7).
+    let rootScans: UnsafeMutablePointer<Atomic<UInt8>>
+    let rootScanRanges: UnsafeMutablePointer<UInt64>
+    let rootScanCount: Int
+    let rootScanStats: UnsafeMutablePointer<Atomic<UInt64>>
 }
 
 /// Host side: written by `start` and `shutdown` only.

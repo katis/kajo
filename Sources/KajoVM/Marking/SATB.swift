@@ -33,10 +33,13 @@ func storeWithBarriers(_ s: StatePointer, _ o: UInt64, _ i: Int, _ v: UInt64, _ 
 }
 
 /// Record the value slot `i` of `o` holds before it is overwritten: return
-/// if no cycle is marking, if the holder is young (created after the
-/// snapshot: overwriting its slots deletes no snapshot edge), if the old
-/// value is not a reference, not a snapshot entry, or already marked; else
-/// push it on this worker's buffer.
+/// if no cycle is marking, if the holder is young and its nursery's
+/// young-root scan is done (it was a root at the snapshot and its slots
+/// have been read since, or it was created after the snapshot: overwriting
+/// its slots deletes no snapshot edge), if the old value is not a
+/// reference, not a snapshot entry, or already marked; else push it on
+/// this worker's buffer. The final mark on the devices: while the scan is
+/// owed the holder's old value is recorded (`youngHolderScanOwed`).
 @inline(__always)
 func satbRecord(_ mk: MarkingPointer, _ om: ObjectMemory, _ w: WorkerPointer, _ o: UInt64, _ i: Int) {
     let b = unsafe mk.buffer(w.pointee.index)
@@ -44,7 +47,10 @@ func satbRecord(_ mk: MarkingPointer, _ om: ObjectMemory, _ w: WorkerPointer, _ 
     if unsafe mk.phaseNow != .marking { return }
     let sw = unsafe mk.pointee.config.testSwitches
     if sw.satbOff { return }
-    if !sw.literal && om.headerWord(o) & Header.youngBit != 0 { return }
+    if !sw.literal {
+        let h = om.headerWord(o)
+        if unsafe h & Header.youngBit != 0 && !youngHolderScanOwed(mk, h) { return }
+    }
     let old = om.loadAtomic(bodyOffset: om.stateWord(o), i)
     unsafe satbPushIfCandidate(mk, om, w, old)
 }

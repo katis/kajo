@@ -16,6 +16,9 @@ import Synchronization
 /// are the stop's roots (module 3); module 1's own roots are added here.
 func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Bool, timeToSafepointNs: UInt64 = 0) {
     guard let n = unsafe vm.pointee.nursery else { return }
+    // The final mark on the devices: a young-root scan still owed is done
+    // before anything young moves (docs/modules/final-mark.md).
+    if let mk = unsafe vm.pointee.marking { unsafe finishRootScansInStop(vm, mk) }
     let t0 = nanoseconds()
     let om = unsafe n.pointee.om
     let config = unsafe n.pointee.config

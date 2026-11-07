@@ -135,9 +135,19 @@ func greySlots(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePoint
 }
 
 /// Trace until the stack is empty, with no poll (the final mark, world
-/// stopped).
-func drainStack(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>) {
-    while let o = unsafe m.pointee.stack.popLast() { unsafe traceObject(mk, om, m, o) }
+/// stopped), or until `units` reaches `bound` (each object traced counts
+/// what `traceObject` answers): false when the stack is not empty then.
+func drainStack(_ mk: MarkingPointer, _ om: ObjectMemory, _ m: UnsafeMutablePointer<MarkerState>,
+                units: inout Int, bound: Int) -> Bool {
+    while units < bound, let o = unsafe m.pointee.stack.popLast() { units &+= unsafe traceObject(mk, om, m, o) }
+    return unsafe m.pointee.stack.count == 0
+}
+
+/// The marker's queue holds an item (marking lock).
+func queueHasItems(_ mk: MarkingPointer) -> Bool {
+    unsafe pthread_mutex_lock(mk.pointee.lock)
+    defer { unsafe pthread_mutex_unlock(mk.pointee.lock) }
+    return unsafe mk.pointee.queue.pointee.items.count > 0
 }
 
 /// One queue item onto the stack: a grey packet's oops as they are, an
@@ -231,13 +241,26 @@ func dropMarkerWork(_ mk: MarkingPointer) {
 }
 
 /// Mark the current cycle to the end and request its final mark (the
-/// marker is the stopper). Inside the VM as the marker worker.
+/// marker is the stopper). Inside the VM as the marker worker. The final
+/// mark on the devices: first the young-root scans the initial mark left
+/// owed; the final mark is requested only with every scan done, the stack
+/// and the queue empty (a collector's scan hands its candidates to the
+/// queue before it is done, so the queue is read after the scans). A final
+/// mark that gave up at its work bound leaves the cycle marking, and the
+/// marker loop comes back here.
 func markCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     let m = unsafe mk.pointee.marker
     let mw = unsafe mk.pointee.markerWorker
     let cycle = unsafe mk.cycleNow
     let w0 = nanoseconds(), c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
-    let outcome = unsafe markSome(vm, mk, limit: .max)
+    var outcome = MarkOutcome.done
+    while true {
+        if unsafe !markerScansYoungRoots(vm, mk, cycle: cycle) { outcome = .abandoned; break }
+        let pending = unsafe rootScansPending(mk)
+        outcome = unsafe markSome(vm, mk, limit: .max)
+        if unsafe outcome != .done || !pending || mk.pointee.config.testSwitches.markerSkipsRootScans { break }
+        if unsafe !markerWaitsForRootScans(vm, mk, cycle: cycle) { outcome = .abandoned; break }
+    }
     unsafe m.pointee.markCpuNs &+= clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) &- c0
     unsafe m.pointee.markWallNs &+= nanoseconds() &- w0
     if outcome != .done { return }

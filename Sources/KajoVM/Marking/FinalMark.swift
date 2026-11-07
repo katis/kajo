@@ -4,8 +4,19 @@ import Synchronization
 // The final mark (docs/modules/concurrent-marking.md "Final mark"): a stop
 // the marker requests when its stack and the queue are empty. With the
 // world stopped: drain every worker's partial SATB buffer, every queued
-// item and the marker's stack; filter dead holders out of the remembered
-// set; resolve ephemerons; nil weak slots; verify; then the sweep may run.
+// item and the marker's stack; resolve ephemerons; filter dead holders out
+// of the remembered set; nil weak slots; verify; then the sweep may run.
+//
+// The final mark on the devices (docs/modules/final-mark.md): the tracing
+// the stop does is bounded in work (`MarkingConfig.finalMarkWork` units:
+// an SATB entry taken, an object traced, a large object's chunk as
+// `MarkChunk.weight`). Past the bound, or with a young-root scan still
+// owed, the stop gives up before anything is decided: the marking bit stays
+// on, what it took stays on the marker's stack, the world is released and
+// the marker drains concurrently and asks again. After
+// `finalMarkGiveUps` give-ups in a cycle the final mark finishes whatever
+// it costs (counted, `finalOverruns`). Firing ephemerons is past the
+// commit point and not bounded (counted in the units).
 
 /// The final mark of cycle `cycle` (world stopped; the stopper is the
 /// marker participant). Nothing happens if that cycle is no longer marking.
@@ -18,31 +29,103 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     let m = unsafe mk.pointee.marker
     let log = unsafe mk.pointee.log
     let config = unsafe mk.pointee.config
-    if !config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOff(mk) }
+    let giveUps = unsafe log.pointee.currentRecord?.finalGiveUps ?? 0
+    let mayGiveUp = !config.testSwitches.unboundedFinalMark && giveUps < UInt64(config.finalMarkGiveUps)
+    let bound = mayGiveUp ? config.finalMarkWork : Int.max
+    var units = 0
 
-    // 1. Drain: partial buffers, queued items, the stack.
+    /// Give up: nothing decided yet; the marking bit is still on.
+    func giveUp() {
+        if var r = unsafe log.pointee.currentRecord {
+            r.finalGiveUps &+= 1
+            r.finalWorkUnitsMax = Swift.max(r.finalWorkUnitsMax, UInt64(units))
+            unsafe log.pointee.currentRecord = r
+        }
+        unsafe log.pointee.counters.finalGiveUps &+= 1
+    }
+
+    // 0. Young roots: the marker scans every owed nursery before it asks;
+    // one still owed (a manual final mark, a skipped scan) is work for
+    // outside the stop.
+    if unsafe rootScansPending(mk) {
+        if mayGiveUp { giveUp(); return }
+        units &+= Int(truncatingIfNeeded: unsafe finishRootScansInStop(vm, mk))
+    }
+
+    // 1. Drain: partial buffers, queued items, the stack, within the bound.
     var drained: UInt64 = 0
     var pushed: UInt64 = 0, handed: UInt64 = 0
     for k in unsafe 0..<mk.pointee.workerCount {
         let b = unsafe mk.buffer(k)
         unsafe takeItem(mk, om, m, MarkItem(words: b.pointee.words, count: b.pointee.count, grey: false))
         drained &+= unsafe UInt64(b.pointee.count)
+        units &+= unsafe b.pointee.count
         unsafe b.pointee.count = 0
         pushed &+= unsafe b.pointee.pushed
         handed &+= unsafe b.pointee.handed
     }
-    while let it = unsafe popItem(mk) {
+    while units < bound, let it = unsafe popItem(mk) {
         unsafe takeItem(mk, om, m, it)
         drained &+= unsafe UInt64(it.count)
+        units &+= unsafe it.count
         unsafe returnBuffer(mk, it.words)
     }
     drained &+= unsafe UInt64(m.pointee.stack.count)
-    unsafe drainStack(mk, om, m)
+    if unsafe !drainStack(mk, om, m, units: &units, bound: bound) || (units >= bound && queueHasItems(mk)) {
+        giveUp()
+        return
+    }
     let t1 = nanoseconds()
 
-    // 2. Filter the remembered set: a holder that is a snapshot entry and
+    // 2. Ephemerons: those whose key got marked are traced, to a fixpoint
+    // (tracing can mark another key), within the bound; the rest are
+    // queued for finalization and traced, key included, so key and value
+    // survive this cycle. Queueing is the commit point: from there on the
+    // stop finishes.
+    var queued: UInt64 = 0
+    let items = unsafe UInt64(m.pointee.ephemerons.count)
+    while unsafe m.pointee.ephemerons.count > 0 {
+        var progressed = false
+        var i = 0
+        while unsafe i < m.pointee.ephemerons.count {
+            let e = unsafe m.pointee.ephemerons[i]
+            let key = om.loadAtomic(bodyOffset: om.stateWord(e), 0)
+            if unsafe !isUnmarkedSnapshotEntry(mk, om, key) {
+                unsafe greySlots(mk, om, m, e)
+                unsafe m.pointee.ephemerons[i] = m.pointee.ephemerons[m.pointee.ephemerons.count - 1]
+                _ = unsafe m.pointee.ephemerons.popLast()
+                progressed = true
+                units &+= 1
+            } else {
+                i &+= 1
+            }
+        }
+        if progressed {
+            if unsafe !drainStack(mk, om, m, units: &units, bound: bound) {
+                giveUp()
+                return
+            }
+            continue
+        }
+        while let e = unsafe m.pointee.ephemerons.popLast() {
+            om.queueForFinalization(Oop(raw: e))
+            queued &+= 1
+            unsafe greySlots(mk, om, m, e)
+            units &+= 1
+        }
+        _ = unsafe drainStack(mk, om, m, units: &units, bound: .max)
+    }
+    if giveUps >= UInt64(config.finalMarkGiveUps) && !config.testSwitches.unboundedFinalMark {
+        unsafe log.pointee.counters.finalOverruns &+= 1
+    }
+    let t2 = nanoseconds()
+    if !config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOff(mk) }
+
+    // 3. Filter the remembered set: a holder that is a snapshot entry and
     // unmarked is dead and about to be freed; the next scavenge must not
-    // scan it.
+    // scan it. After the ephemerons, whose tracing marks objects too (a
+    // holder reachable only through an ephemeron's value was filtered
+    // before this follow-up and its young referents went unscanned).
     var filtered: UInt64 = 0
     if !config.testSwitches.noRememberedFilter, let n = unsafe vm.pointee.nursery {
         func filter(_ list: UnsafeMutablePointer<RawArray<UInt64>>) {
@@ -66,39 +149,6 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
             for i in unsafe 0..<n.pointee.bufferOwners { unsafe filter(n.remBuffer(i, k)) }
             unsafe filter(n.survivors(k).pointer(to: \NurserySurvivors.carried)!)
         }
-    }
-    let t2 = nanoseconds()
-
-    // 3. Ephemerons: those whose key got marked are traced, to a fixpoint
-    // (tracing can mark another key); the rest are queued for finalization
-    // and traced, key included, so key and value survive this cycle.
-    var queued: UInt64 = 0
-    let items = unsafe UInt64(m.pointee.ephemerons.count)
-    while unsafe m.pointee.ephemerons.count > 0 {
-        var progressed = false
-        var i = 0
-        while unsafe i < m.pointee.ephemerons.count {
-            let e = unsafe m.pointee.ephemerons[i]
-            let key = om.loadAtomic(bodyOffset: om.stateWord(e), 0)
-            if unsafe !isUnmarkedSnapshotEntry(mk, om, key) {
-                unsafe greySlots(mk, om, m, e)
-                unsafe m.pointee.ephemerons[i] = m.pointee.ephemerons[m.pointee.ephemerons.count - 1]
-                _ = unsafe m.pointee.ephemerons.popLast()
-                progressed = true
-            } else {
-                i &+= 1
-            }
-        }
-        if progressed {
-            unsafe drainStack(mk, om, m)
-            continue
-        }
-        while let e = unsafe m.pointee.ephemerons.popLast() {
-            om.queueForFinalization(Oop(raw: e))
-            queued &+= 1
-            unsafe greySlots(mk, om, m, e)
-        }
-        unsafe drainStack(mk, om, m)
     }
     let t3 = nanoseconds()
 
@@ -135,8 +185,10 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
         r.finalTtspNs = stop.timeToSafepointNs
         r.drainNs = t1 &- t0
         r.drainedEntries = drained
-        r.filterNs = t2 &- t1
-        r.ephemeronNs = t3 &- t2
+        r.ephemeronNs = t2 &- t1
+        r.filterNs = t3 &- t2
+        r.finalWorkUnits = UInt64(units)
+        r.finalWorkUnitsMax = Swift.max(r.finalWorkUnitsMax, UInt64(units))
         r.ephemeronItems = items
         r.weakNs = t4 &- t3
         r.verifyNs = t5 &- t4
@@ -152,7 +204,6 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
         r.floatingBytes = verdict.floatingBytes
         r.finalBeforeRequestNs = stop.beforeRequestNs
         r.finalCollectionsOpen = stop.collectionsOpen
-        r.finalParkWaitNs = stop.parkWaitNs
         r.finalSlowest = stop.slowest
         r.finalSlowestVia = stop.slowestVia
         r.finalParkedFromWaits = stop.parkedFromWaits

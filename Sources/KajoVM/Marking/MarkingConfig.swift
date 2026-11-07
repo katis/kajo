@@ -28,6 +28,18 @@ struct MarkingConfig: Sendable {
     /// cycle marks waits this long at most for its final mark (a
     /// background worker; the main worker never waits). 0: no wait.
     var allocationWaitMs = 100
+    /// The final mark on the devices (docs/modules/final-mark.md): the
+    /// units of tracing work (an object traced, a large object's chunk as
+    /// `MarkChunk.weight`, an SATB entry taken) a final mark may do inside
+    /// its stop. Past it the stop gives up: the world is released with
+    /// marking still on, the marker drains concurrently and requests the
+    /// final mark again. Measured on the devices: the storm's final marks
+    /// trace a few hundred units; 16 384 is about a millisecond on the
+    /// iPhone's efficiency cores.
+    var finalMarkWork = 16_384
+    /// After this many give-ups in one cycle the final mark finishes past
+    /// the bound (counted, `finalOverruns`): marking must end.
+    var finalMarkGiveUps = 8
     /// The marker thread. Off: nothing marks unless a test drives it
     /// (`VM.markStep`, `finalMark`, `sweep`): the manual mode of the tests.
     var markerThread = true
@@ -91,4 +103,19 @@ struct MarkingTestSwitches: Sendable {
     /// Large bytes, part 2: an empty entry table during a sweep falls back
     /// to a full collection, as before (the sweep is not finished first).
     var noSweepForEntries = false
+    /// The final mark on the devices: the final mark's stop does all its
+    /// tracing whatever its length, as module 5 built it (the bound off).
+    var unboundedFinalMark = false
+    /// The initial mark scans every nursery's young bodies in its stop, as
+    /// module 7 built it (no scan is left owed).
+    var youngRootsInStop = false
+    /// The SATB barrier skips every young holder, a nursery's scan owed or
+    /// not (the barrier that catches what an owed scan has not read, off).
+    var noOwedScanBarrier = false
+    /// A young collection moves its nursery's objects without finishing the
+    /// nursery's owed scan first.
+    var collectBeforeRootScan = false
+    /// The marker requests the final mark without scanning the owed
+    /// nurseries (the work before the stop skipped).
+    var markerSkipsRootScans = false
 }

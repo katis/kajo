@@ -10,7 +10,8 @@
 #     module 5's barrier with the flag word (inlined into interpret and the
 #     primitives), the SATB slow path and handover, the weak keep-alive, the
 #     marker's trace loop and poll, the final mark's drain, the lazy sweep
-#     and the apply;
+#     and the apply; the final mark on the devices' young-root scans (the
+#     marker's, a collector's, a stop's);
 #     module 6's post-store slow paths and conflict call, the hazard
 #     acquire and the array copy primitive with its copy loop, the epoch
 #     enter and the pending-block free, the relocation pass and its copy;
@@ -50,7 +51,8 @@ wanted=(
   Barrier 'rememberSlow(_:_:_:_:)'
   Scavenge 'Scavenger.evacuate(_:_:)|Scavenger.drain()|Scavenger.scanRemembered(_:_:)|Scavenger.sweepNursery(_:)|Scavenger.exportPacket()|Scavenger.takePacket()|participateInScavenge(_:_:)'
   SATB 'storeWithBarriers(_:_:_:_:_:)|handOver(_:_:_:)|weakReadBarrier(_:_:_:_:)|takeBufferLocked(_:)'
-  Marker 'markSome(_:_:limit:)|markerPoll(_:_:cycle:phase:)|drainStack(_:_:_:)|takeItem(_:_:_:_:)|popItem(_:)|returnBuffer(_:_:)'
+  Marker 'markSome(_:_:limit:)|markerPoll(_:_:cycle:phase:)|drainStack(_:_:_:units:bound:)|takeItem(_:_:_:_:)|popItem(_:)|returnBuffer(_:_:)'
+  RootScans 'markerScansYoungRoots(_:_:cycle:)|collectorFinishesRootScan(_:_:_:servicePoint:)|finishRootScansInStop(_:_:)'
   Sweep 'sweepCycle(_:_:inPause:)|applyInStop(_:_:)'
   PostStore 'postStoreSlow(_:_:_:_:)|postStoreSlowByte(_:_:_:_:)|storeConflict(_:_:_:_:_:)'
   Hazard 'hazardAcquire(_:_:_:_:)|primReplace(_:_:)|copySlots(_:_:_:_:_:_:_:_:_:)'

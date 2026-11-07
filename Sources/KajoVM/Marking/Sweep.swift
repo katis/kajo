@@ -146,6 +146,7 @@ func abortCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     for w in unsafe 0..<log.pointee.snapshotWords { snap.setWord(w, 0) }
     unsafe resetBuffersAndQueue(mk)
     unsafe dropMarkerWork(mk)
+    unsafe clearRootScans(mk)
     om.setPendingDead(nil)
     om.setMarkingActive(false)
     unsafe relocationAtCycleEnd(vm, completed: false)
