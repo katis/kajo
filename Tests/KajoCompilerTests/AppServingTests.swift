@@ -104,8 +104,15 @@ func offMain<T: Sendable>(_ f: @escaping @Sendable () throws -> T) async throws 
                                 development: development)
         #expect(app.start(imagePath: sampleDevelopmentImage))
         defer { closeApp(app) }
+        // The window first: opening the app starts nothing of the
+        // development half; a launch tells it after the first frame.
+        #expect(development.server == nil && presenter.shown.isEmpty)
+        app.startDevelopment()
         // Serving from launch: no argument asked for it.
         let server = try #require(development.server)
+        // Told once: a second call opens no second listener.
+        app.startDevelopment()
+        #expect(development.server === server)
         let port = try #require(server.port)
         #expect(development.serviceName.hasPrefix("Sample on "))
         // The pairing screen has the token the store keeps (mode 0600).
@@ -144,6 +151,7 @@ func offMain<T: Sendable>(_ f: @escaping @Sendable () throws -> T) async throws 
                                 development: development)
         #expect(app.start(imagePath: sampleReleaseImage))
         defer { closeApp(app) }
+        app.startDevelopment()
         #expect(app.runtime?.vm.isReleaseImage == true)
         #expect(development.server == nil)
         #expect(presenter.shown.isEmpty)
@@ -198,9 +206,30 @@ func offMain<T: Sendable>(_ f: @escaping @Sendable () throws -> T) async throws 
         try await Task.sleep(for: .milliseconds(300))
     }
 
+    @Test func theDevelopmentHalfStartsWithoutFramesWithinItsBound() async throws {
+        // A launch starts serving at the second frame or after its bound,
+        // whichever comes first; with no display no frame comes and the
+        // bound alone must start it (a step tied to frames starves when
+        // none come).
+        var why: String?
+        let start = ShellVM.now()
+        let after = AfterFrames(frames: 2, bound: 0.05, display: false) { why = $0 }
+        #expect(!after.fired)
+        let end = ShellVM.now() + 120_000_000_000
+        while why == nil && ShellVM.now() < end { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(why == "bound" && after.fired)
+        #expect(ShellVM.now() - start >= 50_000_000)
+    }
+
     @Test func theServiceNameTellsAppsApartAndFitsBonjour() {
         #expect(Development.serviceName(app: "Sample", device: "Joni's iPad") == "Sample on Joni's iPad")
         let long = Development.serviceName(app: String(repeating: "A", count: 30), device: String(repeating: "é", count: 40))
         #expect(long.utf8.count <= 63 && long.hasPrefix(String(repeating: "A", count: 30) + " on "))
+        // The device's part never waits for a name lookup (the host name
+        // took 35 s on iOS): ten reads stay far below that, under load and
+        // the sanitizer too.
+        let t0 = ShellVM.now()
+        for _ in 0..<10 { #expect(!Development.deviceName.isEmpty) }
+        #expect(ShellVM.now() - t0 < 10_000_000_000)
     }
 }

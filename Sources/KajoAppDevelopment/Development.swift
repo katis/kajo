@@ -53,14 +53,20 @@ import UIKit
         return n
     }
 
+    /// The device in the service name; nothing here may wait. On iOS it
+    /// is the model's name ("iPhone", "iPad"): the user's name for the
+    /// device needs an entitlement, `gethostname` answers "localhost", and
+    /// `ProcessInfo.hostName` answered "localhost" too after 35.0 s on the
+    /// main thread of an iPhone and an iPad (it waits for a name lookup that
+    /// never answers), which held the first frame of every Debug launch.
+    /// Two devices of one model are told apart by Bonjour, which renames
+    /// the second ("Sample on iPhone (2)") and reports the name it took to
+    /// the pairing screen.
     static var deviceName: String {
         #if os(macOS)
-        return Host.current().localizedName ?? ProcessInfo.processInfo.hostName
+        return Host.current().localizedName ?? "Mac"
         #else
-        // UIDevice's name is the model's without an entitlement; the host
-        // name is the device's own ("Jonis-iPad.local").
-        let h = ProcessInfo.processInfo.hostName
-        return h.hasSuffix(".local") ? String(h.dropLast(6)) : h
+        return UIDevice.current.name
         #endif
     }
 
@@ -68,7 +74,9 @@ import UIKit
         guard let rt = app.runtime else { return }
         let screen = presenter ?? Development.platformScreen(app)
         pairing = screen
+        LaunchTrace.step("pairing-screen")
         serviceName = Development.serviceName(app: app.configuration.name, device: Development.deviceName)
+        LaunchTrace.step("device-name")
         do {
             server = try rt.serveTCP(port: port, loopbackOnly: loopbackOnly, advertise: advertise, store: store,
                                      imageName: app.configuration.imageName, serviceName: serviceName, pairing: screen)

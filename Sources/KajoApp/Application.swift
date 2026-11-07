@@ -60,13 +60,14 @@ public struct KajoAppConfiguration: Sendable {
 }
 
 /// What a development build adds to a running app (KajoAppDevelopment's
-/// `Development`): called once the app's `open` has run.
+/// `Development`): called once the app's `open` has run and its window is
+/// on the screen (`KajoAppRunner.startDevelopment`).
 @MainActor public protocol AppDevelopment: AnyObject {
     func started(_ app: KajoAppRunner)
 }
 
 /// One app: the runtime over the bundled image on a platform host, the
-/// app class opened, the development half told.
+/// app class opened, and, after its first frame, the development half told.
 @MainActor public final class KajoAppRunner {
     public let configuration: KajoAppConfiguration
     public let platform: ShellPlatform
@@ -81,9 +82,11 @@ public struct KajoAppConfiguration: Sendable {
         self.development = development
     }
 
-    /// Open the image (the bundled one, or `imagePath`), run the app class's
-    /// `open`, tell the development half. False when the app did not open
-    /// (the reason is the status line).
+    /// Open the image (the bundled one, or `imagePath`) and run the app
+    /// class's `open`. False when the app did not open (the reason is the
+    /// status line). The development half is told by `startDevelopment`,
+    /// which a launch calls after the app's first frame: nothing serving
+    /// waits for comes before the window.
     @discardableResult
     public func start(imagePath: String? = nil) -> Bool {
         var o = Headless.Options()
@@ -106,6 +109,7 @@ public struct KajoAppConfiguration: Sendable {
             return false
         }
         runtime = rt
+        LaunchTrace.step("image-opened")
         rt.start()
         guard let p = rt.vm.spawn("open", receiver: configuration.appClass, main: true, priority: 2) else {
             platform.showStatus("\(configuration.name): the image has no class \(configuration.appClass)")
@@ -123,8 +127,53 @@ public struct KajoAppConfiguration: Sendable {
             }
         }
         rt.vm.release(p)
-        development?.started(self)
+        LaunchTrace.step("app-opened")
         return true
+    }
+
+    private var developmentStarted = false
+
+    /// Tell the development half, once, after `start` opened the app (a
+    /// release build has none: nothing happens).
+    public func startDevelopment() {
+        guard let d = development, runtime != nil, !developmentStarted else { return }
+        developmentStarted = true
+        d.started(self)
+        LaunchTrace.step("development-started")
+    }
+}
+
+/// `body` once, at the `frames`-th display frame from now or after `bound`
+/// seconds, whichever comes first: a launch's step that must not delay the
+/// first frame and must not wait for frames that may never come (no
+/// display, an occluded window).
+@MainActor final class AfterFrames {
+    private var body: (@MainActor (String) -> Void)?
+    private var link: LinkTarget?
+    private var seen = 0
+
+    @discardableResult
+    init(frames: Int, bound: Double, display: Bool = true, _ body: @escaping @MainActor (String) -> Void) {
+        self.body = body
+        if display {
+            link = LinkTarget { [weak self] _ in
+                guard let self else { return }
+                self.seen += 1
+                if self.seen >= frames { self.fire("frame") }
+            }.start()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + bound) { MainActor.assumeIsolated { self.fire("bound") } }
+    }
+
+    /// Whether `body` has run.
+    var fired: Bool { body == nil }
+
+    private func fire(_ why: String) {
+        link?.stop()
+        link = nil
+        guard let b = body else { return }
+        body = nil
+        b(why)
     }
 }
 
@@ -175,7 +224,7 @@ nonisolated func appTranscriptSink() -> @Sendable ([UInt8]) -> Void {
     }
 
     /// The process's start (wall clock, seconds).
-    static func processStart() -> Double? {
+    nonisolated static func processStart() -> Double? {
         var info = unsafe kinfo_proc()
         var size = unsafe MemoryLayout<kinfo_proc>.stride
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
@@ -183,6 +232,23 @@ nonisolated func appTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         guard rc == 0 else { return nil }
         let t = unsafe info.kp_proc.p_un.__p_starttime
         return Double(t.tv_sec) + Double(t.tv_usec) / 1e6
+    }
+}
+
+/// `kajo-launch-report` among the launch arguments: one console line per
+/// step of the launch, `launch step=<name> ms=<ms>` with the time since the
+/// process's start at which the step ended (taken when it happened, not
+/// when the line is written), so a wait between the start and the first
+/// frame shows where it is.
+public enum LaunchTrace {
+    static let enabled = CommandLine.arguments.contains("kajo-launch-report")
+    static let start: Double? = LaunchReport.processStart()
+
+    /// The step `name` has ended; `detail` is appended to the line as is.
+    public static func step(_ name: String, _ detail: String = "") {
+        guard enabled, let s = start else { return }
+        let ms = ((Date().timeIntervalSince1970 - s) * 10_000).rounded() / 10
+        appLog("launch step=\(name) ms=\(ms)" + (detail.isEmpty ? "" : " " + detail))
     }
 }
 
@@ -249,9 +315,21 @@ public enum KajoApplication {
         guard let (c, d) = pending else { return nil }
         let r = KajoAppRunner(configuration: c, platform: platform, development: d)
         current = r
+        LaunchTrace.step("host-ready")
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
-                if r.start() { LaunchReport.arm(build: d == nil ? "release" : "debug") }
+                guard r.start() else { return }
+                LaunchReport.arm(build: d == nil ? "release" : "debug")
+                // The window first: the development half (serving, its
+                // name, its token, Bonjour) starts once the app's first
+                // frame is on the screen, at the second frame, or after a
+                // second when no frames come.
+                if d != nil {
+                    AfterFrames(frames: 2, bound: 1) { why in
+                        LaunchTrace.step("development-due", "by=\(why)")
+                        r.startDevelopment()
+                    }
+                }
             }
         }
         return r
@@ -321,6 +399,7 @@ public nonisolated func appLog(_ line: String) {
         w.rootViewController = KajoRootController()
         w.makeKeyAndVisible()
         window = w
+        LaunchTrace.step("window")
     }
 }
 

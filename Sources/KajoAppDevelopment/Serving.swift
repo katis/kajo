@@ -220,6 +220,7 @@ extension ShellRuntime {
         if vm.isReleaseImage { return nil }
         let shell = vm
         let token = store?.load() ?? ProtocolServer.makeToken()
+        LaunchTrace.step("token")
         let server = try ProtocolServer(tcpPort: port, loopbackOnly: loopbackOnly, token: token) { conn, json in
             shell.postRequest(connection: conn, json: json)
         }
@@ -232,7 +233,9 @@ extension ShellRuntime {
             pairing.update { $0.status = refusing ? "refusing every connection for a minute: \(failures) failed pairings" : "serving" }
             show()
         }
+        LaunchTrace.step("listener")
         guard startServing(server) != nil else { return nil }
+        LaunchTrace.step("protocol-started")
         if advertise {
             let txt = [("image", imageName), ("protocol", "1"), ("kernel", KajoVM.version)]
             let a = try? BonjourAdvertiser(name: serviceName, port: server.port ?? 0, txt: txt, loopbackOnly: loopbackOnly) { name, error in
@@ -240,6 +243,7 @@ extension ShellRuntime {
                 show()
             }
             serving.advertiser.withLock { $0 = a }
+            LaunchTrace.step("advertised")
         }
         let state = serving
         presenter?.onNewToken = { [weak server] in
