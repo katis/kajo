@@ -119,5 +119,14 @@ IntegerTest >> testPrinting [
 	self assert: -45 printString = '-45'.
 	self assert: (255 printString: 16) = 'FF'.
 	self assert: (5 printString: 2) = '101'.
+	self assert: (-255 printString: 16) = '-FF'.
+	self assert: (35 printString: 36) = 'Z'.
+	self assert: 1073741823 printString = '1073741823'.
+	self assert: 4611686018427387903 printString = '4611686018427387903'.
+	self assert: -4611686018427387904 printString = '-4611686018427387904'.
+	self assert: (4611686018427387903 printString: 2) byteSize = 62.
+	self assert: (2 raisedTo: 64) negated printString = '-18446744073709551616'.
+	self should: [10 printString: 1] raise: Error.
+	self should: [10 printString: 37] raise: Error.
 	self assert: (7 printPaddedWith: $0 to: 3) = '007'
 ]

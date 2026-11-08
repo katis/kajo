@@ -106,16 +106,24 @@ Integer >> printString [
 
 { #category : #printing }
 Integer >> printString: base [
-	| s n digits |
+	"The digits counted first, then written from the right into a ByteArray that becomes the String: no stream and no reversal, a few sends a number rather than a few a digit (the collections-speed module). A LargeInteger is divided twice as often as it would be with a stream."
+	| n k d bytes |
+	(base < 2 or: [base > 36]) ifTrue: [^ self error: 'the base must be from 2 to 36'].
 	self = 0 ifTrue: [^ '0'].
-	digits := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'.
-	s := WriteStream on: String new.
 	n := self abs.
+	k := self < 0 ifTrue: [1] ifFalse: [0].
+	d := n.
+	[d > 0] whileTrue: [
+		k := k + 1.
+		d := d // base].
+	bytes := ByteArray new: k.
 	[n > 0] whileTrue: [
-		s nextPut: (digits scalarAt: n \\ base + 1).
+		d := n \\ base.
+		bytes at: k put: (d < 10 ifTrue: [48 + d] ifFalse: [55 + d]).
+		k := k - 1.
 		n := n // base].
-	self < 0 ifTrue: [s nextPut: $-].
-	^ s contents reversed
+	self < 0 ifTrue: [bytes at: 1 put: 45].
+	^ bytes asStringValidating
 ]
 
 { #category : #printing }
