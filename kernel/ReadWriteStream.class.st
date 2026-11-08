@@ -7,11 +7,8 @@ Class {
 
 { #category : #accessing }
 ReadWriteStream >> contents [
-	| out |
-	isText ifFalse: [^ collection copyFrom: 1 to: readLimit].
-	out := ByteArray new: readLimit.
-	1 to: readLimit do: [:i | out at: i put: (collection at: i)].
-	^ out asStringValidating
+	isText ifFalse: [^ collection copyFrom: 1 to: self readLimit].
+	^ (collection copyFrom: 1 to: self readLimit) asStringValidating
 ]
 
 { #category : #accessing }

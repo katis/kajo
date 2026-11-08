@@ -101,7 +101,7 @@ PositionableStream >> setOn: aCollection [
 { #category : #accessing }
 PositionableStream >> skip: n [
 	isText ifTrue: [n timesRepeat: [self next]. ^ self].
-	position := (position + n) max: 0 min: readLimit
+	position := ((position + n) max: 0) min: readLimit
 ]
 
 { #category : #accessing }
