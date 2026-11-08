@@ -53,7 +53,7 @@ wanted=(
   SATB 'storeWithBarriers(_:_:_:_:_:)|handOver(_:_:_:)|weakReadBarrier(_:_:_:_:)|takeBufferLocked(_:)'
   Marker 'markSome(_:_:limit:)|markerPoll(_:_:cycle:phase:)|drainStack(_:_:_:units:bound:)|takeItem(_:_:_:_:)|popItem(_:)|returnBuffer(_:_:)'
   RootScans 'markerScansYoungRoots(_:_:cycle:)|collectorFinishesRootScan(_:_:_:servicePoint:)|finishRootScansInStop(_:_:)'
-  Sweep 'sweepCycle(_:_:inPause:)|applyInStop(_:_:)'
+  Sweep 'sweepCycle(_:_:inPause:maxWords:)|applyInStop(_:_:)'
   PostStore 'postStoreSlow(_:_:_:_:)|postStoreSlowByte(_:_:_:_:)|storeConflict(_:_:_:_:_:)'
   Hazard 'hazardAcquire(_:_:_:_:)|primReplace(_:_:)|copySlots(_:_:_:_:_:_:_:_:_:)'
   Epoch 'epochEnter(_:_:)|tryFreePending(_:_:atPause:)|addPending(_:_:)'
