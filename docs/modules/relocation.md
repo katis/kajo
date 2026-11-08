@@ -797,6 +797,72 @@ tests need none. The verifier is almost entirely safe code (6 lines).
 - The planner's density threshold, the sparse threshold and the cap are
   defaults, not tuned.
 
+## The round under load, 2026-11-08
+
+The first weekly run's `tsan-load` gate (ThreadSanitizer, the whole suite,
+twelve `yes` loops) failed `fragmentUnderAggressiveRelocationMatchesStopTheWorld`
+on its `cyclesSelected >= 2`: each of the three runs completed one selecting
+cycle. **Cause**: the marker was starved, not the kernel short or the heap
+dense. The third run's counters read `cyclesPlanned: 2, cyclesSelected: 1`,
+one cycle completed, 10 457 objects moved, no verifier failure, checksums
+equal, and the one relocation pass had 0.14 s of CPU in 4.19 s of wall
+time (`passCpuNs` against `passWallNs`). The second cycle had been planned
+at its initial mark, while the mutators ran, but had not reached its final
+mark (where selection happens) when the kernel ended and the counters were
+read. Every selecting final mark selects with `relocateEveryLiveBlock`, so
+too little fragmentation is ruled out. Filtered, the same test saw 9 cycles
+alone and 7 under the twelve loops; the starvation needed the whole suite
+beside the loops.
+
+**Change** (tests only): `underRelocation` lets a cycle the kernel started
+finish before the round is counted. After the Processes terminate it waits
+for the marking phase to be idle (600 s under the sanitizer, 120 s
+otherwise; not reaching idle records an issue). The marker needs no
+mutator for its final mark, pass and apply, and no new cycle starts without
+scavenges. The assertion, the three runs and the iteration counts are
+unchanged. `theRelocatorNeverParksWhileRelocating` does not wait. Each
+round prints where it stood when its kernel ended (`relocation round:`
+phase, cycles, planned, selected) and the marker's CPU, so the next failure
+shows which case it was.
+
+**Costs**: unchanged. In every round measured the kernel ended with the
+marker idle and the wait took under 1 ms. The filtered test under the
+sanitizer took 121 s alone and 206 s under the loops before. The ten runs
+after took 197 to 224 s. In the gate the fragment test finished 569 s into
+the suite, where it took 620 s alone and 680 s failing before.
+
+**Runs** on the final code, ThreadSanitizer with the filter, twelve
+`gtimeout yes` loops: 10 of 10 passed, 7 or 8 selecting cycles each, the
+kernel 91 to 106 s, no retry. Without the sanitizer under the loops, 3 of 3
+(8 or 9 cycles, 14 s). Once under 48 loops, 5 cycles, 464 s. The `tsan-load`
+gate once: 385 + 121 tests passed, 0 ThreadSanitizer reports, 3504 s
+(fragment 6 cycles, oldheap 4). None of those rounds ended with a cycle
+running. The debug `swift test` of the check below did: its kernels are
+short (11 to 12 s). The oldheap round ended marking with 3 of 4 cycles
+selected and the fragment round marking with 2 of 3; the wait finished
+them in 0.31 s and 2.07 s and both counted one more selecting cycle. A
+starved marker can turn that "one more" into the second.
+
+`just check` on 9c1dc2a (Swift tier, no fuzzer owed; ThreadSanitizer 385 +
+121 tests, 0 reports; `swift test` 385 + 121; 205 kernel tests):
+
+```
+2026-11-08 10:48:47 9c1dc2a check-tier swift: 2 files from origin/master...HEAD (6dbf75f...9c1dc2a) and the working tree
+2026-11-08 10:48:47 9c1dc2a start clean-build (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 10:49:09 9c1dc2a end clean-build rc=0 22s
+2026-11-08 10:49:09 9c1dc2a start swift-test (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 10:56:06 9c1dc2a end swift-test rc=0 417s
+2026-11-08 10:56:06 9c1dc2a start tsan (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 11:42:55 9c1dc2a end tsan rc=0 2809s
+2026-11-08 11:42:55 9c1dc2a start kernel-test (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 11:44:11 9c1dc2a end kernel-test rc=0 76s
+2026-11-08 11:44:11 9c1dc2a start apps (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 11:46:05 9c1dc2a end apps rc=0 114s
+2026-11-08 11:46:05 9c1dc2a start new-check (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 11:49:08 9c1dc2a end new-check rc=0 183s
+2026-11-08 11:49:08 9c1dc2a check-tier done swift failed=0 3621s
+```
+
 ## Commands
 
 ```zsh
