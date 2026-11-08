@@ -148,12 +148,12 @@ interpreter.
 
 ## As built (2026-11-08)
 
-Commits 3734f03 (parts 1 to 3) and d194336 (part 4) on top of the brief
+Commits 3734f03 (parts 1 to 3), d194336 (part 4), 4fbc49c (arc-check), 46f8454 (an `unsafe` marker) and 767fd7f (a test bound) on top of the brief
 97465fc. Everything is under `Sources/KajoVM/Marking/`, `Nursery/`,
 `Relocation/Relocator.swift` (the cut-off), `ObjectMemory/Verifier.swift`
 (one check), `Workers/VMState.swift` (the kind and a counter),
 `YoungCollection/` (the samplers) and `Headless.swift` (the run line);
-nothing in `kernel/` or `tools/`. 40 new or changed `unsafe` lines.
+nothing in `kernel/` or `tools/`. 141 added lines carry `unsafe` (855 lines added under `Sources/`, `Tests/` and `scripts/`).
 
 ### Part 1: the kind, the record, and what they said
 
@@ -382,8 +382,8 @@ before and after.
 
 ### Part 5: before and after
 
-Before is 97465fc, after the final code (d194336 with 4fbc49c's script
-fix), every pair interleaved; raw rows under the hand-back's `before/` and
+Before is 97465fc, after d194336 (the code of 767fd7f but an `unsafe`
+marker and a test bound), every pair interleaved; raw rows under the hand-back's `before/` and
 `after/`.
 
 **binarytrees, 8 workers, `kajo run`** (aligned `-enable-testing` release
@@ -462,7 +462,37 @@ not tell.
 
 ### The A/B and `interpret`
 
-ABTABLE
+`scripts/ab.sh 97465fc` inside `just check` on 767fd7f (five interleaved
+runs, aligned `-enable-testing` builds, checksums equal):
+
+| kernel | workers | base ms | head ms | ratio | base cycles/send | head cycles/send | cycles ratio | instructions ratio | checksums |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|---|
+| alloc | 1 | 2878.8 (2871-2921) | 2889.8 (2884-2926) | **1.004** | 76.3 | 76.8 | 1.006 | 1.000 | same |
+| alloc | 8 | 484.6 (458-492) | 457.7 (451-466) | **0.944** | 87.2 | 87.0 | 0.997 | 0.995 | same |
+| arith | 1 | 1828.4 (1821-1842) | 1832.9 (1820-1838) | **1.002** | - | - | 1.002 | 1.000 | same |
+| arith | 8 | 252.4 (251-260) | 267.2 (257-270) | **1.059** | - | - | 1.006 | 1.002 | same |
+| fib | 1 | 1381.1 (1374-1390) | 1383.0 (1376-1389) | **1.001** | 57.9 | 57.8 | 0.999 | 1.000 | same |
+| fib | 8 | 194.8 (192-199) | 195.3 (190-205) | **1.003** | 59.8 | 59.5 | 0.994 | 1.000 | same |
+| ivars | 1 | 1817.7 (1808-1830) | 1816.9 (1808-1824) | **1.000** | 94919.2 | 94826.8 | 0.999 | 1.000 | same |
+| ivars | 8 | 245.6 (242-260) | 257.1 (242-260) | **1.047** | 95909.2 | 96614.7 | 1.007 | 1.001 | same |
+| sends | 1 | 1669.2 (1661-1675) | 1668.3 (1662-1675) | **0.999** | 69.7 | 69.7 | 1.001 | 1.000 | same |
+| sends | 8 | 236.7 (227-249) | 231.9 (227-247) | **0.980** | 71.9 | 71.7 | 0.998 | 1.000 | same |
+| st-closures | 1 | 3208.1 (3195-3215) | 3209.7 (3201-3213) | **1.000** | 44604.6 | 44718.5 | 1.003 | 1.000 | same |
+| st-closures | 8 | 434.3 (420-441) | 430.9 (422-452) | **0.992** | 45338.3 | 45060.8 | 0.994 | 1.000 | same |
+| st-ivars | 1 | 1812.7 (1803-1821) | 1807.9 (1802-1822) | **0.997** | 189336.7 | 189314.3 | 1.000 | 1.000 | same |
+| st-ivars | 8 | 251.1 (242-268) | 249.4 (241-259) | **0.993** | 193550.3 | 192110.3 | 0.993 | 1.000 | same |
+| st-sends | 1 | 1400.1 (1389-1408) | 1393.7 (1388-1404) | **0.995** | 116.7 | 116.7 | 1.000 | 1.000 | same |
+| st-sends | 8 | 196.8 (191-206) | 201.8 (194-204) | **1.025** | 120.4 | 120.3 | 0.999 | 1.000 | same |
+| storeheavy | 1 | 2115.7 (2106-2121) | 2116.9 (2107-2121) | **1.001** | 36796.6 | 36813.1 | 1.000 | 1.000 | same |
+| storeheavy | 8 | 290.4 (281-304) | 296.2 (282-302) | **1.020** | 37317.8 | 37672.1 | 1.009 | 1.001 | same |
+
+At one worker every kernel is 0.995 to 1.004 with overlapping ranges. At
+eight the ratios scatter both ways (0.944 to 1.059) with overlapping
+ranges in every row and instruction ratios of 0.995 to 1.002; the same
+A/B on ff6e573, the same code, read alloc 0.946, arith 0.985, ivars 0.979
+and st-sends 0.972, so the eight-worker rows are the noise earlier
+modules saw (0.940 to 1.080), not this change: `interpret` is identical,
+and the sweep stop does not run in any of these kernels.
 
 `interpret` (the `-enable-testing` release objects of 97465fc and
 d194336, `Dispatch.o`): 1477 lines of disassembly each, identical after
@@ -473,7 +503,78 @@ any checked path, `sweepCycle(_:_:inPause:maxWords:)` 321 instructions.
 
 ### The gates
 
-GATESLOG
+`just check` on 767fd7f (the final code commit; tier core, Apple Swift
+6.4.2 from Xcode, first on PATH), `.build/check/2026-11-08-final2/gates.log`:
+
+```
+2026-11-08 18:44:09 767fd7f check-tier core: 22 files from origin/master...HEAD (97465fc...767fd7f) and the working tree
+2026-11-08 18:44:09 767fd7f start clean-build (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 18:44:31 767fd7f end clean-build rc=0 22s
+2026-11-08 18:44:31 767fd7f start swift-test (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 18:51:12 767fd7f end swift-test rc=0 401s
+2026-11-08 18:51:12 767fd7f start swift-test-load (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 18:59:23 767fd7f end swift-test-load rc=0 491s
+2026-11-08 18:59:23 767fd7f start tsan (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 19:49:57 767fd7f end tsan rc=0 3034s
+2026-11-08 19:49:57 767fd7f start tsan-load (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:48:09 767fd7f end tsan-load rc=0 3492s
+2026-11-08 20:48:09 767fd7f start ios-check (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:48:24 767fd7f end ios-check rc=0 15s
+2026-11-08 20:48:24 767fd7f start arc-check (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:48:31 767fd7f end arc-check rc=0 7s
+2026-11-08 20:48:31 767fd7f start golden (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:49:39 767fd7f end golden rc=0 68s
+2026-11-08 20:49:39 767fd7f start test-release (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:50:32 767fd7f end test-release rc=0 53s
+2026-11-08 20:50:32 767fd7f start model-check (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:50:53 767fd7f end model-check rc=0 21s
+2026-11-08 20:50:53 767fd7f start soak (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 20:52:05 767fd7f end soak rc=0 72s
+2026-11-08 20:52:05 767fd7f start fuzz-kasm (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:02:08 767fd7f end fuzz-kasm rc=0 603s
+2026-11-08 21:02:08 767fd7f start fuzz-snapshot (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:12:11 767fd7f end fuzz-snapshot rc=0 603s
+2026-11-08 21:12:11 767fd7f start fuzz-syntax (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:22:14 767fd7f end fuzz-syntax rc=0 603s
+2026-11-08 21:22:14 767fd7f start fuzz-protocol (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:32:18 767fd7f end fuzz-protocol rc=0 604s
+2026-11-08 21:32:18 767fd7f start apps (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:34:12 767fd7f end apps rc=0 114s
+2026-11-08 21:34:12 767fd7f start kernel-test (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:35:28 767fd7f end kernel-test rc=0 76s
+2026-11-08 21:35:28 767fd7f start new-check (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:38:32 767fd7f end new-check rc=0 184s
+2026-11-08 21:38:32 767fd7f start ab (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:43:53 767fd7f end ab rc=0 321s
+2026-11-08 21:43:53 767fd7f start matrix-mac (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 21:56:39 767fd7f end matrix-mac rc=0 766s
+2026-11-08 21:56:39 767fd7f start matrix-iphone (swift: Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))
+2026-11-08 22:10:24 767fd7f end matrix-iphone rc=0 825s
+2026-11-08 22:10:24 767fd7f check-tier done core failed=0 12375s
+```
+
+393 + 121 Swift tests in `swift-test`, `swift-test-load`, `tsan` and
+`tsan-load` (ThreadSanitizer 0 reports in both), 205 kernel tests, the
+four fuzzers with "libFuzzer build: ok" at 2.20 (kasm), 3.34 (snapshot),
+0.83 (syntax) and 1.56 (protocol) million runs in 601 s, the Mac matrix
+(`--bar`: 156 rows, 0 failed, 24 fallbacks, all in the three ring rows
+under `young=stw` at 8 each, 174 to 189 frames missed there; the first
+idle launch after the build missed 344 frames with no stop, the known
+first-launch effect; the hog with the budget off 1193 by design) and the
+iPhone matrix at 5 workers (156 rows, 0 fallbacks, the ring under
+`young=stw` missing 4 and 6 frames behind scavenges of up to 15.6 ms, as
+in every earlier run, the hog by design).
+
+The run before it, on ff6e573 (the same code but a test bound), failed
+`tsan-load` once: `anOffloadedCollectionFindsACrossNurseryHolder` waited
+its default 10 s for the young collector's verifier stop in the full
+suite under the sanitizer and twelve busy loops. It touches no marking;
+by the rule for waits on something that must come it waits 120 s now
+(767fd7f), assertion unchanged. Every other gate passed there too
+(`.build/check/2026-11-08-final/gates.log`). The run before that, on
+0767923, was stopped after `ios-check` found an unnecessary `unsafe` in
+`fullCollection` that the clean macOS build did not report (fixed in
+46f8454).
 
 ### Deviations
 
