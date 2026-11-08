@@ -185,10 +185,32 @@ func fullCollection(_ vm: VMPointer, _ stop: StopContext) {
     }
     let roots = stop.roots()
     om.collect(extraRoots: roots)
-    if om.isOverSoftLimit {
+    if unsafe om.isOverSoftLimit || leavesNoHeadroom(vm, om) {
         if let n = unsafe n { unsafe n.pointee.state.pointee.counters.fullCompactions &+= 1 }
         om.compact(extraRoots: roots)
     }
+    // The sweep stop, part 4: the promote-all scavenge this collection
+    // begins with may itself cross the soft limit and request another;
+    // the ring's records showed that request run 300 to 400 ms later as a
+    // second fallback with old space at 15 percent of the limit. A request
+    // that this collection answered is withdrawn.
+    if let n = unsafe n, unsafe !om.isOverSoftLimit { unsafe n.pointee.fullRequested.pointee.store(false, ordering: .relaxed) }
+}
+
+/// The sweep stop, part 4: with concurrent marking, a mark-sweep that
+/// leaves old space at or above the cycle trigger's floor compacts too.
+/// The ring's records under the stop-the-world young mode on the Mac: a
+/// full collection that freed only empty blocks left old space at 98 to
+/// 101 percent of the soft limit, the next scavenge (85 to 185 ms later)
+/// crossed the limit again with no cycle started in between (a requested
+/// full collection suppresses the trigger), and only the third or fourth
+/// one compacted: 12 and 15 fallbacks in a launch for 3 and 4
+/// compactions. A cycle cannot help there; the collector already ran
+/// back to back.
+private func leavesNoHeadroom(_ vm: VMPointer, _ om: ObjectMemory) -> Bool {
+    guard let mk = unsafe vm.pointee.marking else { return false }
+    let floor = unsafe mk.pointee.config.floor
+    return Double(om.blocksInUse) >= floor * Double(om.softLimitBlocks)
 }
 
 /// A scavenge left old space past its soft limit and no full collection

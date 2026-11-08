@@ -176,3 +176,27 @@ private func fillsWithin(_ c: MarkingConfig, capacity: Int, old: UInt64, rate: D
     guard let mk = unsafe rt.vm.state.pointee.marking else { return false }
     return unsafe entryRateFillsTable(mk, entryRate: rate, oldEntries: old, withinNs: horizonNs)
 }
+
+// MARK: - part 4: the ring's cascade of full collections
+
+/// A full collection whose mark-sweep leaves old space at or above the
+/// cycle trigger's floor compacts in the same stop (the ring's records: a
+/// non-compacting one at 98 percent of the limit was followed by two or
+/// three more). With the floor above what the sweep leaves, it does not.
+private func fullCompacts(floor: Double) throws -> UInt64 {
+    let rt = try sweepRuntime { $0.marking.floor = floor }
+    #expect(rt.runInt("churnLists:", 10) == 10 * 2000 * 2001 / 2)
+    rt.scavenge()
+    let before = rt.vm.nurseryCounters.fullCompactions
+    rt.vm.runFullCollection()
+    let n = rt.vm.nurseryCounters.fullCompactions - before
+    #expect(rt.runInt("churnLists:", 3) == 3 * 2000 * 2001 / 2)
+    rt.noFailures()
+    rt.stop()
+    return n
+}
+
+@Test func aFullCollectionThatLeavesOldSpaceAboveTheFloorCompacts() throws {
+    #expect(try fullCompacts(floor: 0) == 1)
+    #expect(try fullCompacts(floor: 2) == 0)
+}
