@@ -29,6 +29,10 @@ enum CycleTrigger: UInt8, Sendable {
     case predictor
     /// `cycleAtEveryScavenge`, or the host (`VM.startCycle`).
     case forced
+    /// The sweep stop, part 3: at the observed rate of entry consumption
+    /// the table would fill within `safetyFactor` cycles (the last one's
+    /// duration).
+    case entryRate
 }
 
 /// A worker's SATB buffer, in its own 128-byte lines. Written by its
@@ -91,6 +95,12 @@ enum CycleTrigger: UInt8, Sendable {
     var sweepCpuNs: UInt64 = 0
     var entriesFreed: UInt64 = 0
     var bytesFreed: UInt64 = 0
+    /// The sweep stop (docs/modules/sweep-stop.md): the snapshot entries
+    /// this cycle's sweep has visited (live and dead), and the entries
+    /// freed so far that a partial apply already handed to the allocators
+    /// (taken off the old-entry estimate then, not again at the apply).
+    var entriesVisited: UInt64 = 0
+    var entriesPublished: UInt64 = 0
     var qos: UInt32 = 0
     var escalations: UInt64 = 0
     var lowerings: UInt64 = 0
@@ -117,6 +127,10 @@ struct CycleRecord: Sendable {
     var rootsNs: UInt64 = 0
     var survivorsNs: UInt64 = 0
     var snapshotEntries: UInt64 = 0
+    /// The sweep stop, part 3: entries consumed per second at the trigger
+    /// (the sampler's rate) and the old-entry estimate then.
+    var entryRate: Double = 0
+    var oldEntriesAtStart: UInt64 = 0
     /// The final mark's pause (from its request: the time to safepoint and
     /// the work to the verifier's end) and its split.
     var finalPauseNs: UInt64 = 0
@@ -256,6 +270,79 @@ struct MarkingCounters: Sendable {
     /// cycle had given up `finalMarkGiveUps` times already.
     var finalGiveUps: UInt64 = 0
     var finalOverruns: UInt64 = 0
+    /// The sweep stop (docs/modules/sweep-stop.md): stops that finished a
+    /// sweep for entries or old space (`sweepsFinishedForEntries` and
+    /// `ForOld` count them as before), by outcome: the sweep reached its end
+    /// inside the bound and was applied whole; it was bounded and only what
+    /// was swept was handed over (a partial apply); it ran to its end past
+    /// any bound (the old behaviour: the test switch, the main worker's old
+    /// allocation, a background worker whose wait for the sweep ran out).
+    /// Relocation passes the bounded stop cut off, and old allocations that
+    /// waited for a sweep outside the stop are in `AllocationWaits`.
+    var sweepStops: UInt64 = 0
+    var sweepStopsWhole: UInt64 = 0
+    var sweepStopsPartial: UInt64 = 0
+    var sweepStopsUnbounded: UInt64 = 0
+    var sweepStopRelocCutOffs: UInt64 = 0
+    /// Part 3: cycles the entry-rate rule started (`byEntryRate`; also in
+    /// `cycles`). Its raises are a VM counter (`entryRateRaises`): they
+    /// are decided between stops.
+    var cyclesByEntryRate: UInt64 = 0
+}
+
+/// What a sweep stop found and did.
+enum SweepStopOutcome: UInt8, Sendable {
+    /// No sweep was pending: the caller falls back.
+    case none
+    /// The sweep reached its end (or had) and was applied whole.
+    case whole
+    /// Bounded: what was swept was handed to the allocators; the rest is
+    /// swept with the world running.
+    case partial
+    /// Swept to the end past the bound, and applied.
+    case unbounded
+}
+
+/// The sweep stop (docs/modules/sweep-stop.md, part 1): the circumstances
+/// of one stop that finished or bounded a lazy sweep because the entry
+/// table was empty or an old allocation found no room. ns.
+struct SweepStopRecord: Sendable {
+    var cause = FullCause.entries
+    var phase = MarkingPhase.sweeping
+    var outcome = SweepStopOutcome.none
+    /// The requester's worker index (0 the main worker; -1 outside the table).
+    var requester = -1
+    /// How far the sweep had got when the stop began: snapshot words
+    /// swept of all, entries visited and freed (by the marker and any
+    /// earlier stop), entries already handed over, runs pending, and the
+    /// snapshot's entries (so the entries still to visit follow).
+    var cursorWords = 0
+    var totalWords = 0
+    var entriesVisited: UInt64 = 0
+    var entriesFreed: UInt64 = 0
+    var entriesPublished: UInt64 = 0
+    var pendingRuns = 0
+    var snapshotEntries: UInt64 = 0
+    /// Since the sweep could start (its final mark's end), and the marker's
+    /// QoS and the policy's wish then.
+    var sinceSweepStartNs: UInt64 = 0
+    var markerQoS: UInt32 = 0
+    var wantUserInitiated = false
+    /// The table and old space when the stop began.
+    var entryCapacity: UInt64 = 0
+    var highWater: UInt64 = 0
+    var oldEntries: UInt64 = 0
+    var blocksInUse = 0
+    var softLimitBlocks = 0
+    /// The stop's work: words swept and entries freed inside it, its
+    /// sweeping, and its apply (whole) or hand-over (partial); entries handed
+    /// to the allocators by it; whether it cut a relocation pass off.
+    var wordsInStop = 0
+    var entriesFreedInStop: UInt64 = 0
+    var sweepNs: UInt64 = 0
+    var applyNs: UInt64 = 0
+    var entriesHanded: UInt64 = 0
+    var relocationCutOff = false
 }
 
 /// Large bytes, part 2: old allocations that found no room while a cycle
@@ -266,6 +353,11 @@ struct AllocationWaits: Sendable {
     var ns: UInt64 = 0
     var maxNs: UInt64 = 0
     var timeouts: UInt64 = 0
+    /// The sweep stop: old allocations that waited for a sweep to end
+    /// (`waitForSweep`), their time, and those that ran out.
+    var sweepCount: UInt64 = 0
+    var sweepNs: UInt64 = 0
+    var sweepTimeouts: UInt64 = 0
 }
 
 /// Large bytes, part 2: the circumstances of one fallback, taken in its
@@ -329,7 +421,17 @@ struct MarkingLog {
     var startNs: UInt64 = 0
     /// Promotion over the last scavenges: (time, cumulative promoted bytes).
     var samples: [(ns: UInt64, promoted: UInt64)] = []
+    /// The sweep stop, part 3: entries consumed (objects promoted and old
+    /// allocations, cumulative) at the same scavenges.
+    var entrySamples: [(ns: UInt64, entries: UInt64)] = []
     var lastCycleNs: UInt64 = 0
+    /// The last completed cycle's sweep, from its final mark's end to its
+    /// apply (ns, 0: none yet).
+    var lastSweepNs: UInt64 = 0
+    /// When the current cycle's sweep could start (its final mark's end; 0
+    /// before). In the log, not the marker's state: participants read it
+    /// between stops (the entry-rate rule).
+    var sweepStartNs: UInt64 = 0
     /// Old entries, estimated: promoted objects and old allocations since
     /// the last scavenge added, a sweep's frees taken off, recounted from
     /// the old map after module 1 collected. With the module 1 collection
@@ -374,6 +476,8 @@ struct MarkingLog {
     var lastApplyAtNs: UInt64 = 0
     /// Large bytes, part 2: the last fallbacks' circumstances.
     var fallbackRecords = RecordRing<FallbackRecord>(capacity: 16)
+    /// The sweep stop: the last sweep stops' records.
+    var sweepStopRecords = RecordRing<SweepStopRecord>(capacity: 64)
     /// Words of the snapshot map that may have bits (high water at the
     /// snapshot, rounded up).
     var snapshotWords = 0

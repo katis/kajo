@@ -40,6 +40,23 @@ struct MarkingConfig: Sendable {
     /// After this many give-ups in one cycle the final mark finishes past
     /// the bound (counted, `finalOverruns`): marking must end.
     var finalMarkGiveUps = 8
+    /// The sweep stop (docs/modules/sweep-stop.md): the snapshot words (64
+    /// entries each) a stop that found the entry table empty may sweep
+    /// before it hands what is swept to the allocators and leaves the rest
+    /// to the marker. Part 1's records, the Mac's binarytrees at 8 workers (unbounded):
+    /// a stop sweeps a word in 140 to 145 ns (140 161 words in 20.05 ms,
+    /// 48 704 in 6.92), so 4096 words are about 0.6 ms on the Mac. 0: hand
+    /// over only what the marker swept.
+    var sweepStopWords = 4096
+    /// ...and sweeps at all only when the marker's swept entries not yet
+    /// handed over are fewer than this: 64 stash refills of 1024 entries.
+    /// Part 1's records found 3.2 to 12 million pending in every
+    /// stop (793 to 3003 runs of 4096) in every stop.
+    var sweepStopEnoughEntries = 1 << 16
+    /// An old allocation (a background worker) that a bounded sweep stop
+    /// could not serve waits this long at most, outside the stop, for the
+    /// sweep to end; past it the next stop finishes the sweep whole.
+    var sweepWaitMs = 100
     /// The marker thread. Off: nothing marks unless a test drives it
     /// (`VM.markStep`, `finalMark`, `sweep`): the manual mode of the tests.
     var markerThread = true
@@ -118,4 +135,16 @@ struct MarkingTestSwitches: Sendable {
     /// The marker requests the final mark without scanning the owed
     /// nurseries (the work before the stop skipped).
     var markerSkipsRootScans = false
+    /// The sweep stop: a stop that finds the entry table empty or an old
+    /// allocation without room finishes the sweep whole, whatever its
+    /// length, as the large-bytes follow-up built it.
+    var sweepStopUnbounded = false
+    /// A broken variant (never set outside its test): the bounded sweep
+    /// stop also frees the dead entries of the snapshot word just past the
+    /// sweep's cursor and hands them over, without the sweep having reached
+    /// them. The sweep frees them again; the free-list verifier must fail.
+    var applyAheadOfSweep = false
+    /// The sweep stop, part 3: the entry-rate rule off (the trigger and the
+    /// QoS policy watch the table's headroom only, as before).
+    var noEntryRateRule = false
 }

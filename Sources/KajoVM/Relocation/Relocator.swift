@@ -172,6 +172,22 @@ func relocationAtCycleEnd(_ vm: VMPointer, completed: Bool) {
     }
 }
 
+/// The sweep stop (world stopped, phase sweeping): a bounded sweep is
+/// about to run in this stop while `cycle`'s relocation pass has not
+/// finished (or not started). The pass ends here, at the poll the
+/// relocator is parked at (or before its first object), as an apply ends
+/// it: what it evacuated is pending and freed by epoch, what it did not
+/// stays where it is, and the selected blocks go back to the pool at the
+/// apply's rebuild. The relocator sees `relocatedCycle == cycle` at its
+/// next poll and stops. Answers true when a pass was cut off.
+func relocationCutOffForSweep(_ vm: VMPointer, cycle: UInt64) -> Bool {
+    guard let r = unsafe vm.pointee.relocation else { return false }
+    let st = unsafe r.pointee.state
+    guard unsafe st.pointee.plannedCycle == cycle && st.pointee.relocatedCycle != cycle else { return false }
+    unsafe st.pointee.relocatedCycle = cycle
+    return true
+}
+
 // MARK: - the pass (the marker inside the VM, phase sweeping)
 
 enum RelocateOutcome {
@@ -218,6 +234,12 @@ func relocatePass(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64) -> Bool 
             if n & 63 == 0 || sincePoll >= 16384 {
                 sincePoll = 0
                 if unsafe !markerPoll(vm, mk, cycle: cycle, phase: .sweeping) {
+                    aborted = true
+                    break outer
+                }
+                // The sweep stop cut the pass off while it was parked
+                // (`relocationCutOffForSweep`): nothing more is moved.
+                if unsafe st.pointee.relocatedCycle == cycle {
                     aborted = true
                     break outer
                 }

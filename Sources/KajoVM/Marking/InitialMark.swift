@@ -41,10 +41,17 @@ func afterScavenge(_ vm: VMPointer, roots: [Oop], literalBefore: RawArray<UInt64
     let promoted = unsafe (vm.pointee.nursery?.pointee.state.pointee.counters.promotedBytes ?? 0) &+ om.allocationCounters.allocatedBytes
     unsafe log.pointee.samples.append((now, promoted))
     if unsafe log.pointee.samples.count > MarkingConfig.rateWindow { unsafe log.pointee.samples.removeFirst() }
+    // The sweep stop, part 3: entries consumed, promoted objects and old
+    // allocations (world stopped: the counters are the stop's to read).
+    let consumed = unsafe (vm.pointee.nursery?.pointee.state.pointee.counters.promotedObjects ?? 0)
+        &+ (vm.pointee.young?.pointee.promotedObjects.pointee.load(ordering: .relaxed) ?? 0) &+ om.allocationCounters.allocations
+    unsafe log.pointee.entrySamples.append((now, consumed))
+    if unsafe log.pointee.entrySamples.count > MarkingConfig.rateWindow { unsafe log.pointee.entrySamples.removeFirst() }
+    let entryRate = unsafe sampleRate(log.pointee.entrySamples.map { ($0.ns, $0.entries) })
     unsafe countOldEntries(vm, mk)
-    unsafe updateWantedQoS(mk, oldEntries: nil)
+    unsafe updateWantedQoS(mk, oldEntries: nil, entryRate: entryRate, vm: vm)
     if unsafe mk.phaseNow != .idle || fullCollectionDue(vm) { return }
-    guard let trigger = unsafe decideTrigger(mk) else { return }
+    guard let trigger = unsafe decideTrigger(mk, rate: promotionRate(mk), entryRate: entryRate, oldEntries: nil, record: true) else { return }
     unsafe initialMark(vm, mk, roots: roots, trigger: trigger, literal: false)
 }
 
@@ -82,16 +89,19 @@ func promotionRate(_ mk: MarkingPointer) -> Double {
     return Double(b.promoted &- a.promoted) / (Double(b.ns &- a.ns) / 1e9)
 }
 
-/// Decide at the end of a scavenge. Records the rate and the prediction
-/// either way.
-func decideTrigger(_ mk: MarkingPointer) -> CycleTrigger? {
-    unsafe decideTrigger(mk, rate: promotionRate(mk), oldEntries: nil, record: true)
+/// A rate over (time, cumulative count) samples: per second; 0 with fewer
+/// than two samples.
+func sampleRate(_ s: [(UInt64, UInt64)]) -> Double {
+    guard s.count >= 2, let a = s.first, let b = s.last, b.0 > a.0, b.1 >= a.1 else { return 0 }
+    return Double(b.1 &- a.1) / (Double(b.0 &- a.0) / 1e9)
 }
 
 /// The decision on a given promotion rate (module 7 samples between
 /// stops). `record`: world stopped, the rate and the prediction are kept
 /// in the log; module 7 decides outside stops and only reads the log.
-func decideTrigger(_ mk: MarkingPointer, rate: Double, oldEntries: UInt64?, record: Bool) -> CycleTrigger? {
+/// `entryRate`: entries consumed per second (the sweep stop's part 3; 0:
+/// no sample yet).
+func decideTrigger(_ mk: MarkingPointer, rate: Double, entryRate: Double = 0, oldEntries: UInt64?, record: Bool) -> CycleTrigger? {
     let c = unsafe mk.pointee.config
     let om = unsafe mk.pointee.om
     let log = unsafe mk.pointee.log
@@ -112,8 +122,29 @@ func decideTrigger(_ mk: MarkingPointer, rate: Double, oldEntries: UInt64?, reco
     }
     if c.stress.contains(.cycleAtEveryScavenge) { return .forced }
     if inUse >= c.floor * soft { return .floor }
-    if unsafe Double(oldEntries ?? log.pointee.oldEntries) >= c.floor * Double(om.entryCapacity) { return .entries }
-    return predicted ? .predictor : nil
+    let entries = unsafe oldEntries ?? log.pointee.oldEntries
+    if Double(entries) >= c.floor * Double(om.entryCapacity) { return .entries }
+    if predicted { return .predictor }
+    // The sweep stop, part 3: the entries a cycle frees reach the
+    // allocators only as it sweeps, so a cycle must start while the table
+    // still holds `safetyFactor` cycles' consumption at the observed rate
+    // (the last cycle's duration; before any cycle the rule waits). This
+    // is the predictor's rule for old space, applied to the entry table.
+    if unsafe entryRateFillsTable(mk, entryRate: entryRate, oldEntries: entries, withinNs: Double(log.pointee.lastCycleNs) * c.safetyFactor) {
+        return .entryRate
+    }
+    return nil
+}
+
+/// At `entryRate` entries per second, the table's free entries (its
+/// capacity less the old entries, freed-but-pending ones counted as used)
+/// run out within `withinNs`. False without a rate, a horizon, or with
+/// the rule off.
+func entryRateFillsTable(_ mk: MarkingPointer, entryRate: Double, oldEntries: UInt64, withinNs: Double) -> Bool {
+    if unsafe mk.pointee.config.testSwitches.noEntryRateRule || entryRate <= 0 || withinNs <= 0 { return false }
+    let om = unsafe mk.pointee.om
+    let free = Double(om.entryCapacity) - Double(oldEntries)
+    return free <= 0 || free / entryRate * 1e9 < withinNs
 }
 
 /// The policy's QoS: user-initiated while the headroom of old space (free
@@ -122,13 +153,34 @@ func decideTrigger(_ mk: MarkingPointer, rate: Double, oldEntries: UInt64?, reco
 /// used) is below the threshold. The marker takes it at its next poll.
 /// World stopped, or (module 7, large bytes part 2) any participant: it
 /// reads the pools under their lock and stores one atomic.
-func updateWantedQoS(_ mk: MarkingPointer, oldEntries: UInt64?) {
+///
+/// The sweep stop, part 3: also raised while a cycle runs when, at
+/// `entryRate` entries per second, the table empties before the cycle is
+/// predicted to end (marking: its start plus the last cycle's duration;
+/// sweeping: the sweep's start plus the last sweep's duration). The times
+/// are written in stops, before the caller last took the safepoint mutex.
+func updateWantedQoS(_ mk: MarkingPointer, oldEntries: UInt64?, entryRate: Double = 0, vm: VMPointer? = nil) {
     if unsafe mk.pointee.config.testSwitches.qosOnBlocksOnly && oldEntries != nil { return }
-    let low = unsafe wantsRaise(mk, oldEntries: oldEntries ?? mk.pointee.log.pointee.oldEntries,
-                                blocksOnly: mk.pointee.config.testSwitches.qosOnBlocksOnly)
+    let entries = unsafe oldEntries ?? mk.pointee.log.pointee.oldEntries
+    let low = unsafe wantsRaise(mk, oldEntries: entries, blocksOnly: mk.pointee.config.testSwitches.qosOnBlocksOnly)
     // Raised as soon as headroom is low; lowered only when a cycle ends
     // with headroom above the threshold (`applyInStop`).
-    if low { unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed) }
+    if low {
+        unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed)
+        return
+    }
+    let log = unsafe mk.pointee.log
+    let now = nanoseconds()
+    var end: UInt64 = 0
+    switch unsafe mk.phaseNow {
+    case .marking: end = unsafe log.pointee.lastCycleNs == 0 ? 0 : log.pointee.startNs &+ log.pointee.lastCycleNs
+    case .sweeping:
+        let s = unsafe log.pointee.sweepStartNs
+        end = unsafe s == 0 || log.pointee.lastSweepNs == 0 ? 0 : s &+ log.pointee.lastSweepNs
+    case .idle, .swept: end = 0
+    }
+    guard end > now, unsafe entryRateFillsTable(mk, entryRate: entryRate, oldEntries: entries, withinNs: Double(end &- now)) else { return }
+    if unsafe !mk.pointee.wantUserInitiated.pointee.exchange(true, ordering: .relaxed), let vm = unsafe vm { unsafe vm.count(.entryRateRaises) }
 }
 
 /// Either resource's headroom is below the threshold.
@@ -180,6 +232,9 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     unsafe m.pointee.sweepCpuNs = 0
     unsafe m.pointee.entriesFreed = 0
     unsafe m.pointee.bytesFreed = 0
+    unsafe m.pointee.entriesVisited = 0
+    unsafe m.pointee.entriesPublished = 0
+    unsafe log.pointee.sweepStartNs = 0
     om.setMarkingActive(true)
     // Module 6: a relocation planned for this cycle counts live bytes.
     unsafe relocationAtInitialMark(vm, mk, cycle: cycle)
@@ -229,6 +284,12 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     rec.rootsNs = t2 &- t1
     rec.survivorsNs = t3 &- t2
     rec.snapshotEntries = entries
+    if let y = unsafe vm.pointee.young {
+        rec.entryRate = unsafe youngEntryRate(y)
+    } else {
+        rec.entryRate = unsafe sampleRate(log.pointee.entrySamples.map { ($0.ns, $0.entries) })
+    }
+    rec.oldEntriesAtStart = unsafe log.pointee.oldEntries
     unsafe log.pointee.begin(rec)
     unsafe log.pointee.startNs = t0
     unsafe log.pointee.counters.cycles &+= 1
@@ -237,6 +298,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     case .predictor: unsafe log.pointee.counters.cyclesByPredictor &+= 1
     case .entries: unsafe log.pointee.counters.cyclesByEntries &+= 1
     case .forced: unsafe log.pointee.counters.cyclesForced &+= 1
+    case .entryRate: unsafe log.pointee.counters.cyclesByEntryRate &+= 1
     }
     unsafe log.pointee.counters.initialMarkNs &+= t3 &- t0
     // The barrier is on before any mutator runs again (the stop's release

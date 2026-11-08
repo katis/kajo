@@ -269,7 +269,17 @@ struct CacheEntry {
             let w = unsafe workerOf(state)
             let keep = extra == .none ? [nilObject] : [nilObject, extra]
             var waited = false
+            // The sweep stop: a bounded stop's hand-over did not serve this
+            // allocation (blocks come only with the whole apply): wait for
+            // the sweep outside the stop, once; the main worker and a wait
+            // that ran out finish the sweep whole in the stop.
+            var waitSweep = false, waitedSweep = false
             while true {
+                if waitSweep {
+                    waitSweep = false
+                    waitedSweep = true
+                    _ = unsafe waitForSweep(vm, w, holding: extra)
+                }
                 if unsafe !state.pointee.collectAtEveryAllocation {
                     let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
                                               deferZero: deferZero)
@@ -294,11 +304,17 @@ struct CacheEntry {
                     // Large bytes, part 2: a cycle that has marked holds
                     // the dead runs until its apply; finishing its sweep
                     // here frees them, before module 1's full collection.
-                    if unsafe finishSweepInStop(vm, for: .oldAllocation) {
+                    let bounded = unsafe w.pointee.index != 0 && !waitedSweep
+                    let swept = unsafe finishSweepInStop(vm, for: .oldAllocation, bounded: bounded)
+                    if swept != .none {
                         let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
                                                   deferZero: deferZero)
                         if o != .none {
                             result = o
+                            return
+                        }
+                        if swept == .partial {
+                            waitSweep = true
                             return
                         }
                     }
@@ -311,6 +327,7 @@ struct CacheEntry {
                 }
                 if !stopped { continue }
                 unsafe state.pointee.counters.collectionsTriggered &+= pauseCount() &- before
+                if waitSweep { continue }
                 guard let o = result else {
                     if !softFailure { fail(.outOfMemory) }
                     return .none

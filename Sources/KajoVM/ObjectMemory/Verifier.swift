@@ -151,6 +151,13 @@ extension ObjectMemory {
             if markByte(e) != 0 && !marking { out.fail("entry \(e) has its mark set outside a collection") }
             if EntryState.isFree(s) {
                 if hd.raw != 0 { out.fail("free entry \(e) has header 0x\(String(hd.raw, radix: 16))") }
+                // The sweep stop: while a lazy sweep is pending, an entry
+                // its snapshot still names is the sweep's to free; one that
+                // is free already has two owners (a partial apply handed
+                // over an entry the sweep has not reached).
+                if let pd = unsafe gc.pointee.pendingDead, pd.contains(e) {
+                    out.fail("free entry \(e) is still in the lazy sweep's snapshot: the sweep has not reached it")
+                }
                 continue
             }
             if s & EntryState.relocatingBit != 0 { out.fail("entry \(e) is RELOCATING"); continue }

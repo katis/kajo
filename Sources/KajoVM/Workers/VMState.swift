@@ -171,6 +171,10 @@ enum StopKind: UInt8, Sendable {
     /// Module 7: an initial mark without a scavenge, the young verifier.
     case initialMark
     case verify
+    /// The sweep stop (docs/modules/sweep-stop.md): an allocation found the
+    /// entry table empty, or an old allocation found no room, while a
+    /// cycle swept; the sweep is bounded or finished and applied here.
+    case sweep
 }
 
 struct StopRecord: Sendable {
@@ -301,6 +305,10 @@ enum Counter: Int, CaseIterable {
     /// or the pause found a cycle running or a full collection due); a
     /// large allocation decided it and found the pending table full.
     case triggersNotStarted, largeTriggersUnrooted
+    /// The sweep stop, part 3: young collections at which the entry-rate
+    /// rule asked for the marker to be raised (the table would empty at
+    /// the observed rate before the running cycle ends).
+    case entryRateRaises
 }
 
 /// A snapshot of the counters.

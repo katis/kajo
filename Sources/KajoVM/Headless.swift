@@ -38,6 +38,11 @@ public enum Headless {
         /// The marker is raised to user-initiated below this headroom (0:
         /// always utility, above 1: always user-initiated).
         public var escalateBelow = 0.25
+        /// The sweep stop (docs/modules/sweep-stop.md): the words a sweep
+        /// stop may sweep (nil: `MarkingConfig`'s; -1: unbounded, the
+        /// large-bytes follow-up's stop) and the entry-rate rule (part 3).
+        public var sweepStopWords: Int? = nil
+        public var entryRateRule = true
         /// Module 6: concurrent relocation (`on`, `off`), its stress flags
         /// (`everyblock`, `everycycle`), the sparse-block threshold and the
         /// to-space cap (fractions).
@@ -276,6 +281,10 @@ public enum Headless {
         vc.marking.floor = options.floor
         vc.marking.safetyFactor = options.safetyFactor
         vc.marking.escalateBelow = options.escalateBelow
+        if let w = options.sweepStopWords {
+            if w < 0 { vc.marking.testSwitches.sweepStopUnbounded = true } else { vc.marking.sweepStopWords = w }
+        }
+        vc.marking.testSwitches.noEntryRateRule = !options.entryRateRule
         guard options.relocation == "on" || options.relocation == "off" else { return .failure(.unsupported("--reloc: on or off")) }
         vc.relocation.enabled = options.relocation == "on"
         vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
@@ -517,6 +526,11 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         return s.isEmpty ? "-" : ms(s[min(s.count - 1, Int(Double(s.count) * q))])
     }
     let finals = stops.filter { $0.kind == .finalMark }.map(\.pauseNs)
+    let sweepStops = stops.filter { $0.kind == .sweep }.map(\.pauseNs)
+    func pctD(_ xs: [Double], _ q: Double) -> String {
+        let s = xs.sorted()
+        return s.isEmpty ? "-" : f(s[min(s.count - 1, Int(Double(s.count) * q))] / 1e6)
+    }
     let ttsp = stops.filter { $0.kind == .finalMark }.map(\.timeToSafepointNs)
     let done = log.filter(\.completed)
     let im = log.map { $0.snapshotNs &+ $0.rootsNs &+ $0.survivorsNs }
@@ -550,6 +564,22 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("fallbacksOld", "\(c.fallbacksOldAllocation)"), ("fallbackLog", fallbackSummary(vm.fallbackLog)),
         ("sweepsForEntries", "\(c.sweepsFinishedForEntries)"), ("sweepsForOld", "\(c.sweepsFinishedForOld)"),
         ("sweepsInStopMs", ms(c.sweepsFinishedForEntriesNs)),
+        ("sweepStops", "\(c.sweepStops)"), ("sweepStopsWhole", "\(c.sweepStopsWhole)"),
+        ("sweepStopsPartial", "\(c.sweepStopsPartial)"), ("sweepStopsUnbounded", "\(c.sweepStopsUnbounded)"),
+        ("sweepStopP50ms", pct(sweepStops, 0.5)), ("sweepStopMaxMs", sweepStops.max().map(ms) ?? "-"),
+        ("sweepStopRelocCutOffs", "\(c.sweepStopRelocCutOffs)"),
+        ("sweepWaits", "\(c.allocationWaits.sweepCount)"), ("sweepWaitMs", ms(c.allocationWaits.sweepNs)),
+        ("sweepWaitTimeouts", "\(c.allocationWaits.sweepTimeouts)"),
+        ("byEntryRate", "\(c.cyclesByEntryRate)"), ("entryRateRaises", "\(vm.counters[.entryRateRaises])"),
+        ("sweepStopLog", sweepStopSummary(vm.sweepStopLog)),
+        // Part 3's two rates, over the cycles the log kept: entries consumed
+        // per second at each trigger, and entries a completed sweep visited
+        // per second of its wall time (M/s), with the share of the table
+        // the old entries held at the trigger.
+        ("entryRateP50Ms", pctD(log.map(\.entryRate).filter { $0 > 0 }, 0.5)),
+        ("sweepRateP50Ms", pctD(done.filter { $0.sweepNs > 0 }.map { Double($0.snapshotEntries) / (Double($0.sweepNs) / 1e9) }, 0.5)),
+        ("sweepRateMinMs", done.filter { $0.sweepNs > 0 }.map { Double($0.snapshotEntries) / (Double($0.sweepNs) / 1e9) }.min().map { f($0 / 1e6) } ?? "-"),
+        ("oldEntriesAtTriggerP50", pctD(log.map { Double($0.oldEntriesAtStart) * 1e6 / Double(Swift.max(1, vm.inspect { $0.entryCapacity })) }, 0.5)),
         ("allocWaits", "\(c.allocationWaits.count)"), ("allocWaitMs", ms(c.allocationWaits.ns)),
         ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
@@ -642,6 +672,31 @@ func stopsByKind(_ stops: [StopRecord]) -> String {
     }.joined(separator: ",")
 }
 
+/// The sweep stop (docs/modules/sweep-stop.md): each recorded sweep stop
+/// as cause/phase/outcome (w whole, p partial, u unbounded)/requester/
+/// swept percent of the snapshot's words when it began/entries visited
+/// percent of the snapshot's/entries freed before it (k)/pending runs/ms
+/// since the sweep could start/marker QoS/raise wanted/words swept in the
+/// stop/entries freed in it (k)/its sweeping ms/its apply or hand-over
+/// ms/entries handed over (k)/relocation cut off (1)/old entries percent
+/// of the table, separated by commas; "-" when none.
+func sweepStopSummary(_ rs: [SweepStopRecord]) -> String {
+    if rs.isEmpty { return "-" }
+    func pc(_ a: Double, _ b: Double) -> String { b > 0 ? unsafe String(format: "%.0f", 100 * a / b) : "-" }
+    func ms(_ ns: UInt64) -> String { unsafe String(format: "%.2f", Double(ns) / 1e6) }
+    func k(_ n: UInt64) -> String { unsafe String(format: "%.0f", Double(n) / 1e3) }
+    return rs.map { r in
+        let cause = ["soft", "entries", "other", "old"][Int(r.cause.rawValue)]
+        let phase = ["idle", "marking", "sweeping", "swept"][Int(r.phase.rawValue)]
+        let outcome = ["-", "w", "p", "u"][Int(r.outcome.rawValue)]
+        return [cause, phase, outcome, "\(r.requester)", pc(Double(r.cursorWords), Double(r.totalWords)),
+                pc(Double(r.entriesVisited), Double(r.snapshotEntries)), k(r.entriesFreed), "\(r.pendingRuns)",
+                ms(r.sinceSweepStartNs), "\(r.markerQoS)", r.wantUserInitiated ? "1" : "0", "\(r.wordsInStop)",
+                k(r.entriesFreedInStop), ms(r.sweepNs), ms(r.applyNs), k(r.entriesHanded), r.relocationCutOff ? "1" : "0",
+                pc(Double(r.oldEntries), Double(r.entryCapacity))].joined(separator: "/")
+    }.joined(separator: ",")
+}
+
 /// Large bytes, part 2: each recorded fallback as
 /// cause/phase/trigger/ms since the cycle started/ms since the last
 /// apply/cycles started/swept percent/entries
@@ -654,7 +709,7 @@ func fallbackSummary(_ rs: [FallbackRecord]) -> String {
     return rs.map { r in
         let cause = ["soft", "entries", "other", "old"][Int(r.cause.rawValue)]
         let phase = ["idle", "marking", "sweeping", "swept"][Int(r.phase.rawValue)]
-        let trig = r.trigger.map { ["floor", "entries", "predictor", "forced"][Int($0.rawValue)] } ?? "-"
+        let trig = r.trigger.map { ["floor", "entries", "predictor", "forced", "entryRate"][Int($0.rawValue)] } ?? "-"
         return [cause, phase, trig, unsafe String(format: "%.1f", Double(r.sinceCycleStartNs) / 1e6),
                 unsafe String(format: "%.1f", Double(r.sinceLastApplyNs) / 1e6), "\(r.cyclesStarted)",
                 unsafe String(format: "%.0f", r.sweptFraction * 100), pc(Double(r.highWater), Double(r.entryCapacity)),

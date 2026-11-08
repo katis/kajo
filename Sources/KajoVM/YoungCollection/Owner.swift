@@ -203,7 +203,7 @@ func afterYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer
             // decided only at the initial mark, on old space only: on the
             // devices the storm's table ran out while the utility-QoS
             // marker on efficiency cores was still sweeping.
-            unsafe updateWantedQoS(mk, oldEntries: youngOldEntries(vm, y, mk))
+            unsafe updateWantedQoS(mk, oldEntries: youngOldEntries(vm, y, mk), entryRate: youngEntryRate(y), vm: vm)
         }
     }
     let config = unsafe y.pointee.config
@@ -224,11 +224,27 @@ private func sampleForTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingP
     // not sampled: they show in occupancy, which the floor watches.
     let promoted = unsafe y.pointee.promotedBytes.pointee.load(ordering: .relaxed)
         &+ (unsafe vm.pointee.nursery?.pointee.state.pointee.counters.promotedBytes ?? 0)
+    // The sweep stop, part 3: the entries promotion takes from the table
+    // (each promoted object keeps its entry; its nursery refills).
+    let objects = unsafe y.pointee.promotedObjects.pointee.load(ordering: .relaxed)
+        &+ (unsafe vm.pointee.nursery?.pointee.state.pointee.counters.promotedObjects ?? 0)
+    let now = nanoseconds()
     unsafe pthread_mutex_lock(y.pointee.samplerLock)
     let s = unsafe y.pointee.sampler
-    unsafe s.pointee.samples.append((nanoseconds(), promoted))
+    unsafe s.pointee.samples.append((now, promoted))
     if unsafe s.pointee.samples.count > MarkingConfig.rateWindow { unsafe s.pointee.samples.removeFirst() }
+    unsafe s.pointee.entrySamples.append((now, objects))
+    if unsafe s.pointee.entrySamples.count > MarkingConfig.rateWindow { unsafe s.pointee.entrySamples.removeFirst() }
     unsafe pthread_mutex_unlock(y.pointee.samplerLock)
+}
+
+/// The sweep stop, part 3: entries promotion took per second over this
+/// module's last samples (0 with fewer than two).
+func youngEntryRate(_ y: YoungPointer) -> Double {
+    unsafe pthread_mutex_lock(y.pointee.samplerLock)
+    let s = unsafe y.pointee.sampler.pointee.entrySamples
+    unsafe pthread_mutex_unlock(y.pointee.samplerLock)
+    return sampleRate(s.map { ($0.ns, $0.entries) })
 }
 
 /// The trigger on this module's samples (module 5's rule: floor,
@@ -242,7 +258,7 @@ private func youngTrigger(_ vm: VMPointer, _ y: YoungPointer, _ mk: MarkingPoint
     if samples.count >= 2, let a = samples.first, let b = samples.last, b.ns > a.ns {
         rate = Double(b.promoted &- a.promoted) / (Double(b.ns &- a.ns) / 1e9)
     }
-    return unsafe decideTrigger(mk, rate: rate, oldEntries: entries, record: false)
+    return unsafe decideTrigger(mk, rate: rate, entryRate: youngEntryRate(y), oldEntries: entries, record: false)
 }
 
 /// Old entries: module 5's estimate (kept at stops) plus what young

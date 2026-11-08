@@ -153,6 +153,12 @@ extension VM {
         return inspect { _ in unsafe mk.pointee.log.pointee.fallbackRecords.records }
     }
 
+    /// The sweep stop: the last sweep stops' records, oldest first.
+    var sweepStopLog: [SweepStopRecord] {
+        guard let mk = unsafe state.pointee.marking else { return [] }
+        return inspect { _ in unsafe mk.pointee.log.pointee.sweepStopRecords.records }
+    }
+
     /// The final mark on the devices: the young-root scans' counters
     /// (`RootScanStat`), read outside stops (atomics).
     var rootScanStats: [UInt64] {
@@ -243,6 +249,35 @@ extension VM {
         }
         if unsafe mk.phaseNow == .sweeping { _ = unsafe sweepCycle(state, mk, inPause: false) }
         unsafe leaveVM(state, mw)
+    }
+
+    /// Manual mode: sweep at most `words` snapshot words as the marker
+    /// (relocating first, as `sweep`); true when the sweep reached its end.
+    @discardableResult
+    func sweepStep(words: Int) -> Bool {
+        let mk = unsafe manualMarker()
+        let mw = unsafe mk.pointee.markerWorker
+        unsafe enterVM(state, mw)
+        if let r = unsafe state.pointee.relocation, unsafe !r.pointee.config.testSwitches.manualRelocation,
+           unsafe mk.phaseNow == .sweeping {
+            _ = unsafe relocatePass(state, mk, cycle: mk.cycleNow)
+        }
+        var done = false
+        if unsafe mk.phaseNow == .sweeping { done = unsafe sweepCycle(state, mk, inPause: false, maxWords: words) }
+        unsafe leaveVM(state, mw)
+        return done
+    }
+
+    /// Tests: a sweep stop now, from the host, as a young allocation that
+    /// found the entry table empty runs it (`bounded` false: as the main
+    /// worker's old allocation does). Answers its outcome.
+    @discardableResult
+    func sweepStop(cause: FullCause = .entries, bounded: Bool = true) -> SweepStopOutcome {
+        var outcome = SweepStopOutcome.none
+        _ = unsafe host { w in
+            unsafe stopWorld(state, w, retry: true) { _ in outcome = unsafe finishSweepInStop(state, for: cause, bounded: bounded) }
+        }
+        return outcome
     }
 
     /// `o` was an old object at the current snapshot.

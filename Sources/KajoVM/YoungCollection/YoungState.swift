@@ -269,6 +269,10 @@ struct YoungWorkerCounters: Sendable {
 /// Under its own lock.
 struct YoungSampler {
     var samples: [(ns: UInt64, promoted: UInt64)] = []
+    /// The sweep stop, part 3: objects promoted (cumulative, the young
+    /// collections' and the stop-the-world scavenges'), the entries they
+    /// took from the table, at the same collections.
+    var entrySamples: [(ns: UInt64, entries: UInt64)] = []
     var oldEntries: UInt64 = 0
     var lastPromotedObjects: UInt64 = 0
     var lastOldAllocations: UInt64 = 0

@@ -240,6 +240,7 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
     om.setPendingDead(unsafe mk.pointee.snapshot)
     unsafe m.pointee.sweepCursor = 0
     unsafe m.pointee.sweepWords = log.pointee.snapshotWords
+    unsafe log.pointee.sweepStartNs = nanoseconds()
     unsafe m.pointee.sweepStamp = UInt32(truncatingIfNeeded: cycle)
     let blocks = om.heap.blockCount
     if unsafe m.pointee.sweepLive.count != blocks {

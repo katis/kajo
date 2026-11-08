@@ -9,7 +9,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress every,tiny,oneblock,preempt,stop,tinynursery,promoteall,scavenge]
                 [--slice-ms 5] [--nursery KiB] [--survivor KiB] [--age N] [--verify]
                 [--gc cm|stw] [--stress cycle,alwayson,neverapply] [--floor 0.6]
-                [--safety 2] [--escalate-below 0.25] [--reloc on|off]
+                [--safety 2] [--escalate-below 0.25] [--sweep-stop-words n|-1] [--entry-rate on|off] [--reloc on|off]
                 [--stress everyblock,everycycle] [--reloc-threshold 0.5]
                 [--reloc-cap 0.5] [--sample-ms N] [--young stw|local|offload]
                 [--stress everyhalf,everypoll,barrieron] [--main-ms N|-1 --main-alloc N --main-work N]
@@ -114,6 +114,8 @@ case "run":
         case "--floor": options.floor = Double(value()) ?? 0.6
         case "--safety": options.safetyFactor = Double(value()) ?? 2
         case "--escalate-below": options.escalateBelow = Double(value()) ?? 0.25
+        case "--sweep-stop-words": options.sweepStopWords = Int(value())
+        case "--entry-rate": options.entryRateRule = value() != "off"
         case "--reloc": options.relocation = value()
         case "--reloc-threshold": options.relocationThreshold = Double(value()) ?? 0.5
         case "--reloc-cap": options.relocationCap = Double(value()) ?? 0.5
