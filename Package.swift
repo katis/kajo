@@ -17,20 +17,17 @@ let package = Package(
         .library(name: "KajoDev", targets: ["KajoDev"]),
         .executable(name: "kajo", targets: ["kajo"]),
     ],
-    // Module 11a: a generated app's pinned dependency enables KajoAppBuild:
-    // Xcode builds every package in its Debug configuration unoptimized and
-    // with DEBUG (a checked build: every verifier at every pause), whatever
-    // the app's settings say. Under this trait the VM is optimized (-O, file
-    // by file: Xcode's index-while-building refuses whole-module flags) and
-    // unchecked in Debug too. The repository's own builds never enable it.
-    traits: [.trait(name: "KajoAppBuild")],
+    // Module 11a's KajoAppBuild trait is gone with module 11b: a generated
+    // app links the distribution checkout's prebuilt Release frameworks
+    // (scripts/dist.sh) in both configurations, never this package's
+    // sources, so no Debug build of the VM is made for an app.
     targets: [
         // The VM core: object memory, GC, interpreter, scheduler.
         // This is the trusted computing base. Strict memory safety is on so
         // every unsafe construct is labelled and greppable.
         .target(
             name: "KajoVM",
-            swiftSettings: [.strictMemorySafety(), .unsafeFlags(["-O"], .when(configuration: .debug, traits: ["KajoAppBuild"]))]
+            swiftSettings: [.strictMemorySafety()]
         ),
         // Module 8b: the bootstrap compiler (Smalltalk method syntax and
         // Tonel class files to bytecode set v1), the kernel image build.
@@ -58,7 +55,7 @@ let package = Package(
             swiftSettings: [.strictMemorySafety()]
         ),
         // Module 11a: `kajo new`, the app project generator (a library so
-        // the Mac app's wizard can call it). Foundation only.
+        // the Kajo app's File > New App... calls it, module 11b). Foundation only.
         .target(
             name: "KajoGenerator",
             swiftSettings: [.strictMemorySafety()]
@@ -68,7 +65,7 @@ let package = Package(
         // scenario, demo, dev, devsession, serve) over KajoApp's runtime.
         .target(
             name: "KajoShellCore",
-            dependencies: ["KajoApp", "KajoAppDevelopment", "KajoVM", "KajoCompiler", "KajoDev"],
+            dependencies: ["KajoApp", "KajoAppDevelopment", "KajoVM", "KajoCompiler", "KajoDev", "KajoGenerator"],
             swiftSettings: [.strictMemorySafety()]
         ),
         // Module 9b: the development protocol outside the VM: its JSON and

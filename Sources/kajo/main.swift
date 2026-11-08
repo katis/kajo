@@ -19,7 +19,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
-       kajo new <Name> --bundle-id <id> (--kajo <path> | --kajo-url <url> --revision <rev>) [--team <id>] [--directory <dir>]
+       kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS]
        kajo version
 \(clientUsage)
 
@@ -50,14 +50,16 @@ interface, advertised with Bonjour as _kajo-dev._tcp (--name, or this
 Mac's name), and prints the port and the addresses with the token. --release marks it a release
 image: Smalltalk cannot make, install or remove methods in it.
 
-new (module 11a): writes a Kajo app project into <dir> (default ./<Name>,
-which must be empty or absent): an xcodegen spec with <Name>-macOS and
-<Name>-iOS over one Tonel directory (src/, the package <Name> with the
-class <Name>App and its test), the Swift both targets run, the Info.plists
-(only Debug's name the local network), the build phase that makes a
-development image (Debug) or a release image (Release) with the pinned
-Kajo's kajo, and the Xcode project when xcodegen is on PATH. --kajo names a
-Kajo checkout on this machine; --kajo-url and --revision a repository.
+new (module 11a, 11b): writes a Kajo app project into <dir> (default
+./<Name>, which must be empty or absent): an xcodegen spec with
+<Name>-macOS and <Name>-iOS (or the one --platforms names) over one Tonel
+directory (src/, the package <Name> with the class <Name>App and its
+test), the Swift the targets run, the Info.plists (only Debug's name the
+local network), the build phase that makes a development image (Debug) or
+a release image (Release) with the checkout's prebuilt kajo, and the Xcode
+project when xcodegen is found. --kajo names a Kajo distribution checkout
+(Prebuilt/ with the Release frameworks and kajo; the Kajo app copies its
+own to Application Support, scripts/dist.sh makes one).
 
 seal: loads an image (every loader check), marks it a release image and
 saves it to <out.img>. Nothing clears the mark.
@@ -204,7 +206,7 @@ case "build-image":
     }
 case "new":
     var spec = AppProjectSpec(name: "", bundleIdentifier: "", kajo: .path(""))
-    var url: String? = nil, revision: String? = nil, path: String? = nil, directory: String? = nil
+    var path: String? = nil, directory: String? = nil
     var i = 0
     func value() -> String {
         i += 1
@@ -216,9 +218,12 @@ case "new":
         case "--bundle-id": spec.bundleIdentifier = value()
         case "--team": spec.team = value()
         case "--kajo": path = value()
-        case "--kajo-url": url = value()
-        case "--revision": revision = value()
         case "--directory": directory = value()
+        case "--platforms":
+            let names = value().split(separator: ",").map(String.init)
+            let ps = names.compactMap(AppPlatform.init(rawValue:))
+            guard ps.count == names.count else { fail("kajo new: --platforms takes macOS, iOS or macOS,iOS") }
+            spec.platforms = AppPlatform.allCases.filter(ps.contains)
         case let a where a.hasPrefix("-"): fail("unknown option \(a)\n\(usage)")
         default:
             guard spec.name.isEmpty else { fail("one name\n\(usage)") }
@@ -227,13 +232,10 @@ case "new":
         i += 1
     }
     guard !spec.name.isEmpty, !spec.bundleIdentifier.isEmpty else { fail(usage) }
-    switch (path, url, revision) {
-    case (let p?, nil, nil):
-        // A relative checkout is taken from the current directory.
-        spec.kajo = .path(p.hasPrefix("/") ? p : (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(p))
-    case (nil, let u?, let r?): spec.kajo = .git(url: u, revision: r)
-    default: fail("kajo new: where Kajo comes from: --kajo <path>, or --kajo-url <url> with --revision <rev>")
-    }
+    guard let p = path else { fail("kajo new: where Kajo comes from: --kajo <checkout>") }
+    // A relative checkout is taken from the current directory.
+    spec.kajo = .path(p.hasPrefix("/") ? p : (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(p))
+    if let r = AppProjectGenerator.check(spec) ?? AppProjectGenerator.checkCheckout(spec.kajo) { fail("kajo new: \(r)", 1) }
     let dir: String
     switch AppProjectGenerator.resolve(directory ?? spec.name, base: FileManager.default.currentDirectoryPath) {
     case .success(let d): dir = d
@@ -243,7 +245,9 @@ case "new":
     case .success(let files):
         print("\(dir): \(files.count) files")
         do {
-            print(try AppProjectGenerator.generateXcodeProject(in: dir) ? "\(dir)/\(spec.name).xcodeproj" : "no xcodegen on PATH: run `xcodegen generate` in \(dir)")
+            // Beside this kajo in the Kajo app's Contents/Helpers.
+            let bundled = ((CommandLine.arguments[0] as NSString).resolvingSymlinksInPath as NSString).deletingLastPathComponent + "/xcodegen/bin/xcodegen"
+            print(try AppProjectGenerator.generateXcodeProject(in: dir, xcodegen: bundled) ? "\(dir)/\(spec.name).xcodeproj" : "no xcodegen on PATH: run `xcodegen generate` in \(dir)")
         } catch {
             fail("kajo new: \(error)", 1)
         }

@@ -10,11 +10,12 @@ import UIKit
 #endif
 
 // Module 11a (docs/modules/app-project.md): the entry a generated app's
-// Swift calls. The app's whole Swift is
+// Swift calls. The app's whole Swift is (since module 11b both modules come
+// from the distribution checkout's prebuilt frameworks)
 //
-//     import KajoPin
+//     import KajoApp
 //     #if DEBUG
-//     import KajoPinDevelopment
+//     import KajoAppDevelopment
 //     #endif
 //
 //     @main enum Main {
@@ -289,6 +290,7 @@ public enum KajoApplication {
     /// runtime, the app class opened after the first frame. `development`
     /// is a development build's half (nil in a release build).
     @MainActor public static func main(_ configuration: KajoAppConfiguration, development: AppDevelopment? = nil) -> Never {
+        if let kernel = KernelBench.requested() { exit(KernelBench.run(kernel)) }
         pending = (configuration, development)
         #if os(macOS)
         // No window restoration: after a crash AppKit would ask, in a modal
@@ -333,6 +335,47 @@ public enum KajoApplication {
             }
         }
         return r
+    }
+}
+
+/// Module 11b: `kajo-bench=<dir>/<kernel>.kasm [kajo-bench-runs=N]` among
+/// the launch arguments runs one of the fixture kernels (with `prelude.kasm`
+/// and `lib.kasm` from the same directory) on one worker, N times (3 by
+/// default), prints one `bench kernel=<name> run=<i> ms=<ms> checksum=<n>`
+/// line each, and exits before any window: the VM an app links, measured
+/// in the app's own binary (a Debug build against a Release build of one
+/// project, docs/modules/distribution.md). Nothing else reads the files.
+enum KernelBench {
+    static func requested() -> String? {
+        CommandLine.arguments.first(where: { $0.hasPrefix("kajo-bench=") }).map { String($0.dropFirst(11)) }
+    }
+
+    static func run(_ kernel: String) -> Int32 {
+        let dir = (kernel as NSString).deletingLastPathComponent
+        let name = ((kernel as NSString).lastPathComponent as NSString).deletingPathExtension
+        let runs = CommandLine.arguments.first(where: { $0.hasPrefix("kajo-bench-runs=") }).flatMap { Int($0.dropFirst(16)) } ?? 3
+        var files: [(path: String, text: String)] = []
+        for p in [dir + "/prelude.kasm", dir + "/lib.kasm", kernel] {
+            guard let t = try? String(contentsOfFile: p, encoding: .utf8) else {
+                appLog("bench kernel=\(name) error=cannot_read path=\(p)")
+                return 1
+            }
+            files.append((p, t))
+        }
+        var o = Headless.Options()
+        o.workers = 1
+        o.heapMiB = 1024
+        o.sliceMs = 0
+        for i in 1...max(1, runs) {
+            let r = Headless.run(files, options: o)
+            switch r.checksum {
+            case .success(let v): appLog("bench kernel=\(name) run=\(i) ms=\((r.milliseconds * 10).rounded() / 10) checksum=\(v)")
+            case .failure(let f):
+                appLog("bench kernel=\(name) run=\(i) error=\("\(f)".replacingOccurrences(of: " ", with: "_"))")
+                return 1
+            }
+        }
+        return 0
     }
 }
 

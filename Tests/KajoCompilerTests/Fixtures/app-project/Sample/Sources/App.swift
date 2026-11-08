@@ -1,10 +1,10 @@
-// The app's whole Swift, the same for the Mac and iOS targets: the
-// bundled image to Kajo. Debug adds the development half, which serves
-// the development protocol from launch; Release links none of it.
+// The app's whole Swift, the same for every target: the bundled image
+// to Kajo. Debug adds the development half, which serves the
+// development protocol from launch; Release links none of it.
 
-import KajoPin
+import KajoApp
 #if DEBUG
-import KajoPinDevelopment
+import KajoAppDevelopment
 #endif
 
 @main enum Main {

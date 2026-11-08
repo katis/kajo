@@ -1,33 +1,44 @@
 import Foundation
 
 // Module 11a (docs/modules/app-project.md, part 2): `kajo new`, the app
-// project generator. A library so that the Mac app's wizard can call it
-// later; the CLI is one caller. It takes a developer's input, so every
-// check is a refusal (a value), never a trap, and its output for a given
-// input is the same bytes every time (no dates, no machine names).
+// project generator; module 11b (docs/modules/distribution.md) points it at
+// a distribution checkout's prebuilt Kajo and gives it the wizard's target
+// choice. A library so that the Kajo app's File > New App... calls it; the
+// CLI is the other caller. It takes a developer's input, so every check is
+// a refusal (a value), never a trap, and its output for a given input is
+// the same bytes every time (no dates, no machine names).
 //
 // The project it writes:
 //
-//   <Name>/project.yml        xcodegen: <Name>-macOS and <Name>-iOS over one
-//                             Tonel directory, Debug and Release
-//   <Name>/KajoPin/           the pinned Kajo (a path, or a URL and a
-//                             revision) with the KajoAppBuild trait, and the
-//                             two products the app imports
+//   <Name>/project.yml        xcodegen: <Name>-macOS and/or <Name>-iOS over
+//                             one Tonel directory, Debug and Release, and the
+//                             one local package: the checkout's Prebuilt/
 //   <Name>/Sources/App.swift  the few lines both targets run
 //   <Name>/Info-*.plist       per platform and configuration: only Debug
 //                             names the Bonjour service and the local network
 //   <Name>/src/               the Tonel package: the app class and its test
 //   <Name>/scripts/build-images.sh  the build phase: the image of the
-//                             configuration with the pinned checkout's kajo
+//                             configuration with the checkout's prebuilt kajo
 //   <Name>/.gitignore, README.md
 
-/// Where the generated project's Kajo comes from.
+/// Where the generated project's Kajo comes from: a distribution checkout
+/// on this machine (the Kajo app copies its own to Application Support;
+/// `scripts/dist.sh` makes one), whose `Prebuilt/` holds the Release
+/// frameworks of every module an app links and the Release `kajo`. Module
+/// 11a's source pin (the package by path or by URL with the KajoAppBuild
+/// trait) is gone with the trait: a Debug build links the same prebuilt
+/// Release VM as a Release build.
 public enum KajoSource: Sendable, Equatable {
-    /// A Kajo checkout on this machine (the tests' and the gate's form).
+    /// The checkout's root (it holds `kernel/` and `Prebuilt/`).
     case path(String)
-    /// A repository and a revision (the real form, once there is a
-    /// repository to name; module 11a raises it as a question).
-    case git(url: String, revision: String)
+}
+
+/// The platforms a project has a target for (the wizard's checkboxes).
+public enum AppPlatform: String, Sendable, Equatable, CaseIterable, Comparable {
+    case macOS
+    case iOS
+
+    public static func < (a: AppPlatform, b: AppPlatform) -> Bool { a.rawValue < b.rawValue }
 }
 
 /// What `kajo new` is asked for.
@@ -39,13 +50,19 @@ public struct AppProjectSpec: Sendable, Equatable {
     /// The development team, or nil to leave signing to Xcode's settings.
     public var team: String?
     public var kajo: KajoSource
+    /// The targets: a Mac app, an iPhone and iPad app, or both (the default).
+    public var platforms: [AppPlatform]
 
-    public init(name: String, bundleIdentifier: String, team: String? = nil, kajo: KajoSource) {
+    public init(name: String, bundleIdentifier: String, team: String? = nil, kajo: KajoSource,
+                platforms: [AppPlatform] = AppPlatform.allCases) {
         self.name = name
         self.bundleIdentifier = bundleIdentifier
         self.team = team
         self.kajo = kajo
+        self.platforms = platforms
     }
+
+    func has(_ p: AppPlatform) -> Bool { platforms.contains(p) }
 }
 
 /// Why the generator refuses. Each is a value the caller shows.
@@ -55,6 +72,8 @@ public enum GeneratorRefusal: Error, Equatable, Sendable, CustomStringConvertibl
     case invalidBundleIdentifier(String, String)
     case invalidTeam(String)
     case invalidKajoSource(String)
+    case noTargets
+    case notACheckout(String)
     case directoryNotEmpty(String)
     case pathEscapes(String)
     case cannotWrite(String)
@@ -66,6 +85,8 @@ public enum GeneratorRefusal: Error, Equatable, Sendable, CustomStringConvertibl
         case .invalidBundleIdentifier(let b, let why): "not a bundle identifier: \(b.debugDescription) (\(why))"
         case .invalidTeam(let t): "not a development team: \(t.debugDescription) (ten capital letters and digits)"
         case .invalidKajoSource(let why): "not a place Kajo comes from: \(why)"
+        case .noTargets: "an app needs a target: the Mac, iPhone and iPad, or both"
+        case .notACheckout(let p): "not a Kajo checkout with a prebuilt Kajo (no Prebuilt/Package.swift and Prebuilt/bin/kajo): \(p)"
         case .directoryNotEmpty(let d): "the directory exists and is not empty: \(d)"
         case .pathEscapes(let p): "the path leaves the directory it is relative to: \(p)"
         case .cannotWrite(let why): "cannot write the project: \(why)"
@@ -124,43 +145,35 @@ public enum AppProjectGenerator {
         return nil
     }
 
-    /// A path, URL or revision that lands in the package manifest and the
-    /// build script as written: no quotes, backslashes, dollars, backticks
-    /// or control characters, and the forms each takes.
+    /// A path that lands in the project spec and the build script as
+    /// written: absolute, naming a directory, and without quotes,
+    /// backslashes, dollars, backticks or control characters.
     public static func checkKajo(_ k: KajoSource) -> GeneratorRefusal? {
-        func plain(_ s: String) -> Bool {
-            !s.isEmpty && s.unicodeScalars.allSatisfy { $0.value >= 32 && $0.value != 127 && !"\"'\\$`".unicodeScalars.contains($0) }
-        }
         switch k {
         case .path(let p):
-            guard plain(p) else { return .invalidKajoSource("a path without quotes, backslashes, dollars or control characters") }
+            guard !p.isEmpty, p.unicodeScalars.allSatisfy({ $0.value >= 32 && $0.value != 127 && !"\"'\\$`".unicodeScalars.contains($0) }) else {
+                return .invalidKajoSource("a path without quotes, backslashes, dollars or control characters")
+            }
             guard p.hasPrefix("/") else { return .invalidKajoSource("an absolute path to a Kajo checkout") }
-            guard packageIdentity(k) != nil else { return .invalidKajoSource("the path names no directory") }
-        case .git(let url, let rev):
-            guard plain(url), !url.contains(" ") else { return .invalidKajoSource("a URL without spaces, quotes or control characters") }
-            guard url.hasPrefix("https://") || url.hasPrefix("ssh://") || url.hasPrefix("git@") else {
-                return .invalidKajoSource("an https://, ssh:// or git@ URL")
-            }
-            guard packageIdentity(k) != nil else { return .invalidKajoSource("the URL names no repository") }
-            guard (7...40).contains(rev.count), rev.unicodeScalars.allSatisfy({ ("0"..."9").contains($0) || ("a"..."f").contains($0) }) else {
-                return .invalidKajoSource("a revision is 7 to 40 lowercase hexadecimal digits")
-            }
+            let last = p.split(separator: "/").last.map(String.init) ?? ""
+            guard !last.isEmpty, last != ".", last != ".." else { return .invalidKajoSource("the path names no directory") }
         }
         return nil
     }
 
-    /// SwiftPM's identity of the Kajo package: the last path component,
-    /// lowercased, without `.git`.
-    public static func packageIdentity(_ k: KajoSource) -> String? {
-        let s: String
+    /// The checkout on disk has what a generated project uses: the
+    /// prebuilt package and `kajo`, and the kernel's sources. Not part of
+    /// `files(for:)`, which stays a function of its input; `kajo new` and
+    /// the wizard ask it before writing.
+    public static func checkCheckout(_ k: KajoSource) -> GeneratorRefusal? {
+        if let r = checkKajo(k) { return r }
         switch k {
-        case .path(let p): s = p
-        case .git(let url, _): s = url
+        case .path(let p):
+            let fm = FileManager.default
+            guard fm.fileExists(atPath: p + "/Prebuilt/Package.swift"), fm.isExecutableFile(atPath: p + "/Prebuilt/bin/kajo"),
+                  fm.fileExists(atPath: p + "/kernel") else { return .notACheckout(p) }
         }
-        var last = String(s.split(whereSeparator: { $0 == "/" || $0 == ":" }).last ?? "")
-        if last.hasSuffix(".git") { last.removeLast(4) }
-        guard !last.isEmpty, last != ".", last != ".." else { return nil }
-        return last.lowercased()
+        return nil
     }
 
     /// Every check, in the order a developer would fix them.
@@ -168,6 +181,7 @@ public enum AppProjectGenerator {
         if let r = checkName(spec.name) { return r }
         if let r = checkBundleIdentifier(spec.bundleIdentifier) { return r }
         if let t = spec.team, let r = checkTeam(t) { return r }
+        if spec.platforms.isEmpty { return .noTargets }
         return checkKajo(spec.kajo)
     }
 
@@ -175,15 +189,16 @@ public enum AppProjectGenerator {
     public static func files(for spec: AppProjectSpec) -> Result<[GeneratedFile], GeneratorRefusal> {
         if let r = check(spec) { return .failure(r) }
         let t = Templates(spec)
-        let out = [
-            GeneratedFile(path: ".gitignore", text: t.gitignore, executable: false),
-            GeneratedFile(path: "Info-iOS-Debug.plist", text: t.iosPlist(debug: true), executable: false),
-            GeneratedFile(path: "Info-iOS-Release.plist", text: t.iosPlist(debug: false), executable: false),
-            GeneratedFile(path: "Info-macOS-Debug.plist", text: t.macPlist(debug: true), executable: false),
-            GeneratedFile(path: "Info-macOS-Release.plist", text: t.macPlist(debug: false), executable: false),
-            GeneratedFile(path: "KajoPin/Package.swift", text: t.pinManifest, executable: false),
-            GeneratedFile(path: "KajoPin/Sources/KajoPin/KajoPin.swift", text: t.pinSource, executable: false),
-            GeneratedFile(path: "KajoPin/Sources/KajoPinDevelopment/KajoPinDevelopment.swift", text: t.pinDevelopmentSource, executable: false),
+        var out = [GeneratedFile(path: ".gitignore", text: t.gitignore, executable: false)]
+        if spec.has(.iOS) {
+            out.append(GeneratedFile(path: "Info-iOS-Debug.plist", text: t.iosPlist(debug: true), executable: false))
+            out.append(GeneratedFile(path: "Info-iOS-Release.plist", text: t.iosPlist(debug: false), executable: false))
+        }
+        if spec.has(.macOS) {
+            out.append(GeneratedFile(path: "Info-macOS-Debug.plist", text: t.macPlist(debug: true), executable: false))
+            out.append(GeneratedFile(path: "Info-macOS-Release.plist", text: t.macPlist(debug: false), executable: false))
+        }
+        out += [
             GeneratedFile(path: "README.md", text: t.readme, executable: false),
             GeneratedFile(path: "Sources/App.swift", text: t.mainSwift, executable: false),
             GeneratedFile(path: "project.yml", text: t.projectYML, executable: false),
@@ -240,12 +255,21 @@ public enum AppProjectGenerator {
         return .success(written)
     }
 
-    /// `xcodegen generate` in the project directory when xcodegen is on
-    /// PATH: true when it made the Xcode project, false when there is no
-    /// xcodegen (the README says how to make it later).
-    public static func generateXcodeProject(in directory: String) throws -> Bool {
+    /// Where xcodegen is: the one the Kajo app carries (`Contents/Helpers/
+    /// xcodegen/bin/xcodegen`, so a developer needs nothing beyond Xcode),
+    /// then PATH and Homebrew's places.
+    public static func findXcodegen(bundled: String? = nil) -> String? {
+        let fm = FileManager.default
+        if let b = bundled, fm.isExecutableFile(atPath: b) { return b }
         let paths = (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin").split(separator: ":") + ["/opt/homebrew/bin", "/usr/local/bin"]
-        guard let tool = paths.map({ "\($0)/xcodegen" }).first(where: { FileManager.default.isExecutableFile(atPath: $0) }) else { return false }
+        return paths.map({ "\($0)/xcodegen" }).first(where: { fm.isExecutableFile(atPath: $0) })
+    }
+
+    /// `xcodegen generate` in the project directory: true when it made the
+    /// Xcode project, false when there is no xcodegen (the README says how
+    /// to make it later).
+    public static func generateXcodeProject(in directory: String, xcodegen: String? = nil) throws -> Bool {
+        guard let tool = findXcodegen(bundled: xcodegen) else { return false }
         let p = Process()
         p.executableURL = URL(fileURLWithPath: tool)
         p.arguments = ["generate", "--spec", (directory as NSString).appendingPathComponent("project.yml"), "--quiet"]

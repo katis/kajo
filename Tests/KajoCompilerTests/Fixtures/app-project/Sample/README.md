@@ -5,7 +5,11 @@ package `Sample`); the Swift in `Sources/App.swift` only hands the
 bundled image to Kajo.
 
 - `project.yml` is the xcodegen spec: `Sample-macOS` and `Sample-iOS`
-  over the same `src/`. Make the Xcode project with `xcodegen generate`.
+  over the same `src/`. Make the Xcode project with `xcodegen generate`
+  (the Kajo app does it for you).
+- Kajo is the prebuilt Release build in `/path/to/kajo/Prebuilt`, the one
+  local package the project names: both configurations run the same
+  optimized VM, and nothing is compiled or fetched for it.
 - Debug bundles a development image of the kernel and `src/` and serves
   the Kajo development protocol from launch (Bonjour `_kajo-dev._tcp`,
   named "Sample on <device>"). Its pairing screen is a shake away on
@@ -13,7 +17,7 @@ bundled image to Kajo.
 - Release bundles a sealed release image of the same sources and links
   no development code; it does not serve.
 - The images are built by `scripts/build-images.sh` in a build phase,
-  with the `kajo` of the Kajo that `KajoPin/Package.swift` pins.
+  with the checkout's prebuilt `kajo`.
 
 Develop live from the Mac: run the Debug build, read the token off its
 pairing screen, and connect the tools or the CLI to `bonjour:<name>`;

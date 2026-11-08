@@ -1,5 +1,6 @@
 // Module 11a: the app project generator (docs/modules/app-project.md, part
-// 2). Its output for a fixed input, byte for byte against the fixture
+// 2); since module 11b the prebuilt pin and the wizard's targets
+// (docs/modules/distribution.md). Its output for a fixed input, byte for byte against the fixture
 // project; every refusal and the name rules; writing into a directory; the
 // generated Tonel compiles with the kernel and its test passes.
 
@@ -62,25 +63,65 @@ func scratchDirectory(_ tag: String) -> String {
         let yml = try #require(files.first { $0.path == "project.yml" }).text
         // Debug links the development objects, Release does not; neither
         // links the development product through Xcode.
-        #expect(yml.components(separatedBy: "KajoDev.o").count == 3)
+        #expect(yml.components(separatedBy: "-framework KajoAppDevelopment -framework KajoDev").count == 3)
         #expect(yml.components(separatedBy: "link: false").count == 3)
     }
 
-    @Test func aRepositoryPinNamesItsRevisionAndXcodesCheckout() throws {
+    @Test func thePinIsTheCheckoutsPrebuiltPackageInBothConfigurations() throws {
         let spec = AppProjectSpec(name: "Notes", bundleIdentifier: "com.example.notes",
-                                  kajo: .git(url: "https://github.com/example/Kajo.git", revision: "0878ea2"))
+                                  kajo: .path("/Users/me/Library/Application Support/Kajo/0.2/"))
         let files = try generated(spec)
-        let pin = try #require(files.first { $0.path == "KajoPin/Package.swift" }).text
-        #expect(pin.contains(".package(url: \"https://github.com/example/Kajo.git\", revision: \"0878ea2\", traits: [\"KajoAppBuild\"])"))
-        #expect(pin.contains("package: \"kajo\""))
-        let script = try #require(files.first { $0.path == "scripts/build-images.sh" }).text
-        #expect(script.contains("kajo_root=${BUILD_DIR%/Build/*}/SourcePackages/checkouts/kajo"))
         let yml = try #require(files.first { $0.path == "project.yml" }).text
+        // One local package, the prebuilt one; no package of Kajo's sources,
+        // no trait, nothing fetched.
+        #expect(yml.contains("packages:\n  Kajo:\n    path: \"/Users/me/Library/Application Support/Kajo/0.2/Prebuilt\"\n"))
+        #expect(!yml.contains("KajoPin") && !yml.contains("KajoAppBuild") && !yml.contains("url:"))
+        #expect(yml.components(separatedBy: "product: KajoApp\n").count == 3)
         #expect(!yml.contains("DEVELOPMENT_TEAM"))
         #expect(yml.contains("Notes-macOS:") && yml.contains("Notes-iOS:"))
+        #expect(yml.contains("ARCHS: arm64"))
+        #expect(!files.contains { $0.path.hasPrefix("KajoPin/") })
+        let script = try #require(files.first { $0.path == "scripts/build-images.sh" }).text
+        #expect(script.contains("kajo_root='/Users/me/Library/Application Support/Kajo/0.2'\nkajo=$kajo_root/Prebuilt/bin/kajo\n"))
+        // The build phase compiles nothing: no swift, no toolchain.
+        #expect(!script.contains("swift build") && !script.contains("swiftly"))
+        let app = try #require(files.first { $0.path == "Sources/App.swift" }).text
+        #expect(app.contains("import KajoApp\n#if DEBUG\nimport KajoAppDevelopment\n#endif"))
         #expect(files.contains { $0.path == "src/NotesApp.class.st" })
-        // The package identity follows the checkout's directory name.
-        #expect(AppProjectGenerator.packageIdentity(.path("/Users/me/src/Kajo-main")) == "kajo-main")
+    }
+
+    @Test func theWizardsTargetsChooseThePlatforms() throws {
+        var spec = fixtureSpec
+        spec.platforms = [.macOS]
+        var files = try generated(spec)
+        var yml = try #require(files.first { $0.path == "project.yml" }).text
+        #expect(yml.contains("Sample-macOS:") && !yml.contains("Sample-iOS:") && !yml.contains("iOS: \"18.0\""))
+        #expect(files.filter { $0.path.hasSuffix(".plist") }.map(\.path) == ["Info-macOS-Debug.plist", "Info-macOS-Release.plist"])
+        spec.platforms = [.iOS]
+        files = try generated(spec)
+        yml = try #require(files.first { $0.path == "project.yml" }).text
+        #expect(!yml.contains("Sample-macOS:") && yml.contains("Sample-iOS:") && !yml.contains("macOS: \"15.0\"") && !yml.contains("ARCHS"))
+        #expect(files.filter { $0.path.hasSuffix(".plist") }.map(\.path) == ["Info-iOS-Debug.plist", "Info-iOS-Release.plist"])
+        // Both, as the fixture: the same files as the default.
+        spec.platforms = [.macOS, .iOS]
+        #expect(try generated(spec) == (try generated(fixtureSpec)))
+        spec.platforms = []
+        #expect(AppProjectGenerator.files(for: spec) == .failure(.noTargets))
+    }
+
+    @Test func aCheckoutWithoutThePrebuiltKajoIsRefused() throws {
+        let fm = FileManager.default
+        let d = scratchDirectory("checkout")
+        defer { try? fm.removeItem(atPath: d) }
+        try fm.createDirectory(atPath: d + "/Prebuilt/bin", withIntermediateDirectories: true)
+        #expect(AppProjectGenerator.checkCheckout(.path(d)) == .notACheckout(d))
+        fm.createFile(atPath: d + "/Prebuilt/Package.swift", contents: Data())
+        fm.createFile(atPath: d + "/Prebuilt/bin/kajo", contents: Data(), attributes: [.posixPermissions: 0o644])
+        try fm.createDirectory(atPath: d + "/kernel", withIntermediateDirectories: true)
+        #expect(AppProjectGenerator.checkCheckout(.path(d)) == .notACheckout(d))
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: d + "/Prebuilt/bin/kajo")
+        #expect(AppProjectGenerator.checkCheckout(.path(d)) == nil)
+        #expect(AppProjectGenerator.checkCheckout(.path("relative")) != nil)
     }
 
     @Test func theNameRules() {
@@ -123,9 +164,6 @@ func scratchDirectory(_ tag: String) -> String {
         let badSources: [KajoSource] = [
             .path(""), .path("relative/kajo"), .path("/a/\"b"), .path("/a/$HOME"), .path("/a/`x`"), .path("/a/b\\c"), .path("/a/b\nc"),
             .path("/"), .path("/a/.."),
-            .git(url: "http://example.com/kajo", revision: "0878ea2"), .git(url: "https://example.com/ka jo", revision: "0878ea2"),
-            .git(url: "https://example.com/kajo", revision: "main"), .git(url: "https://example.com/kajo", revision: "0878EA2"),
-            .git(url: "https://example.com/kajo", revision: "087"), .git(url: "https://example.com/kajo\"", revision: "0878ea2"),
         ]
         for k in badSources {
             s = fixtureSpec
@@ -133,9 +171,7 @@ func scratchDirectory(_ tag: String) -> String {
             guard case .invalidKajoSource? = refusal(s) else { Issue.record("Kajo source \(k)"); continue }
         }
         // Accepted forms.
-        for k: KajoSource in [.path("/Users/me/code/kajo"), .path("/Users/me/My Code/kajo"),
-                              .git(url: "git@github.com:me/kajo.git", revision: "0878ea2abcdef0123456789abcdef0123456789a"),
-                              .git(url: "ssh://git@example.com/kajo", revision: "0878ea2")] {
+        for k: KajoSource in [.path("/Users/me/code/kajo"), .path("/Users/me/Library/Application Support/Kajo/0.1")] {
             s = fixtureSpec
             s.kajo = k
             #expect(refusal(s) == nil, "\(k)")
@@ -158,7 +194,7 @@ func scratchDirectory(_ tag: String) -> String {
         let d = scratchDirectory("write")
         defer { try? fm.removeItem(atPath: d) }
         let written = try AppProjectGenerator.write(fixtureSpec, into: d).get()
-        #expect(written.count == 15)
+        #expect(written.count == 12)
         let mode = try fm.attributesOfItem(atPath: d + "/scripts/build-images.sh")[.posixPermissions] as? Int
         #expect(mode == 0o755)
         #expect(fm.contents(atPath: d + "/src/package.st") == Data("Package { #name : #Sample }\n".utf8))
@@ -168,7 +204,7 @@ func scratchDirectory(_ tag: String) -> String {
         let empty = scratchDirectory("empty")
         try fm.createDirectory(atPath: empty, withIntermediateDirectories: true)
         defer { try? fm.removeItem(atPath: empty) }
-        #expect((try? AppProjectGenerator.write(fixtureSpec, into: empty).get())?.count == 15)
+        #expect((try? AppProjectGenerator.write(fixtureSpec, into: empty).get())?.count == 12)
         let file = scratchDirectory("file")
         fm.createFile(atPath: file, contents: Data("x".utf8))
         defer { try? fm.removeItem(atPath: file) }
