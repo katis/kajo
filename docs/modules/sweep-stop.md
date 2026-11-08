@@ -380,3 +380,152 @@ missed, every remaining fallback a cycle started and not finished
 The other young modes' ring rows miss no frame and fall back 0 times,
 before and after.
 
+### Part 5: before and after
+
+Before is 97465fc, after the final code (d194336 with 4fbc49c's script
+fix), every pair interleaved; raw rows under the hand-back's `before/` and
+`after/`.
+
+**binarytrees, 8 workers, `kajo run`** (aligned `-enable-testing` release
+builds, five interleaved pairs; the machine drifted from 1.8 to 2.25 s a
+run over the ten, both sides alike):
+
+| | before | after |
+|---|---|---|
+| run ms, median (range) | 2218 (1843 to 2259) | 2196 (1909 to 2246) |
+| longest stop of any kind, ms | 23.1 to 27.2 (the sweep, filed as `other`) | 0.38 to 0.55 |
+| sweep stops a run | 5 to 7 (`other`), 23 to 27 ms max | 0 to 1, 0.10 to 0.17 ms (p50 the same) |
+| cycles a run | 10 | 13 to 15 |
+| fallbacks | 0 | 0 |
+
+The comparison's binarytrees row re-run alone (`bench.sh` with
+`KERNELS=binarytrees RUNTIMES="kajo kajo-st"`, five rounds, thermal
+nominal): 8 workers 1.82 s kasm (1.79 to 1.85) and 1.87 s Smalltalk (1.85
+to 1.89), against section 1a's 1.88 and the comparison's 1.94; one worker
+11.5 and 11.8 s as in section 1a.
+
+**The Mac matrix at 7 workers** (three interleaved rounds of the
+scenarios part plus large churn and photo at `young=offload`; `--bar`
+over all 36 rows per side):
+
+| row | frames missed before / after | main stopped for others ms/10 s before / after | fallbacks before / after |
+|---|---|---|---|
+| idle | 0 / 0 | 0.0 / 0.0 | 0 / 0 |
+| storm stw / local / offload | 0 / 0 each | 325 / 67 / 67 against 288 / 63 / 66 | 0 / 0 |
+| ring stw | 308 to 320 / 162 to 190 | 1399 / 1322 | 31 to 33 / 8 to 9 |
+| ring local / offload | 0 / 0 | 95 / 96 against 95 / 96 | 0 / 0 |
+| share stw / local / offload | 0 / 0 | 68 / 91 / 90 against 66 / 89 / 87 | 0 / 0 |
+| large churn | 0 / 0 | 60 / 60 | 0 / 0 |
+| photo | 0 / 0 | 1.5 / 1.9 | 0 / 0 |
+
+`--bar`: before 36 rows, 0 failed, 3 rows missing frames (943 frames, all
+the ring under `young=stw`), 96 fallbacks, longest stop 190.85 ms (a
+compacting full collection); after 36 rows, 0 failed, 3 rows missing
+frames (537, the same rows), 25 fallbacks, longest stop 201.27 ms (the
+same kind), no sweep stop in any row on the Mac.
+
+**The devices at 5 workers** (five rounds per device, each round the
+before build installed and run twice per row, then the after build;
+iPhone and iPad at the same time, the iPad plugged in; thermal states
+nominal to serious on the iPhone and nominal to fair, one serious, on the
+iPad, on both sides):
+
+| device, row | frames missed before / after | fallbacks before / after | main stopped for others ms/10 s p50 (range) before / after | sweep stops a launch after (longest ms) |
+|---|---|---|---|---|
+| iPhone 13 Pro, storm | 0 / 0 (10 launches each) | 0 / 0 | 31.7 (22.6 to 45.4) / 30.0 (27.7 to 46.7) | 0 |
+| iPhone 13 Pro, large churn | 0 / 0 | 0 / 0 | 67.7 (51.9 to 93.1) / 75.5 (54.8 to 86.1) | 1 to 14 (5.46) |
+| iPad Pro 3rd gen, storm | 0 / 0 | 0 / 0 | 46.8 (41.5 to 58.3) / 48.8 (44.7 to 52.0) | 0 |
+| iPad Pro 3rd gen, large churn | 0 / 0 | 0 / 0 | 154.3 (140.9 to 167.5) / 154.7 (143.3 to 164.2) | 146 to 284 (11.0) |
+
+Against the final-mark module's rows (offload storm p50 40.0 on the
+iPhone and 49.1 on the iPad) and the large-bytes follow-up's large churn
+(71 and 166) the main thread is stopped no longer. The entry-rate rule
+started 5 of the storm's cycles on each device in 10 launches (0 before)
+and raised the marker never.
+
+The devices' sweep stops are all the large churn's old allocations
+(`sweepsForOld`, 137 to 284 a launch on the iPad on both sides, filed as
+`other` before): the stop's own work is 0.06 to 0.12 ms (whole, the
+snapshot fits the bound), the rest of their length is time to safepoint
+(up to 10.7 ms on the iPad and 5.2 ms on the iPhone after, 4.2 and 2.2 ms
+before). 60 percent of them found the cycle's relocation pass not yet
+done and cut it off, which the whole finish of the large-bytes follow-up
+also did (its apply ended the pass). One iPad large-churn launch of the
+after build had an initial mark whose time to safepoint was 570 ms (every
+other initial mark of all 40 iPad launches under 5 ms), with the main
+thread's longest park 1.3 ms and no frame missed: some other participant
+did not reach a poll for half a second. It is not explained; the obvious
+candidate is the utility-QoS marker on the efficiency cores (its share of
+performance cores in that launch was 0.075), and nothing this module
+changed is on a participant's way to its poll, but a single launch does
+not tell.
+
+### The A/B and `interpret`
+
+ABTABLE
+
+`interpret` (the `-enable-testing` release objects of 97465fc and
+d194336, `Dispatch.o`): 1477 lines of disassembly each, identical after
+normalising branch-target addresses (no line differs). `just arc-check`
+passes (its `sweepCycle` entry renamed for the new signature, 4fbc49c):
+`interpret` 1403 instructions, one jump table, no retain or release on
+any checked path, `sweepCycle(_:_:inPause:maxWords:)` 321 instructions.
+
+### The gates
+
+GATESLOG
+
+### Deviations
+
+- Part 4 changes the fallback's own full collection, not when a cycle
+  starts. The records showed the ring's collector already running back to
+  back under `young=stw`, so no trigger setting could start a cycle
+  earlier; two thirds of the fallbacks were a cascade of non-compacting
+  full collections and a re-request made by the compacting one's own
+  promote-all. Every fallback is still counted and recorded.
+- Part 3's rule is the old-space predictor applied to the entry table,
+  with its `safetyFactor`, not a new constant. The brief expected the
+  sweep to be slower than consumption; on the Mac it is three to four
+  times faster, and the table emptied because the cycle started too late
+  for its whole duration.
+- The verifier gained one check (a free entry that the pending sweep's
+  snapshot still names), so the broken variant fails at the stop that
+  makes it, before any allocation can take the entry; without it the
+  variant would be found only when the sweep reached the word, after the
+  heap was corrupt.
+- The main worker's old allocation keeps the unbounded stop: a partial
+  apply frees no block, and the main worker never waits (open question
+  1). No row measured it: large objects are allocated by background
+  Processes in every scenario.
+
+### Not done
+
+- No device row for the main worker's old allocation while sweeping
+  (above), and no measurement of `waitForSweep` outside its test path:
+  no row of the matrix or the devices took it (`sweepWaits=0` everywhere,
+  the large churn's stops all ended whole).
+- The iPad's one 570 ms initial-mark time to safepoint is not explained
+  (part 5).
+- The devices' sweep stops are short in work but up to 10.7 ms from
+  request to release; the time to safepoint of a stop requested by a
+  large allocation is a question of its own (large objects are filled
+  without polls, module 10's not-done list).
+- The rate rule watches promotion only; old allocations (large objects)
+  consume entries too and are not in the young sampler's rate.
+
+### Open questions for the owner (built as recommended)
+
+1. Should the main worker ever wait for a sweep outside a stop? Built:
+   no. It keeps the bounded stop for entries (a hand-over, 0.10 to 0.17 ms
+   on the Mac) and the unbounded one for an old allocation without room.
+2. The entry-rate rule raises the marker only when the table will empty
+   before the running cycle's predicted end. Built that way: it raised
+   the marker 1 to 3 times a run on binarytrees and never on the devices;
+   it starts cycles earlier instead (binarytrees 13 to 15 cycles against
+   10; the devices' storm 5 cycles in 10 launches), and the marker ran
+   raised in fewer cycles than before on binarytrees. Is the extra marking
+   (more cycles) acceptable on the devices' energy budget?
+3. The ring's soft-limit fallbacks at 7 workers under `young=stw`: 8 to 9
+   a launch after against 31 to 33, each a cycle started and not
+   finished. A number to accept, or a target (which would need a faster
+   marker or a slower mutator, not a trigger)?
