@@ -255,7 +255,7 @@ public enum AppProjectGenerator {
         return .success(written)
     }
 
-    /// Where xcodegen is: the one the Kajo app carries (`Contents/Helpers/
+    /// Where xcodegen is: the one the Kajo app carries (`Contents/Resources/
     /// xcodegen/bin/xcodegen`, so a developer needs nothing beyond Xcode),
     /// then PATH and Homebrew's places.
     public static func findXcodegen(bundled: String? = nil) -> String? {

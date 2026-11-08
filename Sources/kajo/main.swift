@@ -245,8 +245,8 @@ case "new":
     case .success(let files):
         print("\(dir): \(files.count) files")
         do {
-            // Beside this kajo in the Kajo app's Contents/Helpers.
-            let bundled = ((CommandLine.arguments[0] as NSString).resolvingSymlinksInPath as NSString).deletingLastPathComponent + "/xcodegen/bin/xcodegen"
+            // The Kajo app's, when this kajo is its Contents/Helpers/kajo.
+            let bundled = ((CommandLine.arguments[0] as NSString).resolvingSymlinksInPath as NSString).deletingLastPathComponent + "/../Resources/xcodegen/bin/xcodegen"
             print(try AppProjectGenerator.generateXcodeProject(in: dir, xcodegen: bundled) ? "\(dir)/\(spec.name).xcodeproj" : "no xcodegen on PATH: run `xcodegen generate` in \(dir)")
         } catch {
             fail("kajo new: \(error)", 1)

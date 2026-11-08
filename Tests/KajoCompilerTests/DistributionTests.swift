@@ -28,7 +28,7 @@ import Testing
         #expect(p.bundledCheckout == "/Applications/Kajo.app/Contents/Resources/Kajo-0.3")
         #expect(p.installedCheckout == "/Users/me/Library/Application Support/Kajo/0.3")
         #expect(p.cli == "/Applications/Kajo.app/Contents/Helpers/kajo")
-        #expect(p.xcodegen == "/Applications/Kajo.app/Contents/Helpers/xcodegen/bin/xcodegen")
+        #expect(p.xcodegen == "/Applications/Kajo.app/Contents/Resources/xcodegen/bin/xcodegen")
         #expect(p.linkDirectory == "/usr/local/bin")
         let o = ProductPaths(version: "0.3", bundle: "/A/Kajo.app", environment: ["KAJO_SUPPORT_DIR": "/tmp/s", "KAJO_CLI_LINK_DIR": "/tmp/b"])
         #expect(o.installedCheckout == "/tmp/s/0.3")

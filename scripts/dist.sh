@@ -17,8 +17,8 @@
 #      library evolution), and Prebuilt/Package.swift naming them
 #   4. the Kajo app: xcodebuild Release of the checkout's apps/KajoShell-macOS
 #      with MARKETING_VERSION=<version> and only the development image;
-#      Contents/Helpers/kajo (the CLI), Contents/Helpers/xcodegen (New App's
-#      project maker), Contents/Resources/Kajo-<version> (the checkout the
+#      Contents/Helpers/kajo (the CLI), Contents/Resources/xcodegen (New
+#      App's project maker), Contents/Resources/Kajo-<version> (the checkout the
 #      app copies to Application Support)
 #   5. signing, inside out, hardened runtime: KAJO_SIGN_IDENTITY, or the
 #      first Developer ID Application identity in the keychain; without one
@@ -207,9 +207,11 @@ ditto $work/appdd/Build/Products/Release/Kajo.app $app
 mkdir -p $app/Contents/Helpers
 cp $cli $app/Contents/Helpers/kajo
 xg=$(readlink -f $(command -v xcodegen)); xgroot=${xg:h:h}
-mkdir -p $app/Contents/Helpers/xcodegen/bin $app/Contents/Helpers/xcodegen/share/xcodegen
-cp $xg $app/Contents/Helpers/xcodegen/bin/xcodegen
-cp -R $xgroot/share/xcodegen/SettingPresets $app/Contents/Helpers/xcodegen/share/xcodegen/
+# In Resources, not Helpers: xcodegen reads its presets from ../share beside
+# its bin/, and data files in a code directory are refused by codesign.
+mkdir -p $app/Contents/Resources/xcodegen/bin $app/Contents/Resources/xcodegen/share/xcodegen
+cp $xg $app/Contents/Resources/xcodegen/bin/xcodegen
+cp -R $xgroot/share/xcodegen/SettingPresets $app/Contents/Resources/xcodegen/share/xcodegen/
 cp $xgroot/LICENSE $app/Contents/Resources/xcodegen-LICENSE
 print "xcodegen $(xcodegen --version 2>&1 | tail -1) (MIT, LICENSE in Resources/xcodegen-LICENSE)" > $app/Contents/Resources/xcodegen-VERSION
 ditto $ck $app/Contents/Resources/Kajo-$version
@@ -227,7 +229,7 @@ sign() { gtimeout 120 codesign --force --sign "$identity" $ts "$@" >> $work/sign
 inner=$app/Contents/Resources/Kajo-$version/Prebuilt
 sign --options runtime $inner/bin/kajo
 for x in $inner/*.xcframework; do sign $x; done
-sign --options runtime $app/Contents/Helpers/xcodegen/bin/xcodegen
+sign --options runtime $app/Contents/Resources/xcodegen/bin/xcodegen
 sign --options runtime $app/Contents/Helpers/kajo
 sign --options runtime $app
 gtimeout 300 codesign --verify --deep --strict --verbose=2 $app > $out/codesign-verify.txt 2>&1 && log "codesign --verify --deep --strict: ok" || die "codesign --verify ($out/codesign-verify.txt)"
@@ -328,14 +330,14 @@ log "bundled kajo test: exit=$rc $(tail -1 $out/kajo-test.txt)"
   print "Kajo.app $(du -sk $app | cut -f1)KiB"
   print "Kajo.app/Contents/MacOS/Kajo $(stat -f %z $app/Contents/MacOS/Kajo)"
   print "Kajo.app/Contents/Helpers/kajo $(stat -f %z $app/Contents/Helpers/kajo)"
-  print "Kajo.app/Contents/Helpers/xcodegen $(du -sk $app/Contents/Helpers/xcodegen | cut -f1)KiB"
+  print "Kajo.app/Contents/Resources/xcodegen $(du -sk $app/Contents/Resources/xcodegen | cut -f1)KiB"
   print "Kajo.app/Contents/Resources/kajo/dev.img $(stat -f %z $app/Contents/Resources/kajo/dev.img)"
   print "Kajo-$version (the checkout) $(du -sk $app/Contents/Resources/Kajo-$version | cut -f1)KiB"
   print "Kajo-$version without Prebuilt $(( $(du -sk $app/Contents/Resources/Kajo-$version | cut -f1) - $(du -sk $inner | cut -f1) ))KiB"
   print "Prebuilt $(du -sk $inner | cut -f1)KiB"
   for x in $inner/*.xcframework; do
     print "${x:t} $(du -sk $x | cut -f1)KiB"
-    for s in $x/*/; do [[ -d $s ]] && print "  ${x:t:r}/${s:t} $(stat -L -f %z $s/*.framework/${x:t:r})"; done
+    for s in $x/*-arm64/; do [[ -d $s ]] && print "  ${x:t:r}/${s:t} $(stat -L -f %z $s/*.framework/${x:t:r})"; done
   done
   print "Prebuilt/bin/kajo $(stat -f %z $inner/bin/kajo)"
 } > $out/sizes.txt

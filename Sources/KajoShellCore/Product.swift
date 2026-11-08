@@ -38,7 +38,10 @@ public struct ProductPaths: Sendable, Equatable {
     /// `Contents/MacOS/kajo`: on a case-insensitive volume that name is
     /// the app's own executable, `Kajo`.
     public let cli: String
-    /// `Contents/Helpers/xcodegen/bin/xcodegen` (with its presets beside it).
+    /// `Contents/Resources/xcodegen/bin/xcodegen`, its presets in
+    /// `share/` beside `bin/` where it looks for them (in `Contents/Helpers`
+    /// the presets would be unsigned files in a code directory, which
+    /// codesign refuses).
     public let xcodegen: String
     /// Where File > Install Command Line Tool... puts the link
     /// (/usr/local/bin, or KAJO_CLI_LINK_DIR).
@@ -52,7 +55,7 @@ public struct ProductPaths: Sendable, Equatable {
         bundledCheckout = bundle + "/Contents/Resources/Kajo-" + version
         supportRoot = environment["KAJO_SUPPORT_DIR"] ?? home + "/Library/Application Support/Kajo"
         cli = bundle + "/Contents/Helpers/kajo"
-        xcodegen = bundle + "/Contents/Helpers/xcodegen/bin/xcodegen"
+        xcodegen = bundle + "/Contents/Resources/xcodegen/bin/xcodegen"
         linkDirectory = environment["KAJO_CLI_LINK_DIR"] ?? "/usr/local/bin"
     }
 
