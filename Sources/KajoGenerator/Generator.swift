@@ -265,6 +265,7 @@ public enum AppProjectGenerator {
         return paths.map({ "\($0)/xcodegen" }).first(where: { fm.isExecutableFile(atPath: $0) })
     }
 
+    #if os(macOS)
     /// `xcodegen generate` in the project directory: true when it made the
     /// Xcode project, false when there is no xcodegen (the README says how
     /// to make it later).
@@ -279,4 +280,5 @@ public enum AppProjectGenerator {
         guard p.terminationStatus == 0 else { throw GeneratorRefusal.cannotWrite("xcodegen exited with \(p.terminationStatus)") }
         return true
     }
+    #endif
 }

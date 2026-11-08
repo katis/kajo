@@ -198,6 +198,7 @@ public struct NewAppRequest: Sendable, Equatable {
         case .failure(let r): return .failure(NewAppFailure(r.description))
         case .success: break
         }
+        #if os(macOS)
         do {
             guard try AppProjectGenerator.generateXcodeProject(in: directory, xcodegen: xcodegen) else {
                 return .failure(NewAppFailure("the project is written to \(directory), but no xcodegen was found to make its Xcode project"))
@@ -206,6 +207,10 @@ public struct NewAppRequest: Sendable, Equatable {
             return .failure(NewAppFailure("\(error)"))
         }
         return .success(directory + "/" + name + ".xcodeproj")
+        #else
+        // KajoShellCore is the iOS shell's too, where no process can be run.
+        return .failure(NewAppFailure("the project is written to \(directory); make its Xcode project on a Mac"))
+        #endif
     }
 }
 
