@@ -12,6 +12,8 @@
 # run, into work/ (gitignored).
 #
 # Usage: experiments/runtime-comparison/bench.sh
+#        KERNELS="collections-oc collections-dict collections-stream collections-sort collections" \
+#          RUNTIMES="kajo-st pharo" OUT=path bench.sh                (the collections parts)
 #        ROUNDS=1 KERNELS="fib arith" RUNTIMES="kajo c" bench.sh   (a probe)
 #        OUT=path bench.sh                                          (another raw file)
 #
@@ -53,11 +55,15 @@ KAJO_PRELUDE="$ROOT/Tests/KajoVMTests/Fixtures/kernels/prelude.kasm"
 
 FOUR="fib dispatch binarytrees arith"
 ALL="fib dispatch binarytrees collections arith"
+# The collections program's four parts, each alone (the collections-speed
+# module) and an empty program (start-up alone, subtracted for net times):
+# not in the default KERNELS, run with KERNELS="$PARTS" or a list.
+PARTS="collections-empty collections-oc collections-dict collections-stream collections-sort"
 # label|kernels|workers kernels (the 8-worker row)
 RUNTIME_TABLE="
 kajo|$FOUR|fib dispatch binarytrees
-kajo-st|$ALL|fib dispatch binarytrees
-pharo|$ALL|
+kajo-st|$ALL $PARTS|fib dispatch binarytrees
+pharo|$ALL $PARTS|
 c|$FOUR|
 luajit|$FOUR|
 luajit-joff|$FOUR|
