@@ -47,9 +47,10 @@ private func fragmentKernel(_ iterations: Int) -> String {
 private let fragmentSource = fragmentKernel(fragmentIterations)
 
 /// `run: i of: 4` on four workers; the summed checksum and the runtime
-/// (stopped by the caller).
+/// (stopped by the caller). With `finishCycle`, a marking cycle still
+/// running when the kernel ends is waited for.
 private func runKernel(_ src: String, heapBlocks: Int, relocate: Bool?, perturb: Bool = false,
-                       young: YoungMode = YoungConfig().mode) throws -> (Int64, Runtime) {
+                       young: YoungMode = YoungConfig().mode, finishCycle: Bool = false) throws -> (Int64, Runtime) {
     let rt = try Runtime(src, background: 4, heapBlocks: heapBlocks, entries: 1 << 21, pollEvery: 256, start: false,
                          configure: { c in
                              c.nursery.bytes = 1 << 20
@@ -65,16 +66,38 @@ private func runKernel(_ src: String, heapBlocks: Int, relocate: Bool?, perturb:
                              if perturb { c.perturb = Perturbation(seed: 7, probability: 0.05, maxSleepUs: 20) }
                          })
     rt.start()
+    let t0 = now()
     var ps: [Oop] = []
     for i in 0..<4 { ps.append(rt.spawn("run:of:", [int(Int64(i)), int(4)])) }
     rt.waitAllTerminated(underThreadSanitizer ? 900 : 180)
+    if finishCycle {
+        // A cycle the kernel started (planned at its initial mark, with the
+        // mutators running) is let finish before the round is counted: the
+        // marker needs no mutator to reach its final mark, selection, pass
+        // and apply, and no new cycle starts without scavenges. Under
+        // ThreadSanitizer, twelve busy loops and the whole suite, the
+        // utility-QoS marker got 0.14 s of CPU in a 4.2 s pass and the third
+        // of three runs ended with its second cycle planned but not yet at
+        // its final mark (cyclesPlanned 2, cyclesSelected 1, one cycle
+        // completed; the 2026-11-08 weekly run, docs/modules/relocation.md
+        // "The round under load"). A wait for something that must come is
+        // long (AGENTS.md); not reaching idle is a failure. The line below
+        // says where each round stood when its kernel ended.
+        let atEnd = (rt.marking, rt.relocation, rt.phase)
+        let t1 = now()
+        if !eventually(underThreadSanitizer ? 600 : 120, { rt.phase == .idle }) {
+            Issue.record("the cycle the kernel started did not finish: \(rt.phase) \(rt.marking)")
+        }
+        let m = rt.marking, r = rt.relocation
+        print("relocation round: kernel \(Double(t1 - t0) / 1e9) s, at its end phase \(atEnd.2) cycles \(atEnd.0.cycles) completed \(atEnd.0.cyclesCompleted) planned \(atEnd.1.cyclesPlanned) selected \(atEnd.1.cyclesSelected); finished in \(Double(now() - t1) / 1e9) s: cycles \(m.cycles) completed \(m.cyclesCompleted) planned \(r.cyclesPlanned) selected \(r.cyclesSelected); marker CPU \(Double(m.markerCpuNs) / 1e9) s, pass wall \(Double(r.passWallNs) / 1e9) s CPU \(Double(r.passCpuNs) / 1e9) s, final marks \(Double(m.finalMarkNs) / 1e9) s")
+    }
     return (ps.map { rt.result($0) }.reduce(0, &+), rt)
 }
 
 private func underRelocation(_ src: String, heapBlocks: Int, _ name: String) throws {
     let (a, stw) = try runKernel(src, heapBlocks: heapBlocks, relocate: nil)
     stw.stop()
-    var (b, rt) = try runKernel(src, heapBlocks: heapBlocks, relocate: true)
+    var (b, rt) = try runKernel(src, heapBlocks: heapBlocks, relocate: true, finishCycle: true)
     // Two selecting cycles need the marker to keep up with four workers;
     // in the release suite, beside every other test, it once completed one
     // (module 10's gate run; 8 and 9 alone). The round is repeated, never
@@ -84,7 +107,7 @@ private func underRelocation(_ src: String, heapBlocks: Int, _ name: String) thr
         #expect(a == b)
         rt.noFailures()
         rt.stop()
-        (b, rt) = try runKernel(src, heapBlocks: heapBlocks, relocate: true)
+        (b, rt) = try runKernel(src, heapBlocks: heapBlocks, relocate: true, finishCycle: true)
         attempts += 1
     }
     if attempts > 1 { print("\(name) under relocation: \(attempts) runs to see two selecting cycles") }
