@@ -194,7 +194,7 @@ func fullCollection(_ vm: VMPointer, _ stop: StopContext) {
     // the ring's records showed that request run 300 to 400 ms later as a
     // second fallback with old space at 15 percent of the limit. A request
     // that this collection answered is withdrawn.
-    if let n = unsafe n, unsafe !om.isOverSoftLimit { unsafe n.pointee.fullRequested.pointee.store(false, ordering: .relaxed) }
+    if let n = unsafe n, !om.isOverSoftLimit { unsafe n.pointee.fullRequested.pointee.store(false, ordering: .relaxed) }
 }
 
 /// The sweep stop, part 4: with concurrent marking, a mark-sweep that
