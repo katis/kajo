@@ -7,6 +7,14 @@ Class {
 }
 
 { #category : #accessing }
+ByteArray >> = anObject [
+	"Equal bytes, and only to another ByteArray: a String or a Symbol of the same bytes is never equal (#[97] = 'a' is false both ways). The bytes are compared by primitive 121 (sameBytesAs:)."
+	self == anObject ifTrue: [^ true].
+	self class == anObject class ifFalse: [^ false].
+	^ self sameBytesAs: anObject
+]
+
+{ #category : #accessing }
 ByteArray >> asString [
 	^ self asStringValidating
 ]
@@ -34,10 +42,18 @@ ByteArray >> encode: aCharacter at: offset [
 
 { #category : #accessing }
 ByteArray >> hash [
+	"FNV-1a of the bytes, by primitive 122 (polled past 256 KiB), the function a String's hash is: a ByteArray and a String of the same bytes hash alike, which is allowed since they are never equal. hashOfBytes is the same function in Smalltalk, the fallback."
+	<primitive: 122>
+	^ self hashOfBytes
+]
+
+{ #category : #accessing }
+ByteArray >> hashOfBytes [
+	"Primitive 122's FNV-1a in Smalltalk (64-bit arithmetic through LargeIntegers): the same value as hash, slowly."
 	| h |
-	h := self size.
-	self do: [:b | h := (h * 31 + b) bitAnd: 16r3FFFFFFF].
-	^ h
+	h := 16rCBF29CE484222325.
+	self do: [:b | h := ((h bitXor: b) * 16r100000001B3) bitAnd: 16rFFFFFFFFFFFFFFFF].
+	^ (h bitXor: (h bitShift: -62)) bitAnd: 16r3FFFFFFFFFFFFFFF
 ]
 
 { #category : #accessing }
@@ -57,6 +73,13 @@ ByteArray >> replaceFrom: start to: stop with: aCollection startingAt: from [
 	"Large bytes: primitive 38 copies bytes from a byte object (polled between chunks past 256 KiB); anything else, or a copy within the receiver whose target overlaps after its source, runs the loop."
 	<primitive: 38>
 	^ super replaceFrom: start to: stop with: aCollection startingAt: from
+]
+
+{ #category : #accessing }
+ByteArray >> sameBytesAs: aByteArray [
+	"The same bytes as another byte object (primitive 121, polled past 256 KiB); the element-wise loop is the fallback."
+	<primitive: 121>
+	^ super = aByteArray
 ]
 
 { #category : #accessing }

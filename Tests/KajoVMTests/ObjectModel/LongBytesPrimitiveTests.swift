@@ -209,3 +209,62 @@ private func runLongWork(polls: Bool) throws -> (Int64, ByteWorkCounters) {
     #expect(v == Int64(n))
     #expect(c.longestStretch >= UInt64(n), "\(c)")
 }
+
+// MARK: - collections speed: a ByteArray's equality and hash
+
+private let m = 4 * ByteWork.chunk + 5
+
+/// Two ByteArrays of four chunks and a bit (one a `shallowCopy` of the
+/// other) compared (121) and hashed (122): 1 when equal with equal hashes.
+/// Before the collections-speed module both primitives took text only and
+/// failed here.
+private let byteArraySource = workSource + "\n" + """
+method UndefinedObject byteArrayWork temps=4
+  push_lit @ByteArray
+  push_lit \(m)
+  send new: 1
+  store_temp 0
+  push_temp 0
+  push_lit \(m)
+  push_int 65
+  send at:put: 2
+  pop
+  push_temp 0
+  send p96 0
+  store_temp 1
+  push_temp 0
+  push_temp 1
+  send p121: 1
+  jump_if_false bad
+  push_temp 0
+  send p122 0
+  push_temp 1
+  send p122 0
+  eq
+  jump_if_false bad
+  push_int 1
+  return_top
+bad:
+  push_int -1
+  return_top
+end
+"""
+
+/// Primitives 121 and 122 over a ByteArray past a chunk poll between
+/// chunks as over a long String: the longest stretch of byte work between
+/// two polls is one chunk.
+@Test func aByteArrayPastAChunkIsComparedAndHashedPolled() throws {
+    let rt = try Runtime(byteArraySource, background: 1, heapBlocks: 2048, start: true)
+    let p = rt.spawn("byteArrayWork")
+    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    let v = rt.result(p)
+    rt.vm.release(p)
+    let c = rt.vm.byteWorkCounters
+    rt.noFailures()
+    rt.stop()
+    #expect(v == 1)
+    // A comparison and two hashes of m bytes, each polled.
+    #expect(c.bytes >= UInt64(3 * (m - ByteWork.chunk)), "\(c)")
+    #expect(c.polls >= UInt64(3 * (m / ByteWork.chunk - 1)), "\(c)")
+    #expect(c.longestStretch <= UInt64(ByteWork.chunk), "\(c)")
+}

@@ -67,6 +67,13 @@ extension Machine {
         return (c == WellKnown.string || c == WellKnown.symbol) && om.isBytes(o)
     }
 
+    /// Any byte object, text or not (primitives 121 and 122 since the
+    /// collections-speed module: a ByteArray's equality and hash).
+    @inline(__always)
+    func isByteObject(_ o: Oop) -> Bool {
+        o.isObject && om.isBytes(o)
+    }
+
     /// A new String of `n` bytes, zeroed (the caller fills it with valid
     /// UTF-8 before anything else can see it). Module 10: past a block it
     /// is a large object; large bytes: up to `Header.maxByteLength`.
@@ -217,15 +224,22 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     let om = m.om
     let r = c.receiver
     switch n {
-    case 120, 121:
+    case 121:
+        // Collections speed: any two byte objects (a ByteArray's `=` as a
+        // String's); the kernel keeps the class check.
+        guard c.argc == 1, m.isByteObject(r), m.isByteObject(c.arg0) else { return .none }
+        // Large bytes: past a chunk, polled (`LongBytes.swift`).
+        if Swift.min(om.count(of: r), om.count(of: c.arg0)) > UInt64(ByteWork.chunk) {
+            return m.sameBytesLong(r, c.arg0).map { m.boolean($0) } ?? .none
+        }
+        return m.boolean(om.sameBytes(r, c.arg0))
+    case 120:
         guard c.argc == 1, m.isText(r), m.isText(c.arg0) else { return .none }
         // Large bytes: past a chunk, polled (`LongBytes.swift`).
         let a = Int(om.count(of: r)), b = Int(om.count(of: c.arg0))
         if Swift.min(a, b) > ByteWork.chunk {
-            if n == 121 { return m.sameBytesLong(r, c.arg0).map { m.boolean($0) } ?? .none }
             return m.compareBytesLong(r, c.arg0).map { Oop(smallInteger: $0) } ?? .none
         }
-        if n == 121 { return m.boolean(om.sameBytes(r, c.arg0)) }
         var i = 0
         while i < a && i < b {
             let x = om.loadByte(r, i), y = om.loadByte(c.arg0, i)
@@ -234,7 +248,8 @@ func stringPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         }
         return Oop(smallInteger: a < b ? -1 : a == b ? 0 : 1)
     case 122:
-        guard c.argc == 0, m.isText(r) else { return .none }
+        // Collections speed: any byte object (a ByteArray's `hash`).
+        guard c.argc == 0, m.isByteObject(r) else { return .none }
         if om.count(of: r) > UInt64(ByteWork.chunk) { return m.byteHashLong(r).map { Oop(smallInteger: $0) } ?? .none }
         return Oop(smallInteger: om.byteObjectHash(r))
     case 123:
