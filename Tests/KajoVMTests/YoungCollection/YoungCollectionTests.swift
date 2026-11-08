@@ -257,7 +257,10 @@ private func carried(_ carry: Bool) throws -> (UInt64, Int64?) {
     let yc = rt.vm.youngCounters
     #expect(yc.collectionsOffloaded == 2 && yc.offloadedInline == 0, "\(yc)")
     // The collector thread requests the verifier's stop after it is done.
-    #expect(eventually { rt.vm.youngCounters.verifierRuns >= 2 })
+    // Something that must come is waited for long everywhere (AGENTS.md):
+    // the default 10 s ran out once in the full suite under the sanitizer
+    // and twelve busy loops (the sweep-stop module's gate run on ff6e573).
+    #expect(eventually(120) { rt.vm.youngCounters.verifierRuns >= 2 })
     let p = rt.spawn("readH")
     rt.runOn(2)
     #expect(rt.result(p) == 42)
