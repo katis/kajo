@@ -65,6 +65,10 @@ StringTest >> testIteration [
 	'añb' do: [:c | out add: c].
 	self assert: out asArray = {$a. Character value: 16rF1. $b}.
 	out := OrderedCollection new.
+	'abc' do: [:c | out add: c].
+	self assert: out asArray = {$a. $b. $c}.
+	'' do: [:c | self fail].
+	out := OrderedCollection new.
 	'añb' reverseDo: [:c | out add: c].
 	self assert: out first == $b.
 	self assert: ('hello' collect: [:c | c asUppercase]) = 'HELLO'.

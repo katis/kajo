@@ -268,9 +268,13 @@ String >> collect: aBlock [
 
 { #category : #enumerating }
 String >> do: aBlock [
+	"Each scalar's Character. When every byte is a scalar (scalarCount, one primitive pass, equals byteSize) the next offset is the next byte and scalarSizeAt: is not sent (the collections-speed module)."
 	| i end |
-	i := 1.
 	end := self byteSize.
+	self scalarCount = end ifTrue: [
+		1 to: end do: [:k | aBlock value: (self scalarAt: k)].
+		^ self].
+	i := 1.
 	[i <= end] whileTrue: [
 		aBlock value: (self scalarAt: i).
 		i := i + (self scalarSizeAt: i)]
