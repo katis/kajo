@@ -243,6 +243,17 @@ if [[ -n $raddr ]]; then
   gettoken "$raddr" || note "FAILED host=$host step=token"
   v=$(gtimeout 30 $kajo eval --target app 'SampleApp pressed. SampleApp labelText' 2>&1)
 fi
+# Module 11b: a name can still resolve to the previous launch's record
+# (same name, its old port: "Connection refused" on the iPhone, twice in
+# 11b's runs); then the rebuilt launch's own address from its console.
+if [[ $v != *'"class":"String"'* && -n $name ]]; then
+  note "rebuilt host=$host by_name_failed=1 ($(print -r -- $v | head -1 | cut -c1-100))"
+  raddr=$(name="" address_of debug-rebuilt)
+  if [[ -n $raddr ]]; then
+    gettoken "$raddr" || note "FAILED host=$host step=token"
+    v=$(gtimeout 30 $kajo eval --target app 'SampleApp pressed. SampleApp labelText' 2>&1)
+  fi
+fi
 if [[ $v == *'"class":"String"'* ]]; then
   note "rebuilt host=$host addr=$raddr starts_with_change=$([[ $v == *"Changed by the tools: 1"* ]] && print 1 || print 0)"
 else

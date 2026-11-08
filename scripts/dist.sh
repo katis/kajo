@@ -337,7 +337,7 @@ log "bundled kajo test: exit=$rc $(tail -1 $out/kajo-test.txt)"
   print "Prebuilt $(du -sk $inner | cut -f1)KiB"
   for x in $inner/*.xcframework; do
     print "${x:t} $(du -sk $x | cut -f1)KiB"
-    for s in $x/*-arm64/; do [[ -d $s ]] && print "  ${x:t:r}/${s:t} $(stat -L -f %z $s/*.framework/${x:t:r})"; done
+    for s in ios-arm64 macos-arm64; do print "  ${x:t:r}/$s $(stat -L -f %z $x/$s/${x:t:r}.framework/${x:t:r})"; done
   done
   print "Prebuilt/bin/kajo $(stat -f %z $inner/bin/kajo)"
 } > $out/sizes.txt
