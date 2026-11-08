@@ -5,12 +5,19 @@
 #
 #   scripts/app-roundtrip.sh mac|device <outdir> [launches]
 #
+# Module 11b: APP_PROJECT=<dir> runs the same rows on a project made
+# elsewhere (the Kajo app's New App from the dmg: a directory holding
+# Sample.xcodeproj and src/) instead of generating one, and KAJO=<path>
+# talks to it with that kajo (the dmg's Contents/Helpers/kajo) instead of
+# the working tree's.
+#
 # mac: the Mac target, run here. device: the iOS target on DEVICE (the
 # iPhone by default; DD names its DerivedData) through scripts/device.sh,
 # bundle identifier dev.katajamaki.kajo.sample. The steps, each line of
 # results appended to <outdir>/roundtrip-<host>.txt:
 #
-#  1. generate <outdir>/Sample if it is not there (the working tree as Kajo),
+#  1. generate <outdir>/Sample if it is not there (the working tree's
+#     checkout with its prebuilt Kajo as Kajo, made by scripts/dist.sh),
 #     build Debug (timed), build again with nothing changed (timed)
 #  2. <launches> cold launches of the Debug build to the first frame
 #  3. the Debug build serving with no client for 10 s: frames missed
@@ -40,9 +47,14 @@ host=${1:?mac|device} out=${2:?outdir} n=${3:-5}
 mkdir -p $out
 out=${out:A}
 res=$out/roundtrip-$host.txt
-proj=$out/Sample
-kajo=$(swift build --package-path $root --product kajo --show-bin-path)/kajo
-swift build --package-path $root --product kajo > /dev/null || exit 1
+proj=${APP_PROJECT:-$out/Sample}
+proj=${proj:A}
+if [[ -n ${KAJO:-} ]]; then
+  kajo=$KAJO
+else
+  kajo=$(swift build --package-path $root --product kajo --show-bin-path)/kajo
+  swift build --package-path $root --product kajo > /dev/null || exit 1
+fi
 now() { perl -MTime::HiRes=time -e 'printf "%.3f", time' }
 since() { perl -e "printf \"%.3f\", $(now) - $1" }
 note() { print -r -- "$*" | tee -a $res }
@@ -51,8 +63,15 @@ tok=$out/tok-$host
 mkdir -p $tok && chmod 700 $tok
 export KAJO_TARGETS=$targets
 
-if [[ ! -d $proj ]]; then
-  (cd $out && $kajo new Sample --bundle-id dev.katajamaki.kajo.sample --team BDN6M642M2 --kajo $root) > /dev/null || exit 1
+if [[ -n ${APP_PROJECT:-} ]]; then
+  [[ -d $proj/Sample.xcodeproj ]] || { print "app-roundtrip: no Sample.xcodeproj in $proj"; exit 2; }
+  note "project host=$host dir=$proj made_elsewhere=1 kajo=$kajo"
+elif [[ ! -d $proj ]]; then
+  # Module 11b: a project pins a checkout with the prebuilt Kajo; the
+  # working tree's (scripts/dist.sh checkout) unless KAJO_CHECKOUT names one.
+  ck=${KAJO_CHECKOUT:-$out/kajo-checkout}
+  [[ -x $ck/Prebuilt/bin/kajo ]] || $root/scripts/dist.sh checkout $ck > $out/checkout.log 2>&1 || { tail -5 $out/checkout.log; exit 1; }
+  (cd $out && $kajo new Sample --bundle-id dev.katajamaki.kajo.sample --team BDN6M642M2 --kajo $ck) > /dev/null || exit 1
 fi
 [[ -d $out/src-pristine ]] || cp -R $proj/src $out/src-pristine
 

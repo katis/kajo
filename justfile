@@ -12,7 +12,7 @@ test:
     swift test
 
 # Release build
-release:
+release-build:
     swift build -c release
 
 # Run the headless CLI
@@ -90,7 +90,7 @@ dev-image OUT="dev.img":
 tools:
     just dev-image dev.img
     scripts/mac-shell.sh build
-    ${DD:-${TMPDIR:-/tmp}/kajo-shell-mac}/Build/Products/Release/KajoShell.app/Contents/MacOS/KajoShell mode=dev image=$PWD/dev.img project=$PWD/tools
+    ${DD:-${TMPDIR:-/tmp}/kajo-shell-mac}/Build/Products/Release/Kajo.app/Contents/MacOS/Kajo mode=dev image=$PWD/dev.img project=$PWD/tools
 
 # Module 9a: the iOS shell on the attached iPhone (`just device build`, `just device tests <dir>`, `just device run <out> mode=...`)
 device *ARGS:
@@ -127,6 +127,10 @@ weekly-status:
     -launchctl print gui/$(id -u)/dev.katajamaki.kajo.weekly
     -tail -5 $HOME/kajo-weekly/weekly.log
 
-# Gate tiers: a release tarball of the Release kajo CLI and the development image, with its SHA-256; prints the gh command, uploads nothing
-release-tarball TAG:
-    scripts/release.sh {{TAG}}
+# Module 11b: Kajo-<version>.dmg (the Kajo app, the checkout, the prebuilt frameworks), signed, notarized when KAJO_NOTARY_PROFILE names a profile
+dist VERSION:
+    scripts/dist.sh {{VERSION}}
+
+# Module 11b: tag v0.<n> locally, build its dmg, print the gh release command (uploads nothing; --dry-run only prints)
+release TAG *ARGS:
+    scripts/release.sh {{TAG}} {{ARGS}}

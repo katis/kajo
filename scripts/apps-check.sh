@@ -19,6 +19,6 @@ check() {
   grep -E "^/.*: (warning|error):" $log | sort -u | head -20
   [[ $rc == 0 && $errors == 0 && $warnings == 0 ]] || fail=1
 }
-check macos -project $root/apps/KajoShell-macOS/KajoShell-macOS.xcodeproj -scheme KajoShell
+check macos -project $root/apps/KajoShell-macOS/KajoShell-macOS.xcodeproj -scheme Kajo
 check ios -project $root/apps/KajoShell-iOS/KajoShell-iOS.xcodeproj -scheme KajoShell -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
 exit $fail

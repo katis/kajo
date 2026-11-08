@@ -1,45 +1,71 @@
 #!/bin/zsh
-# A release of the headless pieces, built on the mini (docs/modules/gate-tiers.md;
-# no paid CI, nothing built on GitHub): the Release `kajo` CLI and the
-# development image (kernel/ with tools/) it builds, in one tarball with
-# its SHA-256, under .build/release-artifacts/<tag>/. It uploads nothing:
-# it prints the `gh release create` command for the owner. The dmg,
-# signing and notarization are the distribution module's.
+# A Kajo release, built on the mini (module 11b, docs/modules/distribution.md;
+# no paid CI, nothing built on GitHub): tag the commit v0.<n> (a local tag),
+# run scripts/dist.sh for version 0.<n> (Kajo-0.<n>.dmg with its SHA-256,
+# signed with the Developer ID identity and notarized when
+# KAJO_NOTARY_PROFILE names the owner's notarytool profile), write release
+# notes to fill in, and print the `gh release create` command. It uploads
+# nothing and pushes nothing: the main session pushes the tag and runs the
+# command.
 #
-#   scripts/release.sh <tag>
+#   scripts/release.sh v0.<n> [--dry-run]
 #
-# The tag names a commit the tree is at (refused otherwise); a dirty tree
-# is refused, so the tarball is what the tag says.
+# The tree must be clean and at the tag when the tag exists. --dry-run
+# checks the same and prints what it would do (the tag, the dist command,
+# the gh command), building and tagging nothing. A build that found no
+# Developer ID identity makes Kajo-<version>-unsigned-dev.dmg; the script
+# says it is not for distribution and prints no upload command for it.
 set -uo pipefail
 root=${0:A:h:h}
-tag=${1:?<tag>, e.g. v0.1.0}
-[[ $tag =~ '^[A-Za-z0-9._-]+$' ]] || { print "release: a tag is letters, digits, '.', '_' and '-'"; exit 2 }
+tag=${1:?usage: release.sh v0.<n> [--dry-run]}
+dry=0; [[ ${2:-} == --dry-run ]] && dry=1
+[[ $tag =~ '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ]] || { print "release: a tag is v<major>.<minor>, e.g. v0.1"; exit 2 }
+version=${tag#v}
 cd $root
-[[ -z $(git status --porcelain) ]] || { print "release: the tree is dirty; commit or stash first"; exit 1 }
+[[ -z $(git status --porcelain) ]] || { print "release: the tree is dirty; commit first"; exit 1 }
 head=$(git rev-parse HEAD)
+made_tag=0
 if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
   [[ $(git rev-parse "$tag^{commit}") == $head ]] || { print "release: tag $tag is not HEAD"; exit 1 }
+  print "release: $tag is HEAD ($(git rev-parse --short HEAD))"
+elif [[ $dry == 1 ]]; then
+  print "release: would tag $tag at $(git rev-parse --short HEAD) (git tag -a $tag -m 'Kajo $version')"
 else
-  print "release: no tag $tag yet; the command below creates it on the remote at $(git rev-parse --short HEAD) (--target)"
+  git tag -a $tag -m "Kajo $version" || exit 1
+  made_tag=1
+  print "release: tagged $tag at $(git rev-parse --short HEAD) (local; push it with git push origin $tag)"
 fi
-out=$root/.build/release-artifacts/$tag
-name=kajo-$tag-macos-$(uname -m)
-rm -rf $out && mkdir -p $out/$name/bin
-gtimeout 3600 swift build -c release --product kajo > $out/build.log 2>&1 || { print "release: build failed ($out/build.log)"; exit 1 }
-bin=$(swift build -c release --product kajo --show-bin-path)/kajo
-cp $bin $out/$name/bin/kajo
-gtimeout 600 $out/$name/bin/kajo build-image -o $out/$name/dev.img --with tools > $out/image.log 2>&1 || { print "release: the development image did not build ($out/image.log)"; exit 1 }
-{
-  print "kajo $tag"
-  print "commit $head"
-  print "built $(date '+%F %T') on $(sysctl -n hw.model), $(swift --version 2>&1 | head -1)"
-  print "bin/kajo      the headless CLI (kajo run, build-image, test, new, mcp, ...)"
-  print "dev.img       the development image: kernel/ and tools/"
-} > $out/$name/VERSION
-tar -C $out -czf $out/$name.tar.gz $name
-(cd $out && shasum -a 256 $name.tar.gz > $name.tar.gz.sha256)
-print "release: $out/$name.tar.gz ($(stat -f %z $out/$name.tar.gz) bytes)"
-cat $out/$name.tar.gz.sha256
-print "\nTo publish (not run by this script):"
-print "  gh release create $tag --target $head --title 'Kajo $tag' --notes-file <notes.md> \\"
-print "    $out/$name.tar.gz $out/$name.tar.gz.sha256"
+out=${KAJO_DIST_OUT:-$root/.build/dist/$version}
+if [[ $dry == 1 ]]; then
+  print "release: would run KAJO_DIST_OUT=$out scripts/dist.sh $version"
+  dmg=$out/Kajo-$version.dmg
+else
+  KAJO_DIST_OUT=$out $root/scripts/dist.sh $version || { print "release: dist failed ($out/dist.log)"; exit 1 }
+  dmg=$(ls $out/Kajo-$version*.dmg | head -1)
+fi
+notes=$out/notes.md
+if [[ $dry == 0 ]]; then
+  {
+    print "# Kajo $version"
+    print
+    print "Kajo-$version.dmg: the Kajo app (the tools on the development image, File > New App..., the kajo CLI),"
+    print "the Kajo checkout of $tag ($head) and the prebuilt Kajo frameworks for macOS arm64 and iOS arm64."
+    print "Apple silicon Macs, macOS 15 or later; Xcode for building apps. SHA-256 in Kajo-$version.dmg.sha256."
+    print
+    print "## Changes"
+    print
+    print "(fill in)"
+  } > $notes
+fi
+print
+if [[ $dmg == *-unsigned-dev.dmg ]]; then
+  print "release: $dmg is a local build signed for development, not for distribution (no Developer ID identity);"
+  print "         no upload command. With the owner's certificate and notary profile:"
+  print "  KAJO_NOTARY_PROFILE=<profile> scripts/release.sh $tag"
+else
+  print "To publish (not run by this script):"
+  print "  git push origin $tag"
+  print "  gh release create $tag $dmg $dmg.sha256 --title 'Kajo $version' --notes-file $notes --verify-tag"
+fi
+[[ $made_tag == 1 ]] && print "(the local tag $tag stays; git tag -d $tag removes it)"
+exit 0

@@ -1,0 +1,65 @@
+# Module 11b (docs/modules/distribution.md): the xcodegen spec scripts/dist.sh
+# builds the prebuilt Kajo from. One static framework per module a generated
+# app links, each compiled from the checkout's sources with the flags the
+# package gives them in a release build (-O, whole module, strict memory
+# safety, Swift 6) plus library evolution, so the frameworks carry module
+# interfaces any later compiler can read. __SRC__ is the checkout's
+# Sources directory. Not a project anyone opens.
+name: KajoFrameworks
+options:
+  deploymentTarget:
+    iOS: "18.0"
+    macOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MACH_O_TYPE: staticlib
+    SWIFT_OPTIMIZATION_LEVEL: -O
+    SWIFT_COMPILATION_MODE: wholemodule
+    BUILD_LIBRARY_FOR_DISTRIBUTION: YES
+    SWIFT_STRICT_MEMORY_SAFETY: YES
+    # The package's name, for the modules' `package` declarations.
+    OTHER_SWIFT_FLAGS: -package-name kajo
+    # A static library's debug info would be most of its bytes; the
+    # symbols stay.
+    GCC_GENERATE_DEBUGGING_SYMBOLS: NO
+    DEBUG_INFORMATION_FORMAT: dwarf
+    # Swift clients only: no Objective-C header (it would also refuse every
+    # architecture but the slice's in a client's module scan).
+    SWIFT_INSTALL_OBJC_HEADER: NO
+    # No clang module either (set per target: xcodegen's framework preset
+    # turns it on): the frameworks hold Swift modules only.
+    SKIP_INSTALL: NO
+    GENERATE_INFOPLIST_FILE: YES
+    ENABLE_TESTABILITY: NO
+    CODE_SIGNING_ALLOWED: NO
+    SUPPORTED_PLATFORMS: "macosx iphoneos"
+    TARGETED_DEVICE_FAMILY: "1,2"
+targets:
+  KajoVM:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    sources: [{path: __SRC__/KajoVM}]
+    settings: {PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.vm, DEFINES_MODULE: NO}
+  KajoDev:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    sources: [{path: __SRC__/KajoDev}]
+    settings: {PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.dev, DEFINES_MODULE: NO}
+    dependencies: [{target: KajoVM, link: false}]
+  KajoApp:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    sources: [{path: __SRC__/KajoApp}]
+    settings: {PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.app, DEFINES_MODULE: NO}
+    dependencies: [{target: KajoVM, link: false}]
+  KajoAppDevelopment:
+    type: framework
+    supportedDestinations: [macOS, iOS]
+    sources: [{path: __SRC__/KajoAppDevelopment}]
+    settings: {PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.appdevelopment, DEFINES_MODULE: NO}
+    dependencies: [{target: KajoApp, link: false}, {target: KajoDev, link: false}, {target: KajoVM, link: false}]
+schemes:
+  KajoFrameworks:
+    build:
+      targets: {KajoVM: all, KajoDev: all, KajoApp: all, KajoAppDevelopment: all}

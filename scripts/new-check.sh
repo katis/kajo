@@ -1,18 +1,26 @@
 #!/bin/zsh
 # Module 11a's gate for the generated app project (`just new-check`): `kajo
 # new` writes the Sample app into a scratch directory with this working
-# tree as its Kajo, xcodegen makes the project, and xcodebuild builds both
+# tree's checkout as its Kajo (since module 11b: `scripts/dist.sh checkout`
+# exports the tree and builds its Prebuilt/, the frameworks and kajo a
+# project links and runs; KAJO_CHECKOUT names an existing checkout instead,
+# such as the one the Kajo app copied from the dmg, and KAJO_NEW the kajo
+# that runs `kajo new`), xcodegen makes the project, and xcodebuild builds both
 # targets in both configurations from clean (the iOS target for a generic
 # device without signing, as `just apps` does). Each build reads the exit
 # status and the error count first, then the compiler warnings (0 or fail).
 # Then the built products: a Release binary links no development protocol,
 # no compiler and no shell modes (symbols and strings), its Info.plist names
 # neither the Bonjour service nor the local network, and its image is a
-# release image that refuses to serve; a Debug product has all three. The
+# release image that refuses to serve; a Debug product has all three; both
+# link the prebuilt VM (no KajoVM is compiled for the app, and the Debug
+# product holds the prebuilt framework's symbols). The
 # image build phase is timed first and incremental (nothing changed, then
 # one source touched). The scratch project and its DerivedData are removed.
 #
 #   scripts/new-check.sh [outdir]      (DD overrides the DerivedData root)
+#   KAJO_CHECKOUT=<dir> scripts/new-check.sh [outdir]
+#   APP_PROJECT=<dir> KAJO_CHECKOUT=<dir> scripts/new-check.sh [outdir]   (a project made elsewhere, checked as is)
 set -uo pipefail
 root=${0:A:h:h}
 out=${1:-${TMPDIR:-/tmp}/kajo-new-check}
@@ -21,10 +29,33 @@ mkdir -p $out
 work=$(mktemp -d)
 trap 'rm -rf $work $DD' EXIT
 fail=0
-swift build --package-path $root --product kajo > $out/kajo-build.log 2>&1 || { print "new-check: kajo did not build"; exit 1; }
-kajo=$(swift build --package-path $root --product kajo --show-bin-path)/kajo
-(cd $work && $kajo new Sample --bundle-id dev.katajamaki.kajo.sample --team BDN6M642M2 --kajo $root) > $out/new.log 2>&1 \
-  || { cat $out/new.log; print "new-check: kajo new failed"; exit 1; }
+if [[ -n ${KAJO_CHECKOUT:-} ]]; then
+  ck=$KAJO_CHECKOUT
+  print "new-check: the checkout $ck"
+else
+  ck=$work/kajo-checkout
+  t0=$(date +%s)
+  $root/scripts/dist.sh checkout $ck > $out/checkout.log 2>&1 || { tail -20 $out/checkout.log $ck.work/dist.log; print "new-check: the checkout did not build"; exit 1; }
+  print "new-check: the working tree's checkout with its Prebuilt/ in $(( $(date +%s) - t0 )) s"
+  cp $ck.work/dist.log $out/checkout-dist.log
+  cp $ck/Prebuilt/FLAGS.txt $out/prebuilt-flags.txt
+fi
+if [[ -n ${KAJO_NEW:-} ]]; then
+  kajo=$KAJO_NEW
+else
+  swift build --package-path $root --product kajo > $out/kajo-build.log 2>&1 || { print "new-check: kajo did not build"; exit 1; }
+  kajo=$(swift build --package-path $root --product kajo --show-bin-path)/kajo
+fi
+if [[ -n ${APP_PROJECT:-} ]]; then
+  # A project made elsewhere (the Kajo app's New App): a copy of it, so the
+  # original keeps its own build state; its pin is an absolute path.
+  [[ -d $APP_PROJECT/Sample.xcodeproj ]] || { print "new-check: no Sample.xcodeproj in $APP_PROJECT"; exit 1; }
+  ditto $APP_PROJECT $work/Sample && rm -rf $work/Sample/.build
+  print "new-check: the project $APP_PROJECT, pinned to $(sed -n 's/^    path: //p' $work/Sample/project.yml | head -1)"
+else
+  (cd $work && $kajo new Sample --bundle-id dev.katajamaki.kajo.sample --team BDN6M642M2 --kajo $ck) > $out/new.log 2>&1 \
+    || { cat $out/new.log; print "new-check: kajo new failed"; exit 1; }
+fi
 proj=$work/Sample
 [[ -f $proj/Sample.xcodeproj/project.pbxproj ]] || { cat $out/new.log; print "new-check: no Xcode project (is xcodegen on PATH?)"; exit 1; }
 
@@ -73,13 +104,13 @@ build Sample-macOS Debug macos-debug
 mac=$DD/Build/Products/Debug/Sample.app/Contents
 # A Debug Mac build links the app into a debug dylib beside the stub.
 check macos-debug $mac/MacOS/Sample.debug.dylib $mac/Info.plist $mac/Resources/kajo/app.img debug
-# The Debug build's VM: optimized and not a checked build (the KajoAppBuild
-# trait the pin enables), read from the compile line.
-vmline=$(grep -m1 -- "-module-name KajoVM " $out/build-macos-debug.log)
-trait=$([[ $vmline == *"-DKajoAppBuild"* ]] && print 1 || print 0)
-opt=$([[ $vmline == *" -O "* ]] && print 1 || print 0)
-print "macos-debug: vm_trait=$trait vm_optimized=$opt"
-[[ $trait == 1 && $opt == 1 ]] || { print "macos-debug: FAILED the Debug VM is a checked or unoptimized build"; fail=1; }
+# Module 11b: the Debug build's VM is the prebuilt Release one: no KajoVM
+# (nor any other Kajo module) is compiled for the app, and the Debug
+# product holds the prebuilt framework's code (by a symbol only KajoVM has).
+compiled=$(grep -cE -- "-module-name (KajoVM|KajoApp|KajoAppDevelopment|KajoDev) " $out/build-macos-debug.log)
+vmsyms=$(nm $mac/MacOS/Sample.debug.dylib 2>/dev/null | grep -c "6KajoVM")
+print "macos-debug: kajo_modules_compiled=$compiled prebuilt_vm_symbols=$vmsyms"
+[[ $compiled == 0 && $vmsyms -gt 1000 ]] || { print "macos-debug: FAILED the Debug VM is not the prebuilt one"; fail=1; }
 # Incremental: nothing changed, then one source touched (the image is built
 # again, nothing else).
 build Sample-macOS Debug macos-debug-again

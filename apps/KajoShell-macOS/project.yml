@@ -1,5 +1,8 @@
-# xcodegen spec for the macOS shell (module 9a). `xcodegen generate` in this
-# directory writes KajoShell-macOS.xcodeproj (committed with the spec).
+# xcodegen spec for the Kajo app (module 11b), the macOS shell of module 9a
+# renamed: with no launch arguments the product, with `mode=` the
+# measurement tool. `xcodegen generate` in this directory writes
+# KajoShell-macOS.xcodeproj (committed with the spec). scripts/dist.sh
+# builds it with MARKETING_VERSION=<version> KAJO_APP_IMAGES=product.
 name: KajoShell-macOS
 options:
   bundleIdPrefix: dev.katajamaki.kajo
@@ -14,7 +17,7 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "6.0"
 targets:
-  KajoShell:
+  Kajo:
     type: application
     platform: macOS
     sources:
@@ -23,15 +26,21 @@ targets:
       path: Info.plist
       properties:
         CFBundleDisplayName: Kajo
-        CFBundleShortVersionString: "0.1"
+        CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "15.0"
         NSPrincipalClass: NSApplication
         NSHighResolutionCapable: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.shell-macos
-        PRODUCT_NAME: KajoShell
+        PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo
+        PRODUCT_NAME: Kajo
+        # The version a dist build stamps (scripts/dist.sh); a build from the
+        # repository is 0.0.
+        MARKETING_VERSION: "0.0"
+        # Which images the bundle carries: all of them (the measurement
+        # modes'), or the product's development image only (dist.sh).
+        KAJO_APP_IMAGES: all
         ENABLE_USER_SCRIPT_SANDBOXING: NO
         ENABLE_HARDENED_RUNTIME: NO
         SWIFT_OPTIMIZATION_LEVEL: -O
@@ -52,4 +61,5 @@ targets:
         basedOnDependencyAnalysis: false
         script: |
           set -e
-          "$SRCROOT/../Shared/build-images.sh" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH" mac
+          if [[ "$KAJO_APP_IMAGES" == product ]]; then platform=product; else platform=mac; fi
+          "$SRCROOT/../Shared/build-images.sh" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH" $platform

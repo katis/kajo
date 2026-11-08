@@ -7,28 +7,28 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		14BE3A5A0DF7CF151C1A10BA /* KajoAppDevelopment in Frameworks */ = {isa = PBXBuildFile; productRef = 811477BC3B50FB6C9BB7224F /* KajoAppDevelopment */; };
-		3269E4AE48761E9C7E835CFD /* KajoApp in Frameworks */ = {isa = PBXBuildFile; productRef = C01551BEEB5E048F1C2D0AE3 /* KajoApp */; };
-		52BC6959BF846937C4FC1C4C /* MacShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472C2ABD65D9B61A24DEAD0A /* MacShell.swift */; };
-		AFEF8336747FDE2ACDFF080F /* KajoVM in Frameworks */ = {isa = PBXBuildFile; productRef = 5268F8BFFB4A5C7E5648D973 /* KajoVM */; };
-		AFFB0D8D90B79F9A6E8A977A /* KajoShellCore in Frameworks */ = {isa = PBXBuildFile; productRef = 3FBC0913790ADAA272DBC14D /* KajoShellCore */; };
+		03EDC7536A5F199F7D14CBDA /* KajoAppDevelopment in Frameworks */ = {isa = PBXBuildFile; productRef = 88500919A7DE6FCE30065338 /* KajoAppDevelopment */; };
+		1CAC2CF3CC09D96CD86D9CED /* KajoApp in Frameworks */ = {isa = PBXBuildFile; productRef = F1CD2B1C374D963DB321008F /* KajoApp */; };
+		6F518A09CC91E5EA156E4008 /* KajoVM in Frameworks */ = {isa = PBXBuildFile; productRef = 303F43D1B77AA430F71DB1B8 /* KajoVM */; };
+		73702316A608BBA76B735F3C /* KajoShellCore in Frameworks */ = {isa = PBXBuildFile; productRef = D7E5281D64D5435A62EA8F43 /* KajoShellCore */; };
+		FCD2BE493CE7CDA43D289A07 /* MacShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = 472C2ABD65D9B61A24DEAD0A /* MacShell.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		3AA9CA156CE9F20556DE61E2 /* KajoShell.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KajoShell.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		36E853619F03179D2B1683D1 /* Kajo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Kajo.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		472C2ABD65D9B61A24DEAD0A /* MacShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacShell.swift; sourceTree = "<group>"; };
 		CD4AF382D49D1894F93A1523 /* kajo */ = {isa = PBXFileReference; lastKnownFileType = folder; name = kajo; path = ../..; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
-		9B30A55F7BB024E9B51BBFEC /* Frameworks */ = {
+		CBB30F725A67E63E019DA673 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				AFFB0D8D90B79F9A6E8A977A /* KajoShellCore in Frameworks */,
-				3269E4AE48761E9C7E835CFD /* KajoApp in Frameworks */,
-				14BE3A5A0DF7CF151C1A10BA /* KajoAppDevelopment in Frameworks */,
-				AFEF8336747FDE2ACDFF080F /* KajoVM in Frameworks */,
+				73702316A608BBA76B735F3C /* KajoShellCore in Frameworks */,
+				1CAC2CF3CC09D96CD86D9CED /* KajoApp in Frameworks */,
+				03EDC7536A5F199F7D14CBDA /* KajoAppDevelopment in Frameworks */,
+				6F518A09CC91E5EA156E4008 /* KajoVM in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -38,7 +38,7 @@
 		1E991775FC5D55EE388F30E1 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				3AA9CA156CE9F20556DE61E2 /* KajoShell.app */,
+				36E853619F03179D2B1683D1 /* Kajo.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -71,27 +71,27 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		73BAA94466E4A849995A77E5 /* KajoShell */ = {
+		AEA676DCDB995FB2CF8B48D3 /* Kajo */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 2755DE3C1371BE971D7A2A43 /* Build configuration list for PBXNativeTarget "KajoShell" */;
+			buildConfigurationList = E5BFE044CAB828EC8BBB882C /* Build configuration list for PBXNativeTarget "Kajo" */;
 			buildPhases = (
-				A89703F194BC0CA0740FFBE7 /* Sources */,
-				9B30A55F7BB024E9B51BBFEC /* Frameworks */,
-				F1CA18C2479A7397318841C8 /* Bundle images */,
+				92255EB021FA2E9478E378F7 /* Sources */,
+				CBB30F725A67E63E019DA673 /* Frameworks */,
+				5E5A675280E692F14A2E1F09 /* Bundle images */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = KajoShell;
+			name = Kajo;
 			packageProductDependencies = (
-				3FBC0913790ADAA272DBC14D /* KajoShellCore */,
-				C01551BEEB5E048F1C2D0AE3 /* KajoApp */,
-				811477BC3B50FB6C9BB7224F /* KajoAppDevelopment */,
-				5268F8BFFB4A5C7E5648D973 /* KajoVM */,
+				D7E5281D64D5435A62EA8F43 /* KajoShellCore */,
+				F1CD2B1C374D963DB321008F /* KajoApp */,
+				88500919A7DE6FCE30065338 /* KajoAppDevelopment */,
+				303F43D1B77AA430F71DB1B8 /* KajoVM */,
 			);
-			productName = KajoShell;
-			productReference = 3AA9CA156CE9F20556DE61E2 /* KajoShell.app */;
+			productName = Kajo;
+			productReference = 36E853619F03179D2B1683D1 /* Kajo.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -103,7 +103,7 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
-					73BAA94466E4A849995A77E5 = {
+					AEA676DCDB995FB2CF8B48D3 = {
 						DevelopmentTeam = BDN6M642M2;
 						ProvisioningStyle = Automatic;
 					};
@@ -126,13 +126,13 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				73BAA94466E4A849995A77E5 /* KajoShell */,
+				AEA676DCDB995FB2CF8B48D3 /* Kajo */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXShellScriptBuildPhase section */
-		F1CA18C2479A7397318841C8 /* Bundle images */ = {
+		5E5A675280E692F14A2E1F09 /* Bundle images */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;
 			buildActionMask = 2147483647;
@@ -149,23 +149,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\n\"$SRCROOT/../Shared/build-images.sh\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\" mac\n";
+			shellScript = "set -e\nif [[ \"$KAJO_APP_IMAGES\" == product ]]; then platform=product; else platform=mac; fi\n\"$SRCROOT/../Shared/build-images.sh\" \"$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH\" $platform\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		A89703F194BC0CA0740FFBE7 /* Sources */ = {
+		92255EB021FA2E9478E378F7 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				52BC6959BF846937C4FC1C4C /* MacShell.swift in Sources */,
+				FCD2BE493CE7CDA43D289A07 /* MacShell.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		58F18D89552FBA877EF46511 /* Debug */ = {
+		0D997F1C39B46D61BC724A1A /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -175,19 +175,21 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				KAJO_APP_IMAGES = all;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "dev.katajamaki.kajo.shell-macos";
-				PRODUCT_NAME = KajoShell;
+				MARKETING_VERSION = 0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.katajamaki.kajo;
+				PRODUCT_NAME = Kajo;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 			};
 			name = Debug;
 		};
-		64CA3659C476B1775A7FCB09 /* Release */ = {
+		A6CB2E6B110A5A74A555FF06 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -197,12 +199,14 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
+				KAJO_APP_IMAGES = all;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = "dev.katajamaki.kajo.shell-macos";
-				PRODUCT_NAME = KajoShell;
+				MARKETING_VERSION = 0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dev.katajamaki.kajo;
+				PRODUCT_NAME = Kajo;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -335,20 +339,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		2755DE3C1371BE971D7A2A43 /* Build configuration list for PBXNativeTarget "KajoShell" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				58F18D89552FBA877EF46511 /* Debug */,
-				64CA3659C476B1775A7FCB09 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Debug;
-		};
 		613AF04CDAD09008F5BDB9AF /* Build configuration list for PBXProject "KajoShell-macOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				BD574C3A7C7644C4EDEB6DBE /* Debug */,
 				DC8DA1DDC9BBA7C611398D58 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		E5BFE044CAB828EC8BBB882C /* Build configuration list for PBXNativeTarget "Kajo" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				0D997F1C39B46D61BC724A1A /* Debug */,
+				A6CB2E6B110A5A74A555FF06 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -363,19 +367,19 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		3FBC0913790ADAA272DBC14D /* KajoShellCore */ = {
-			isa = XCSwiftPackageProductDependency;
-			productName = KajoShellCore;
-		};
-		5268F8BFFB4A5C7E5648D973 /* KajoVM */ = {
+		303F43D1B77AA430F71DB1B8 /* KajoVM */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = KajoVM;
 		};
-		811477BC3B50FB6C9BB7224F /* KajoAppDevelopment */ = {
+		88500919A7DE6FCE30065338 /* KajoAppDevelopment */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = KajoAppDevelopment;
 		};
-		C01551BEEB5E048F1C2D0AE3 /* KajoApp */ = {
+		D7E5281D64D5435A62EA8F43 /* KajoShellCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = KajoShellCore;
+		};
+		F1CD2B1C374D963DB321008F /* KajoApp */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = KajoApp;
 		};

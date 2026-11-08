@@ -1,8 +1,14 @@
 # apps
 
-Xcode projects for the macOS and iOS shells. Each depends on the root
-package (`../..`) as a local Swift package and links `KajoVM`.
+The native shells (module 9a), each an xcodegen spec with its generated
+Xcode project, over the root package (`../..`) as a local Swift package:
 
-Not created yet. Create them with Xcode when the VM can boot an image, and
-add them here. Whether there is one project with two targets or two projects
-is open (ADR 0002).
+- `KajoShell-macOS/`: the **Kajo app** since module 11b (target and scheme
+  `Kajo`, bundle `dev.katajamaki.kajo`). Launched with no arguments it is
+  the product (the tools on the development image, File > New App...,
+  File > Install Command Line Tool...; `docs/modules/distribution.md`);
+  with `mode=` it is the measurement shell (`scripts/mac-shell.sh`).
+  `scripts/dist.sh` builds it into `Kajo-<version>.dmg`.
+- `KajoShell-iOS/`: the iOS measurement shell (scheme `KajoShell`).
+- `Shared/`: the image build phase both run and the Smalltalk the
+  scenarios and the scripted session load.

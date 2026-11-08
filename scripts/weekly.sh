@@ -8,7 +8,7 @@
 #
 # It refuses to start (exit 0, one line in ~/kajo-weekly/weekly.log) when
 # anything of Kajo runs: a kajo, swift-build, swift-test, xcodebuild,
-# KajoShell, Sample or yes process of this user outside its own process
+# KajoShell, Kajo, Sample or yes process of this user outside its own process
 # group (by exact executable name, so nothing else of the owner's matches).
 # It runs on the tree as checked out: it does not pull, switch or clean,
 # and says in the log when the tree is dirty or not on master.
@@ -33,7 +33,7 @@ own=$(ps -o pgid= -p $$ | tr -d ' ')
 busy=$(ps -U $(id -u) -o pid=,pgid=,ucomm= | awk -v own=$own '
   { n = $0; sub(/^ *[0-9]+ +[0-9]+ +/, "", n); sub(/ +$/, "", n)
     if ($2 != own && (n == "kajo" || n == "swift-build" || n == "swift-test" || n == "xcodebuild" ||
-                      n == "KajoShell" || n == "Sample" || n == "yes")) { printf "%s %s(%s)", sep, n, $1; sep = "," } }')
+                      n == "KajoShell" || n == "Kajo" || n == "Sample" || n == "yes")) { printf "%s %s(%s)", sep, n, $1; sep = "," } }')
 if [[ -n $busy ]]; then
   wlog "weekly refused: Kajo is running:$busy"
   exit 0

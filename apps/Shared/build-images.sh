@@ -19,9 +19,19 @@ mkdir -p $dst/kasm
 # host build: a clean environment with the PATH toolchain.
 clean=(/usr/bin/env -i HOME=$HOME PATH=$HOME/.swiftly/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin)
 scratch=$root/.build/apps-image
-$clean swift build --package-path $root --scratch-path $scratch --product kajo > $dst/../kajo-build.log 2>&1 || { cat $dst/../kajo-build.log; exit 1; }
-kajo=$($clean swift build --package-path $root --scratch-path $scratch --product kajo --show-bin-path)/kajo
+if [[ $platform == product && -n ${KAJO:-} ]]; then
+  kajo=$KAJO
+else
+  $clean swift build --package-path $root --scratch-path $scratch --product kajo > $dst/../kajo-build.log 2>&1 || { cat $dst/../kajo-build.log; exit 1; }
+  kajo=$($clean swift build --package-path $root --scratch-path $scratch --product kajo --show-bin-path)/kajo
+fi
 cd $root
+if [[ $platform == product ]]; then
+  rmdir $dst/kasm
+  $kajo build-image -o $dst/dev.img kernel --with tools > /dev/null
+  rm -f $dst/../kajo-build.log
+  exit 0
+fi
 $kajo build-image -o $dst/kernel.img kernel > /dev/null
 if [[ -n ${KAJO_SHELL_CLASSES:-} ]]; then
   # The devices investigation (2026-11-06): KAJO_SHELL_CLASSES=1806 in the
