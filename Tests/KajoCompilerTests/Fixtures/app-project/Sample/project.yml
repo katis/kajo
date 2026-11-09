@@ -58,6 +58,9 @@ targets:
       base:
         PRODUCT_MODULE_NAME: Sample
         TARGETED_DEVICE_FAMILY: "1,2"
+        # The prebuilt Kajo's simulator slice is Apple silicon only
+        # (a generic simulator build would also ask for x86_64).
+        "ARCHS[sdk=iphonesimulator*]": arm64
       configs:
         Debug:
           INFOPLIST_FILE: Info-iOS-Debug.plist

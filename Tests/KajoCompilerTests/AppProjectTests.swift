@@ -100,7 +100,10 @@ func scratchDirectory(_ tag: String) -> String {
         spec.platforms = [.iOS]
         files = try generated(spec)
         yml = try #require(files.first { $0.path == "project.yml" }).text
-        #expect(!yml.contains("Sample-macOS:") && yml.contains("Sample-iOS:") && !yml.contains("macOS: \"15.0\"") && !yml.contains("ARCHS"))
+        #expect(!yml.contains("Sample-macOS:") && yml.contains("Sample-iOS:") && !yml.contains("macOS: \"15.0\"") && !yml.contains("ARCHS: arm64"))
+        // The iOS target builds only arm64 for the simulator (the prebuilt
+        // simulator slice is arm64 only; docs/modules/simulator-slices.md).
+        #expect(yml.contains("\"ARCHS[sdk=iphonesimulator*]\": arm64"))
         #expect(files.filter { $0.path.hasSuffix(".plist") }.map(\.path) == ["Info-iOS-Debug.plist", "Info-iOS-Release.plist"])
         // Both, as the fixture: the same files as the default.
         spec.platforms = [.macOS, .iOS]
