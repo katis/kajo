@@ -73,7 +73,7 @@ constraints, each stated in the doc as built:
   build nothing of 1b, say so with the numbers, and leave the chunk
   design as a paragraph. Either way the slot scan inside a stop reads
   nothing through a hazard slot or pin: the world is stopped.
-- Kernel: `Object>>pointersTo` (limit 100 000, as `allInstances`),
+- Kernel: `Object>>pointersTo` (no default limit; the owner's answer of 2026-11-09, the primitive's 16 777 215 the only bound),
   `pointersTo:`, `pointerCount`; category `reflection` or beside
   `allInstances`' category; `pointersTo:` checks the limit before the
   primitive and names the reason. `kernel/ReflectionTest`: an object

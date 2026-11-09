@@ -122,6 +122,8 @@ ReflectionTest >> testTheLimitHolds [
 	self should: [ReflectionTestProbe allInstances: -1] raise: Error.
 	self should: [ReflectionTestProbe allInstances: 16777216] raise: Error.
 	self should: [ReflectionTestProbe allInstances: nil] raise: Error.
+	"No default limit: allInstances is every instance."
+	self assert: ReflectionTestProbe allInstances size equals: (ReflectionTestProbe allInstances: 16777215) size.
 	self assert: keep size equals: 5
 ]
 
@@ -210,6 +212,8 @@ ReflectionTest >> testThePointerLimitHolds [
 	self should: [o pointersTo: -1] raise: Error.
 	self should: [o pointersTo: 16777216] raise: Error.
 	self should: [o pointersTo: nil] raise: Error.
+	"No default limit: pointersTo is every holder."
+	self assert: o pointersTo size equals: (o pointersTo: 16777215) size.
 	self assert: keep size equals: 5
 ]
 

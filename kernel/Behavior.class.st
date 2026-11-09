@@ -191,8 +191,8 @@ Behavior >> new: size [
 
 { #category : #instances }
 Behavior >> allInstances [
-	"Every object whose class is the receiver, at most 100 000 of them (allInstances: for more). A development image holds millions of objects, and one Array of all of them would be a stop a frame long (the discoverability follow-up's open question 3, built with a limit as recommended). The objects are found in one stop of the world after every young one is promoted, so an object nothing reaches any more is still an instance until a collection frees it (send Smalltalk garbageCollect first for the live ones only). The immediate classes (SmallInteger, SmallFloat, Character) have no instances in the heap and answer #(); UndefinedObject, True and False answer their one instance."
-	^ self allInstances: 100000
+	"Every object whose class is the receiver, with no limit but the largest Array's (16 777 215; allInstances: takes a smaller one: the owner's answer of 2026-11-09 to the discoverability follow-up's open question 3). Beware: a development image holds millions of objects, and Object allInstances or String allInstances is an Array of hundreds of thousands made in one stop that can be a frame long; ask for a limit where that matters. The objects are found in one stop of the world after every young one is promoted, so an object nothing reaches any more is still an instance until a collection frees it (send Smalltalk garbageCollect first for the live ones only). The immediate classes (SmallInteger, SmallFloat, Character) have no instances in the heap and answer #(); UndefinedObject, True and False answer their one instance."
+	^ self allInstances: 16777215
 ]
 
 { #category : #instances }
@@ -203,8 +203,8 @@ Behavior >> allInstances: aLimit [
 
 { #category : #instances }
 Behavior >> allSubInstances [
-	"Every object whose class is the receiver or inherits from it, at most 100 000 of them; one walk of old space with every such class at once. See allInstances."
-	^ self allSubInstances: 100000
+	"Every object whose class is the receiver or inherits from it, with no limit but the largest Array's (allSubInstances: for a smaller one); one walk of old space with every such class at once. See allInstances."
+	^ self allSubInstances: 16777215
 ]
 
 { #category : #instances }
