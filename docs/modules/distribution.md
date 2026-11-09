@@ -571,7 +571,7 @@ phase 0.15 s first, 0.02 s again.
   for the repository's build).
 - `Config.swift`'s dead `!KajoAppBuild` (a one-line core change).
 
-## Open questions for the owner (built as recommended)
+## Open questions for the owner (built as recommended; answered by the owner on 2026-11-09: 1 add the simulator slices, a follow-up in `docs/modules/simulator-slices.md`; 2 to 6 as built)
 
 1. **Simulator slices**: none (the phone is the target; a simulator slice
    doubles the frameworks step and the size). Built: none.
