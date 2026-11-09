@@ -315,6 +315,35 @@ Kajo (kasm) runs 918 M bytecodes/s in its own kernel time (7.99 s of the 8.01 s 
 | **Kajo (Smalltalk)** | 6.25 | 6.23–6.27 | 0.6% | 1.00× |
 <!-- /generated -->
 
+The program's four parts, each alone in the same harness (the
+collections-speed module, 2026-11-08, `docs/modules/collections-speed.md`;
+`KERNELS="$PARTS" RUNTIMES="kajo-st pharo" bench.sh`, five interleaved
+rounds, thermal nominal throughout). Hand-written, not generated: the raw
+rows are the module's, not `bench-raw.txt`'s. *Net* is the median less the
+runtime's empty program (start and exit alone: Kajo 44 ms, Pharo 59 ms),
+which is most of Pharo's stream part. Sends are `kajo run`'s full sends (the
+method cache's, special sends that fell back included) and bytecodes the
+plain instructions the counting build dispatched, per element (a million
+integers added and summed, 200 000 keys made, put and looked up, a million
+Characters written and scanned, 500 000 integers sorted; each three times).
+The JIT is 5.5 to 6 times Kajo's interpreter on fib, dispatch and arith; a
+part far past that is the library's.
+
+| part | before: Kajo s | Pharo s | net ratio | sends / element | cycles / bytecode | after: Kajo s | Pharo s | net ratio | sends / element | cycles / bytecode |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| OrderedCollection | 0.493 | 0.297 | 1.89 | 2.0 | 6.33 | 0.491 | 0.297 | 1.88 | 2.0 | 6.35 |
+| Dictionary of Symbols | 3.174 | 1.158 | 2.85 | 152.6 | 11.59 | 1.691 | 1.166 | 1.49 | 56.8 | 11.63 |
+| WriteStream and scan | 0.860 | 0.112 | **15.5** | 8.0 | 7.75 | 0.525 | 0.111 | 9.2 | 5.0 | 8.05 |
+| sort | 1.885 | 0.457 | 4.63 | 3.0 | 5.22 | 1.882 | 0.458 | 4.61 | 3.0 | 5.22 |
+| **whole program** | 6.258 | 1.613 | 4.00 (3.88 whole) | | | 4.452 | 1.609 | 2.84 (2.77 whole) | | |
+
+Only the stream part was the library's: a `nextPut:` sent four times and a
+`contents` copied byte by byte. The Dictionary part's time was mostly its
+keys' `printString` (57 percent, 105 sends a number), the stream again. The
+sort (18 block activations and 789 bytecodes an element) and the
+OrderedCollection are the interpreter's. The table above the parts is the
+comparison's own run on the commit before the module and is not re-run.
+
 ## 6. Scaling across workers
 
 <!-- generated: scaling -->
