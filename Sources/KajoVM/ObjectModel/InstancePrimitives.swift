@@ -42,9 +42,27 @@
 // may have been freed: the fill then finds fewer, and the answer is a
 // second Array of exactly what was found.
 
+//   169  Smalltalk primPointersTo: anObject limit: n (the `pointersTo:`
+//        follow-up, docs/modules/pointers-to.md). An Array of every object
+//        in the heap with at least one slot holding anObject (compared
+//        raw, so an immediate works too), at most n of them (0 to
+//        16 777 215), in entry-table order; a method whose literal frame
+//        holds it stands for that frame. Garbage counts until a collection
+//        frees it; Process stacks are not in the heap and are not read.
+//        The answer is never one of its own elements; anObject itself is
+//        listed when it holds itself.
+//   170  Smalltalk primPointerCountTo: anObject. How many such objects
+//        there are, allocating nothing.
+//
+// 169 and 170 run in the same stop kind and hook as 167 and 168, and 169
+// counts, allocates and fills exactly as 167 does (the rule and the
+// reason above hold word for word). The walk is ObjectMemory's
+// `walkPointers`; the slots it compared are the stop record's `words`.
+
 enum InstancePrimitives {
     static let table: [(number: Int, selector: String, argc: Int)] = [
         (167, "Smalltalk primAllInstancesOf:limit:", 2), (168, "Smalltalk primInstanceCountOf:", 1),
+        (169, "Smalltalk primPointersTo:limit:", 2), (170, "Smalltalk primPointerCountTo:", 1),
     ]
     /// The largest `limit`: the count field's (an Array of more slots
     /// cannot be made).
@@ -63,6 +81,21 @@ func instancePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard c.argc == 1, let classes = instanceClassFlags(m, c.arg0) else { return .none }
         var n = -1
         inInstanceStop(m, keeping: [c.arg0]) { om, _ in n = om.walkInstances(of: classes) { _ in true } }
+        return n < 0 ? .none : Oop(smallInteger: Int64(n))
+    case 169:
+        guard c.argc == 2, c.arg1.isSmallInteger else { return .none }
+        let limit = c.arg1.smallIntegerValue
+        guard limit >= 0, limit <= InstancePrimitives.maxLimit else { return .none }
+        return pointersTo(m, c.arg0, limit: Int(limit))
+    case 170:
+        guard c.argc == 1 else { return .none }
+        var n = -1
+        let target = c.arg0
+        inInstanceStop(m, keeping: [target]) { om, _ in
+            var words: UInt64 = 0
+            n = om.walkPointers(to: target.raw, words: &words) { _ in true }
+            noteStopWords(m, words)
+        }
         return n < 0 ? .none : Oop(smallInteger: Int64(n))
     default:
         return .none
@@ -110,6 +143,41 @@ private func inInstanceStop(_ m: Machine, keeping: [Oop], _ work: (ObjectMemory,
         if om.prepareOldSpaceOperation(roots).isEmpty { work(om) { roots } }
     }
     m.flushCache()
+}
+
+/// The slots a stop's walk compared, for its record (part 1a's words).
+private func noteStopWords(_ m: Machine, _ words: UInt64) {
+    if let vm = unsafe workerOf(m.state).pointee.vm { unsafe noteStopWork(vm, words: words) }
+}
+
+/// Primitive 169: 167's two walks and allocation with the slot scan.
+private func pointersTo(_ m: Machine, _ target: Oop, limit: Int) -> Oop {
+    var answer = Oop.none
+    let ctx = unsafe m.state.pointee.context
+    inInstanceStop(m, keeping: [target]) { om, roots in
+        var words: UInt64 = 0
+        defer { noteStopWords(m, words) }
+        var n = 0
+        if limit > 0 { om.walkPointers(to: target.raw, words: &words) { _ in n &+= 1; return n < limit } }
+        guard let a = om.allocate(ctx, classIndex: WellKnown.array, slots: n, fill: m.nilObject, extraRoots: roots()) else { return }
+        var filled = 0
+        if n > 0 {
+            om.walkPointers(to: target.raw, skipping: a, words: &words) { o in
+                om.store(a, filled, o)
+                filled &+= 1
+                return filled < n
+            }
+        }
+        if filled == n {
+            answer = a
+            return
+        }
+        // The allocation collected: what it freed is not in the heap any more.
+        guard let b = om.allocate(ctx, classIndex: WellKnown.array, slots: filled, fill: m.nilObject, extraRoots: roots() + [a]) else { return }
+        for i in 0..<filled { om.store(b, i, om.load(a, i)) }
+        answer = b
+    }
+    return answer
 }
 
 /// Primitive 167's two walks and the allocation between them (see the

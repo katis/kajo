@@ -228,8 +228,9 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe sp.pointee.stops[i & (SafepointState.stopLog - 1)] = StopRecord(
         timeToSafepointNs: t1 &- tr, pauseNs: t2 &- tr, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind,
         atNs: tr, beforeRequestNs: tr &- t0, collectionsOpen: collectionsOpen, slowestVia: slowestVia,
-        parkedFromWaits: fromWaits)
+        parkedFromWaits: fromWaits, words: sp.pointee.words)
     unsafe sp.pointee.kind = .other
+    unsafe sp.pointee.words = 0
     unsafe sp.pointee.stopCount = i &+ 1
     let epoch = unsafe sp.pointee.epoch
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
@@ -273,6 +274,14 @@ func runParallelPhase(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer) -
 func markStop(_ vm: UnsafeMutablePointer<VMState>, _ kind: StopKind) {
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
     unsafe vm.pointee.safepoint.pointee.kind = kind
+    unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+}
+
+/// The `pointersTo:` follow-up: the slots the current stop's walk compared,
+/// for its record (stopper, world stopped).
+func noteStopWork(_ vm: UnsafeMutablePointer<VMState>, words: UInt64) {
+    unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    unsafe vm.pointee.safepoint.pointee.words &+= words
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 }
 

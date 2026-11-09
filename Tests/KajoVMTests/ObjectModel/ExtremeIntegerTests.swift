@@ -6,7 +6,8 @@
 // primitive that takes a SmallInteger argument is called here with
 // minVal, maxVal, -1, 0 and the receiver's count + 1 in each integer
 // argument (all combinations), and the VM must answer every call (the
-// discoverability follow-up added 167 and 168). Large
+// discoverability follow-up added 167 and 168, the pointersTo: follow-up
+// 169 and 170). Large
 // bytes: `basicNew:` also takes the old and the new size limits and one
 // past each, and primitive 38 a byte receiver.
 
@@ -70,6 +71,11 @@ private let cases: [PrimitiveCase] = {
     c.append(PrimitiveCase(prim: 167, receiver: "  push_nil\n", args: ["  push_lit @Array\n", nil], count: 0))
     c.append(PrimitiveCase(prim: 167, receiver: "  push_nil\n", args: [nil, nil], count: 0))
     c.append(PrimitiveCase(prim: 168, receiver: "  push_nil\n", args: [nil], count: 0))
+    // The pointersTo: follow-up: the limit of pointersTo:limit: (169), and
+    // an integer as the target of 169 and 170 (an immediate is a target).
+    c.append(PrimitiveCase(prim: 169, receiver: "  push_nil\n", args: ["  push_lit @Array\n", nil], count: 0))
+    c.append(PrimitiveCase(prim: 169, receiver: "  push_nil\n", args: [nil, nil], count: 0))
+    c.append(PrimitiveCase(prim: 170, receiver: "  push_nil\n", args: [nil], count: 0))
     return c
 }()
 

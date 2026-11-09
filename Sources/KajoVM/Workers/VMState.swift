@@ -147,6 +147,9 @@ struct WorkerShared: ~Copyable {
     /// wait inside the VM rather than a poll.
     var lastParkerVia = ParkVia.poll
     var parkedFromWaits = 0
+    /// The `pointersTo:` follow-up: slots the current stop's walk compared
+    /// (primitives 169 and 170), for its record.
+    var words: UInt64 = 0
 }
 
 /// The final mark on the devices: where a parker was when the stop found it.
@@ -202,6 +205,9 @@ struct StopRecord: Sendable {
     /// How the last parker came, and how many came from a wait.
     var slowestVia = ParkVia.poll
     var parkedFromWaits = 0
+    /// The `pointersTo:` follow-up: the slots a pointer walk compared in
+    /// this stop (0 for every other stop).
+    var words: UInt64 = 0
 }
 
 /// Guarded by the scheduler lock.

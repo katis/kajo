@@ -249,7 +249,7 @@ public enum Headless {
             default: other += 1
             }
             let ts = (Int64(st.atNs) + offsetNs) / 1000
-            events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"\(st.kind)\",\"pauseUs\":\(st.pauseNs / 1000),\"ttspUs\":\(st.timeToSafepointNs / 1000),\"slowestWorker\":\(st.slowest)}".utf8))
+            events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"\(st.kind)\",\"pauseUs\":\(st.pauseNs / 1000),\"ttspUs\":\(st.timeToSafepointNs / 1000),\"slowestWorker\":\(st.slowest)\(st.words > 0 ? ",\"words\":\(st.words)" : "")}".utf8))
         }
         let c = image.om.counters
         let ts = clock_gettime_nsec_np(CLOCK_REALTIME) / 1000
