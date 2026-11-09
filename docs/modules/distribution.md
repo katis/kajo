@@ -237,7 +237,8 @@ refusals and the project over a checkout) and `AppProjectTests` (10).
 **One framework per module, four of them.** `Prebuilt/` holds
 `KajoVM.xcframework`, `KajoApp.xcframework`, `KajoAppDevelopment.xcframework`
 and `KajoDev.xcframework` (static frameworks, slices `macos-arm64` and
-`ios-arm64`), `bin/kajo`, `FLAGS.txt` and a `Package.swift` (name `Kajo`)
+`ios-arm64`, and since the simulator-slices follow-up of 2026-11-09
+`ios-arm64-simulator`, `docs/modules/simulator-slices.md`), `bin/kajo`, `FLAGS.txt` and a `Package.swift` (name `Kajo`)
 with a `binaryTarget` each and two products: `KajoApp` (KajoApp, KajoVM)
 and `KajoAppDevelopment` (KajoAppDevelopment, KajoDev). One framework with
 every module was not built: Release
@@ -250,7 +251,9 @@ KajoCompiler and KajoShellCore are not in it: no generated app links them
 
 **How they are built**: `scripts/dist-frameworks.yml`, an xcodegen spec of
 four framework targets over the checkout's `Sources/`, `xcodebuild build`
-once per platform (`generic/platform=macOS|iOS`, `ARCHS=arm64`), then
+once per platform (`generic/platform=macOS|iOS`, and since the
+simulator-slices follow-up `generic/platform=iOS Simulator`, `ARCHS=arm64`
+each; a generated iOS target asks for arm64 only in the simulator), then
 `xcodebuild -create-xcframework` per module. `xcodebuild archive` was
 tried first: static frameworks land in `UninstalledProducts`, not the
 archive, so `build` it is. The compile lines, read back into `FLAGS.txt`,
@@ -376,6 +379,22 @@ These two bar items wait on the owner's certificate and profile.
 (Each xcframework's size includes its module interfaces and swiftmodules
 for both slices.) SHA-256 of the dmg:
 `b84f53886693e630c64d21df125b1f1b8a5c736b3156f4f2e508612d95442d32`.
+
+**Re-measured with the simulator slice** (2026-11-09, `scripts/dist.sh
+0.2` on 8f06c70 against the script before on 5e3a54e, both signed with
+the Apple Development identity and not notarized;
+`docs/modules/simulator-slices.md`):
+
+| part | before | with `ios-arm64-simulator` |
+|---|--:|--:|
+| the dmg | 15 448 949 B | 17 452 775 B |
+| Kajo.app | 46 544 KiB | 54 356 KiB |
+| `Prebuilt` | 18 932 KiB | 26 728 KiB |
+| KajoVM.xcframework | 10 812 KiB | 16 172 KiB (macos-arm64 3 398 560 B, ios-arm64 3 350 072, ios-arm64-simulator 3 349 600) |
+| KajoDev.xcframework | 2 580 KiB | 3 856 KiB (764 248, 765 496, 760 920) |
+| KajoApp.xcframework | 1 692 KiB | 2 428 KiB (638 160, 427 256, 424 616) |
+| KajoAppDevelopment.xcframework | 892 KiB | 1 316 KiB (277 128, 267 752, 266 112) |
+| the frameworks step | 69 s | 100 s |
 **The bundled `kajo` ran the kernel's tests** on an image it built from
 the bundled checkout's `kernel/`: 205 tests, 205 passed, in 4.97 s.
 
