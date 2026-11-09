@@ -176,6 +176,13 @@ View class >> hasShell [
 ]
 
 { #category : #primitives }
+View class >> openURL: aString [
+	"Have the host open aString, an http or https URL, in the system's browser (the discoverability follow-up: the tools' Help menu). Answers false with no shell or when the host refuses it."
+	self hasShell ifFalse: [^ false].
+	^ ([self primCall: #openURL handle: nil with: {aString}] on: Error do: [:e | nil]) == true
+]
+
+{ #category : #primitives }
 View class >> primCall: op handle: aHandle with: anArray [
 	"Primitive 150, a hop primitive (see the class comment)."
 	<primitive: 150>

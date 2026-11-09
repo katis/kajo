@@ -51,6 +51,12 @@ Menu >> title: aString [
 	self set: 'title' to: aString
 ]
 
+{ #category : #accessing }
+Menu >> uninstallFromMenuBar [
+	"Take the menu out of the application's menu bar again (a test's menu)."
+	self call: 'uninstall' with: #()
+]
+
 { #category : #events }
 Menu >> choose: anId [
 	"What choosing an item does (the event loop sends it; tests may too)."

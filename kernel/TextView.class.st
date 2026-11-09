@@ -4,7 +4,8 @@ Class {
 	#superclass : #View,
 	#instVars : [
 		'keyAction',
-		'changeAction'
+		'changeAction',
+		'keys'
 	],
 	#category : #'Kernel-UI'
 }
@@ -29,6 +30,7 @@ TextView >> headlessCall: aName with: anArray [
 	aName = 'select' ifTrue: [^ self set: 'selection' to: anArray first printString , ' ' , (anArray at: 2) printString].
 	aName = 'setStyles' ifTrue: [^ self set: 'styles' to: anArray].
 	aName = 'scrollTo' ifTrue: [^ self set: 'scrolledTo' to: anArray first].
+	aName = 'focus' ifTrue: [^ self set: 'focused' to: true].
 	^ nil
 ]
 
@@ -49,8 +51,20 @@ TextView >> editable: aBoolean [
 ]
 
 { #category : #editing }
+TextView >> focus [
+	"Make this view its window's first responder (the one keys go to)."
+	self call: 'focus' with: #()
+]
+
+{ #category : #editing }
 TextView >> isEditable [
 	^ (self get: 'editable') == true
+]
+
+{ #category : #editing }
+TextView >> isFocused [
+	"Whether this view is the first responder of the frontmost window, the one a menu item acts on (the discoverability follow-up). Headless, whether focus was sent."
+	^ (self get: 'focused') == true
 ]
 
 { #category : #editing }
@@ -92,7 +106,14 @@ TextView >> styles: anArray [
 { #category : #events }
 TextView >> bindKeys: anArray [
 	"The keys this view reports before handling them, as key events ('cmd-s', 'cmd-d', 'cmd-shift-p'); any other key the view handles as usual."
+	keys := anArray asArray.
 	self set: 'keys' to: (anArray inject: '' into: [:a :k | a isEmpty ifTrue: [k] ifFalse: [a , ' ' , k]])
+]
+
+{ #category : #events }
+TextView >> boundKeys [
+	"The keys bindKeys: gave (the discoverability follow-up: a menu item acts on a pane only with a key the pane binds)."
+	^ keys ifNil: [#()]
 ]
 
 { #category : #events }
@@ -111,6 +132,21 @@ TextView >> onChange: aBlock [
 { #category : #events }
 TextView >> onKey: aBlock [
 	keyAction := aBlock
+]
+
+{ #category : #events }
+TextView >> pressKey: aKey [
+	"Run the key action as the bound key aKey would, when this view binds it (the discoverability follow-up: the Smalltalk menu and a pane's context menu do exactly what the key does). Answers whether it ran."
+	(self boundKeys includes: aKey) ifFalse: [^ false].
+	keyAction ifNotNil: [:b | b cull: aKey cull: self].
+	^ true
+]
+
+{ #category : #events }
+TextView >> simulateKey: aKey emulating: aBoolean [
+	"Have the host deliver aKey ('cmd-d') to this view, its first responder, as a key-down (a test of one key, one action). The host answers how: 'app' (through the application, key window first, then the menu bar, as the window server's keys go), 'notKey' (the window is not the key window yet: the host asked for the activation; try again after a turn), or, with aBoolean true and no key window to be had, 'emulated' (offered to the window's views and then to the menu bar, the order AppKit documents for a key window). nil headless or where the host cannot."
+	self isHeadless ifTrue: [^ nil].
+	^ [self call: 'pressKey' with: {aKey. aBoolean}] on: Error do: [:e | nil]
 ]
 
 { #category : #lines }

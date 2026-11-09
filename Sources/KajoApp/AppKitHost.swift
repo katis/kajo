@@ -126,6 +126,7 @@ final class FlippedView: NSView {
             e.view.identifier = NSUserInterfaceItemIdentifier("\(h)")
             return .int(Int64(h))
         }
+        if call.op == "openURL" { return openURL(a) }
         guard let e = entries[call.handle] else { return nil }
         switch call.op {
         case "set":

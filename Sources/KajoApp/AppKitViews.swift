@@ -534,6 +534,13 @@ extension AppKitHost: NSTextViewDelegate {
             return .string("\(r.start) \(r.stop)")
         case "editable":
             return kajoText(e).map { .bool($0.isEditable) }
+        case "focused":
+            // The discoverability follow-up: the pane a menu item acts on is
+            // the first responder of the key window (the main or frontmost
+            // one while the app is not active, as in a scripted launch).
+            guard let t = kajoText(e) else { return nil }
+            let front = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.orderedWindows.first
+            return .bool(unsafe t.window != nil && t.window === front && t.window?.firstResponder === t)
         case "text" where kajoText(e) != nil:
             return .string(kajoText(e)!.string)
         case "selected":
@@ -562,6 +569,9 @@ extension AppKitHost: NSTextViewDelegate {
             t.scrollRangeToVisible(r)
         case ("focus", let t as KajoTextView):
             unsafe t.window?.makeFirstResponder(t)
+        case ("pressKey", let t as KajoTextView):
+            guard let k = a.first?.string, let how = pressKey(t, k, emulate: a.count > 1 && a[1] == .bool(true)) else { return nil }
+            return .string(how)
         case ("setStyles", let t as KajoTextView):
             guard a.count % 3 == 0, let storage = unsafe t.textStorage else { return nil }
             var triples: [(Int64?, Int64?, String?)] = []
@@ -629,6 +639,11 @@ extension AppKitHost: NSTextViewDelegate {
             let item = NSMenuItem(title: m.menu.title, action: nil, keyEquivalent: "")
             item.submenu = m.menu
             bar.addItem(item)
+        case ("uninstall", let m as MenuHost):
+            // The discoverability follow-up's tests: a menu installed for a
+            // test leaves the menu bar again.
+            guard let bar = NSApp.mainMenu, let i = bar.items.firstIndex(where: { $0.submenu === m.menu }) else { return nil }
+            bar.removeItem(at: i)
         case ("setMenu", _):
             guard let h = a.first?.int, let menu = entries[Int(h)]?.object as? MenuHost else { return nil }
             e.view.menu = menu.menu
@@ -657,6 +672,56 @@ extension AppKitHost: NSTextViewDelegate {
     public func textDidChange(_ n: Notification) {
         guard let t = n.object as? KajoTextView else { return }
         eventHandler?(ShellEvent(kind: .textChanged, target: t.handle, timeNs: eventTime()))
+    }
+
+    /// The discoverability follow-up: an http or https URL opened in the
+    /// default browser (the tools' Help menu); anything else is refused.
+    func openURL(_ a: [ShellValue]) -> ShellValue? {
+        guard a.count == 1, let s = a[0].string, let u = URL(string: s), u.scheme == "https" || u.scheme == "http" else { return nil }
+        return .bool(NSWorkspace.shared.open(u))
+    }
+
+    /// The discoverability follow-up's test of one key, one action: `name`
+    /// ('cmd-d', 'cmd-shift-n') as a key-down event with `t` the first
+    /// responder of its window. When that window is the key window the event
+    /// goes through `NSApp.sendEvent`, the path a key from the window server
+    /// takes (answer "app"). A process AppKit will not activate (a launch
+    /// from a script: macOS's cooperative activation refuses it) never has a
+    /// key window; then the call asks for the activation and answers
+    /// "notKey", or, with `emulate`, offers the event as `NSApplication`
+    /// does for a key window, to the window's views and then to the menu bar
+    /// (answer "emulated"): the real text view and the real menu, in the
+    /// documented order.
+    func pressKey(_ t: KajoTextView, _ name: String, emulate: Bool) -> String? {
+        guard let w = unsafe t.window else { return nil }
+        let parts = name.split(separator: "-").map(String.init)
+        guard let key = parts.last, key.count == 1 else { return nil }
+        var flags: NSEvent.ModifierFlags = []
+        for p in parts.dropLast() {
+            switch p {
+            case "cmd": flags.insert(.command)
+            case "shift": flags.insert(.shift)
+            case "alt": flags.insert(.option)
+            case "ctrl": flags.insert(.control)
+            default: return nil
+            }
+        }
+        if w.firstResponder !== t { w.makeFirstResponder(t) }
+        let chars = flags.contains(.shift) ? key.uppercased() : key
+        guard let ev = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags, timestamp: Double(ShellVM.now()) / 1e9,
+                                        windowNumber: w.windowNumber, context: nil, characters: chars,
+                                        charactersIgnoringModifiers: chars, isARepeat: false, keyCode: 0) else { return nil }
+        if w.isKeyWindow {
+            NSApp.sendEvent(ev)
+            return "app"
+        }
+        if !emulate {
+            NSApp.activate()
+            w.makeKeyAndOrderFront(nil)
+            return "notKey"
+        }
+        if !w.performKeyEquivalent(with: ev) { _ = NSApp.mainMenu?.performKeyEquivalent(with: ev) }
+        return "emulated"
     }
 
     /// The typing measurement: a key typed into the text view `handle` as

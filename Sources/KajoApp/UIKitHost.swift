@@ -106,6 +106,7 @@ import UIKit
             e.view.tag = h
             return .int(Int64(h))
         }
+        if call.op == "openURL" { return openURL(a) }
         guard let e = entries[call.handle] else { return nil }
         switch call.op {
         case "set":
@@ -200,12 +201,21 @@ import UIKit
         return true
     }
 
+    /// The discoverability follow-up: an http or https URL opened by the
+    /// system (the tools' Help menu); anything else is refused.
+    func openURL(_ a: [ShellValue]) -> ShellValue? {
+        guard a.count == 1, let s = a[0].string, let u = URL(string: s), u.scheme == "https" || u.scheme == "http" else { return nil }
+        UIApplication.shared.open(u)
+        return .bool(true)
+    }
+
     func get(_ e: Entry, _ k: String) -> ShellValue? {
         func num(_ d: CGFloat) -> ShellValue { d == d.rounded() ? .int(Int64(d)) : .double(Double(d)) }
         switch (k, e.view) {
         case ("text", let l as UILabel): return .string(l.text ?? "")
         case ("text", let t as UITextView): return .string(t.text ?? "")
         case ("editable", let t as UITextView): return .bool(t.isEditable)
+        case ("focused", let t as UITextView): return .bool(t.isFirstResponder)
         case ("selection", let t as UITextView):
             let r = TextOffsets.byteRange(t.text ?? "", t.selectedRange)
             return .string("\(r.start) \(r.stop)")

@@ -12,6 +12,29 @@ ViewWrapperTest >> assertRefused: aViewClass [
 ]
 
 { #category : #helpers }
+ViewWrapperTest >> dispatchQueuedEvents: aBlock [
+	"Hand every event the host queued to its wrapper, as the event loop would, until aBlock answers true or nothing is queued. Without a running loop (the tests mode starts none) the queue is drained here; with one, wait for it (at most 5 s)."
+	| a deadline |
+	UIEventLoop isRunning ifFalse: [
+		[(a := UIEventLoop nextEvent) notNil] whileTrue: [UIEventLoop dispatch: (UIEvent fromArray: a)].
+		^ self].
+	deadline := Smalltalk microsecondClock + 5000000.
+	[aBlock value or: [Smalltalk microsecondClock > deadline]] whileFalse: [(Delay forMilliseconds: 10) wait]
+]
+
+{ #category : #helpers }
+ViewWrapperTest >> press: aKey in: aTextView [
+	"Deliver aKey to aTextView through the host (simulateKey:emulating:): through the application once its window is the key window (asked for, then waited for at most 2 s), else in AppKit's documented order for a key window. Answers how, and says so on the Transcript, so a run tells which path it measured."
+	| how deadline |
+	deadline := Smalltalk microsecondClock + 2000000.
+	[(how := aTextView simulateKey: aKey emulating: false) = 'notKey' and: [Smalltalk microsecondClock < deadline]]
+		whileTrue: [(Delay forMilliseconds: 20) wait].
+	how = 'notKey' ifTrue: [how := aTextView simulateKey: aKey emulating: true].
+	Transcript showLine: 'ViewWrapperTest one key, one action: ' , aKey , ' delivered ' , how printString.
+	^ how
+]
+
+{ #category : #helpers }
 ViewWrapperTest >> readsBack: aView [
 	"Whether what aView was given can be read back: a text view's styles and keys, an outline's children and tree, a table's rows and page. On AppKit and UIKit the native view holds them and the protocol has no get for them (nothing the toolkit holds is mirrored, module 9c); only the headless wrapper, which keeps its properties itself, answers them."
 	^ aView isHeadless
@@ -90,6 +113,44 @@ ViewWrapperTest >> testMenusAndToolbars [
 	b handleEvent: (UIEvent kind: #menu target: b handle value: 7 time: 0).
 	self assert: chosen equals: 7.
 	self assert: (w subviews includes: b)
+]
+
+{ #category : #tests }
+ViewWrapperTest >> testOneKeyOneActionBetweenAViewAndTheMenuBar [
+	"The discoverability follow-up: a key a focused text view binds that is also a menu item's key equivalent in the menu bar (the Smalltalk menu's Do it, Cmd-D) runs the view's key action exactly once and the menu's not at all; a key the view does not bind reaches the menu exactly once. Measured through the host's own key path (simulateKey:emulating: sends the key-down through the application when its window can be the key window, else offers it to the window's views and then to the menu bar as AppKit does for a key window; the Transcript line says which), so where there is no window server (headless) or no menu bar (UIKit) only the wrapper's side is checked: pressKey: runs a bound key's action and refuses another."
+	| w t m viewKeys menuIds |
+	viewKeys := OrderedCollection new.
+	menuIds := OrderedCollection new.
+	w := Window new.
+	w x: 120 y: 120 width: 320 height: 200.
+	t := w add: TextView new.
+	t x: 0 y: 0 width: 320 height: 200.
+	t editable: true.
+	t bindKeys: #('cmd-d').
+	t onKey: [:k | viewKeys add: k].
+	self assert: t boundKeys equals: #('cmd-d').
+	self assert: (t pressKey: 'cmd-d').
+	self deny: (t pressKey: 'cmd-e').
+	self assert: viewKeys asArray equals: #('cmd-d').
+	viewKeys removeAll: viewKeys copy.
+	(View hasShell and: [View supports: Menu kind]) ifFalse: [^ self].
+	m := Menu new.
+	m title: 'KeyTest'.
+	m addItem: 1 title: 'Do it' key: 'cmd-d'; addItem: 2 title: 'Other' key: 'cmd-e'.
+	m action: [:id | menuIds add: id].
+	m installInMenuBar.
+	[w show.
+	t focus.
+	self assert: t isFocused.
+	self assert: ((self press: 'cmd-d' in: t) isKindOf: String).
+	self dispatchQueuedEvents: [viewKeys notEmpty].
+	self assert: viewKeys asArray equals: #('cmd-d').
+	self assert: menuIds asArray equals: #().
+	self assert: ((self press: 'cmd-e' in: t) isKindOf: String).
+	self dispatchQueuedEvents: [menuIds notEmpty].
+	self assert: viewKeys asArray equals: #('cmd-d').
+	self assert: menuIds asArray equals: #(2)]
+		ensure: [m uninstallFromMenuBar. w close]
 ]
 
 { #category : #tests }
