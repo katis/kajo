@@ -1,4 +1,4 @@
-"The image's classes as Tonel files (module 8e), in the canonical form kernel/ is written in: the class comment (quotes doubled), the class definition with the keys #name, #superclass, #instVars, #classVars, #classInstVars (each only when not empty), #category and #type (only when the format kind is not the one the superclass's gives), a tab before each key and two before each name; then the methods, instance side before class side, grouped by category with the categories sorted, the selectors sorted within each, each one as `{ #category : ... }` on its line and `Class >> pattern [body]` where pattern and body are the recorded source split after the message pattern. A body that does not start on a line of its own is put on one, indented by a tab; anything else of the source is written as recorded. A method of another package than its class's is written in that package's <Class>.extension.st, `Extension { #name : ... }` and the methods (module 9b). A method's metadata is its category only: an agent's author mark is a pragma in the method's source, <author: #'agent:<name>'> (the development answers; source:author: puts it there)."
+"The image's classes as Tonel files (module 8e), in the canonical form kernel/ is written in: the class comment (quotes doubled), the class definition with the keys #name, #superclass, #instVars, #classVars, #classInstVars (each only when not empty) and #type (only when the format kind is not the one the superclass's gives), never #category, #package or #tag (tags as subdirectories: the package is the directory the file is written into and the tag, when the class has one, the subdirectory), a tab before each key and two before each name; then the methods, instance side before class side, grouped by category with the categories sorted, the selectors sorted within each, each one as `{ #category : ... }` on its line and `Class >> pattern [body]` where pattern and body are the recorded source split after the message pattern. A body that does not start on a line of its own is put on one, indented by a tab; anything else of the source is written as recorded. A method of another package than its class's is written in that package's <Class>.extension.st, `Extension { #name : ... }` and the methods (module 9b). A method's metadata is its category only: an agent's author mark is a pragma in the method's source, <author: #'agent:<name>'> (the development answers; source:author: puts it there)."
 Class {
 	#name : #TonelWriter,
 	#superclass : #Object,
@@ -14,16 +14,25 @@ TonelWriter class >> fileNameOf: aClass package: aName [
 ]
 
 { #category : #files }
+TonelWriter class >> pathOf: aClass package: aName [
+	"The package aName's file of aClass relative to the package's directory: <Tag>/<Name>.class.st when aClass belongs to the package and has a tag, <Name>.class.st when it has none, <Name>.extension.st at the root for another package's class (an extension file stays at the package's root: the extended class's tag is not the package's business)."
+	| name |
+	name := self fileNameOf: aClass package: aName.
+	(Smalltalk packageOf: aClass) = aName ifFalse: [^ name].
+	^ (Smalltalk tagOf: aClass) ifNil: [name] ifNotNil: [:t | t asString , '/' , name]
+]
+
+{ #category : #files }
 TonelWriter class >> write: aClass into: aDirectory [
-	"Write aClass's file, <Name>.class.st, into aDirectory (a path under the directory the VM was opened with; '' for that directory itself)."
+	"Write aClass's file, <Name>.class.st, into aDirectory or its subdirectory <Tag> (a path under the directory the VM was opened with; '' for that directory itself)."
 	^ self write: aClass package: (Smalltalk packageOf: aClass) into: aDirectory
 ]
 
 { #category : #files }
 TonelWriter class >> write: aClass package: aName into: aDirectory [
-	"Write aClass's file for the package aName into aDirectory: its class file when it belongs to the package, else the package's extension file of it."
+	"Write aClass's file for the package aName into aDirectory: its class file when it belongs to the package (in the subdirectory of its tag, which the write creates when missing), else the package's extension file of it. Answers the path written."
 	| name path |
-	name := self fileNameOf: aClass package: aName.
+	name := self pathOf: aClass package: aName.
 	path := aDirectory isEmpty ifTrue: [name] ifFalse: [aDirectory , '/' , name].
 	(Smalltalk primWriteFile: path contents: (self sourceOf: aClass package: aName)) == true
 		ifFalse: [^ self error: 'cannot write ' , path].
@@ -73,7 +82,6 @@ TonelWriter class >> headerOf: aClass [
 	d instVarNames isEmpty ifFalse: [entries add: (self list: '#instVars' of: d instVarNames)].
 	aClass classVarNames isEmpty ifFalse: [entries add: (self list: '#classVars' of: aClass classVarNames)].
 	d classInstVarNames isEmpty ifFalse: [entries add: (self list: '#classInstVars' of: d classInstVarNames)].
-	entries add: '#category : ' , (self ston: (d category ifNil: [#Unclassified])).
 	type := self typeOf: aClass.
 	type ifNotNil: [:t | entries add: '#type : #' , t].
 	out := out , 'Class {' , lf.

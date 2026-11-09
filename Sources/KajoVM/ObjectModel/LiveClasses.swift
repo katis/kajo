@@ -802,20 +802,56 @@ private func literalsName(_ m: Machine, _ meth: Oop, _ cls: Oop) -> Bool {
 /// inside the directory rather than following it. `resolved` is the whole
 /// path resolved when the last component exists: a read opens it with
 /// `O_NOFOLLOW`.
-func sourcesPath(_ m: Machine, _ relative: String) -> (path: String, resolved: String?)? {
+///
+/// Tags as subdirectories (docs/modules/tags-as-subdirectories.md): with
+/// `creatingDirectory` (a write, 148) the file's own directory is created
+/// when it is the one missing component, a class defined into a new tag
+/// having nowhere else to go: its parent must resolve inside the
+/// directory, the name is one component (no `/`, `.` or `..`, checked
+/// above for every component), and it is made with `mkdirat` on a
+/// descriptor of the resolved parent opened `O_DIRECTORY | O_NOFOLLOW`,
+/// so a link planted in its place (a dangling one: an existing one
+/// resolves) makes `mkdirat` fail and refuses the write. Two missing
+/// components refuse it as before. And a write whose own directory, below
+/// the opened one, is a symbolic link is refused whatever it names: a
+/// link in a tag's place is never followed.
+func sourcesPath(_ m: Machine, _ relative: String, creatingDirectory: Bool = false) -> (path: String, resolved: String?)? {
     guard let vm = unsafe workerOf(m.state).pointee.vm, let root = unsafe vm.pointee.config.sourcesDirectory, !root.isEmpty else { return nil }
     guard !relative.isEmpty, !relative.hasPrefix("/"), !relative.contains("\0") else { return nil }
     let parts = relative.split(separator: "/", omittingEmptySubsequences: false)
     guard parts.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else { return nil }
     guard let realRoot = realPath(root) else { return nil }
     func inside(_ p: String) -> Bool { p == realRoot || p.hasPrefix(realRoot + "/") }
-    let parent = ([root] + parts.dropLast().map(String.init)).joined(separator: "/")
-    guard let realParent = realPath(parent), inside(realParent) else { return nil }
+    let parentParts = parts.dropLast().map(String.init)
+    let parent = ([root] + parentParts).joined(separator: "/")
+    var resolvedParent = realPath(parent)
+    if creatingDirectory, let last = parentParts.last {
+        if resolvedParent == nil {
+            let grand = ([root] + parentParts.dropLast()).joined(separator: "/")
+            guard let realGrand = realPath(grand), inside(realGrand), makeDirectory(last, in: realGrand) else { return nil }
+            resolvedParent = realPath(parent)
+        } else {
+            var lst = stat()
+            guard unsafe lstat(parent, &lst) == 0, (lst.st_mode & S_IFMT) != S_IFLNK else { return nil }
+        }
+    }
+    guard let realParent = resolvedParent, inside(realParent) else { return nil }
     let path = realParent + "/" + String(parts.last!)
     var st = stat()
     guard unsafe lstat(path, &st) == 0 else { return (path, nil) }
     guard let whole = realPath(path), inside(whole), whole != realRoot else { return nil }
     return (path, whole)
+}
+
+/// Create the directory `name` in the directory `parent` (resolved, inside
+/// the opened one): `mkdirat` on a descriptor opened without following a
+/// link, failing when anything (a dangling link among them) is in its
+/// place.
+private func makeDirectory(_ name: String, in parent: String) -> Bool {
+    let fd = unsafe open(parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+    guard fd >= 0 else { return false }
+    defer { close(fd) }
+    return unsafe mkdirat(fd, name, 0o755) == 0
 }
 
 private func realPath(_ p: String) -> String? {
@@ -825,16 +861,18 @@ private func realPath(_ p: String) -> String? {
 }
 
 private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
-    guard let rel = m.symbolText(c.arg0), m.classIndex(of: c.arg0) == WellKnown.string, let named = sourcesPath(m, rel) else { return .none }
-    let path = named.path
+    guard let rel = m.symbolText(c.arg0), m.classIndex(of: c.arg0) == WellKnown.string else { return .none }
     if n == 148 {
         guard c.argc == 2, m.classIndex(of: c.arg1) == WellKnown.string, m.om.isBytes(c.arg1) else { return .none }
-        // A refused path never reaches here; the file is replaced whole
-        // (written beside it and renamed over it).
         // Large bytes: a file write copies the String through Swift,
         // unpolled: not a long one (file primitives over long bytes are
         // not this follow-up's).
         guard let bytes = m.om.bytesIfShort(of: c.arg1) else { return .none }
+        // A refused path never reaches here (the arguments checked before
+        // a tag's directory is created); the file is replaced whole
+        // (written beside it and renamed over it).
+        guard let named = sourcesPath(m, rel, creatingDirectory: true) else { return .none }
+        let path = named.path
         let tmp = path + ".kajo-tmp"
         guard writeFile(tmp, bytes), unsafe rename(tmp, path) == 0 else {
             _ = unsafe unlink(tmp)
@@ -843,7 +881,7 @@ private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         unsafe m.state.pointee.counters.filesWritten &+= 1
         return m.trueObject
     }
-    guard c.argc == 1, let resolved = named.resolved, let bytes = readFile(resolved), bytes.count <= Header.maxLargeCount, String(validating: bytes, as: UTF8.self) != nil else {
+    guard c.argc == 1, let named = sourcesPath(m, rel), let resolved = named.resolved, let bytes = readFile(resolved), bytes.count <= Header.maxLargeCount, String(validating: bytes, as: UTF8.self) != nil else {
         return .none
     }
     unsafe m.state.pointee.counters.filesRead &+= 1

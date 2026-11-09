@@ -1,8 +1,7 @@
 "What the scripted developer session (apps/Shared/devsession) does to a target other than its own image (module 9d: the phone's shell image): a method that fails at a missing method and is fixed in its frame, one whose missing method is defined from the Mac's debugger and the send retried, and one that stops for the dropped link. originalFailingStep is the source the session puts back first, so a target serves several sessions."
 Class {
 	#name : #DevSessionTarget,
-	#superclass : #Object,
-	#category : #'Shell-Bench'
+	#superclass : #Object
 }
 
 { #category : #session }

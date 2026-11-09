@@ -37,7 +37,7 @@ BrowserWindow >> sourceView [
 { #category : #actions }
 BrowserWindow >> toolbarItem: anId [
 	anId = 1 ifTrue: [^ model toggleSide].
-	anId = 2 ifTrue: [^ model toggleByCategory].
+	anId = 2 ifTrue: [^ model toggleByTag].
 	anId = 3 ifTrue: [^ model selectSelector: nil].
 	anId = 4 ifTrue: [^ model showComment].
 	anId = 5 ifTrue: [^ model newMethodTemplate].
@@ -177,7 +177,7 @@ BrowserWindow >> update: anAspect [
 { #category : #building }
 BrowserWindow class >> toolbarItems [
 	"The toolbar's commands: id, title."
-	^ #(#(1 'Instance/Class') #(2 'Hierarchy/Category') #(3 'Definition') #(4 'Comment') #(5 'New method') #(6 'New class')
+	^ #(#(1 'Instance/Class') #(2 'Hierarchy/Tag') #(3 'Definition') #(4 'Comment') #(5 'New method') #(6 'New class')
 		#(7 'Senders') #(8 'Implementors') #(9 'Remove method') #(10 'Remove class'))
 ]
 

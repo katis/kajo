@@ -22,8 +22,8 @@ func projectCopy(_ name: String) throws -> URL {
     @Test func theProjectWrittenOutIsTheProjectByteForByte() throws {
         let image = try Image.load(image: projectImage)
         defer { image.destroy() }
-        let files = try FileManager.default.contentsOfDirectory(atPath: projectFixtureDirectory).filter { $0.hasSuffix(".st") && $0 != "package.st" }.sorted()
-        let classes = files.map { $0.components(separatedBy: ".").first! }
+        let files = try tonelFiles(in: projectFixtureDirectory)
+        let classes = files.map { ($0 as NSString).lastPathComponent.components(separatedBy: ".").first! }
         let texts = try smalltalkStrings(image, "evaluateStrings:", classes.map { "TonelWriter sourceOf: \($0) package: 'Sample'" })
         for (f, t) in zip(files, texts) {
             let original = try String(contentsOfFile: (projectFixtureDirectory as NSString).appendingPathComponent(f), encoding: .utf8)
@@ -47,7 +47,7 @@ func projectCopy(_ name: String) throws -> URL {
         try change("method.compile", [("className", .string("String")), ("source", .string("sampleShout\n\t^ self asUppercase , '!'")),
                                       ("category", .string("*Sample"))])
         try change("class.define", [("name", .string("SampleNew")), ("superclass", .string("SampleCounter")),
-                                    ("instanceVariables", .string("x")), ("category", .string("Sample-New"))])
+                                    ("instanceVariables", .string("x")), ("tag", .string("New"))])
         try change("method.compile", [("className", .string("SampleNew")), ("source", .string("x\n\t^ x ifNil: [[:y | y + 1] value: 41]")),
                                       ("category", .string("accessing"))])
         try change("method.compile", [("className", .string("SampleNew")), ("source", .string("make\n\t^ self new")), ("side", .string("class")),
@@ -75,9 +75,11 @@ func projectCopy(_ name: String) throws -> URL {
         #expect(again[1] == sources.replacingOccurrences(of: "'", with: ""))
         #expect(again[2] == authors)
         #expect(again[3] == "Made by a \"session\".")
-        // And writes the same files back.
-        for f in try FileManager.default.contentsOfDirectory(atPath: dir.path) where f.hasSuffix(".st") && f != "package.st" {
-            let cls = f.components(separatedBy: ".").first!
+        // And writes the same files back, each in its tag's directory.
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("New/SampleNew.class.st").path))
+        #expect(try smalltalkStrings(image, "evaluateStrings:", ["(Smalltalk tagOf: SampleNew) printString"]) == ["#New"])
+        for f in try tonelFiles(in: dir.path) {
+            let cls = (f as NSString).lastPathComponent.components(separatedBy: ".").first!
             let text = try smalltalkStrings(image, "evaluateStrings:", ["TonelWriter sourceOf: \(cls) package: 'Sample'"])[0]
             #expect(text == (try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8)), "\(f)")
         }
@@ -108,9 +110,10 @@ func projectCopy(_ name: String) throws -> URL {
             "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}",
             msg("tools/list", .object([])),
             call("class_define", [("name", .string("SampleShape")), ("superclass", .string("Object")), ("instanceVariables", .string("side")),
-                                  ("category", .string("Sample-Shapes"))]),
+                                  ("tag", .string("Shapes"))]),
             call("method_compile", [("className", .string("SampleShape")), ("source", .string("side: n\n\tside := n")), ("category", .string("accessing"))]),
-            call("class_define", [("name", .string("SampleShapeTest")), ("superclass", .string("TestCase")), ("category", .string("Sample-Tests"))]),
+            call("class_define", [("name", .string("SampleShapeTest")), ("superclass", .string("TestCase")), ("package", .string("Sample")),
+                                  ("tag", .string("Tests"))]),
             call("method_compile", [("className", .string("SampleShapeTest")),
                                     ("source", .string("testArea\n\tself assert: (SampleShape new side: 3; area) = 9")), ("category", .string("tests"))]),
             call("test_run", [("filter", .string("SampleShapeTest*"))]),
@@ -123,6 +126,11 @@ func projectCopy(_ name: String) throws -> URL {
         #expect(out.count == script.count - 1)
         let tools = out[1]["result"]?["tools"]?.array ?? []
         #expect(tools.contains { $0["name"] == .string("method_compile") } && tools.contains { $0["name"] == .string("process_retrySend") })
+        // Tags as subdirectories: the tools follow describe.
+        let define = tools.first { $0["name"] == .string("class_define") }
+        let props = define?["inputSchema"]?["properties"]
+        #expect(props?["package"] != nil && props?["tag"] != nil && props?["category"] == nil, "\(String(describing: define))")
+        #expect(tools.contains { $0["name"] == .string("package_tags") } && !tools.contains { $0["name"] == .string("class_categories") })
         func text(_ i: Int) -> String {
             (out[i]["result"]?["content"]?.array ?? []).compactMap { $0["text"]?.string }.joined(separator: "\n")
         }
@@ -150,8 +158,9 @@ func projectCopy(_ name: String) throws -> URL {
         let s = try t.session()
         try s.waitForResult("16")
         // Every change is in the project, marked with the agent.
-        let shape = try String(contentsOf: dir.appendingPathComponent("SampleShape.class.st"), encoding: .utf8)
+        let shape = try String(contentsOf: dir.appendingPathComponent("Shapes/SampleShape.class.st"), encoding: .utf8)
         #expect(shape.contains("SampleShape >> area [\n\t<author: #'agent:mcp-test'>\n") && !shape.contains("#author :"))
-        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("SampleShapeTest.class.st").path))
+        #expect(!shape.contains("\t#category :") && !shape.contains("\t#tag :"))
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Tests/SampleShapeTest.class.st").path))
     }
 }

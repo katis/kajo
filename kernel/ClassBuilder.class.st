@@ -6,31 +6,39 @@ Class {
 }
 
 { #category : #defining }
-ClassBuilder class >> define: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars category: aCategory kind: aKindOrNil comment: aCommentOrNil [
-	"The class aName with this shape: a new class, or the existing class of that name (same superclass) reshaped. Names are Strings or Symbols; aKindOrNil a format kind (nil: the superclass's, as Tonel's #type absent)."
+ClassBuilder class >> define: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars package: aPackageOrNil tag: aTagOrNil kind: aKindOrNil comment: aCommentOrNil [
+	"The class aName with this shape: a new class, or the existing class of that name (same superclass) reshaped. Names are Strings or Symbols; aKindOrNil a format kind (nil: the superclass's, as Tonel's #type absent). A package given places the class in it with aTagOrNil as its tag (nil: none, at the package's root); none given keeps an existing class's package and tag and gives a new one the default package (ClassBuilder defaultPackage) and no tag (tags as subdirectories)."
 	| existing kind |
 	self checkWritable: aName.
 	existing := Smalltalk at: aName asSymbol ifAbsent: [nil].
 	civars isNil ifTrue: [
 		^ self define: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars
 			classInstanceVariableNames: (existing ifNil: [#()] ifNotNil: [:c | (Smalltalk definitionOf: c) classInstVarNames])
-			category: aCategory kind: aKindOrNil comment: aCommentOrNil].
+			package: aPackageOrNil tag: aTagOrNil kind: aKindOrNil comment: aCommentOrNil].
 	kind := aKindOrNil ifNil: [self inheritedKindFrom: aClass] ifNotNil: [:k | k asSymbol].
 	existing ifNotNil: [:c |
 		c superclass == aClass ifFalse: [
 			^ ClassDefinitionError new signal: aName , ' exists with the superclass ' , c superclass printString , ': redefining it under another superclass is not done'].
 		(self kindOf: c) == kind ifFalse: [
 			^ ClassDefinitionError new signal: aName , ' is ' , (self kindOf: c) , ': changing its format kind is not done'].
+		self checkTag: aTagOrNil.
 		self redefine: c instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars.
-		aCategory ifNotNil: [:cat | c category: cat].
+		aPackageOrNil ifNotNil: [:p | self place: c package: p tag: aTagOrNil].
 		aCommentOrNil ifNotNil: [:t | c comment: t].
 		^ c].
-	^ self newClass: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars category: aCategory kind: kind comment: aCommentOrNil
+	^ self newClass: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars package: aPackageOrNil tag: aTagOrNil kind: kind comment: aCommentOrNil
 ]
 
 { #category : #defining }
-ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars category: aCategory kind: kind comment: aCommentOrNil [
+ClassBuilder class >> defaultPackage [
+	"The package of a class made with none named outside a development session: Unclassified, as before tags as subdirectories (the category a class made with none got), so every class has a package its file can be written into and the browser lists it."
+	^ 'Unclassified'
+]
+
+{ #category : #defining }
+ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars package: aPackageOrNil tag: aTagOrNil kind: kind comment: aCommentOrNil [
 	| own ownC cv spec result inherited inheritedC |
+	self checkTag: aTagOrNil.
 	own := (ivars collect: [:n | n asSymbol]) asArray.
 	ownC := (civars collect: [:n | n asSymbol]) asArray.
 	cv := (cvars collect: [:n | n asSymbol]) asArray.
@@ -41,9 +49,9 @@ ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: 
 		at: 5 put: cv; at: 6 put: kind; at: 7 put: Binding; at: 8 put: inherited size; at: 9 put: inheritedC size.
 	result := Smalltalk primDefineClass: spec.
 	result isString ifTrue: [^ ClassDefinitionError new signal: result].
-	Smalltalk noteDefinition: ((ClassDefinition instVarNames: own classInstVarNames: ownC
-		category: (aCategory ifNil: [#Unclassified] ifNotNil: [:c | c asSymbol]) kind: kind comment: (aCommentOrNil ifNil: ['']))
-			package: ClassBuilder newClassPackage; yourself)
+	Smalltalk noteDefinition: (ClassDefinition instVarNames: own classInstVarNames: ownC
+		package: (aPackageOrNil ifNil: [self newClassPackage ifNil: [self defaultPackage]] ifNotNil: [:p | p asString])
+		tag: (aPackageOrNil ifNil: [nil] ifNotNil: [aTagOrNil]) kind: kind comment: (aCommentOrNil ifNil: ['']))
 		of: result.
 	Smalltalk forgetClassNames.
 	^ result
@@ -53,6 +61,18 @@ ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: 
 ClassBuilder class >> newClassPackage [
 	"The package a class defined now belongs to: the one the active Process's development session names (module 9b), else none."
 	^ DevProtocol packageOfActiveSession
+]
+
+{ #category : #defining }
+ClassBuilder class >> place: aClass package: aPackage tag: aTagOrNil [
+	"Put aClass in aPackage under aTagOrNil (nil: at the package's root). Its file moves with it the next time it is written (DevSession answers the old path to remove)."
+	| d |
+	self checkWritable: aClass name.
+	self checkTag: aTagOrNil.
+	d := Smalltalk definitionOf: aClass.
+	d isNil ifTrue: [^ ClassDefinitionError new signal: aClass name , ' has no definition in the image'].
+	d package: aPackage asString; tag: aTagOrNil.
+	^ aClass
 ]
 
 { #category : #defining }
@@ -112,6 +132,17 @@ ClassBuilder class >> redefine: aClass instanceVariableNames: ivars classVariabl
 	removed do: [:n | | b | b := kept at: n. b beUndeclared. Smalltalk noteUndeclared: b in: aClass].
 	added do: [:n | Smalltalk forgetUndeclared: n in: aClass].
 	^ aClass
+]
+
+{ #category : #private }
+ClassBuilder class >> checkTag: aTagOrNil [
+	"A tag is the name of one directory under its package's: no / or NUL, not . or .., not hidden; nil or empty is none."
+	| t |
+	aTagOrNil isNil ifTrue: [^ self].
+	t := aTagOrNil asString.
+	t isEmpty ifTrue: [^ self].
+	((t includes: $/) or: [(t includes: (Character value: 0)) or: [t first = $.]])
+		ifTrue: [^ ClassDefinitionError new signal: '''' , t , ''' is not a tag (one directory name, no /, not hidden)']
 ]
 
 { #category : #private }

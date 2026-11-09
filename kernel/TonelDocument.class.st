@@ -1,4 +1,4 @@
-"One Tonel file as TonelReader read it (module 8e): the class definition (name, superclass name, instance, class and class-side instance variable names, category, #type, comment) or an Extension's class name, and its methods, each {class side?. category. source}."
+"One Tonel file as TonelReader read it (module 8e): the class definition (name, superclass name, instance, class and class-side instance variable names, #type, comment; a #category, #package or #tag key is read and ignored: the class's place is its file's, tags as subdirectories) or an Extension's class name, and its methods, each {class side?. category. source}."
 Class {
 	#name : #TonelDocument,
 	#superclass : #Object,
@@ -8,7 +8,6 @@ Class {
 		'instVarNames',
 		'classVarNames',
 		'classInstVarNames',
-		'category',
 		'type',
 		'comment',
 		'isExtension',
@@ -17,15 +16,6 @@ Class {
 	#category : #'Kernel-System'
 }
 
-{ #category : #accessing }
-TonelDocument >> category [
-	^ category
-]
-
-{ #category : #accessing }
-TonelDocument >> category: aString [
-	category := aString
-]
 
 { #category : #accessing }
 TonelDocument >> classInstVarNames [
@@ -133,7 +123,7 @@ TonelDocument >> summary [
 	| rs out |
 	rs := String with: (Character value: 30).
 	out := name , rs , (superclassName ifNil: ['nil']) , rs , (self names: self instVarNames) , rs , (self names: self classVarNames) , rs
-		, (self names: self classInstVarNames) , rs , category , rs , (type ifNil: ['']) , rs , comment , rs , (self isExtension ifTrue: ['extension'] ifFalse: ['class']).
+		, (self names: self classInstVarNames) , rs , (type ifNil: ['']) , rs , comment , rs , (self isExtension ifTrue: ['extension'] ifFalse: ['class']).
 	self methods do: [:m |
 		out := out , rs , ((m at: 1) ifTrue: ['class'] ifFalse: ['instance']) , rs , (m at: 2) , rs , (m at: 3)].
 	^ out

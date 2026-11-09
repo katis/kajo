@@ -4,14 +4,13 @@ Class {
 	#superclass : #Object,
 	#classInstVars : [
 		'chunks'
-	],
-	#category : #'Tests-Measure'
+	]
 }
 
 { #category : #measuring }
 ReshapeMeasure class >> run [
 	| c t0 t1 ok |
-	c := Object subclass: #ReshapeMeasured instanceVariableNames: 'a b c' classVariableNames: '' category: 'Tests-Measure'.
+	c := Object subclass: #ReshapeMeasured instanceVariableNames: 'a b c' classVariableNames: '' package: 'Measure' tag: 'Tests-Measure'.
 	1 to: 50 do: [:i | c compile: 'm' , i printString , ' ^ a + b + c + ' , i printString].
 	chunks := (1 to: 5) collect: [:k | (1 to: 2000) collect: [:i | c basicNew instVarAt: 1 put: i; instVarAt: 2 put: k; instVarAt: 3 put: 0; yourself]].
 	t0 := Smalltalk microsecondClock.

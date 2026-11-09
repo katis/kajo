@@ -2,7 +2,9 @@
 """Module 9c: a package of generated classes for the browser's measurements
 (docs/modules/developer-ui.md, Measurements): N classes in a tree (each
 class's superclass one of the earlier ones), M methods each, in categories,
-as Tonel files in the canonical form. Usage: gen-classes.py <dir> <classes> <methods>"""
+as Tonel files in the canonical form, each in one of 50 tags' subdirectories
+(tags as subdirectories: the old category Generated-<k> is the tag <k>).
+Usage: gen-classes.py <dir> <classes> <methods>"""
 import os, random, sys
 
 out, n, m = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
@@ -27,8 +29,10 @@ for i in range(n):
                 pat, src = sel, "^ %d" % (i * m + j)
             body.append((c, pat, src))
     body.sort(key=lambda t: (t[0], t[1].split(":")[0] + (":" if ":" in t[1] else "")))
-    s = '"A generated class (module 9c\'s browser measurement)."\nClass {\n\t#name : #%s,\n\t#superclass : #%s,\n\t#category : #\'Generated-%d\'\n}\n' % (name, sup, i % 50)
+    s = '"A generated class (module 9c\'s browser measurement)."\nClass {\n\t#name : #%s,\n\t#superclass : #%s\n}\n' % (name, sup)
     for c, pat, src in body:
         s += "\n{ #category : #%s }\n%s >> %s [\n\t%s\n]\n" % (c, name, pat, src)
-    with open(os.path.join(out, name + ".class.st"), "w") as f:
+    tag = os.path.join(out, "%d" % (i % 50))
+    os.makedirs(tag, exist_ok=True)
+    with open(os.path.join(tag, name + ".class.st"), "w") as f:
         f.write(s)

@@ -12,7 +12,7 @@ DevClientTest >> testADroppedLinkReconnectsAndSendsAgainWhatMayBe [
 	c hold: true.
 	events := OrderedCollection new.
 	#('connection.lost' 'connection.reconnecting' 'connection.open') do: [:k | c on: k do: [:e | events add: k]].
-	listId := c classList: nil then: [:r | got := r].
+	listId := c classList: nil tag: nil then: [:r | got := r].
 	evalId := c request: 'evaluate' args: {'source'. '1'} then: [:r | got := #evaluated] else: [:e | failed := e].
 	self assert: c pendingCount equals: 2.
 	c lost: 'the target closed the connection'.
@@ -23,7 +23,7 @@ DevClientTest >> testADroppedLinkReconnectsAndSendsAgainWhatMayBe [
 	self assert: c timers size equals: 1.
 	self assert: c timers first first equals: 1000.
 	"A request made meanwhile waits too, unsent."
-	c classCategories: [:r | nil].
+	c packageTags: nil then: [:r | nil].
 	self assert: c sent size equals: 2.
 	c fireTimer.
 	self assert: c opened equals: 1.
@@ -144,7 +144,7 @@ DevClientTest >> testTheConnectionsEndFailsWhatIsPending [
 	self assert: c state equals: #lost.
 	self assert: (failed includesSubstring: 'lost').
 	self assert: lost equals: 'the target closed the connection'.
-	c classList: nil then: [:r | failed := #sent].
+	c classList: nil tag: nil then: [:r | failed := #sent].
 	self deny: failed == #sent
 ]
 

@@ -50,7 +50,7 @@ func smalltalkStrings(_ image: Image, _ selector: String, _ arguments: [String])
 func swiftSummary(_ t: TonelClass) -> String {
     let rs = "\u{1E}"
     var f = [t.name, t.superclass ?? "nil", t.instanceVariables.joined(separator: " "), t.classVariables.joined(separator: " "),
-             t.classInstanceVariables.joined(separator: " "), t.category, t.type ?? "", t.comment, t.isExtension ? "extension" : "class"]
+             t.classInstanceVariables.joined(separator: " "), t.type ?? "", t.comment, t.isExtension ? "extension" : "class"]
     for m in t.methods { f += [m.classSide ? "class" : "instance", m.category, String(decoding: m.source, as: UTF8.self)] }
     return f.joined(separator: rs)
 }
@@ -59,6 +59,12 @@ let tonelFixtureDirectory: String = {
     var url = URL(fileURLWithPath: #filePath)
     url.deleteLastPathComponent()
     return url.appendingPathComponent("Fixtures/tonel").path
+}()
+
+let legacyFixtureDirectory: String = {
+    var url = URL(fileURLWithPath: #filePath)
+    url.deleteLastPathComponent()
+    return url.appendingPathComponent("Fixtures/legacy").path
 }()
 
 func temporaryDirectory(_ name: String) throws -> URL {
@@ -75,8 +81,8 @@ func temporaryDirectory(_ name: String) throws -> URL {
         let dir = try temporaryDirectory("tonel")
         defer { if ProcessInfo.processInfo.environment["KAJO_KEEP_TONEL"] == nil { try? FileManager.default.removeItem(at: dir) } }
         let n = try runSmalltalk(image, "writeAllTonel", sources: dir.path)
-        let kernelFiles = try FileManager.default.contentsOfDirectory(atPath: kernelDirectory).filter { $0.hasSuffix(".st") }.sorted()
-        let written = try FileManager.default.contentsOfDirectory(atPath: dir.path).sorted()
+        let kernelFiles = try tonelFiles(in: kernelDirectory)
+        let written = try tonelFiles(in: dir.path)
         #expect(n == Oop(smallInteger: Int64(kernelFiles.count)))
         #expect(written == kernelFiles)
         var differing: [String] = []
@@ -100,6 +106,61 @@ func temporaryDirectory(_ name: String) throws -> URL {
             if try swiftSummary(readTonel(f.text, file: f.file)) != mine[k] { differing.append(f.file) }
         }
         #expect(differing.isEmpty, "\(differing.count) read differently: \(differing.prefix(5))")
+        // Tags as subdirectories: both readers take a class's tag from its
+        // file's path relative to its package's directory, the same way, on
+        // every file and on paths no file has.
+        var paths = try tonelFiles(in: kernelDirectory) + tonelFiles(in: tonelFixtureDirectory)
+        paths += ["a/b/C.class.st", "/C.class.st", ".hidden/C.class.st", "../C.class.st", "Tag/C.class.st", "C.class.st",
+                  "Tests-Live/C.class.st", "a//C.class.st"]
+        let theirs = try smalltalkStrings(image, "tonelTagsOf:", paths)
+        let ours = paths.map { p -> String in
+            do { return try tonelTag(ofPath: p) ?? "" } catch { return "refused" }
+        }
+        #expect(theirs.count == paths.count)
+        var disagree: [String] = []
+        for (k, p) in paths.enumerated() where k < theirs.count {
+            let t = theirs[k].hasPrefix("refused") ? "refused" : theirs[k]
+            if t != ours[k] { disagree.append("\(p): \(t) against \(ours[k])") }
+        }
+        #expect(disagree.isEmpty, "\(disagree)")
+        // KAJO_READERS_OUT names a file the comparison is written to.
+        if let line = ProcessInfo.processInfo.environment["KAJO_READERS_OUT"] {
+            let report = "files \(files.count), summaries differing \(differing.count); paths \(paths.count), tags disagreeing \(disagree.count)\n"
+                + zip(paths, ours).map { "\($0.0) -> \($0.1.isEmpty ? "(none)" : $0.1)" }.joined(separator: "\n") + "\n"
+            try? report.write(toFile: line, atomically: true, encoding: .utf8)
+        }
+    }
+
+    /// Tags as subdirectories' bar: a Pharo-style file with `#package` and
+    /// `#tag` keys and an old Kajo file with `#category` both load, take
+    /// their package from the directory and their tag from the
+    /// subdirectory, and the next write leaves the keys out and puts each
+    /// file where it was.
+    @Test func pharoAndOldKajoFilesLoadAndTheNextWriteLeavesTheKeysOut() throws {
+        let files = try KernelBuild.sources(in: [kernelDirectory, legacyFixtureDirectory])
+        #expect(files.filter { $0.file.hasPrefix(legacyFixtureDirectory) }.map(\.tag) == ["Old", "Shapes"])
+        let image = try Image.load(image: try KernelBuild.build(files).image)
+        defer { image.destroy() }
+        let placed = try smalltalkStrings(image, "evaluateStrings:", [
+            "(Smalltalk packageOf: LegacyPharo) , ' ' , (Smalltalk tagOf: LegacyPharo) , ' ' , LegacyPharo new side printString",
+            "(Smalltalk packageOf: LegacyKajo) , ' ' , (Smalltalk tagOf: LegacyKajo) , ' ' , LegacyKajo new answer printString",
+        ])
+        #expect(placed == ["Legacy Shapes 3", "Legacy Old 42"])
+        let dir = try temporaryDirectory("legacy")
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("legacy"), withIntermediateDirectories: true)
+        _ = try runSmalltalk(image, "writePackages:", ["Legacy", "legacy"], sources: dir.path)
+        #expect(try tonelFiles(in: dir.path + "/legacy") == ["Old/LegacyKajo.class.st", "Shapes/LegacyPharo.class.st"])
+        for f in ["Old/LegacyKajo.class.st", "Shapes/LegacyPharo.class.st"] {
+            let written = try String(contentsOfFile: dir.path + "/legacy/" + f, encoding: .utf8)
+            let original = try String(contentsOfFile: legacyFixtureDirectory + "/" + f, encoding: .utf8)
+            for key in ["\t#category :", "\t#package :", "\t#tag :"] { #expect(!written.contains(key), "\(f) \(key)") }
+            // the same file but for the keys
+            let stripped = original.split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.hasPrefix("\t#category :") && !$0.hasPrefix("\t#package :") && !$0.hasPrefix("\t#tag :") }
+                .joined(separator: "\n").replacingOccurrences(of: ",\n}", with: "\n}")
+            #expect(written == stripped, "\(f)")
+        }
     }
 
     @Test func aClassWrittenOutOfOneImageReadsBackIntoAnother() throws {

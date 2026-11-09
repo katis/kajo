@@ -12,7 +12,6 @@ Class {
 	#classInstVars : [
 		'default'
 	],
-	#category : #'Tests-Tonel',
 	#type : #variable
 }
 

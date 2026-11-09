@@ -1,4 +1,4 @@
-"Method categories, class categories and class comments in the image (module 8e): the image build keeps every category its Tonel files carry, compile: and compile:classified: keep one, removeSelector: forgets it, and organization, categories and selectorsInCategory: read them."
+"Method categories, class packages and tags, and class comments in the image (module 8e; tags as subdirectories: a class's package is the directory its file is in and its tag the subdirectory): the image build keeps every method category its Tonel files carry, compile: and compile:classified: keep one, removeSelector: forgets it, and organization, categories and selectorsInCategory: read them."
 Class {
 	#name : #OrganizationTest,
 	#superclass : #TestCase,
@@ -12,12 +12,17 @@ OrganizationTest >> tearDown [
 ]
 
 { #category : #tests }
-OrganizationTest >> testClassCategoryAndComment [
-	self assert: Object category = 'Kernel-Objects'.
+OrganizationTest >> testClassPackageTagAndComment [
+	self assert: (Smalltalk packageOf: Object) = 'Kernel'.
+	self assert: (Smalltalk tagOf: Object) == #Objects.
+	self assert: (Smalltalk tagOf: Object class) == #Objects.
 	self assert: (Object comment beginsWith: 'The root of the class hierarchy').
 	self assert: Object class comment = Object comment.
-	self assert: LiveSample category = 'Kernel-Tests'.
-	self assert: (Smalltalk definitionOf: Object) category == #'Kernel-Objects'
+	self assert: (Smalltalk tagOf: LiveSample) == #Tests.
+	self assert: (Smalltalk tagOf: TestCase) == #SUnit.
+	self assert: (Smalltalk definitionOf: Object) tag == #Objects.
+	self assert: ((Smalltalk tagsOf: 'Kernel') includes: 'Collections').
+	self assert: (ClassDescription includesSelector: #category) not
 ]
 
 { #category : #tests }

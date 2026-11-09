@@ -1,4 +1,4 @@
-"Tonel files read in the image (module 8e): the bootstrap reader (Sources/KajoCompiler/Tonel.swift) in Smalltalk, rule for rule: the comment before the definition (a doubled quote is one quote), the STON map of Class { ... } or Extension { ... }, then each method's optional { #category : ... } and Class [class] >> pattern [ body ], the body's end found by bracket depth outside strings, comments and character literals. A method's source is its pattern without the blanks before the bracket, then its body (a blank between when the body starts with neither a blank nor a line break), as the image build records it. The bootstrap reader stays the image build's and the oracle: a test reads every kernel file with both."
+"Tonel files read in the image (module 8e): the bootstrap reader (Sources/KajoCompiler/Tonel.swift) in Smalltalk, rule for rule: the comment before the definition (a doubled quote is one quote), the STON map of Class { ... } or Extension { ... } (a #category, #package or #tag key read and ignored as every key it does not know: the class's place is its file's, tagOfPath:), then each method's optional { #category : ... } and Class [class] >> pattern [ body ], the body's end found by bracket depth outside strings, comments and character literals. A method's source is its pattern without the blanks before the bracket, then its body (a blank between when the body starts with neither a blank nor a line break), as the image build records it. The bootstrap reader stays the image build's and the oracle: a test reads every kernel file with both."
 Class {
 	#name : #TonelReader,
 	#superclass : #Object,
@@ -162,7 +162,7 @@ TonelReader >> readDocument [
 				doc superclassName: (sup at: 2)].
 		doc instVarNames: (self names: 'instVars' in: def); classInstVarNames: (self names: 'classInstVars' in: def);
 			classVarNames: (self names: 'classVars' in: def)].
-	doc category: ((self text: 'category' in: def) ifNil: ['']); type: (self text: 'type' in: def).
+	doc type: (self text: 'type' in: def).
 	[self space. position < limit] whileTrue: [self readMethodInto: doc].
 	^ doc
 ]
@@ -273,6 +273,18 @@ TonelReader >> value: depth [
 	s := self identifier.
 	s isEmpty ifTrue: [^ self fail: 'unexpected character in STON'].
 	^ Array with: #identifier with: s
+]
+
+{ #category : #reading }
+TonelReader class >> tagOfPath: aPath [
+	"The tag a class file's path gives, aPath relative to its package's directory (tags as subdirectories): nil for a file at the root, the directory's name for a file one directory down, refused (an Error) for a file further down or a directory name no tag can have. The bootstrap reader's tonelTag(ofPath:) is the same rule; a test compares them on every file."
+	| parts |
+	parts := aPath splitOn: '/'.
+	parts size = 1 ifTrue: [^ nil].
+	parts size = 2 ifFalse: [^ self error: aPath , ': a class file two directories below its package (a tag is one directory)'].
+	((parts first isEmpty or: [(parts first byteAt: 1) = 46]) or: [parts first includes: (Character value: 0)])
+		ifTrue: [^ self error: aPath , ': ''' , parts first , ''' is not a tag''s directory'].
+	^ parts first asSymbol
 ]
 
 { #category : #reading }

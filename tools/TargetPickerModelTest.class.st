@@ -33,7 +33,7 @@ TargetPickerModelTest >> testTheTargetsAndTheirStatesFollowTheLink [
 	self assert: (m rows collect: [:r | r first]) asArray equals: #('local' 'phone').
 	m connect: 'phone'.
 	self assert: (m rows at: 2) last equals: 'open'.
-	c classCategories: [:r | nil].
+	c packageTags: nil then: [:r | nil].
 	c lost: 'the target closed the connection'.
 	self assert: (m rows at: 2) last equals: 'reconnecting'.
 	self assert: (m status includesSubstring: 'reconnecting in 1 s').

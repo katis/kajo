@@ -26,8 +26,7 @@ Class {
 	],
 	#classInstVars : [
 		''made''
-	],
-	#category : #''Kernel-Tests-Live''
+	]
 }
 
 { #category : #accessing }
@@ -94,6 +93,46 @@ TonelTest >> testAClassDefinedAndRedefinedFromTonel [
 ]
 
 { #category : #tests }
+TonelTest >> testATagIsTheFilesDirectory [
+	"Tags as subdirectories: a class's tag comes from the path its file is read from, relative to its package's directory, never from a key; an old Kajo file's #category and a Pharo file's #package and #tag are read and ignored, and the next write leaves them out."
+	| c old pharo |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	self assert: (TonelReader tagOfPath: 'Foo.class.st') isNil.
+	self assert: (TonelReader tagOfPath: 'Things/Foo.class.st') == #Things.
+	self assert: (TonelReader tagOfPath: 'Tests-Live/Foo.class.st') == #'Tests-Live'.
+	#('a/b/Foo.class.st' '/Foo.class.st' '.hidden/Foo.class.st' '../Foo.class.st') do: [:p |
+		self should: [TonelReader tagOfPath: p] raise: Error].
+	old := self sampleText copyReplaceAll: '''made''
+	]
+}' with: '''made''
+	],
+	#category : #''Kernel-Tests-Live''
+}'.
+	pharo := self sampleText copyReplaceAll: '''made''
+	]
+}' with: '''made''
+	],
+	#package : #''Elsewhere'',
+	#tag : #''Somewhere''
+}'.
+	self deny: old = self sampleText.
+	self deny: pharo = self sampleText.
+	self assert: (TonelReader read: old) summary = (TonelReader read: self sampleText) summary.
+	self assert: (TonelReader read: pharo) summary = (TonelReader read: self sampleText) summary.
+	c := Smalltalk readTonel: old path: 'Live/LiveTonelSample.class.st'.
+	self assert: (Smalltalk tagOf: c) == #Live.
+	self assert: c tonelSource = self sampleText.
+	self assert: (TonelWriter pathOf: c package: (Smalltalk packageOf: c)) = 'Live/LiveTonelSample.class.st'.
+	Smalltalk readTonel: pharo path: 'LiveTonelSample.class.st'.
+	self assert: (Smalltalk tagOf: c) isNil.
+	self assert: c tonelSource = self sampleText.
+	self assert: (TonelWriter pathOf: c package: (Smalltalk packageOf: c)) = 'LiveTonelSample.class.st'.
+	Smalltalk readTonel: self sampleText.
+	self assert: (Smalltalk tagOf: c) isNil.
+	self should: [Smalltalk readTonel: self sampleText path: 'a/b/LiveTonelSample.class.st'] raise: Error
+]
+
+{ #category : #tests }
 TonelTest >> testMalformedTonelIsRefused [
 	#('' 'Class' 'Class {' 'Class { #superclass : #Object }' 'Thing { #name : #X }' 'Class { #name : #X } Y >> foo [ ^ 1 ]' 'Class { #name : #X } X >> foo [ ^ 1' '"open comment' 'Class { #name : #X, #instVars : [ ''a-b'' ] }') do: [:t |
 		self should: [TonelReader read: t] raise: CompileError]
@@ -109,7 +148,7 @@ TonelTest >> testTheReaderReadsWhatTheWriterWrote [
 		self assert: (doc instVarNames collect: [:x | x asSymbol]) = c instVarNames asArray.
 		self assert: (doc classVarNames collect: [:x | x asSymbol]) = c classVarNames asArray.
 		self assert: (doc classInstVarNames collect: [:x | x asSymbol]) = c class instVarNames asArray.
-		self assert: doc category = c category.
+		self deny: ((c tonelSource copyFrom: 1 to: (c tonelSource indexOfSubstring: (String lf , '}'))) includesSubstring: '#category :').
 		self assert: doc comment = c comment.
 		self assert: doc methods size = (c selectors size + c class selectors size).
 		doc methods do: [:m | | b sel |

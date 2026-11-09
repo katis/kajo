@@ -4,8 +4,7 @@ Class {
 	#superclass : #Object,
 	#instVars : [
 		'count'
-	],
-	#category : #'Sample-Core'
+	]
 }
 
 { #category : #accessing }

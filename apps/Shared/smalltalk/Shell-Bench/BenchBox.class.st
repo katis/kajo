@@ -6,8 +6,7 @@ Class {
 		'a',
 		'b',
 		'next'
-	],
-	#category : #'Shell-Bench'
+	]
 }
 
 { #category : #building }

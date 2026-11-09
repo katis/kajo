@@ -6,7 +6,7 @@ import KajoVM
 /// every method compiled by the bootstrap compiler and verified by the
 /// assembler, the entry point is `Smalltalk`, and in a VM before the image
 /// is saved: the class definitions are handed to the kernel (`Smalltalk
-/// recordDefinitions:`, module 8e: the instance variable names, category,
+/// recordDefinitions:`, module 8e: the instance variable names, tag,
 /// format kind and comment of every class, which the compiler in Smalltalk
 /// and the Tonel writer read; 8b synthesized a method that answered them),
 /// the kernel's class-side `initialize` methods run, and every method's
@@ -30,11 +30,15 @@ public struct KernelBuild: Sendable {
     }
 
     /// Module 9b: the package a source file belongs to: the name its
-    /// directory's `package.st` gives (`Package { #name : #Foo }`), else the
-    /// directory's name with its first letter capitalized (`kernel/` is
-    /// `Kernel`).
-    public static func package(ofFile file: String) -> String {
-        let dir = (file as NSString).deletingLastPathComponent
+    /// package directory's `package.st` gives (`Package { #name : #Foo }`),
+    /// else the directory's name with its first letter capitalized
+    /// (`kernel/` is `Kernel`). The package directory is the file's
+    /// directory, or its parent for a file in a tag's subdirectory (tags as
+    /// subdirectories: `kernel/Collections/Array.class.st` is package
+    /// `Kernel`, tag `Collections`).
+    public static func package(ofFile file: String, tag: String? = nil) -> String {
+        var dir = (file as NSString).deletingLastPathComponent
+        if tag != nil { dir = (dir as NSString).deletingLastPathComponent }
         if let data = FileManager.default.contents(atPath: (dir as NSString).appendingPathComponent("package.st")),
            let text = String(data: data, encoding: .utf8),
            let r = text.range(of: "#name"),
@@ -47,28 +51,60 @@ public struct KernelBuild: Sendable {
         return base.prefix(1).uppercased() + base.dropFirst()
     }
 
-    /// The `.st` files of the directories, each directory's in name order
-    /// (`package.st`, a package's name, is not a class file).
-    public static func sources(in directories: [String]) throws(CompileError) -> [(file: String, text: [UInt8])] {
-        var out: [(String, [UInt8])] = []
+    /// The `.st` files of the directories, each directory's by path
+    /// relative to it (`package.st`, a package's name, is not a class
+    /// file), with their tags: a file at a directory's root has none, a
+    /// file in a subdirectory has the subdirectory's name (tags as
+    /// subdirectories, one level: a `.st` file further down is refused
+    /// naming its path; hidden entries are skipped).
+    public static func sources(in directories: [String]) throws(CompileError) -> [(file: String, text: [UInt8], tag: String?)] {
+        var out: [(String, [UInt8], String?)] = []
+        func isDirectory(_ p: String) -> Bool {
+            (try? URL(fileURLWithPath: p).resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+        }
+        func read(_ p: String) throws(CompileError) -> [UInt8] {
+            guard let data = FileManager.default.contents(atPath: p) else { throw CompileError("cannot read \(p)") }
+            return [UInt8](data)
+        }
         for d in directories {
             guard let names = try? FileManager.default.contentsOfDirectory(atPath: d) else {
                 // a single file
-                guard let data = FileManager.default.contents(atPath: d) else { throw CompileError("cannot read \(d)") }
-                out.append((d, [UInt8](data)))
+                out.append((d, try read(d), nil))
                 continue
             }
-            for n in names.sorted() where n.hasSuffix(".st") && n != "package.st" {
+            var found: [(rel: String, path: String, tag: String?)] = []
+            for n in names where !n.hasPrefix(".") {
                 let p = (d as NSString).appendingPathComponent(n)
-                guard let data = FileManager.default.contents(atPath: p) else { throw CompileError("cannot read \(p)") }
-                out.append((p, [UInt8](data)))
+                if isDirectory(p) {
+                    guard let inner = try? FileManager.default.contentsOfDirectory(atPath: p) else { throw CompileError("cannot read \(p)") }
+                    for m in inner where !m.hasPrefix(".") {
+                        let q = (p as NSString).appendingPathComponent(m)
+                        if isDirectory(q) {
+                            let deeper = (try? FileManager.default.subpathsOfDirectory(atPath: q)) ?? []
+                            if let f = deeper.sorted().first(where: { $0.hasSuffix(".st") }) {
+                                _ = try tonelTag(ofPath: n + "/" + m + "/" + f)
+                            }
+                        } else if m.hasSuffix(".st") && m != "package.st" {
+                            found.append((n + "/" + m, q, try tonelTag(ofPath: n + "/" + m)))
+                        }
+                    }
+                } else if n.hasSuffix(".st") && n != "package.st" {
+                    found.append((n, p, nil))
+                }
             }
+            for f in found.sorted(by: { $0.rel < $1.rel }) { out.append((f.path, try read(f.path), f.tag)) }
         }
         return out
     }
 
-    /// Build an image from Tonel sources.
+    /// Build an image from Tonel files at their packages' roots (no tags):
+    /// the form the tests' generated files take.
     public static func build(_ files: [(file: String, text: [UInt8])], options: Options = Options()) throws(CompileError) -> Result {
+        try build(files.map { ($0.file, $0.text, nil) }, options: options)
+    }
+
+    /// Build an image from Tonel sources.
+    public static func build(_ files: [(file: String, text: [UInt8], tag: String?)], options: Options = Options()) throws(CompileError) -> Result {
         let plan = try Plan(files)
         let image: Image
         do { image = try Image.bootForKernel(heapMiB: options.heapMiB) } catch { throw CompileError(error.message) }
@@ -106,14 +142,17 @@ public struct KernelBuild: Sendable {
 /// The classes in definition order, every method compiled, the warnings.
 struct Plan {
     var classes: [TonelClass] = []
+    /// Tags as subdirectories: each class's tag, from its file's place.
+    var tags: [String: String] = [:]
     var definitions: [KernelClassDefinition] = []
     var compiled: [AssembledMethod] = []
     /// "Class[ class]\nselector\ncategory\npackage\nsource" per compiled method.
     var sources: [String] = []
     /// Module 8e: per class, in definition order (superclasses first),
-    /// "name\nsuperclass\ninstVars\nclassInstVars\ncategory\nkind\npackage\ncomment"
+    /// "name\nsuperclass\ninstVars\nclassInstVars\ntag\nkind\npackage\ncomment"
     /// (names separated by blanks; the comment last, it may hold line
-    /// breaks; module 9b added the package).
+    /// breaks; module 9b added the package; the tag, empty for none,
+    /// took the category's place with tags as subdirectories).
     var definitionRecords: [String] = []
     var warnings: [String] = []
     /// Instance variable names (inherited first) and class-side ones.
@@ -123,12 +162,16 @@ struct Plan {
     /// its superclasses'), by name, with the class that declares it.
     var classVariables: [String: [String: String]] = [:]
 
-    init(_ files: [(file: String, text: [UInt8])]) throws(CompileError) {
+    init(_ files: [(file: String, text: [UInt8], tag: String?)]) throws(CompileError) {
         var defs: [TonelClass] = []
         var extensions: [TonelClass] = []
+        var fileTags: [String: String] = [:]
         for f in files {
             let c = try readTonel(f.text, file: f.file)
+            // An extension file stays at its package's root (open question
+            // 2): one in a tag's directory is still its package's.
             if c.isExtension { extensions.append(c) } else { defs.append(c) }
+            if let t = f.tag { fileTags[f.file] = t }
         }
         // Superclasses first; names unique.
         var byName: [String: TonelClass] = [:]
@@ -152,6 +195,7 @@ struct Plan {
         }
         for c in defs.sorted(by: { $0.name < $1.name }) { try place(c) }
         classes = ordered
+        for c in ordered { if let t = fileTags[c.file] { tags[c.name] = t } }
 
         // Layouts: inherited names first; the format inherited unless given.
         var kinds: [String: String] = [:]
@@ -195,8 +239,8 @@ struct Plan {
             }
             kinds[c.name] = kind
             definitionRecords.append([c.name, c.superclass ?? "nil", c.instanceVariables.joined(separator: " "),
-                                      c.classInstanceVariables.joined(separator: " "), c.category, kind,
-                                      KernelBuild.package(ofFile: c.file), c.comment]
+                                      c.classInstanceVariables.joined(separator: " "), tags[c.name] ?? "", kind,
+                                      KernelBuild.package(ofFile: c.file, tag: tags[c.name]), c.comment]
                 .joined(separator: "\n"))
             definitions.append(KernelClassDefinition(name: c.name, superclass: c.superclass, instSize: all.count, kind: kind,
                                                      metaSlots: allMeta.count, classVariables: c.classVariables, file: c.file,
@@ -211,10 +255,10 @@ struct Plan {
         // Module 9b: each method with the package of the file it came from.
         var all = ordered.flatMap { c in c.methods.map { ($0, c.file, "") } }
         var classPackage: [String: String] = [:]
-        for c in ordered { classPackage[c.name] = KernelBuild.package(ofFile: c.file) }
+        for c in ordered { classPackage[c.name] = KernelBuild.package(ofFile: c.file, tag: tags[c.name]) }
         for e in extensions {
             guard known.contains(e.name) else { throw CompileError("an extension of unknown class \(e.name)", file: e.file, line: e.line) }
-            let p = KernelBuild.package(ofFile: e.file)
+            let p = KernelBuild.package(ofFile: e.file, tag: fileTags[e.file])
             all += e.methods.map { ($0, e.file, p == classPackage[e.name] ? "" : p) }
         }
         for (m, file, package) in all {

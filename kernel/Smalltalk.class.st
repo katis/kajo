@@ -221,6 +221,12 @@ Smalltalk class >> readTonel: aString [
 ]
 
 { #category : #'file in' }
+Smalltalk class >> readTonel: aString path: aPath [
+	"readTonel: of the file at aPath, relative to its package's directory: the class takes its tag from the path (TonelReader tagOfPath:; a file at the root has none, one two directories down is refused), never from a key in the file (tags as subdirectories)."
+	^ TonelLoader load: (TonelReader read: aString) path: aPath
+]
+
+{ #category : #'file in' }
 Smalltalk class >> readTonelAll: anArray [
 	"readTonel: each text in turn; answer what each class writes out afterwards."
 	^ anArray collect: [:t | (self readTonel: t) tonelSource]
@@ -230,6 +236,12 @@ Smalltalk class >> readTonelAll: anArray [
 Smalltalk class >> tonelSourcesOf: anArray [
 	"The Tonel file of each class anArray names (a test's way out of the image)."
 	^ anArray collect: [:n | (self at: n asSymbol) tonelSource]
+]
+
+{ #category : #'file in' }
+Smalltalk class >> tonelTagsOf: anArray [
+	"For each path relative to a package's directory, the tag it gives: the tag, '' for none, or 'refused: ' and why (a test compares them with the bootstrap reader's)."
+	^ anArray collect: [:p | [(TonelReader tagOfPath: p) ifNil: ['']] on: Error do: [:e | 'refused: ' , e messageText]]
 ]
 
 { #category : #'file in' }
@@ -252,7 +264,7 @@ Smalltalk class >> writeAllTonel [
 
 { #category : #'file out' }
 Smalltalk class >> writeTonel: aDirectory [
-	"Write every class, sealed ones too, as <Name>.class.st into aDirectory, a path under the directory the VM was opened with (kajo run --sources; '' for that directory itself). Answers how many files. Module 8e."
+	"Write every class, sealed ones too, as <Name>.class.st into aDirectory, or into its subdirectory <Tag> when the class has a tag (tags as subdirectories), a path under the directory the VM was opened with (kajo run --sources; '' for that directory itself). Answers how many files. Module 8e."
 	| n |
 	n := 0.
 	self allClasses do: [:c | TonelWriter write: c into: aDirectory. n := n + 1].
@@ -313,8 +325,24 @@ Smalltalk class >> packageOfSelector: aSelector in: aBehavior [
 ]
 
 { #category : #packages }
+Smalltalk class >> tagOf: aClass [
+	"The class's tag within its package, a Symbol, or nil when it has none (tags as subdirectories: the subdirectory of the package's directory its file is in)."
+	^ (self definitionOf: aClass theNonMetaClass) ifNotNil: [:d | d tag]
+]
+
+{ #category : #packages }
+Smalltalk class >> tagsOf: aPackageOrNil [
+	"The tags of the package's classes (of every class when nil), sorted."
+	| out |
+	out := Set new.
+	self allClasses do: [:c |
+		(aPackageOrNil isNil or: [(self packageOf: c) = aPackageOrNil]) ifTrue: [(self tagOf: c) ifNotNil: [:t | out add: t asString]]].
+	^ out asArray sort: [:a :b | a <= b]
+]
+
+{ #category : #packages }
 Smalltalk class >> writePackage: aName into: aDirectory [
-	"Write the package's files into aDirectory (module 9b): a class file for each of its classes (their methods of the package), an extension file for each other class with methods of the package. Answers the paths."
+	"Write the package's files into aDirectory (module 9b): a class file for each of its classes (their methods of the package), in the subdirectory of its tag when it has one, an extension file for each other class with methods of the package, at aDirectory's root. Answers the paths."
 	| out |
 	out := OrderedCollection new.
 	self allClasses do: [:c |
@@ -433,12 +461,6 @@ Smalltalk class >> snapshot: aPathOrNil [
 ]
 
 { #category : #sources }
-Smalltalk class >> categoryOf: aClass [
-	"aClass's category, a String ('' when none)."
-	^ (self definitionOf: aClass) ifNil: [''] ifNotNil: [:d | d category asString]
-]
-
-{ #category : #sources }
 Smalltalk class >> categoryOfSelector: aSelector in: aBehavior [
 	organizations isNil ifTrue: [^ nil].
 	^ (organizations at: aBehavior ifAbsent: [^ nil]) at: aSelector ifAbsent: [nil]
@@ -522,7 +544,7 @@ Smalltalk class >> noteSource: aString of: aCompiledMethod [
 
 { #category : #sources }
 Smalltalk class >> recordDefinitions: anArray [
-	"The image build hands every class definition over, superclasses first (module 8e): the name, the superclass, the instance variables, the class-side instance variables, the category, the format kind, the package (module 9b) and the comment, a line each (the comment last; names separated by blanks)."
+	"The image build hands every class definition over, superclasses first (module 8e): the name, the superclass, the instance variables, the class-side instance variables, the tag (empty for none: tags as subdirectories, in the category's place), the format kind, the package (module 9b) and the comment, a line each (the comment last; names separated by blanks)."
 	| lf |
 	lf := String with: Character lf.
 	definitions := IdentityDictionary new.
@@ -535,14 +557,13 @@ Smalltalk class >> recordDefinitions: anArray [
 			start := j + 1].
 		fields add: (s copyFrom: start to: s byteSize).
 		cls := self at: (fields at: 1) asSymbol.
-		definitions at: cls put: ((ClassDefinition
+		definitions at: cls put: (ClassDefinition
 			instVarNames: ((fields at: 3) substrings collect: [:n | n asSymbol])
 			classInstVarNames: ((fields at: 4) substrings collect: [:n | n asSymbol])
-			category: (fields at: 5) asSymbol
+			package: ((fields at: 7) isEmpty ifTrue: [nil] ifFalse: [fields at: 7])
+			tag: ((fields at: 5) isEmpty ifTrue: [nil] ifFalse: [(fields at: 5) asSymbol])
 			kind: (fields at: 6) asSymbol
-			comment: (fields at: 8))
-				package: ((fields at: 7) isEmpty ifTrue: [nil] ifFalse: [fields at: 7]);
-				yourself)]
+			comment: (fields at: 8))]
 ]
 
 { #category : #sources }

@@ -5,8 +5,7 @@ Class {
 	#instVars : [
 		'left',
 		'right'
-	],
-	#category : #'Shell-Bench'
+	]
 }
 
 { #category : #building }

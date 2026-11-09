@@ -14,8 +14,7 @@ Class {
 		'measureWindow',
 		'targetClass',
 		'workspace'
-	],
-	#category : #'Devsession'
+	]
 }
 
 { #category : #session }

@@ -9,8 +9,7 @@ Class {
 		'count',
 		'times',
 		'probe'
-	],
-	#category : #'Shell-Tests'
+	]
 }
 
 { #category : #building }

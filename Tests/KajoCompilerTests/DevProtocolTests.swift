@@ -180,8 +180,8 @@ extension ProtocolClient {
         // A method into a class of the package: its class file.
         let r1 = try s.request("method.compile", [("className", .string("SampleCounter")), ("source", .string("reset\n\tcount := 0")),
                                                   ("category", .string("accessing"))])
-        #expect(try project.apply(r1) == ["SampleCounter.class.st"])
-        let text = try String(contentsOf: dir.appendingPathComponent("SampleCounter.class.st"), encoding: .utf8)
+        #expect(try project.apply(r1) == ["Core/SampleCounter.class.st"])
+        let text = try String(contentsOf: dir.appendingPathComponent("Core/SampleCounter.class.st"), encoding: .utf8)
         // The development answers: the agent's mark is a pragma in the
         // source, the metadata the category only.
         #expect(text.contains("{ #category : #accessing }\nSampleCounter >> reset [\n\t<author: #'agent:claude'>\n\tcount := 0\n]"))
@@ -196,25 +196,55 @@ extension ProtocolClient {
         #expect(ext.contains("Object >> sampleTwice: x [") && ext.contains("Object >> sampleThrice: x ["))
         let src = try s.request("method.source", [("className", .string("Object")), ("selector", .string("sampleThrice:"))])
         #expect(src["author"] == .string("agent:claude") && src["package"] == .string("Sample"))
-        // A class defined by the session belongs to its package.
+        // A class defined by the session belongs to its package; with a
+        // tag its file is in the tag's subdirectory (tags as
+        // subdirectories), created when missing.
         let r3 = try s.request("class.define", [("name", .string("SampleThing")), ("superclass", .string("Object")),
                                                 ("instanceVariables", .array([.string("a"), .string("b")])),
-                                                ("category", .string("Sample-Core"))])
-        #expect(try project.apply(r3) == ["SampleThing.class.st"])
+                                                ("tag", .string("Parts"))])
+        #expect(try project.apply(r3) == ["Parts/SampleThing.class.st"])
+        let thing = try String(contentsOf: dir.appendingPathComponent("Parts/SampleThing.class.st"), encoding: .utf8)
+        #expect(!thing.contains("\t#category :") && !thing.contains("\t#tag :") && !thing.contains("\t#package :"))
         let def = try s.request("class.definition", [("className", .string("SampleThing"))])
-        #expect(def["package"] == .string("Sample") && def["instanceVariables"] == .array([.string("a"), .string("b")]))
+        #expect(def["package"] == .string("Sample") && def["tag"] == .string("Parts")
+                && def["instanceVariables"] == .array([.string("a"), .string("b")]) && def["category"] == nil)
+        let entry = try s.request("class.hierarchy").array?.first { $0["name"] == .string("SampleThing") }
+        #expect(entry?["tag"] == .string("Parts") && entry?["package"] == .string("Sample") && entry?["category"] == nil)
+        #expect(try s.request("class.list", [("package", .string("Sample")), ("tag", .string("Parts"))]) == .array([.string("SampleThing")]))
+        #expect(try s.request("package.tags", [("name", .string("Sample"))]) == .array([.string("Core"), .string("Parts")]))
+        // Its tag changed: the file moves (the new one written, the old one
+        // and its emptied directory gone).
+        let moved = try s.request("class.define", [("name", .string("SampleThing")), ("superclass", .string("Object")),
+                                                   ("instanceVariables", .string("a b")), ("package", .string("Sample")),
+                                                   ("tag", .string("Things"))])
+        #expect(try project.apply(moved) == ["Things/SampleThing.class.st", "-Parts/SampleThing.class.st"])
+        #expect(FileManager.default.fileExists(atPath: dir.appendingPathComponent("Things/SampleThing.class.st").path))
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("Parts").path))
+        // The old key is a malformed request, answered as any other.
+        let old = try s.send("class.define", [("name", .string("SampleThing")), ("category", .string("Sample-Core"))])
+        #expect(old["ok"] == .bool(false) && old["error"]?.string?.contains("has no argument category") == true)
         let r4 = try s.request("class.remove", [("className", .string("SampleThing"))])
-        #expect(try project.apply(r4) == ["-SampleThing.class.st"])
-        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("SampleThing.class.st").path))
+        #expect(try project.apply(r4) == ["-Things/SampleThing.class.st"])
+        #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("Things/SampleThing.class.st").path))
         // A refused change is an error reply and writes nothing.
         let bad = try s.send("method.compile", [("className", .string("SampleCounter")), ("source", .string("broken ^ ^"))])
         #expect(bad["ok"] == .bool(false) && bad["error"]?.string?.contains("CompileError") == true)
-        // The project writer takes nothing but file names of the project.
-        for evil in ["../x.class.st", "/tmp/x.class.st", "x.st", ".class.st", "a/b.class.st"] {
+        // The project writer takes nothing but file names of the project
+        // and class files one directory down.
+        for evil in ["../x.class.st", "/tmp/x.class.st", "x.st", ".class.st", "a/b/c.class.st", "../a/b.class.st",
+                     "./b.class.st", "a//b.class.st", ".hidden/b.class.st", "a/b.extension.st", "a/..", "/a/b.class.st"] {
             #expect(throws: ProtocolError.self) {
                 try project.apply(.object([("files", .array([.object([("path", .string(evil)), ("text", .string(""))])]))]))
             }
         }
+        // A link in a tag's place is not followed, wherever it leads.
+        let outside = try temporaryDirectory("project-outside-\(t.path.hashValue)")
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("Linked"), withDestinationURL: outside)
+        #expect(throws: ProtocolError.self) {
+            try project.apply(.object([("files", .array([.object([("path", .string("Linked/x.class.st")), ("text", .string("x"))])]))]))
+        }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
     }
 
     @Test func aNewDevProtocolMethodIsANewRequest() throws {

@@ -50,7 +50,7 @@ DevelopmentTest >> testARemovedClassStillNamedIsKept [
 	"A removed class an object still names keeps its indices until nothing does."
 	| a index holder |
 	Smalltalk isReleaseImage ifTrue: [^ self].
-	a := Object subclass: #DevelopmentSampleA instanceVariableNames: '' classVariableNames: '' category: 'Kernel-Tests-Development'.
+	a := Object subclass: #DevelopmentSampleA instanceVariableNames: '' classVariableNames: '' package: 'Kernel' tag: 'Tests-Development'.
 	index := a classIndex.
 	Smalltalk removeClass: a.
 	holder := Array with: a.
@@ -161,7 +161,7 @@ DevelopmentTest >> testJsonRoundTrip [
 DevelopmentTest >> testRemovedClassesAreFreedAndTheirIndicesTaken [
 	| a index b |
 	Smalltalk isReleaseImage ifTrue: [^ self].
-	a := Object subclass: #DevelopmentSampleA instanceVariableNames: 'x' classVariableNames: '' category: 'Kernel-Tests-Development'.
+	a := Object subclass: #DevelopmentSampleA instanceVariableNames: 'x' classVariableNames: '' package: 'Kernel' tag: 'Tests-Development'.
 	index := a classIndex.
 	Smalltalk removeClass: a.
 	self assert: a isObsolete.
@@ -170,9 +170,49 @@ DevelopmentTest >> testRemovedClassesAreFreedAndTheirIndicesTaken [
 	self assert: Smalltalk garbageCollect >= 1.
 	self assert: (Smalltalk classAt: index) isNil.
 	self assert: (Smalltalk classAt: index + 1) isNil.
-	b := Object subclass: #DevelopmentSampleB instanceVariableNames: '' classVariableNames: '' category: 'Kernel-Tests-Development'.
+	b := Object subclass: #DevelopmentSampleB instanceVariableNames: '' classVariableNames: '' package: 'Kernel' tag: 'Tests-Development'.
 	self assert: b classIndex = index.
 	self assert: b new class == b
+]
+
+{ #category : #tests }
+DevelopmentTest >> testClassDefineIntoATagAndMoving [
+	"class.define with a package and a tag (tags as subdirectories): the class's file is <Tag>/<Name>.class.st in the session's project, a definition with another tag moves it (the new file to write, the old one to remove), one with no tag puts it at the package's root, one with neither keeps its place, and the file never carries a #category, #package or #tag key."
+	| s r files c |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	s := DevSession conn: 0 client: 'developer' package: 'DevelopmentSamples'.
+	[r := s classDefine: 'DevelopmentSampleT' superclass: nil instanceVariables: 'a' classVariables: nil package: nil tag: 'Things'.
+	c := Smalltalk at: #DevelopmentSampleT.
+	self assert: (Smalltalk packageOf: c) = 'DevelopmentSamples'.
+	self assert: (Smalltalk tagOf: c) == #Things.
+	files := r at: 'files'.
+	self assert: files size = 1.
+	self assert: (files first at: 'path') = 'Things/DevelopmentSampleT.class.st'.
+	self deny: ((files first at: 'text') includesSubstring: (String with: Character tab) , '#category :').
+	self deny: ((files first at: 'text') includesSubstring: (String with: Character tab) , '#tag :').
+	self deny: ((files first at: 'text') includesSubstring: (String with: Character tab) , '#package :').
+	r := s classDefine: 'DevelopmentSampleT' superclass: nil instanceVariables: 'a b' classVariables: nil package: nil tag: nil.
+	self assert: (Smalltalk tagOf: c) == #Things.
+	self assert: ((r at: 'files') collect: [:f | f at: 'path']) = #('Things/DevelopmentSampleT.class.st').
+	r := s classDefine: 'DevelopmentSampleT' superclass: nil instanceVariables: 'a b' classVariables: nil package: nil tag: 'Other'.
+	files := r at: 'files'.
+	self assert: (files collect: [:f | f at: 'path']) = #('Other/DevelopmentSampleT.class.st' 'Things/DevelopmentSampleT.class.st').
+	self assert: ((files at: 1) at: 'text') notNil.
+	self assert: ((files at: 2) at: 'remove') == true.
+	r := s classDefine: 'DevelopmentSampleT' superclass: nil instanceVariables: 'a b' classVariables: nil package: 'DevelopmentSamples' tag: nil.
+	self assert: (Smalltalk tagOf: c) isNil.
+	self assert: ((r at: 'files') collect: [:f | f at: 'path']) = #('DevelopmentSampleT.class.st' 'Other/DevelopmentSampleT.class.st').
+	self assert: ((s classList: 'DevelopmentSamples' tag: nil) includes: 'DevelopmentSampleT').
+	self assert: (s classList: 'DevelopmentSamples' tag: 'Other') isEmpty.
+	self assert: ((s classDefinition: 'DevelopmentSampleT') at: 'package') = 'DevelopmentSamples'.
+	self assert: ((s classDefinition: 'DevelopmentSampleT') at: 'tag') isNil.
+	files := (s classRemove: 'DevelopmentSampleT') at: 'files'.
+	self assert: (files first at: 'path') = 'DevelopmentSampleT.class.st'.
+	self assert: (files first at: 'remove') == true]
+		ensure: [
+			(Smalltalk at: #DevelopmentSampleT ifAbsent: [nil]) ifNotNil: [:k | Smalltalk removeClass: k].
+			c := nil.
+			Smalltalk garbageCollect]
 ]
 
 { #category : #tests }
@@ -180,7 +220,10 @@ DevelopmentTest >> testRequestKinds [
 	self assert: (DevProtocol kindOf: #processRetrySend:) = 'process.retrySend'.
 	self assert: (DevProtocol kindOf: #protocolDescribe) = 'protocol.describe'.
 	self assert: (DevProtocol kindOf: #evaluate:receiver:) = 'evaluate'.
-	self assert: ((DevProtocol argumentNamesOf: #methodCompile:source:category:side:) = #('className' 'source' 'category' 'side'))
+	self assert: ((DevProtocol argumentNamesOf: #methodCompile:source:category:side:) = #('className' 'source' 'category' 'side')).
+	self assert: ((DevProtocol argumentNamesOf: #classDefine:superclass:instanceVariables:classVariables:package:tag:) = #('name' 'superclass' 'instanceVariables' 'classVariables' 'package' 'tag')).
+	self assert: ((DevProtocol argumentNamesOf: #classList:tag:) = #('package' 'tag')).
+	self assert: (DevSession lookupSelector: #classCategories) isNil
 ]
 
 { #category : #tests }

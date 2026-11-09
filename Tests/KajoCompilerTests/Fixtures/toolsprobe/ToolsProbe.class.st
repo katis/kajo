@@ -9,8 +9,7 @@ Class {
 		'hierarchy',
 		'framesBefore',
 		'remoteProcess'
-	],
-	#category : #'Toolsprobe'
+	]
 }
 
 { #category : #actions }

@@ -5,7 +5,7 @@ Class {
 	#instVars : [
 		'conn',
 		'client',
-		'package',
+		'sessionPackage',
 		'handles',
 		'nextHandle'
 	],
@@ -27,7 +27,7 @@ DevSession >> info [
 	"session.open's answer: the protocol, the client, the package, the image kind, the number of requests, and every standing stop as its process.stopped event said (the development answers: a client that connects after a Process stopped, with no client or another one, finds it here and opens its debugger)."
 	| o |
 	o := JsonObject new.
-	o at: 'protocol' put: 1; at: 'client' put: client; at: 'package' put: package;
+	o at: 'protocol' put: 1; at: 'client' put: client; at: 'package' put: sessionPackage;
 		at: 'image' put: (Smalltalk isReleaseImage ifTrue: ['release'] ifFalse: ['development']);
 		at: 'requests' put: DevProtocol describe size;
 		at: 'stopped' put: ((Debugger stops sort: [:a :b | a process id <= b process id]) collect: [:s | s notedSummary]).
@@ -36,14 +36,14 @@ DevSession >> info [
 
 { #category : #accessing }
 DevSession >> package [
-	^ package
+	^ sessionPackage
 ]
 
 { #category : #accessing }
 DevSession >> setConn: anInteger client: aString package: aPackageOrNil [
 	conn := anInteger.
 	client := aString.
-	package := aPackageOrNil.
+	sessionPackage := aPackageOrNil.
 	handles := Dictionary new.
 	nextHandle := 1
 ]
@@ -90,16 +90,27 @@ DevSession >> behaviorNamed: aName side: aSide [
 
 { #category : #helpers }
 DevSession >> filesFor: aBehavior [
-	"What the client writes into its project directory after a change of aBehavior's class (module 9b): the session's package's file of the class, {path. text}, or the file to remove when the package has nothing of it any more."
+	"What the client writes into its project directory after a change of aBehavior's class (module 9b): the session's package's file of the class, {path. text}, or the file to remove when the package has nothing of it any more. The path is relative to the project directory: <Tag>/<Name>.class.st for a class with a tag (tags as subdirectories)."
 	| c pkg o |
 	c := aBehavior theNonMetaClass.
-	pkg := package ifNil: [Smalltalk packageOf: c].
+	pkg := self packageFor: c.
 	o := JsonObject new.
-	o at: 'path' put: (TonelWriter fileNameOf: c package: pkg).
+	o at: 'path' put: (TonelWriter pathOf: c package: pkg).
 	((Smalltalk packageOf: c) = pkg or: [TonelWriter hasMethodsOf: c package: pkg])
 		ifTrue: [o at: 'text' put: (TonelWriter sourceOf: c package: pkg)]
 		ifFalse: [o at: 'remove' put: true].
 	^ Array with: o
+]
+
+{ #category : #helpers }
+DevSession >> filesFor: aClass movedFrom: anOldPathOrNil [
+	"filesFor: aClass, and the file at anOldPathOrNil to remove when the class's file is no longer there (its tag or its package changed: the file moves, as a removed class's file goes)."
+	| files o |
+	files := self filesFor: aClass.
+	(anOldPathOrNil isNil or: [anOldPathOrNil = (files first at: 'path')]) ifTrue: [^ files].
+	o := JsonObject new.
+	o at: 'path' put: anOldPathOrNil; at: 'remove' put: true.
+	^ files , (Array with: o)
 ]
 
 { #category : #helpers }
@@ -110,23 +121,20 @@ DevSession >> namesOf: aStringOrArray [
 ]
 
 { #category : #helpers }
+DevSession >> packageFor: aClass [
+	"The package whose files a change of aClass writes: the session's, else the class's own."
+	^ sessionPackage ifNil: [Smalltalk packageOf: aClass]
+]
+
+{ #category : #helpers }
 DevSession >> stopOf: aProcessId [
 	^ (Debugger stopWithId: aProcessId) ifNil: [self error: 'the Process ' , aProcessId printString , ' is not stopped']
 ]
 
-{ #category : #'requests-browse' }
-DevSession >> classCategories [
-	"The class categories, sorted."
-	<devProtocol>
-	| out |
-	out := Set new.
-	Smalltalk allClasses do: [:c | out add: (Smalltalk categoryOf: c)].
-	^ out asArray sort: [:a :b | a <= b]
-]
 
 { #category : #'requests-browse' }
 DevSession >> classDefinition: className [
-	"A class's definition: its superclass, instance variables, class variables, class-side instance variables, category, format kind, comment and package."
+	"A class's definition: its superclass, instance variables, class variables, class-side instance variables, format kind, comment, package and tag (nil when it has none; tags as subdirectories)."
 	<devProtocol>
 	| c d o |
 	c := self behaviorNamed: className side: nil.
@@ -136,27 +144,29 @@ DevSession >> classDefinition: className [
 		at: 'instanceVariables' put: (d instVarNames collect: [:n | n asString]);
 		at: 'classVariables' put: (c classVarNames collect: [:n | n asString]);
 		at: 'classInstanceVariables' put: (d classInstVarNames collect: [:n | n asString]);
-		at: 'category' put: d category; at: 'kind' put: d kind; at: 'comment' put: d comment;
-		at: 'package' put: d package.
+		at: 'kind' put: d kind; at: 'comment' put: d comment;
+		at: 'package' put: d package; at: 'tag' put: (d tag ifNotNil: [:t | t asString]).
 	^ o
 ]
 
 { #category : #'requests-browse' }
 DevSession >> classHierarchy [
-	"Every class with its superclass, category and package, sorted by name: the browser's class tree in one request (module 9c)."
+	"Every class with its superclass, package and tag (nil when it has none), sorted by name: the browser's class tree in one request (module 9c; the tag since tags as subdirectories)."
 	<devProtocol>
 	^ (Smalltalk allClasses collect: [:c | | o |
 		o := JsonObject new.
 		o at: 'name' put: c name asString; at: 'superclass' put: (c superclass ifNotNil: [:s | s name asString]);
-			at: 'category' put: (Smalltalk categoryOf: c); at: 'package' put: (Smalltalk packageOf: c).
+			at: 'package' put: (Smalltalk packageOf: c); at: 'tag' put: ((Smalltalk tagOf: c) ifNotNil: [:t | t asString]).
 		o]) asArray sort: [:a :b | (a at: 'name') <= (b at: 'name')]
 ]
 
 { #category : #'requests-browse' }
-DevSession >> classList: category [
-	"The names of the classes, of one category when it is given, sorted."
+DevSession >> classList: package tag: tag [
+	"The names of the classes, of one package when it is given and of one of its tags when that is given too, sorted."
 	<devProtocol>
-	^ ((Smalltalk allClasses select: [:c | category isNil or: [(Smalltalk categoryOf: c) = category]])
+	^ ((Smalltalk allClasses select: [:c |
+		(package isNil or: [(Smalltalk packageOf: c) = package])
+			and: [tag isNil or: [(Smalltalk tagOf: c) notNil and: [(Smalltalk tagOf: c) asString = tag asString]]]])
 		collect: [:c | c name asString]) asArray sort: [:a :b | a <= b]
 ]
 
@@ -242,6 +252,13 @@ DevSession >> packageList [
 ]
 
 { #category : #'requests-browse' }
+DevSession >> packageTags: name [
+	"The tags of a package's classes, sorted (every package's when name is nil; tags as subdirectories: a tag is the subdirectory of the package's directory its classes' files are in)."
+	<devProtocol>
+	^ Smalltalk tagsOf: name
+]
+
+{ #category : #'requests-browse' }
 DevSession >> packageSelectors: name [
 	"Every method of a package, 'Class>>selector' or 'Class class>>selector', sorted (module 9c: the browser's list of a package's methods)."
 	<devProtocol>
@@ -281,14 +298,20 @@ DevSession >> classComment: className comment: comment [
 ]
 
 { #category : #'requests-change' }
-DevSession >> classDefine: name superclass: superclass instanceVariables: instanceVariables classVariables: classVariables category: category [
-	"Define a class, or redefine one of the same superclass and kind (instanceVariables and classVariables: blank-separated names or an Array). It belongs to the session's package. Answers the class and the files to write."
+DevSession >> classDefine: name superclass: superclass instanceVariables: instanceVariables classVariables: classVariables package: package tag: tag [
+	"Define a class, or redefine one of the same superclass and kind (instanceVariables and classVariables: blank-separated names or an Array), in package (the session's when not given) under tag (none when not given: the class's file is at the package's root); an existing class given neither keeps its package and tag. A class whose tag or package changes moves its file: the answer's files hold the new one to write and the old one to remove. Answers the class and the files to write."
 	<devProtocol>
-	| c sup |
+	| c sup old existing |
 	sup := self behaviorNamed: (superclass ifNil: ['Object']) side: nil.
+	existing := Smalltalk at: name asSymbol ifAbsent: [nil].
+	old := existing ifNotNil: [:e | TonelWriter pathOf: e package: (self packageFor: e)].
 	c := sup subclass: name asSymbol instanceVariableNames: (self namesOf: instanceVariables)
-		classVariableNames: (self namesOf: classVariables) category: (category ifNil: [package ifNil: ['Unclassified']]).
-	^ self changed: c
+		classVariableNames: (self namesOf: classVariables)
+		package: ((existing notNil and: [package isNil and: [tag isNil]])
+			ifTrue: [nil]
+			ifFalse: [package ifNil: [sessionPackage ifNil: [(existing ifNotNil: [:e | Smalltalk packageOf: e]) ifNil: [ClassBuilder defaultPackage]]]])
+		tag: tag.
+	^ (JsonObject new) at: 'class' put: c name; at: 'files' put: (self filesFor: c movedFrom: old); yourself
 ]
 
 { #category : #'requests-change' }
@@ -297,7 +320,7 @@ DevSession >> classRemove: className [
 	<devProtocol>
 	| c o path |
 	c := self behaviorNamed: className side: nil.
-	path := TonelWriter fileNameOf: c package: (package ifNil: [Smalltalk packageOf: c]).
+	path := TonelWriter pathOf: c package: (self packageFor: c).
 	Smalltalk removeClass: c.
 	o := JsonObject new.
 	o at: 'path' put: path; at: 'remove' put: true.

@@ -156,6 +156,9 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("dangling"),
                                                    withDestinationURL: outside.appendingPathComponent("none"))
         try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("sub/c.txt.kajo-tmp"), withDestinationURL: kept)
+        // tags as subdirectories: a link in a tag's place, to a directory
+        // inside the root
+        try FileManager.default.createSymbolicLink(atPath: dir.appendingPathComponent("sublink").path, withDestinationPath: "sub")
         let files = miniKernel + [tonel("F", "Object", """
         F class >> write: p contents: s [
             <primitive: 148>
@@ -173,7 +176,7 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
             (self write: '../x' contents: 'x') == nil ifFalse: [^ -5].
             (self write: 'sub/../../x' contents: 'x') == nil ifFalse: [^ -6].
             (self write: 'out/kajo-escape' contents: 'x') == nil ifFalse: [^ -7].
-            (self write: 'none/x' contents: 'x') == nil ifFalse: [^ -8].
+            (self write: 'none/x' contents: 'x') == true ifFalse: [^ -8].
             (self read: 'nothing.txt') == nil ifFalse: [^ -9].
             (self write: '' contents: 'x') == nil ifFalse: [^ -10].
             (self write: #sym contents: 'x') == nil ifFalse: [^ -11].
@@ -184,6 +187,16 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
             (self read: 'dangling') == nil ifFalse: [^ -16].
             (self write: 'dangling' contents: 'x') == nil ifFalse: [^ -17].
             (self write: 'sub/c.txt' contents: 'c') == true ifFalse: [^ -18].
+            (self write: 'sub/Tag/T.class.st' contents: 't') == true ifFalse: [^ -19].
+            (self read: 'sub/Tag/T.class.st') == nil ifTrue: [^ -20].
+            (self write: 'new1/new2/T.class.st' contents: 'x') == nil ifFalse: [^ -21].
+            (self write: 'dangling/T.class.st' contents: 'x') == nil ifFalse: [^ -22].
+            (self write: 'sublink/T.class.st' contents: 'x') == nil ifFalse: [^ -23].
+            (self write: 'out/NewTag/T.class.st' contents: 'x') == nil ifFalse: [^ -24].
+            (self write: 'Tag/../T.class.st' contents: 'x') == nil ifFalse: [^ -25].
+            (self write: 'Tag/./T.class.st' contents: 'x') == nil ifFalse: [^ -26].
+            (self write: 'NoBody/T.class.st' contents: 42) == nil ifFalse: [^ -27].
+            (self read: 'Unread/T.class.st') == nil ifFalse: [^ -28].
             ^ 1
         ]
         F class >> withoutDirectory [
@@ -207,6 +220,15 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: dir.appendingPathComponent("sub/inlink").path)) == nil)
         #expect(try String(contentsOf: dir.appendingPathComponent("sub/c.txt"), encoding: .utf8) == "c")
         #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("none").path))
+        // the one missing directory was created, inside; nothing else was
+        #expect(try String(contentsOf: dir.appendingPathComponent("none/x"), encoding: .utf8) == "x")
+        #expect(try String(contentsOf: dir.appendingPathComponent("sub/Tag/T.class.st"), encoding: .utf8) == "t")
+        for refused in ["new1", "NoBody", "Unread", "Tag", "sub/T.class.st"] {
+            #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent(refused).path), "\(refused)")
+        }
+        #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("NewTag").path))
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: dir.appendingPathComponent("dangling").path)
+                == outside.appendingPathComponent("none").path)
         #expect(try answerOf(image, "F", "withoutDirectory") == 1)
         // a release image refuses them whatever the directory
         image.seal()

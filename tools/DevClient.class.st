@@ -303,10 +303,6 @@ DevClient >> timedOut: anId [
 	self fail: entry with: (entry at: 1) , ' got no reply within ' , timeoutMs printString , ' ms'
 ]
 
-{ #category : #requests }
-DevClient >> classCategories: aBlock [
-	^ self request: 'class.categories' args: #() then: aBlock
-]
 
 { #category : #requests }
 DevClient >> classComment: className comment: comment then: aBlock [
@@ -314,9 +310,9 @@ DevClient >> classComment: className comment: comment then: aBlock [
 ]
 
 { #category : #requests }
-DevClient >> classDefine: className superclass: superclass instanceVariables: instanceVariables classVariables: classVariables category: category then: aBlock [
+DevClient >> classDefine: className superclass: superclass instanceVariables: instanceVariables classVariables: classVariables package: packageName tag: tagName then: aBlock [
 	^ self request: 'class.define'
-		args: {'name'. className. 'superclass'. superclass. 'instanceVariables'. instanceVariables. 'classVariables'. classVariables. 'category'. category}
+		args: {'name'. className. 'superclass'. superclass. 'instanceVariables'. instanceVariables. 'classVariables'. classVariables. 'package'. packageName. 'tag'. tagName}
 		then: aBlock
 ]
 
@@ -331,8 +327,8 @@ DevClient >> classHierarchy: aBlock [
 ]
 
 { #category : #requests }
-DevClient >> classList: category then: aBlock [
-	^ self request: 'class.list' args: {'category'. category} then: aBlock
+DevClient >> classList: packageName tag: tagName then: aBlock [
+	^ self request: 'class.list' args: {'package'. packageName. 'tag'. tagName} then: aBlock
 ]
 
 { #category : #requests }
@@ -403,6 +399,11 @@ DevClient >> packageList: aBlock [
 { #category : #requests }
 DevClient >> packageSelectors: packageName then: aBlock [
 	^ self request: 'package.selectors' args: {'name'. packageName} then: aBlock
+]
+
+{ #category : #requests }
+DevClient >> packageTags: packageName then: aBlock [
+	^ self request: 'package.tags' args: {'name'. packageName} then: aBlock
 ]
 
 { #category : #requests }
@@ -582,12 +583,11 @@ DevClient class >> notRetried [
 DevClient class >> requests [
 	"Every request of the development protocol and the method that sends it (DevClientTest compares this with DevProtocol describe)."
 	^ #(
-		#('class.categories' #classCategories:)
 		#('class.comment' #classComment:comment:then:)
-		#('class.define' #classDefine:superclass:instanceVariables:classVariables:category:then:)
+		#('class.define' #classDefine:superclass:instanceVariables:classVariables:package:tag:then:)
 		#('class.definition' #classDefinition:then:)
 		#('class.hierarchy' #classHierarchy:)
-		#('class.list' #classList:then:)
+		#('class.list' #classList:tag:then:)
 		#('class.remove' #classRemove:then:)
 		#('class.selectors' #classSelectors:side:then:)
 		#('class.tonel' #classTonel:then:)
@@ -602,6 +602,7 @@ DevClient class >> requests [
 		#('method.source' #methodSource:selector:side:then:)
 		#('package.list' #packageList:)
 		#('package.selectors' #packageSelectors:then:)
+		#('package.tags' #packageTags:then:)
 		#('process.evaluate' #processEvaluate:frame:source:then:)
 		#('process.frames' #processFrames:then:)
 		#('process.list' #processList:)

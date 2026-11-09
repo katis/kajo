@@ -4,8 +4,7 @@ Class {
 	#superclass : #Object,
 	#classInstVars : [
 		'result'
-	],
-	#category : #'Sample-Core'
+	]
 }
 
 { #category : #samples }

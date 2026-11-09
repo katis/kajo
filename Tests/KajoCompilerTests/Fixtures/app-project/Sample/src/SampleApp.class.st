@@ -7,8 +7,7 @@ Class {
 		'label',
 		'button',
 		'presses'
-	],
-	#category : #Sample
+	]
 }
 
 { #category : #accessing }

@@ -11,8 +11,7 @@ Class {
 		'progress',
 		'presses',
 		'worker'
-	],
-	#category : #'Shell-Demo'
+	]
 }
 
 { #category : #opening }

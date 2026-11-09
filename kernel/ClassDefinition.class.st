@@ -1,27 +1,17 @@
-"What the image keeps of a class beyond the VM's class object (module 8e): its own instance variable names and class-side instance variable names (Symbols, in slot order), its category, its format kind (fixed, variable, bytes, words16, words32, words64, weak, ephemeron) and its comment. Smalltalk holds one per class; the compiler in Smalltalk reads the names, the Tonel writer all of it. The class variables are the class's pool."
+"What the image keeps of a class beyond the VM's class object (module 8e): its own instance variable names and class-side instance variable names (Symbols, in slot order), its package and its tag (tags as subdirectories: the package is the directory its file is in, the tag, a Symbol or nil, the subdirectory; nothing about placement lives in the file), its format kind (fixed, variable, bytes, words16, words32, words64, weak, ephemeron) and its comment. Smalltalk holds one per class; the compiler in Smalltalk reads the names, the Tonel writer all of it. The class variables are the class's pool."
 Class {
 	#name : #ClassDefinition,
 	#superclass : #Object,
 	#instVars : [
 		'instVarNames',
 		'classInstVarNames',
-		'category',
+		'tag',
 		'kind',
 		'comment',
 		'package'
 	],
 	#category : #'Kernel-Classes'
 }
-
-{ #category : #accessing }
-ClassDefinition >> category [
-	^ category
-]
-
-{ #category : #accessing }
-ClassDefinition >> category: aSymbol [
-	category := aSymbol
-]
 
 { #category : #accessing }
 ClassDefinition >> classInstVarNames [
@@ -69,16 +59,28 @@ ClassDefinition >> package: aString [
 	package := aString
 ]
 
+{ #category : #accessing }
+ClassDefinition >> tag [
+	"The class's tag within its package, a Symbol, or nil when its file is at the package's root (tags as subdirectories)."
+	^ tag
+]
+
+{ #category : #accessing }
+ClassDefinition >> tag: aSymbolOrNil [
+	tag := (aSymbolOrNil isNil or: [aSymbolOrNil isEmpty]) ifTrue: [nil] ifFalse: [aSymbolOrNil asSymbol]
+]
+
 { #category : #initialization }
-ClassDefinition >> setInstVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString [
+ClassDefinition >> setInstVarNames: ivars classInstVarNames: civars package: aPackage tag: aTag kind: aKind comment: aString [
 	instVarNames := ivars.
 	classInstVarNames := civars.
-	category := aCategory.
+	package := aPackage.
+	self tag: aTag.
 	kind := aKind.
 	comment := aString
 ]
 
 { #category : #'instance creation' }
-ClassDefinition class >> instVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString [
-	^ self new setInstVarNames: ivars classInstVarNames: civars category: aCategory kind: aKind comment: aString
+ClassDefinition class >> instVarNames: ivars classInstVarNames: civars package: aPackage tag: aTag kind: aKind comment: aString [
+	^ self new setInstVarNames: ivars classInstVarNames: civars package: aPackage tag: aTag kind: aKind comment: aString
 ]

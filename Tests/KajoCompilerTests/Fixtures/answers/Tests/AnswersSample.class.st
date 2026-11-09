@@ -1,8 +1,7 @@
 "What the development answers' Processes run: compute sends a message nothing defines until a client defines it."
 Class {
 	#name : #AnswersSample,
-	#superclass : #Object,
-	#category : #'Answers-Tests'
+	#superclass : #Object
 }
 
 { #category : #computing }

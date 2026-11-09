@@ -7,6 +7,12 @@ Class {
 
 { #category : #loading }
 TonelLoader class >> load: aDocument [
+	"The file's class with no place of its own: an existing class keeps its package and tag, a new one gets the session's package or the default and no tag."
+	^ self load: aDocument package: nil tag: nil
+]
+
+{ #category : #loading }
+TonelLoader class >> load: aDocument package: aPackageOrNil tag: aTagOrNil [
 	| cls sup existing methods |
 	aDocument isExtension ifTrue: [^ self loadExtension: aDocument].
 	sup := aDocument superclassName ifNotNil: [:n | Smalltalk at: n asSymbol ifAbsent: [^ ClassDefinitionError new signal: aDocument name , ': no superclass ' , n]].
@@ -15,7 +21,7 @@ TonelLoader class >> load: aDocument [
 		instanceVariableNames: (existing ifNil: [aDocument instVarNames] ifNotNil: [:c | c instVarNames])
 		classVariableNames: (existing ifNil: [aDocument classVarNames] ifNotNil: [:c | c classVarNames])
 		classInstanceVariableNames: (existing ifNil: [aDocument classInstVarNames] ifNotNil: [:c | c class instVarNames])
-		category: aDocument category kind: aDocument kind comment: aDocument comment.
+		package: aPackageOrNil tag: aTagOrNil kind: aDocument kind comment: aDocument comment.
 	methods := IdentityDictionary new.
 	methods at: cls put: OrderedCollection new; at: cls class put: OrderedCollection new.
 	aDocument methods do: [:m |
@@ -23,6 +29,18 @@ TonelLoader class >> load: aDocument [
 	ClassBuilder redefine: cls instanceVariableNames: aDocument instVarNames classVariableNames: aDocument classVarNames
 		classInstanceVariableNames: aDocument classInstVarNames methods: methods.
 	^ cls
+]
+
+{ #category : #loading }
+TonelLoader class >> load: aDocument path: aPath [
+	"The file at aPath, relative to its package's directory: the class takes its tag from the path (TonelReader tagOfPath:), in the package it has (an existing class), else the session's or the default one (tags as subdirectories)."
+	| tag existing |
+	tag := TonelReader tagOfPath: aPath.
+	aDocument isExtension ifTrue: [^ self loadExtension: aDocument].
+	existing := Smalltalk at: aDocument name asSymbol ifAbsent: [nil].
+	^ self load: aDocument
+		package: (existing ifNil: [ClassBuilder newClassPackage ifNil: [ClassBuilder defaultPackage]] ifNotNil: [:c | Smalltalk packageOf: c])
+		tag: tag
 ]
 
 { #category : #loading }

@@ -4,8 +4,7 @@ Class {
 	#superclass : #Object,
 	#classInstVars : [
 		'started'
-	],
-	#category : #'Answers-Tests'
+	]
 }
 
 { #category : #opening }

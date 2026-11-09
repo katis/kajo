@@ -56,8 +56,9 @@ ReflectionTest >> testMethods [
 ReflectionTest >> testSmalltalk [
 	self assert: (Smalltalk at: #Object) == Object.
 	self assert: (Smalltalk at: #NoSuchClass ifAbsent: [nil]) isNil.
-	self assert: (Smalltalk categoryOf: Object) = 'Kernel-Objects'.
-	self assert: Object category = 'Kernel-Objects'
+	self assert: (Smalltalk packageOf: Object) = 'Kernel'.
+	self assert: (Smalltalk tagOf: Object) == #Objects.
+	self assert: (Smalltalk class includesSelector: #categoryOf:) not
 ]
 
 { #category : #instances }

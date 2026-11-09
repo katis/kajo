@@ -85,12 +85,12 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
         // SUnitSample is abstract; its failing tests run when named.
         let src = KernelBuild.sources
         let extra: [(file: String, text: [UInt8])] = [("Failing.class.st", Array("""
-        Class { #name : #FailingSample, #superclass : #TestCase, #category : #Test }
+        Class { #name : #FailingSample, #superclass : #TestCase }
         FailingSample >> testFails [ self assert: 1 + 1 equals: 3 ]
         FailingSample >> testErrors [ ^ nil foo ]
         FailingSample >> testPasses [ self assert: true ]
         """.utf8))]
-        let image = try KernelBuild.build(try src([kernelDirectory]) + extra).image
+        let image = try KernelBuild.build(try src([kernelDirectory]) + extra.map { ($0.file, $0.text, nil) }).image
         let (result, lines) = runKernelTests(image, ["--filter", "FailingSample"])
         #expect(try result.get() == 2)
         let report = TestReport(lines)
@@ -109,10 +109,10 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
 
     @Test func theTranscriptIsAnEventWithItsProcess() throws {
         let extra: [(file: String, text: [UInt8])] = [("Shows.class.st", Array("""
-        Class { #name : #ShowsSample, #superclass : #TestCase, #category : #Test }
+        Class { #name : #ShowsSample, #superclass : #TestCase }
         ShowsSample >> testShows [ Transcript show: 'hello '; show: 42; cr ]
         """.utf8))]
-        let image = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + extra).image
+        let image = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + extra.map { ($0.file, $0.text, nil) }).image
         let (_, lines) = runKernelTests(image, ["--filter", "ShowsSample"])
         let report = TestReport(lines)
         let t = try #require(report.events.first { $0["kind"] as? String == "transcript" })
@@ -150,29 +150,29 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
 
     @Test func aBrokenClassFileRefusesTheWholeBuild() throws {
         let bad: [(file: String, text: [UInt8])] = [("Bad.class.st", Array("""
-        Class { #name : #Bad, #superclass : #Object, #category : #Test }
+        Class { #name : #Bad, #superclass : #Object }
         Bad >> broken [ ^ 1 + ]
         """.utf8))]
-        #expect(throws: CompileError.self) { _ = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + bad) }
+        #expect(throws: CompileError.self) { _ = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + bad.map { ($0.file, $0.text, nil) }) }
         let unknown: [(file: String, text: [UInt8])] = [("Bad.class.st", Array("""
-        Class { #name : #Bad, #superclass : #NoSuchClass, #category : #Test }
+        Class { #name : #Bad, #superclass : #NoSuchClass }
         """.utf8))]
-        #expect(throws: CompileError.self) { _ = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + unknown) }
+        #expect(throws: CompileError.self) { _ = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + unknown.map { ($0.file, $0.text, nil) }) }
         let wrongWellKnown: [(file: String, text: [UInt8])] = [("Point.class.st", Array("""
-        Class { #name : #Message, #superclass : #Object, #instVars : [ 'a' ], #category : #Test }
+        Class { #name : #Message, #superclass : #Object, #instVars : [ 'a' ] }
         """.utf8))]
         #expect(throws: CompileError.self) {
             _ = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]).filter { !$0.file.hasSuffix("/Message.class.st") }
-                                      + wrongWellKnown)
+                                      + wrongWellKnown.map { ($0.file, $0.text, nil) })
         }
     }
 
     @Test func anUnconsumedPragmaWarns() throws {
         let extra: [(file: String, text: [UInt8])] = [("P.class.st", Array("""
-        Class { #name : #PragmaSample, #superclass : #Object, #category : #Test }
+        Class { #name : #PragmaSample, #superclass : #Object }
         PragmaSample >> m [ <expectedFailur> ^ 1 ]
         """.utf8))]
-        let r = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + extra)
+        let r = try KernelBuild.build(try KernelBuild.sources(in: [kernelDirectory]) + extra.map { ($0.file, $0.text, nil) })
         #expect(r.warnings.count == 1 && r.warnings[0].contains("<expectedFailur>"))
     }
 }

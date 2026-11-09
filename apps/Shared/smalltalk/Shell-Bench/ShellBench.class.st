@@ -11,8 +11,7 @@ Class {
 		'ring',
 		'shared',
 		'failures'
-	],
-	#category : #'Shell-Bench'
+	]
 }
 
 { #category : #window }

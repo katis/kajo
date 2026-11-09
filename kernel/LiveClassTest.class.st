@@ -7,7 +7,7 @@ Class {
 
 { #category : #running }
 LiveClassTest >> defineSample [
-	^ Object subclass: #LiveClassSample instanceVariableNames: 'a b' classVariableNames: 'Count' category: 'Kernel-Tests-Live'
+	^ Object subclass: #LiveClassSample instanceVariableNames: 'a b' classVariableNames: 'Count' package: 'Kernel' tag: 'Tests-Live'
 ]
 
 { #category : #running }
@@ -111,7 +111,8 @@ LiveClassTest >> testDefineInstantiateRemove [
 	self assert: c class superclass == Object class.
 	self assert: c instVarNames = #(#a #b).
 	self assert: c classVarNames = #(#Count).
-	self assert: c category = 'Kernel-Tests-Live'.
+	self assert: (Smalltalk packageOf: c) = 'Kernel'.
+	self assert: (Smalltalk tagOf: c) == #'Tests-Live'.
 	self assert: c instSize = 2.
 	self assert: (Object subclasses includes: c).
 	c compile: 'a ^ a' classified: #accessing.
@@ -141,18 +142,21 @@ LiveClassTest >> testDefineInstantiateRemove [
 { #category : #tests }
 LiveClassTest >> testDefinitionsTheVMRefuses [
 	Smalltalk isReleaseImage ifTrue: [^ self].
-	self should: [Object subclass: #liveLower instanceVariableNames: '' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [Object subclass: #AnObsoleteThing instanceVariableNames: '' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [Array subclass: #Object instanceVariableNames: '' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [CompiledMethod subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [Context subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [Association subclass: #LiveClassSampleB instanceVariableNames: 'key' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: 'p p' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: 'lower' category: 'x'] raise: ClassDefinitionError.
-	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: 'Tag' classVariableNames: 'Tag' category: 'x'] raise: ClassDefinitionError.
-	self should: [Float subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: 'NaN' category: 'x'] raise: ClassDefinitionError.
-	self should: [ByteArray subclass: #LiveClassSampleB instanceVariableNames: 'p' classVariableNames: '' category: 'x'] raise: ClassDefinitionError.
-	self should: [ByteArray subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' category: 'x' kind: #variable] raise: ClassDefinitionError.
+	self should: [Object subclass: #liveLower instanceVariableNames: '' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [Object subclass: #AnObsoleteThing instanceVariableNames: '' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [Array subclass: #Object instanceVariableNames: '' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [CompiledMethod subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [Context subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [Association subclass: #LiveClassSampleB instanceVariableNames: 'key' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: 'p p' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: 'lower' package: 'x'] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: 'Tag' classVariableNames: 'Tag' package: 'x'] raise: ClassDefinitionError.
+	self should: [Float subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: 'NaN' package: 'x'] raise: ClassDefinitionError.
+	self should: [ByteArray subclass: #LiveClassSampleB instanceVariableNames: 'p' classVariableNames: '' package: 'x'] raise: ClassDefinitionError.
+	self should: [ByteArray subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' package: 'x' tag: nil kind: #variable] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' package: 'x' tag: 'a/b'] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSampleB instanceVariableNames: '' classVariableNames: '' package: 'x' tag: '..'] raise: ClassDefinitionError.
+	self assert: (Smalltalk at: #LiveClassSampleB ifAbsent: [nil]) isNil.
 	self assert: (Smalltalk at: #LiveClassSampleB ifAbsent: [nil]) isNil.
 	"the primitive refuses what the kernel would not send"
 	self assert: (Smalltalk primDefineClass: #(1 2 3)) isString.
@@ -192,7 +196,7 @@ LiveClassTest >> testReshapeKeepsValuesByNameAndRecompiles [
 	c := self defineSample.
 	c compile: 'a ^ a'. c compile: 'b ^ b'. c compile: 'a: x b: y a := x. b := y'.
 	c compile: 'sum ^ a + b'.
-	sub := c subclass: #LiveClassSampleSub instanceVariableNames: 's' classVariableNames: '' category: 'Kernel-Tests-Live'.
+	sub := c subclass: #LiveClassSampleSub instanceVariableNames: 's' classVariableNames: '' package: 'Kernel' tag: 'Tests-Live'.
 	sub compile: 's ^ s'. sub compile: 's: v s := v'. sub compile: 'total ^ self sum + s'.
 	x := c new a: 1 b: 2; yourself.
 	y := (sub new a: 10 b: 20; yourself) s: 30; yourself.

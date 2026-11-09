@@ -1,8 +1,7 @@
 "Module 8c's round trips in Smalltalk: each scenario saves the image (Smalltalk snapshot: nil, to the host) while its Processes hold locks, wait, sit in ensure: blocks and handlers, and answers what its Processes computed. The host runs it to the end, then resumes the saved image in a fresh VM, where the saving Process continues after snapshot: and must answer the same."
 Class {
 	#name : #SnapshotScenarios,
-	#superclass : #Object,
-	#category : #'Snapshot-Tests'
+	#superclass : #Object
 }
 
 { #category : #scenarios }
@@ -155,7 +154,7 @@ SnapshotScenarios class >> removedMethod [
 SnapshotScenarios class >> redefinedClass [
 	"Module 8e: a class defined at run time, with instances, a class variable, a class-side instance variable and an old closure, reshaped on both sides, its pool changed, a second class defined and removed, all before the save; the resumed image (whose loader verified every method against its class's new shape) answers from them: 2 + 2 + 5 + 10 + 20."
 	| c x blk gone |
-	c := Object subclass: #LiveSnapshotSample instanceVariableNames: 'a b' classVariableNames: 'Total' category: 'Scenarios'.
+	c := Object subclass: #LiveSnapshotSample instanceVariableNames: 'a b' classVariableNames: 'Total' package: 'Snapshot' tag: 'Scenarios'.
 	c compile: 'b ^ b'. c compile: 'b: v b := v'. c compile: 'reader ^ [b]'.
 	c compile: 'total ^ Total'. c compile: 'total: v Total := v'.
 	c class instanceVariableNames: 'made'.
@@ -169,7 +168,7 @@ SnapshotScenarios class >> redefinedClass [
 	c addClassVarNamed: 'Extra'.
 	c compile: 'extra ^ Extra'. c compile: 'extra: v Extra := v'.
 	x extra: 20.
-	gone := Object subclass: #LiveSnapshotGone instanceVariableNames: 'p' classVariableNames: '' category: 'Scenarios'.
+	gone := Object subclass: #LiveSnapshotGone instanceVariableNames: 'p' classVariableNames: '' package: 'Snapshot' tag: 'Scenarios'.
 	gone := nil.
 	Smalltalk removeClass: (Smalltalk at: #LiveSnapshotGone).
 	Smalltalk snapshot: nil.

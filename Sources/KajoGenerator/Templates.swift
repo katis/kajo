@@ -345,8 +345,7 @@ struct Templates {
         \t\t'label',
         \t\t'button',
         \t\t'presses'
-        \t],
-        \t#category : #\(name)
+        \t]
         }
 
         { #category : #accessing }
@@ -387,8 +386,7 @@ struct Templates {
         "The test kajo new made for \(name)App: a press changes the label."
         Class {
         \t#name : #\(name)AppTest,
-        \t#superclass : #TestCase,
-        \t#category : #\(name)
+        \t#superclass : #TestCase
         }
 
         { #category : #tests }

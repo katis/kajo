@@ -1,8 +1,7 @@
 "The test kajo new made for SampleApp: a press changes the label."
 Class {
 	#name : #SampleAppTest,
-	#superclass : #TestCase,
-	#category : #Sample
+	#superclass : #TestCase
 }
 
 { #category : #tests }

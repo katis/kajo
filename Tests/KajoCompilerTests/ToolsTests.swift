@@ -169,11 +169,11 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     @Test func theDevelopmentImageBuildsAndTheToolsTestsPass() throws {
         let r = try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory]))
         #expect(r.warnings.isEmpty, "\(r.warnings)")
-        let classes = try FileManager.default.contentsOfDirectory(atPath: toolsDirectory).filter { $0.hasSuffix("Test.class.st") }
+        let classes = try tonelFiles(in: toolsDirectory).filter { $0.hasSuffix("Test.class.st") }
         #expect(classes.count >= 7)
         var total = 0
         for c in classes.sorted() {
-            let name = String(c.dropLast(".class.st".count))
+            let name = String((c as NSString).lastPathComponent.dropLast(".class.st".count))
             let (result, lines) = runKernelTests(developmentImage, ["--filter", "\(name)>>*"])
             let report = TestReport(lines)
             #expect(try result.get() == 0, "\(name): \(report.failures.prefix(3))")
@@ -193,8 +193,8 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         }
         _ = try runSmalltalk(image, "writePackages:", ["Kernel", "kernel", "Tools", "tools"], sources: dir.path)
         for (package, source) in [("kernel", kernelDirectory), ("tools", toolsDirectory)] {
-            let want = try FileManager.default.contentsOfDirectory(atPath: source).filter { $0.hasSuffix(".st") }.sorted()
-            let got = try FileManager.default.contentsOfDirectory(atPath: dir.path + "/" + package).sorted()
+            let want = try tonelFiles(in: source)
+            let got = try tonelFiles(in: dir.path + "/" + package)
             #expect(got == want, "\(package)")
             let differing = want.filter {
                 FileManager.default.contents(atPath: source + "/" + $0) != FileManager.default.contents(atPath: dir.path + "/" + package + "/" + $0)

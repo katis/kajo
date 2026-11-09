@@ -10,7 +10,6 @@ import KajoVM
 //         #instVars : [ 'x', 'y' ],
 //         #classInstVars : [ 'origin' ],
 //         #classVars : [ 'Default' ],
-//         #category : #'Kernel-Numbers',
 //         #type : #variable
 //     }
 //
@@ -31,6 +30,15 @@ import KajoVM
 // variables (`#classVars`, module 8d) are capitalized names the class, its
 // metaclass and every subclass share; the image build checks them
 // (`Plan`).
+//
+// Tags as subdirectories (docs/modules/tags-as-subdirectories.md): nothing
+// about a class's placement lives in its file. Its package is the
+// directory it is read from and its tag, when it has one, the
+// subdirectory of that directory its file is in (`tonelTag(ofPath:)`,
+// one level only). A definition's `#category` (a Kajo file written before
+// the change) and Pharo's `#package` and `#tag` are read and ignored, as
+// every key the reader does not know, so such a file loads and the next
+// write leaves them out.
 
 public struct TonelMethod: Sendable {
     public let className: String
@@ -51,7 +59,6 @@ public struct TonelClass: Sendable {
     public let classInstanceVariables: [String]
     /// Module 8d: the class variables it declares.
     public let classVariables: [String]
-    public let category: String
     /// nil: inherited (`fixed` under Object).
     public let type: String?
     public let comment: String
@@ -270,7 +277,7 @@ struct TonelReader {
         var cls = TonelClass(file: file, line: headLine, isExtension: isExtension, name: name, superclass: superclass,
                              instanceVariables: try names("instVars"), classInstanceVariables: try names("classInstVars"),
                              classVariables: isExtension ? [] : try names("classVars"),
-                             category: entry("category")?.text ?? "", type: entry("type")?.text, comment: comment, methods: [])
+                             type: entry("type")?.text, comment: comment, methods: [])
         while true {
             _ = try space()
             if i >= b.count { break }
@@ -327,6 +334,28 @@ struct TonelReader {
         }
         return cls
     }
+}
+
+/// The tag a class file's path gives (tags as subdirectories): `path` is
+/// relative to the package's directory; a file at its root has none, a
+/// file one directory down has that directory's name as its tag, and a
+/// file further down is refused naming the path. `TonelReader
+/// class>>tagOfPath:` is the same rule in the image; a test compares them.
+public func tonelTag(ofPath path: String) throws(CompileError) -> String? {
+    let parts = path.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+    switch parts.count {
+    case 1: return nil
+    case 2:
+        guard isTonelTag(parts[0]) else { throw CompileError("\(path): '\(parts[0])' is not a tag's directory") }
+        return parts[0]
+    default: throw CompileError("\(path): a class file two directories below its package (a tag is one directory)")
+    }
+}
+
+/// Whether `name` can be a tag: one path component, not empty, not `.` or
+/// `..`, no `/` or NUL, not hidden (a leading `.`).
+public func isTonelTag(_ name: String) -> Bool {
+    !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains("\0")
 }
 
 /// Read one Tonel file.

@@ -6,12 +6,12 @@ import Testing
 /// A class file in Tonel from a header and methods (`Foo >> bar [ ... ]`).
 func tonel(_ name: String, _ superclass: String? = "Object", ivars: [String] = [], classIvars: [String] = [], classVars: [String] = [],
            type: String? = nil, _ methods: String) -> (file: String, text: [UInt8]) {
-    var s = "Class {\n\t#name : #\(name),\n\t#superclass : \(superclass.map { "#" + $0 } ?? "nil"),\n"
-    s += "\t#instVars : [ \(ivars.map { "'\($0)'" }.joined(separator: ", ")) ],\n"
-    s += "\t#classInstVars : [ \(classIvars.map { "'\($0)'" }.joined(separator: ", ")) ],\n"
-    if !classVars.isEmpty { s += "\t#classVars : [ \(classVars.map { "'\($0)'" }.joined(separator: ", ")) ],\n" }
-    if let type { s += "\t#type : #\(type),\n" }
-    s += "\t#category : #Test\n}\n\n" + methods
+    var keys = ["#name : #\(name)", "#superclass : \(superclass.map { "#" + $0 } ?? "nil")",
+                "#instVars : [ \(ivars.map { "'\($0)'" }.joined(separator: ", ")) ]",
+                "#classInstVars : [ \(classIvars.map { "'\($0)'" }.joined(separator: ", ")) ]"]
+    if !classVars.isEmpty { keys.append("#classVars : [ \(classVars.map { "'\($0)'" }.joined(separator: ", ")) ]") }
+    if let type { keys.append("#type : #\(type)") }
+    let s = "Class {\n\t" + keys.joined(separator: ",\n\t") + "\n}\n\n" + methods
     return ("\(name).class.st", Array(s.utf8))
 }
 
@@ -115,4 +115,20 @@ func listing(_ m: AssembledMethod) -> [String] {
         off += d.length
     }
     return out
+}
+
+/// The Tonel files of a package directory, relative to it and sorted: its
+/// own and those one directory down, in its tags' subdirectories (tags as
+/// subdirectories); `package.st` is not one.
+func tonelFiles(in directory: String) throws -> [String] {
+    var out: [String] = []
+    for n in try FileManager.default.contentsOfDirectory(atPath: directory) where !n.hasPrefix(".") {
+        let p = (directory as NSString).appendingPathComponent(n)
+        if let inner = try? FileManager.default.contentsOfDirectory(atPath: p) {
+            out += inner.filter { $0.hasSuffix(".st") }.map { n + "/" + $0 }
+        } else if n.hasSuffix(".st") && n != "package.st" {
+            out.append(n)
+        }
+    }
+    return out.sorted()
 }

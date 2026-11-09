@@ -1,4 +1,4 @@
-"The browser's model (module 9c): packages, the classes of the selected package as a tree by superclass or by category, the instance or class side, a class's method categories and selectors, and the source pane (a method, a class definition, a comment, or a template for a new method or class). Accepting the pane compiles the method, defines the class or sets the comment through the protocol; the target answers the files the change touched, which the client's transport writes into the project directory. A compile error is shown at its line. Senders and implementors fill a list of methods to go to. defineMethod:in:then: is the debugger's define-and-retry: a template for the missing method, and a block run when it compiles."
+"The browser's model (module 9c): packages, the classes of the selected package as a tree by superclass or grouped by tag (tags as subdirectories: a tag is a parent row, a class with none is at the root), the instance or class side, a class's method categories and selectors, and the source pane (a method, a class definition, a comment, or a template for a new method or class). Accepting the pane compiles the method, defines the class or sets the comment through the protocol; the target answers the files the change touched, which the client's transport writes into the project directory. A compile error is shown at its line. Senders and implementors fill a list of methods to go to. defineMethod:in:then: is the debugger's define-and-retry: a template for the missing method, and a block run when it compiles."
 Class {
 	#name : #BrowserModel,
 	#superclass : #ToolModel,
@@ -6,7 +6,7 @@ Class {
 		'hierarchy',
 		'packages',
 		'package',
-		'byCategory',
+		'byTag',
 		'className',
 		'side',
 		'categories',
@@ -27,8 +27,9 @@ Class {
 }
 
 { #category : #accessing }
-BrowserModel >> byCategory [
-	^ byCategory == true
+BrowserModel >> byTag [
+	"Whether the class outline is grouped by tag (else it is the tree by superclass)."
+	^ byTag == true
 ]
 
 { #category : #accessing }
@@ -158,10 +159,10 @@ BrowserModel >> compile: aString [
 
 { #category : #changes }
 BrowserModel >> define: aString [
-	"Accept a class definition: 'Super subclass: #Name instanceVariableNames: ... classVariableNames: ... category: ...'."
+	"Accept a class definition: 'Super subclass: #Name instanceVariableNames: ... classVariableNames: ... package: #P tag: #T' (the tag optional: none puts the class at its package's root; a changed tag moves its file, whose old one the target names to remove)."
 	| spec |
 	spec := [self parseDefinition: aString] on: Error do: [:e | ^ self status: 'not a class definition: ' , e messageText].
-	self request: 'class.define' args: {'name'. spec at: 2. 'superclass'. spec first. 'instanceVariables'. spec at: 3. 'classVariables'. spec at: 4. 'category'. spec at: 5}
+	self request: 'class.define' args: {'name'. spec at: 2. 'superclass'. spec first. 'instanceVariables'. spec at: 3. 'classVariables'. spec at: 4. 'package'. spec at: 5. 'tag'. spec at: 6}
 		then: [:r |
 			files := r at: 'files'.
 			className := spec at: 2.
@@ -198,12 +199,12 @@ BrowserModel >> failed: aString [
 
 { #category : #changes }
 BrowserModel >> parseDefinition: aString [
-	"{superclass. name. instance variables. class variables. category} of a definition."
+	"{superclass. name. instance variables. class variables. package. tag} of a definition; the package and the tag are Symbols or Strings."
 	| s sup out k |
 	s := Scanner on: aString.
 	s next == #identifier ifFalse: [^ self error: 'a superclass first'].
 	sup := s value.
-	out := Array new: 5.
+	out := Array new: 6.
 	out at: 1 put: sup.
 	[(k := s next) == #end] whileFalse: [
 		k == #keyword ifFalse: [^ self error: 'a keyword expected'].
@@ -212,7 +213,9 @@ BrowserModel >> parseDefinition: aString [
 			out at: 2 put: s value asString].
 		s value = 'instanceVariableNames:' ifTrue: [s next. out at: 3 put: s value].
 		s value = 'classVariableNames:' ifTrue: [s next. out at: 4 put: s value].
-		s value = 'category:' ifTrue: [s next. out at: 5 put: s value]].
+		s value = 'category:' ifTrue: [^ self error: 'category: is gone: package: #Package tag: #Tag'].
+		s value = 'package:' ifTrue: [s next. out at: 5 put: s value asString].
+		s value = 'tag:' ifTrue: [s next. out at: 6 put: s value asString]].
 	(out at: 2) isNil ifTrue: [^ self error: 'subclass: #Name'].
 	^ out
 ]
@@ -256,16 +259,18 @@ BrowserModel >> classOfId: anId [
 
 { #category : #classes }
 BrowserModel >> classTree [
-	"{id. parentId. title} triples for the class outline, parents first: by superclass (a class whose superclass is not shown is a root), or by category. A class's id is its index in the hierarchy; a category's is 100000 plus its index."
-	| visible names out roots children cats add |
+	"{id. parentId. title} triples for the class outline, parents first: by superclass (a class whose superclass is not shown is a root), or grouped by tag (each tag a parent row of its classes, sorted; a class with no tag at the root, after the tags). A class's id is its index in the hierarchy; a tag's is 100000 plus its index."
+	| visible names out roots children tags add |
 	visible := self visibleEntries.
 	out := OrderedCollection new.
-	self byCategory ifTrue: [
-		cats := (visible collect: [:e | (e at: 'category') ifNil: ['Unclassified']]) asSet asArray sort: [:a :b | a <= b].
-		cats doWithIndex: [:c :i |
-			out add: {100000 + i. 0. c}.
-			(visible select: [:e | ((e at: 'category') ifNil: ['Unclassified']) = c]) do: [:e |
+	self byTag ifTrue: [
+		tags := ((visible collect: [:e | e at: 'tag']) reject: [:t | t isNil]) asSet asArray sort: [:a :b | a <= b].
+		tags doWithIndex: [:t :i |
+			out add: {100000 + i. 0. t}.
+			(visible select: [:e | (e at: 'tag') = t]) do: [:e |
 				out add: {self idOfClass: (e at: 'name'). 100000 + i. e at: 'name'}]].
+		(visible select: [:e | (e at: 'tag') isNil]) do: [:e |
+			out add: {self idOfClass: (e at: 'name'). 0. e at: 'name'}].
 		^ out asArray].
 	names := Set new.
 	visible do: [:e | names add: (e at: 'name')].
@@ -299,7 +304,7 @@ BrowserModel >> idOfClass: aName [
 
 { #category : #classes }
 BrowserModel >> setHierarchy: anArray [
-	"Every class's entry (name, superclass, category, package), and its index by name."
+	"Every class's entry (name, superclass, package, tag), and its index by name."
 	hierarchy := anArray.
 	indexByName := Dictionary new: anArray size.
 	anArray doWithIndex: [:e :i | indexByName at: (e at: 'name') put: i]
@@ -440,8 +445,8 @@ BrowserModel >> selectorsLoaded [
 ]
 
 { #category : #selecting }
-BrowserModel >> toggleByCategory [
-	byCategory := self byCategory not.
+BrowserModel >> toggleByTag [
+	byTag := self byTag not.
 	self changed: #classes
 ]
 
@@ -454,12 +459,13 @@ BrowserModel >> toggleSide [
 
 { #category : #source }
 BrowserModel >> definitionText: aDefinition [
-	"A class definition as the browser shows and accepts it."
+	"A class definition as the browser shows and accepts it: Pharo 12's package: and, when the class has one, tag: (tags as subdirectories)."
 	^ String streamContents: [:s |
 		s nextPutAll: ((aDefinition at: 'superclass') ifNil: ['nil']); nextPutAll: ' subclass: #'; nextPutAll: (aDefinition at: 'name'); lf;
 			tab; nextPutAll: 'instanceVariableNames: '''; nextPutAll: (self words: (aDefinition at: 'instanceVariables')); nextPutAll: ''''; lf;
 			tab; nextPutAll: 'classVariableNames: '''; nextPutAll: (self words: (aDefinition at: 'classVariables')); nextPutAll: ''''; lf;
-			tab; nextPutAll: 'category: '''; nextPutAll: ((aDefinition at: 'category') ifNil: ['']); nextPutAll: '''']
+			tab; nextPutAll: 'package: '; nextPutAll: (self symbolText: ((aDefinition at: 'package') ifNil: ['Unclassified'])).
+		(aDefinition at: 'tag') ifNotNil: [:t | s lf; tab; nextPutAll: 'tag: '; nextPutAll: (self symbolText: t)]]
 ]
 
 { #category : #source }
@@ -468,7 +474,7 @@ BrowserModel >> newClassTemplate [
 		s nextPutAll: 'Object subclass: #NameOfClass'; lf;
 			tab; nextPutAll: 'instanceVariableNames: '''''; lf;
 			tab; nextPutAll: 'classVariableNames: '''''; lf;
-			tab; nextPutAll: 'category: '''; nextPutAll: (package ifNil: ['Unclassified']); nextPutAll: ''''])
+			tab; nextPutAll: 'package: '; nextPutAll: (self symbolText: (package ifNil: ['Unclassified']))])
 		kind: #newClass
 ]
 
@@ -528,6 +534,13 @@ BrowserModel >> showSource: aString kind: aSymbol [
 	sourceKind := aSymbol.
 	errorLine := nil.
 	self changed: #source
+]
+
+{ #category : #source }
+BrowserModel >> symbolText: aString [
+	"aString as a Symbol literal: #Foo, or #'Foo-Bar' when it is not one identifier."
+	(aString notEmpty and: [aString allSatisfy: [:c | c isLetter or: [c isDigit]]]) ifTrue: [^ '#' , aString].
+	^ '#''' , (aString copyReplaceAll: '''' with: '''''') , ''''
 ]
 
 { #category : #source }

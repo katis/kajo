@@ -7,8 +7,7 @@ Class {
 		'result',
 		'ended',
 		'synthetic'
-	],
-	#category : #'Answers-Tests'
+	]
 }
 
 { #category : #failing }
