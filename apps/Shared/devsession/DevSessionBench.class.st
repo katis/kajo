@@ -12,7 +12,8 @@ Class {
 		'failure',
 		'package',
 		'measureWindow',
-		'targetClass'
+		'targetClass',
+		'workspace'
 	],
 	#category : #'Devsession'
 }
@@ -430,6 +431,56 @@ DevSessionBench class >> startInstances: aSocketPath [
 		w := DevTools openWorkspace: client.
 		w textView text: '(String allInstances: 100000) size'.
 		self evaluateInstances: 10 in: w].
+	self begin: 'open'.
+	self when: [client isOpen and: [browser hierarchy size > 0]] then: [self end].
+	^ true
+]
+
+{ #category : #pointers }
+DevSessionBench class >> checkPointers [
+	"The pointersTo: follow-up's bar on this image, through the tools' own client: after a collection, a fresh object stored in one Array answers exactly that Array; the first tool window's holders include the Array of DevTools' windows collection; nil pointerCount (the worst case) finishes. The answer on a transcript line 'devsession: pointers <printString>'."
+	| w |
+	w := WorkspaceModel new client: client; yourself.
+	self begin: 'pointers.check'.
+	w evaluate: '| o a r t | Smalltalk garbageCollect. o := Object new. a := Array with: o. r := o pointersTo. t := DevTools windows first pointersTo. {r size. r first == a. t size. t identityIncludes: (DevTools windows slotAt: 1). nil pointerCount}'
+		then: [:r | Transcript show: 'devsession: pointers ' , (r at: 'value'); cr; flush].
+	self when: [w lastResult notNil] then: [self end]
+]
+
+{ #category : #pointers }
+DevSessionBench class >> evaluate: aCount in: aWorkspaceWindow step: aName [
+	"Do it on the workspace's pane by its own key action, aCount times, one step named aName each, each waiting for its answer (a SmallInteger)."
+	| m before |
+	aCount = 0 ifTrue: [^ self next].
+	m := aWorkspaceWindow model.
+	before := m lastResult.
+	self begin: aName.
+	aWorkspaceWindow textView selectFrom: 1 to: aWorkspaceWindow textView text byteSize.
+	aWorkspaceWindow textView pressKey: 'cmd-d'.
+	self when: [m lastResult notNil and: [m lastResult ~~ before]] then: [
+		(m lastResult at: 'class') = 'SmallInteger' ifFalse: [^ self fail: 'the doit answered ' , (m lastResult at: 'value')].
+		Transcript show: 'devsession: ' , aName , ' ' , (m lastResult at: 'value'); cr; flush.
+		self record.
+		self evaluate: aCount - 1 in: aWorkspaceWindow step: aName]
+]
+
+{ #category : #pointers }
+DevSessionBench class >> startPointers: aSocketPath [
+	"The pointersTo: follow-up's measurement: the tools on this image, the bar's pointer checks, a Workspace evaluating (DevTools windows first pointersTo: 100000) size ten times (a window is held by a few objects) and then, in the same window so that no window opens in the step, nil pointerCount once (the walk's worst case), each evaluation by its Do it, each a step whose frames the shell counts."
+	steps := OrderedCollection new.
+	failure := nil.
+	DevTools openLocal: aSocketPath project: nil.
+	client := DevTools local.
+	browser := (DevTools windowsOf: BrowserWindow) first model.
+	queue := OrderedCollection new.
+	queue add: [self checkPointers].
+	queue add: [
+		workspace := DevTools openWorkspace: client.
+		workspace textView text: '(DevTools windows first pointersTo: 100000) size'.
+		self evaluate: 10 in: workspace step: 'pointers.eval'].
+	queue add: [
+		workspace textView text: 'nil pointerCount'.
+		self evaluate: 1 in: workspace step: 'pointers.nilcount'].
 	self begin: 'open'.
 	self when: [client isOpen and: [browser hierarchy size > 0]] then: [self end].
 	^ true

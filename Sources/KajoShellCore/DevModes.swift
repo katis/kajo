@@ -99,7 +99,8 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
 /// the whole session; one result line at the end.
 ///
 /// The discoverability follow-up: `session=instances` (local target only)
-/// runs `DevSessionBench startInstances:` instead of the session.
+/// runs `DevSessionBench startInstances:` instead of the session; the
+/// pointersTo: follow-up's `session=pointers` runs `startPointers:`.
 ///
 /// Module 9d: `target=<name|address> [targets=<file>] [project=<dir>]
 /// [package=Kernel]` runs the session against another target (the phone)
@@ -214,6 +215,14 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         // are counted (`steps_ms_missed`).
         if target == nil && typing == 0 && options["session"] == "instances" {
             selector = "startInstances:"
+            args = [.string(server?.path ?? "")]
+        }
+        // The pointersTo: follow-up: `session=pointers` on the local target,
+        // the bar's pointer checks, `nil pointerCount` once and a window's
+        // `pointersTo: 100000` ten times, each a step whose frames are
+        // counted.
+        if target == nil && typing == 0 && options["session"] == "pointers" {
+            selector = "startPointers:"
             args = [.string(server?.path ?? "")]
         }
         if let target {
