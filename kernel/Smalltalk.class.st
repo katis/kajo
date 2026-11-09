@@ -334,11 +334,25 @@ Smalltalk class >> writePackages: anArray [
 ]
 
 { #category : #primitives }
+Smalltalk class >> primAllInstancesOf: aBehaviorOrArray limit: anInteger [
+	"Primitive 167 (the discoverability follow-up): an Array of every object in the heap whose class is aBehaviorOrArray (or one of the Array's behaviors), at most anInteger of them, found in one stop after every young object is promoted. nil when refused: a limit outside 0 to 16777215, an argument that is not a behavior, or a heap so full that nothing young could be promoted."
+	<primitive: 167>
+	^ nil
+]
+
+{ #category : #primitives }
 Smalltalk class >> primDefineClass: anArray [
 	"A class from its specification (ClassBuilder), or a String saying why not (module 8e). Fails in a release image."
 	<primitive: 145>
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: nil selector: (anArray at: 1); signal].
 	^ self error: 'the VM refused to define a class'
+]
+
+{ #category : #primitives }
+Smalltalk class >> primInstanceCountOf: aBehaviorOrArray [
+	"Primitive 168: how many objects primAllInstancesOf:limit: would find with no limit, allocating nothing; nil when refused."
+	<primitive: 168>
+	^ nil
 ]
 
 { #category : #primitives }

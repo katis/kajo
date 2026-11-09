@@ -189,6 +189,52 @@ Behavior >> new: size [
 	^ (self basicNew: size) initialize
 ]
 
+{ #category : #instances }
+Behavior >> allInstances [
+	"Every object whose class is the receiver, at most 100 000 of them (allInstances: for more). A development image holds millions of objects, and one Array of all of them would be a stop a frame long (the discoverability follow-up's open question 3, built with a limit as recommended). The objects are found in one stop of the world after every young one is promoted, so an object nothing reaches any more is still an instance until a collection frees it (send Smalltalk garbageCollect first for the live ones only). The immediate classes (SmallInteger, SmallFloat, Character) have no instances in the heap and answer #(); UndefinedObject, True and False answer their one instance."
+	^ self allInstances: 100000
+]
+
+{ #category : #instances }
+Behavior >> allInstances: aLimit [
+	"Every object whose class is the receiver, at most aLimit of them (an Integer from 0 to 16777215, the largest Array): primitive 167, one walk of old space in a stop. See allInstances."
+	^ self instancesOf: {self} limit: aLimit
+]
+
+{ #category : #instances }
+Behavior >> allSubInstances [
+	"Every object whose class is the receiver or inherits from it, at most 100 000 of them; one walk of old space with every such class at once. See allInstances."
+	^ self allSubInstances: 100000
+]
+
+{ #category : #instances }
+Behavior >> allSubInstances: aLimit [
+	"As allInstances:, for the receiver and every behavior that inherits from it, metaclasses included (Object class inherits from Class, so Class allSubInstances answers every class)."
+	| classes |
+	classes := (Smalltalk allBehaviors select: [:c | c includesBehavior: self]) asOrderedCollection.
+	(classes includes: self) ifFalse: [classes addFirst: self].
+	^ self instancesOf: classes asArray limit: aLimit
+]
+
+{ #category : #instances }
+Behavior >> instanceCount [
+	"How many objects have the receiver as their class (primitive 168: the same walk as allInstances, nothing allocated). Garbage counts until a collection frees it."
+	| n |
+	n := Smalltalk primInstanceCountOf: {self}.
+	n isNil ifTrue: [^ self error: 'cannot count the instances of ' , self name , ': the heap is full'].
+	^ n
+]
+
+{ #category : #instances }
+Behavior >> instancesOf: anArray limit: aLimit [
+	| a |
+	(aLimit isInteger and: [aLimit between: 0 and: 16777215]) ifFalse: [
+		^ self error: 'the limit of allInstances: is an Integer from 0 to 16777215, not ' , aLimit printString].
+	a := Smalltalk primAllInstancesOf: anArray limit: aLimit.
+	a isNil ifTrue: [^ self error: 'cannot list the instances of ' , self name , ': the heap is full'].
+	^ a
+]
+
 { #category : #methods }
 Behavior >> >> aSymbol [
 	^ self compiledMethodAt: aSymbol
