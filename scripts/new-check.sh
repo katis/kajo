@@ -7,7 +7,8 @@
 # such as the one the Kajo app copied from the dmg, and KAJO_NEW the kajo
 # that runs `kajo new`), xcodegen makes the project, and xcodebuild builds both
 # targets in both configurations from clean (the iOS target for a generic
-# device without signing, as `just apps` does). Each build reads the exit
+# device without signing, as `just apps` does), and the iOS target's Debug
+# configuration once more for a generic iOS Simulator. Each build reads the exit
 # status and the error count first, then the compiler warnings (0 or fail).
 # Then the built products: a Release binary links no development protocol,
 # no compiler and no shell modes (symbols and strings), its Info.plist names
@@ -123,6 +124,18 @@ print "macos-release: app_bytes=$(du -sk $DD/Build/Products/Release/Sample.app |
 build Sample-iOS Debug ios-debug -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
 ios=$DD/Build/Products/Debug-iphoneos/Sample.app
 check ios-debug $ios/Sample.debug.dylib $ios/Info.plist $ios/kajo/app.img debug
+# The simulator-slices follow-up (docs/modules/simulator-slices.md): the
+# iOS target's Debug build for the iOS Simulator links the prebuilt
+# frameworks' ios-arm64-simulator slice; the product is a simulator binary
+# (LC_BUILD_VERSION platform IOSSIMULATOR) with the Debug product's checks.
+build Sample-iOS Debug ios-simulator-debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
+sim=$DD/Build/Products/Debug-iphonesimulator/Sample.app
+simbin=$sim/Sample.debug.dylib
+[[ -f $simbin ]] || simbin=$sim/Sample
+check ios-simulator-debug $simbin $sim/Info.plist $sim/kajo/app.img debug
+simplatform=$(vtool -show-build $simbin 2>/dev/null | awk '/platform/ {print $2; exit}')
+print "ios-simulator-debug: platform=$simplatform"
+[[ $simplatform == IOSSIMULATOR ]] || { print "ios-simulator-debug: FAILED not a simulator binary"; fail=1; }
 build Sample-iOS Release ios-release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
 ios=$DD/Build/Products/Release-iphoneos/Sample.app
 check ios-release $ios/Sample $ios/Info.plist $ios/kajo/app.img release

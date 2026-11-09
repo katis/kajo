@@ -3,7 +3,8 @@
 # app links, each compiled from the checkout's sources with the flags the
 # package gives them in a release build (-O, whole module, strict memory
 # safety, Swift 6) plus library evolution, so the frameworks carry module
-# interfaces any later compiler can read. __SRC__ is the checkout's
+# interfaces any later compiler can read. Three slices: macOS, iOS and the
+# iOS Simulator, arm64 each. __SRC__ is the checkout's
 # Sources directory. Not a project anyone opens.
 name: KajoFrameworks
 options:
@@ -33,7 +34,7 @@ settings:
     GENERATE_INFOPLIST_FILE: YES
     ENABLE_TESTABILITY: NO
     CODE_SIGNING_ALLOWED: NO
-    SUPPORTED_PLATFORMS: "macosx iphoneos"
+    SUPPORTED_PLATFORMS: "macosx iphoneos iphonesimulator"
     TARGETED_DEVICE_FAMILY: "1,2"
 targets:
   KajoVM:

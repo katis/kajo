@@ -11,8 +11,10 @@
 #      no references/, no fuzz seeds) as Kajo-<version>/
 #   2. Prebuilt/bin/kajo: `swift build -c release` of the checkout's CLI
 #   3. Prebuilt/*.xcframework: one static framework per module a generated
-#      app links (KajoVM, KajoApp, KajoAppDevelopment, KajoDev), macOS arm64
-#      and iOS arm64, built by xcodebuild from scripts/dist-frameworks.yml
+#      app links (KajoVM, KajoApp, KajoAppDevelopment, KajoDev), macOS arm64,
+#      iOS arm64 and (since the simulator-slices follow-up,
+#      docs/modules/simulator-slices.md) iOS Simulator arm64, built by
+#      xcodebuild from scripts/dist-frameworks.yml
 #      over the checkout's sources (-O, whole module, strict memory safety,
 #      library evolution), and Prebuilt/Package.swift naming them
 #   4. the Kajo app: xcodebuild Release of the checkout's apps/KajoShell-macOS
@@ -73,14 +75,20 @@ build_cli() {
 
 # The frameworks of checkout $1 into $1/Prebuilt, and its manifest.
 build_frameworks() {
-  local ck=$1 work=$2 fw=$2/fw p m line flags t0 rc errors warnings
+  local ck=$1 work=$2 fw=$2/fw p m line flags t0 rc errors warnings args
   rm -rf $fw && mkdir -p $fw
   sed "s|__SRC__|$ck/Sources|g" $root/scripts/dist-frameworks.yml > $fw/project.yml
   (cd $fw && xcodegen generate --quiet) || return 1
-  for p in macOS iOS; do
+  # One build per slice: the destination's platform name, the log's tag and
+  # the products directory's suffix. arm64 only: every Mac Kajo runs on is
+  # Apple silicon, the simulator's included.
+  local -A dest=(macOS macOS iOS iOS iOSSimulator 'iOS Simulator')
+  local -A products=(macOS Release iOS Release-iphoneos iOSSimulator Release-iphonesimulator)
+  local slices=(macOS iOS iOSSimulator)
+  for p in $slices; do
     t0=$(date +%s)
     gtimeout 3600 xcodebuild build -project $fw/KajoFrameworks.xcodeproj -scheme KajoFrameworks -configuration Release \
-      -destination "generic/platform=$p" -derivedDataPath $fw/dd ARCHS=arm64 ONLY_ACTIVE_ARCH=NO > $work/fw-$p.log 2>&1
+      -destination "generic/platform=${dest[$p]}" -derivedDataPath $fw/dd ARCHS=arm64 ONLY_ACTIVE_ARCH=NO > $work/fw-$p.log 2>&1
     rc=$?
     errors=$(grep -cE "(^|: )error:" $work/fw-$p.log)
     warnings=$(grep -E "^/.*: warning:" $work/fw-$p.log | sort -u | wc -l | tr -d ' ')
@@ -89,7 +97,7 @@ build_frameworks() {
   done
   # The flags the slices were compiled with, read from the compile lines.
   : > $work/flags.txt
-  for p in macOS iOS; do
+  for p in $slices; do
     for m in KajoVM KajoApp KajoAppDevelopment KajoDev; do
       line=$(grep -m1 -E "swiftc -module-name $m .*-target arm64" $work/fw-$p.log)
       flags=$(print -r -- $line | tr ' ' '\n' | grep -E '^(-O|-Onone|-whole-module-optimization|-strict-memory-safety|-enable-library-evolution|-swift-version|6|-target|arm64-apple-.*|-D.*|-enable-testing|-g)$' | tr '\n' ' ')
@@ -98,14 +106,17 @@ build_frameworks() {
   done
   for m in KajoVM KajoApp KajoAppDevelopment KajoDev; do
     rm -rf $ck/Prebuilt/$m.xcframework
-    xcodebuild -create-xcframework -framework $fw/dd/Build/Products/Release/$m.framework \
-      -framework $fw/dd/Build/Products/Release-iphoneos/$m.framework -output $ck/Prebuilt/$m.xcframework > $work/xcf-$m.log 2>&1 || return 1
+    args=()
+    for p in $slices; do args+=(-framework $fw/dd/Build/Products/${products[$p]}/$m.framework); done
+    xcodebuild -create-xcframework $args \
+      -output $ck/Prebuilt/$m.xcframework > $work/xcf-$m.log 2>&1 || return 1
   done
   cat > $ck/Prebuilt/Package.swift <<'EOF'
 // swift-tools-version: 6.2
 // The prebuilt Kajo (module 11b, docs/modules/distribution.md): the Release
 // build of every module a generated app links, one static framework each
-// for macOS arm64 and iOS arm64, made by scripts/dist.sh from this
+// for macOS arm64, iOS arm64 and the iOS Simulator on arm64, made by
+// scripts/dist.sh from this
 // checkout's sources (FLAGS.txt). A generated project names this package as
 // its one local package: KajoApp in both configurations, KajoAppDevelopment
 // built for the compiler and linked by Debug alone.
@@ -337,7 +348,7 @@ log "bundled kajo test: exit=$rc $(tail -1 $out/kajo-test.txt)"
   print "Prebuilt $(du -sk $inner | cut -f1)KiB"
   for x in $inner/*.xcframework; do
     print "${x:t} $(du -sk $x | cut -f1)KiB"
-    for s in ios-arm64 macos-arm64; do print "  ${x:t:r}/$s $(stat -L -f %z $x/$s/${x:t:r}.framework/${x:t:r})"; done
+    for s in ios-arm64 ios-arm64-simulator macos-arm64; do print "  ${x:t:r}/$s $(stat -L -f %z $x/$s/${x:t:r}.framework/${x:t:r})"; done
   done
   print "Prebuilt/bin/kajo $(stat -f %z $inner/bin/kajo)"
 } > $out/sizes.txt
