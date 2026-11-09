@@ -131,7 +131,6 @@ DevSession >> stopOf: aProcessId [
 	^ (Debugger stopWithId: aProcessId) ifNil: [self error: 'the Process ' , aProcessId printString , ' is not stopped']
 ]
 
-
 { #category : #'requests-browse' }
 DevSession >> classDefinition: className [
 	"A class's definition: its superclass, instance variables, class variables, class-side instance variables, format kind, comment, package and tag (nil when it has none; tags as subdirectories)."
@@ -252,13 +251,6 @@ DevSession >> packageList [
 ]
 
 { #category : #'requests-browse' }
-DevSession >> packageTags: name [
-	"The tags of a package's classes, sorted (every package's when name is nil; tags as subdirectories: a tag is the subdirectory of the package's directory its classes' files are in)."
-	<devProtocol>
-	^ Smalltalk tagsOf: name
-]
-
-{ #category : #'requests-browse' }
 DevSession >> packageSelectors: name [
 	"Every method of a package, 'Class>>selector' or 'Class class>>selector', sorted (module 9c: the browser's list of a package's methods)."
 	<devProtocol>
@@ -270,6 +262,13 @@ DevSession >> packageSelectors: name [
 				(Smalltalk packageOfSelector: m selector in: b) = name
 					ifTrue: [out add: b name asString , '>>' , m selector asString]]]].
 	^ out asArray sort: [:a :b | a <= b]
+]
+
+{ #category : #'requests-browse' }
+DevSession >> packageTags: name [
+	"The tags of a package's classes, sorted (every package's when name is nil; tags as subdirectories: a tag is the subdirectory of the package's directory its classes' files are in)."
+	<devProtocol>
+	^ Smalltalk tagsOf: name
 ]
 
 { #category : #'requests-browse' }

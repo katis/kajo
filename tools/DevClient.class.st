@@ -303,7 +303,6 @@ DevClient >> timedOut: anId [
 	self fail: entry with: (entry at: 1) , ' got no reply within ' , timeoutMs printString , ' ms'
 ]
 
-
 { #category : #requests }
 DevClient >> classComment: className comment: comment then: aBlock [
 	^ self request: 'class.comment' args: {'className'. className. 'comment'. comment} then: aBlock

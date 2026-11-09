@@ -16,7 +16,6 @@ Class {
 	#category : #'Kernel-System'
 }
 
-
 { #category : #accessing }
 TonelDocument >> classInstVarNames [
 	^ classInstVarNames ifNil: [#()]

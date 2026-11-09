@@ -6,6 +6,12 @@ Class {
 }
 
 { #category : #defining }
+ClassBuilder class >> defaultPackage [
+	"The package of a class made with none named outside a development session: Unclassified, as before tags as subdirectories (the category a class made with none got), so every class has a package its file can be written into and the browser lists it."
+	^ 'Unclassified'
+]
+
+{ #category : #defining }
 ClassBuilder class >> define: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars package: aPackageOrNil tag: aTagOrNil kind: aKindOrNil comment: aCommentOrNil [
 	"The class aName with this shape: a new class, or the existing class of that name (same superclass) reshaped. Names are Strings or Symbols; aKindOrNil a format kind (nil: the superclass's, as Tonel's #type absent). A package given places the class in it with aTagOrNil as its tag (nil: none, at the package's root); none given keeps an existing class's package and tag and gives a new one the default package (ClassBuilder defaultPackage) and no tag (tags as subdirectories)."
 	| existing kind |
@@ -27,12 +33,6 @@ ClassBuilder class >> define: aName superclass: aClass instanceVariableNames: iv
 		aCommentOrNil ifNotNil: [:t | c comment: t].
 		^ c].
 	^ self newClass: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars package: aPackageOrNil tag: aTagOrNil kind: kind comment: aCommentOrNil
-]
-
-{ #category : #defining }
-ClassBuilder class >> defaultPackage [
-	"The package of a class made with none named outside a development session: Unclassified, as before tags as subdirectories (the category a class made with none got), so every class has a package its file can be written into and the browser lists it."
-	^ 'Unclassified'
 ]
 
 { #category : #defining }

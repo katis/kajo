@@ -276,6 +276,12 @@ TonelReader >> value: depth [
 ]
 
 { #category : #reading }
+TonelReader class >> read: aString [
+	"aString's class, a TonelDocument; a CompileError when it is not Tonel."
+	^ self new setSource: aString; readDocument
+]
+
+{ #category : #reading }
 TonelReader class >> tagOfPath: aPath [
 	"The tag a class file's path gives, aPath relative to its package's directory (tags as subdirectories): nil for a file at the root, the directory's name for a file one directory down, refused (an Error) for a file further down or a directory name no tag can have. The bootstrap reader's tonelTag(ofPath:) is the same rule; a test compares them on every file."
 	| parts |
@@ -285,10 +291,4 @@ TonelReader class >> tagOfPath: aPath [
 	((parts first isEmpty or: [(parts first byteAt: 1) = 46]) or: [parts first includes: (Character value: 0)])
 		ifTrue: [^ self error: aPath , ': ''' , parts first , ''' is not a tag''s directory'].
 	^ parts first asSymbol
-]
-
-{ #category : #reading }
-TonelReader class >> read: aString [
-	"aString's class, a TonelDocument; a CompileError when it is not Tonel."
-	^ self new setSource: aString; readDocument
 ]

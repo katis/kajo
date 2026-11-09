@@ -239,15 +239,15 @@ Smalltalk class >> tonelSourcesOf: anArray [
 ]
 
 { #category : #'file in' }
-Smalltalk class >> tonelTagsOf: anArray [
-	"For each path relative to a package's directory, the tag it gives: the tag, '' for none, or 'refused: ' and why (a test compares them with the bootstrap reader's)."
-	^ anArray collect: [:p | [(TonelReader tagOfPath: p) ifNil: ['']] on: Error do: [:e | 'refused: ' , e messageText]]
-]
-
-{ #category : #'file in' }
 Smalltalk class >> tonelSummaries: anArray [
 	"For each Tonel text, its TonelReader summary (a test compares them with the bootstrap reader's)."
 	^ anArray collect: [:t | (TonelReader read: t) summary]
+]
+
+{ #category : #'file in' }
+Smalltalk class >> tonelTagsOf: anArray [
+	"For each path relative to a package's directory, the tag it gives: the tag, '' for none, or 'refused: ' and why (a test compares them with the bootstrap reader's)."
+	^ anArray collect: [:p | [(TonelReader tagOfPath: p) ifNil: ['']] on: Error do: [:e | 'refused: ' , e messageText]]
 ]
 
 { #category : #'file out' }
