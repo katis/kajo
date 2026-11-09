@@ -5,7 +5,8 @@
 // the VM; `basicNew:` of a word class multiplied before its check. Every
 // primitive that takes a SmallInteger argument is called here with
 // minVal, maxVal, -1, 0 and the receiver's count + 1 in each integer
-// argument (all combinations), and the VM must answer every call. Large
+// argument (all combinations), and the VM must answer every call (the
+// discoverability follow-up added 167 and 168). Large
 // bytes: `basicNew:` also takes the old and the new size limits and one
 // past each, and primitive 38 a byte receiver.
 
@@ -64,6 +65,11 @@ private let cases: [PrimitiveCase] = {
     c.append(PrimitiveCase(prim: 128, receiver: bytes4, args: ["  push_lit $a\n", nil], count: 4))
     c.append(PrimitiveCase(prim: 134, receiver: text, args: ["  push_lit 'l'\n", nil], count: 5))
     c.append(PrimitiveCase(prim: 152, receiver: "  push_nil\n", args: [nil], count: 0))
+    // The discoverability follow-up: the limit of allInstancesOf:limit:
+    // (167), and an integer where 167 and 168 take a class or an Array.
+    c.append(PrimitiveCase(prim: 167, receiver: "  push_nil\n", args: ["  push_lit @Array\n", nil], count: 0))
+    c.append(PrimitiveCase(prim: 167, receiver: "  push_nil\n", args: [nil, nil], count: 0))
+    c.append(PrimitiveCase(prim: 168, receiver: "  push_nil\n", args: [nil], count: 0))
     return c
 }()
 

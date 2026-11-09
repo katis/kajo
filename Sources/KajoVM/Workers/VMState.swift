@@ -175,6 +175,9 @@ enum StopKind: UInt8, Sendable {
     /// entry table empty, or an old allocation found no room, while a
     /// cycle swept; the sweep is bounded or finished and applied here.
     case sweep
+    /// The discoverability follow-up: primitives 167 and 168 walk old space
+    /// for instances (ObjectModel/InstancePrimitives.swift).
+    case instances
 }
 
 struct StopRecord: Sendable {
