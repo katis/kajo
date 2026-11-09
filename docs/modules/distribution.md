@@ -518,7 +518,7 @@ phase 0.15 s first, 0.02 s again.
 
 | item | result |
 |---|---|
-| `spctl` accepts the app and the dmg; Gatekeeper opens the app with no override | **not met: waits on the owner's Developer ID Application certificate and notary profile** (rejected, origin Apple Development); the script signs, notarizes and staples with them unchanged |
+| `spctl` accepts the app and the dmg; Gatekeeper opens the app with no override | not met at hand-back (rejected, origin Apple Development); **met on 2026-11-09** with the owner's Developer ID Application certificate and `kajo-notary` profile and the script unchanged: see "The release of v0.1" below |
 | a generated app builds from the dmg's checkout with the network off, the log fetching nothing | met as far as allowed: the offline flags, git limited to `file`, empty package caches, all four products built and nothing fetched in the logs; the network itself was on (not to be touched) |
 | the Debug app's fib within 1.1 of the Release app's | **met: 1.005** (sends 0.997, alloc 0.999) |
 | first frame and frames missed 11a's or better, Mac and iPhone | met on the iPhone (and the iPad); on the Mac Debug's first frame is better and its frames 0 missed in every window but one live window of the first run (1 of 3786) |
@@ -560,7 +560,8 @@ phase 0.15 s first, 0.02 s again.
 ## Not done
 
 - Developer ID signing, notarization, stapling and an accepting `spctl`
-  (the owner's certificate and `notarytool store-credentials` profile).
+  (the owner's certificate and `notarytool store-credentials` profile);
+  done on 2026-11-09, "The release of v0.1" below.
 - A build with the network physically off (not allowed to touch it).
 - `kajo-bench` on the phone (the kernels' files are on the Mac), and the
   Debug-against-Release check there; both iOS configurations link the
@@ -613,6 +614,32 @@ KAJO_NOTARY_PROFILE=kajo-notary scripts/release.sh v0.1
 git push origin v0.1
 gh release create v0.1 .build/dist/0.1/Kajo-0.1.dmg .build/dist/0.1/Kajo-0.1.dmg.sha256 --title 'Kajo 0.1' --notes-file .build/dist/0.1/notes.md --verify-tag
 ```
+
+## The release of v0.1 (2026-11-09)
+
+With the owner's `Developer ID Application: Joni Katajamaki (BDN6M642M2)`
+certificate in the login keychain and the `kajo-notary` profile,
+`KAJO_NOTARY_PROFILE=kajo-notary just release v0.1` ran on 8b11e25 with
+the script as built: export 1 s, CLI 51 s, frameworks 72 s (macOS and
+iOS, 0 warnings), app 53 s, signing 9 s with `codesign --verify --deep
+--strict` ok, notarizing the app 36 s, the dmg 5 s, notarizing the dmg
+34 s, the checks 11 s; 4 min 32 s in all. `spctl` accepts the app, the
+dmg and a quarantined copy of the dmg and the app inside it, every one
+`source=Notarized Developer ID`, and the bundled `kajo test` passes 211
+of 211. `Kajo-0.1.dmg` is 15 431 768 bytes (SHA-256
+`e8834521384d1840bad36b0d55e85da5da01269f903da12f1d5d0c95c72052ba`);
+the app 45.0 MiB, of which the checkout 25.1 MiB (`Prebuilt/` 18.0,
+KajoVM 10.1), xcodegen 7.2 MiB, `dev.img` 6.2 MB. The tag `v0.1` is
+pushed.
+
+Two attempts the day before did not finish: the first's `xcodebuild` for
+the app was SIGKILLed at 0 s (exit 137, nothing in the system log named
+a killer; the retry built it in 50 s), and the second's `codesign` with
+the Developer ID identity waited on the keychain's access prompt, which
+`dist.sh`'s 120 s bound turned into a `FAILED codesign` line (the prompt
+is the owner's; "A gate that waits on a prompt is a blocked gate"). The
+local tag was removed and the release retagged at the day's head once
+the owner had allowed the access.
 
 ## Gates
 

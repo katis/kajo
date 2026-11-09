@@ -614,7 +614,7 @@ by the rule for waits on something that must come it waits 120 s now
 - The rate rule watches promotion only; old allocations (large objects)
   consume entries too and are not in the young sampler's rate.
 
-### Open questions for the owner (built as recommended)
+### Open questions for the owner (built as recommended; answered by the owner on 2026-11-09, all as built: the main worker never waits outside a stop, the extra marking is accepted with the devices' energy to be measured at the next energy pass, and the ring's 8 to 10 fallbacks a launch under `young=stw` are the oracle row's known cost)
 
 1. Should the main worker ever wait for a sweep outside a stop? Built:
    no. It keeps the bounded stop for entries (a hand-over, 0.10 to 0.17 ms
