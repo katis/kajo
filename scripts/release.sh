@@ -56,8 +56,10 @@ if [[ $dry == 0 ]]; then
     print
     print "Open a Workspace (Tools > Workspace, ⌘K), type \`3 + 4\` and press ⌘P (Smalltalk > Print it): the answer"
     print "appears after the expression. ⌘D does it, ⌘I inspects it; the Smalltalk menu and a right-click in any"
-    print "workspace or source pane list the rest, and Help > Keyboard Shortcuts lists every key. In Smalltalk"
-    print "\`\"…\"\` is a comment and \`'…'\` a String."
+    print "workspace or source pane list the rest, and Help > Keyboard Shortcuts lists every key. Select a class"
+    print "name and press ⇧⌘I (Instances of it) to inspect its instances, or an expression and ⇧⌘O (Objects"
+    print "pointing to it) to inspect every object holding what it answers. In Smalltalk \`\"…\"\` is a comment"
+    print "and \`'…'\` a String."
     print
     print "## Changes"
     print

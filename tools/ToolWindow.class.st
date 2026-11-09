@@ -125,13 +125,14 @@ ToolWindow >> itIn: aTextView [
 
 { #category : #it }
 ToolWindow >> key: aKey in: aTextView with: aWorkspaceModelOrNil [
-	"The Smalltalk menu's items on a text pane: Do it, Print it, Inspect it and Instances of it evaluate through aWorkspaceModelOrNil (the pane's evaluation context), Senders, Implementors and Browse open a browser on the target. Accept is each window's own."
+	"The Smalltalk menu's items on a text pane: Do it, Print it, Inspect it, Instances of it and Objects pointing to it evaluate through aWorkspaceModelOrNil (the pane's evaluation context), Senders, Implementors and Browse open a browser on the target. Accept is each window's own."
 	(#('cmd-d' 'cmd-p' 'cmd-i') includes: aKey) ifTrue: [
 		^ aWorkspaceModelOrNil ifNotNil: [:w | self evaluateIn: aTextView with: w key: aKey]].
 	aKey = 'cmd-shift-n' ifTrue: [^ DevTools sendersOf: (self selectorIn: aTextView) client: model client].
 	aKey = 'cmd-shift-m' ifTrue: [^ DevTools implementorsOf: (self selectorIn: aTextView) client: model client].
 	aKey = 'cmd-shift-b' ifTrue: [^ DevTools browseIt: (self itIn: aTextView) client: model client].
-	aKey = 'cmd-shift-i' ifTrue: [^ aWorkspaceModelOrNil ifNotNil: [:w | DevTools instancesOf: (self itIn: aTextView) with: w]]
+	aKey = 'cmd-shift-i' ifTrue: [^ aWorkspaceModelOrNil ifNotNil: [:w | DevTools instancesOf: (self itIn: aTextView) with: w]].
+	aKey = 'cmd-shift-o' ifTrue: [^ aWorkspaceModelOrNil ifNotNil: [:w | DevTools pointersTo: (self itIn: aTextView) with: w]]
 ]
 
 { #category : #it }

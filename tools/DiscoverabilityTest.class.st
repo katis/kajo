@@ -1,4 +1,4 @@
-"The discoverability follow-up's tools, headless against fake targets: every key a tool's text pane binds is a Smalltalk menu item's and is listed by Help > Keyboard Shortcuts (made from the menus); a Smalltalk menu item runs the focused pane's own key action once and does nothing on a pane it does not apply to; each pane's context menu lists the items that apply; a new Workspace names its keys until the first evaluation; a browser names Accept's key once a method is edited; Instances of it opens an inspector whose title says how many instances there were."
+"The discoverability follow-up's tools, headless against fake targets: every key a tool's text pane binds is a Smalltalk menu item's and is listed by Help > Keyboard Shortcuts (made from the menus); a Smalltalk menu item runs the focused pane's own key action once and does nothing on a pane it does not apply to; each pane's context menu lists the items that apply; a new Workspace names its keys until the first evaluation; a browser names Accept's key once a method is edited; Instances of it opens an inspector whose title says how many instances there were, and Objects pointing to it (the pointersTo: follow-up) one whose title says how many objects point to it."
 Class {
 	#name : #DiscoverabilityTest,
 	#superclass : #TestCase,
@@ -76,7 +76,7 @@ DiscoverabilityTest >> testEachPanesContextMenuListsTheItemsThatApply [
 	tools := self openEveryTool.
 	titles := [:pane | ((self contextMenuOf: pane) items collect: [:i | i at: 2]) asArray].
 	self assert: (titles value: (tools at: 1) textView)
-		equals: #('Do it' 'Print it' 'Inspect it' 'Senders of it' 'Implementors of it' 'Browse it' 'Instances of it').
+		equals: #('Do it' 'Print it' 'Inspect it' 'Senders of it' 'Implementors of it' 'Browse it' 'Instances of it' 'Objects pointing to it').
 	self assert: (titles value: (tools at: 2) sourceView) equals: #('Accept' 'Senders of it' 'Implementors of it' 'Browse it').
 	self assert: (titles value: (tools at: 4) sourceView) equals: #('Accept' 'Senders of it' 'Implementors of it' 'Browse it').
 	self assert: (titles value: (tools at: 4) workspaceView) equals: (titles value: (tools at: 1) textView)
@@ -97,7 +97,10 @@ DiscoverabilityTest >> testEveryBoundKeyIsAMenuItemsAndInTheShortcuts [
 		self assert: (text includesSubstring: (DevTools glyphsOf: (i at: 3)) , (String with: Character tab) , (i at: 2))].
 	DevTools helpItems do: [:i | self assert: (text includesSubstring: (i at: 2))].
 	(BrowserWindow toolbarItems , DebuggerWindow toolbarItems) do: [:i | self assert: (text includesSubstring: (i at: 2))].
-	self assert: (DevTools glyphsOf: 'cmd-shift-n') equals: '⇧⌘N'
+	self assert: (DevTools glyphsOf: 'cmd-shift-n') equals: '⇧⌘N'.
+	"The pointersTo: follow-up's item and its key, which no other menu takes."
+	self assert: (text includesSubstring: '⇧⌘O' , (String with: Character tab) , 'Objects pointing to it').
+	self assert: ((DevTools toolsItems , DevTools smalltalkItems) select: [:i | (i at: 3) = 'cmd-shift-o']) size equals: 1
 ]
 
 { #category : #tests }
@@ -117,6 +120,32 @@ DiscoverabilityTest >> testInstancesOfItOpensAnInspectorWithTheCount [
 		equals: #('(String) instanceCount' '(String) allInstances: 1000' nil).
 	inspector := (DevTools windowsOf: InspectorWindow) first.
 	self assert: inspector model title equals: 'Array #(''a'' ''b'') (1000 of 53254 instances)'
+]
+
+{ #category : #tests }
+DiscoverabilityTest >> testObjectsPointingToItOpensAnInspectorWithTheCount [
+	| c w inspector |
+	c := FakeDevClient on: [:kind :args | | src |
+		src := args at: 'source' ifAbsent: [''].
+		kind = 'inspect'
+			ifTrue: [(self describe: '#(an Array)' class: 'Array' handle: 9) at: 'slots' put: #(); yourself]
+			ifFalse: [(src endsWith: 'pointerCount')
+				ifTrue: [self describe: '1532' class: 'SmallInteger' handle: nil]
+				ifFalse: [(src endsWith: 'printString')
+					ifTrue: [self describe: '''it''''s x''' class: 'String' handle: 11]
+					ifFalse: [self describe: '#(an Array)' class: 'Array' handle: 9]]]].
+	w := DevTools openWorkspace: c.
+	w textView text: 'x'.
+	w textView selectFrom: 1 to: 1.
+	w textView pressKey: 'cmd-shift-o'.
+	self assert: (c sent collect: [:s | s last at: 'source' ifAbsent: [nil]]) asArray
+		equals: #('(x) pointerCount' '(x) pointersTo: 1000' '(x) printString' nil).
+	inspector := (DevTools windowsOf: InspectorWindow) first.
+	self assert: inspector model title equals: 'Array #(an Array) (1000 of 1532 objects pointing to it''s x)'.
+	self assert: w model status equals: '1000 of 1532 objects pointing to it''s x'.
+	"Under the limit, the count alone; one is an object."
+	self assert: (DevTools objects: 3 pointingTo: 'nil' limit: 1000) equals: '3 objects pointing to nil'.
+	self assert: (DevTools objects: 1 pointingTo: 'nil' limit: 1000) equals: '1 object pointing to nil'
 ]
 
 { #category : #tests }

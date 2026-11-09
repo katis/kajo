@@ -9,7 +9,8 @@ Class {
 		'history',
 		'seen',
 		'workspace',
-		'note'
+		'note',
+		'selected'
 	],
 	#category : #'Tools-Models'
 }
@@ -93,6 +94,17 @@ InspectorModel >> inspect: aHandle [
 ]
 
 { #category : #navigating }
+InspectorModel >> selectSlot: anIndex [
+	"The slot the table selects (0 for none): what Objects pointing to the slot's value acts on."
+	selected := anIndex
+]
+
+{ #category : #navigating }
+InspectorModel >> selectedSlot [
+	^ (selected notNil and: [selected between: 1 and: self slots size]) ifTrue: [slots at: selected] ifFalse: [nil]
+]
+
+{ #category : #navigating }
 InspectorModel >> show: aHandle [
 	handle := aHandle.
 	seen add: aHandle.
@@ -103,4 +115,23 @@ InspectorModel >> show: aHandle [
 			slots := r at: 'slots'.
 			slots do: [:s | (s at: 'handle') ifNotNil: [:h | seen add: h]].
 			self changed: #object]]
+]
+
+{ #category : #pointers }
+InspectorModel >> pointersToObject [
+	"Objects pointing to it on the inspected object: an inspector on its holders (DevTools pointersTo:with:). The session's handle table holds every object an inspector shows, so it is among the holders."
+	handle isNil ifTrue: [^ self status: 'nothing inspected'].
+	^ DevTools pointersTo: 'self' with: workspace
+]
+
+{ #category : #pointers }
+InspectorModel >> pointersToSelectedSlot [
+	"Objects pointing to it on the selected slot's value: through its handle, or for a value with none (nil, a Boolean, a small Integer, a Character) through its printString evaluated."
+	| s w |
+	s := self selectedSlot.
+	s isNil ifTrue: [^ self status: 'select a slot to find the objects pointing to its value'].
+	w := WorkspaceModel new client: client; yourself.
+	(s at: 'handle') isNil ifTrue: [^ DevTools pointersTo: (s at: 'value') with: w].
+	w receiver: (s at: 'handle').
+	^ DevTools pointersTo: 'self' with: w
 ]

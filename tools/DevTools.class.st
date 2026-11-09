@@ -177,9 +177,43 @@ DevTools class >> instancesOf: aSource with: aWorkspaceModel [
 ]
 
 { #category : #it }
+DevTools class >> objects: aCount pointingTo: aName limit: aLimit [
+	"The inspector's note and the status line of Objects pointing to it: how many there were (L of N when the limit cut the list) and what they point to."
+	| n |
+	n := aCount isNil ifTrue: ['?'] ifFalse: [aCount printString].
+	^ ((aCount notNil and: [aCount > aLimit]) ifTrue: [aLimit printString , ' of ' , n] ifFalse: [n]) ,
+		(aCount = 1 ifTrue: [' object'] ifFalse: [' objects']) , ' pointing to ' , aName
+]
+
+{ #category : #it }
+DevTools class >> pointersTo: aSource with: aWorkspaceModel [
+	"Objects pointing to it (the pointersTo: follow-up): aSource evaluated where aWorkspaceModel evaluates, its pointerCount, then an inspector on the first instancesLimit objects holding it (pointersTo:) whose title says how many there were and what they point to. The count and the list are asked for before the object's printString: every answer of an evaluation gets a handle in the session, whose table would hold the object from then on."
+	| src limit |
+	aSource isEmpty ifTrue: [^ aWorkspaceModel status: 'select an expression to find the objects pointing to it'].
+	src := '(' , aSource , ')'.
+	limit := self instancesLimit.
+	aWorkspaceModel evaluate: src , ' pointerCount' then: [:n | | count |
+		count := (n at: 'value') asInteger.
+		aWorkspaceModel evaluate: src , ' pointersTo: ' , limit printString then: [:r |
+			aWorkspaceModel evaluate: src , ' printString' then: [:p | | name note |
+				name := self unquoted: (p at: 'value').
+				name := name copyFrom: 1 to: (name byteSize min: 40).
+				note := self objects: count pointingTo: name limit: limit.
+				aWorkspaceModel status: note.
+				self inspect: r client: aWorkspaceModel client note: note]]]
+]
+
+{ #category : #it }
 DevTools class >> sendersOf: aSelector client: aClient [
 	aSelector isEmpty ifTrue: [^ nil].
 	^ (self browserFor: aClient) model sendersOf: aSelector
+]
+
+{ #category : #it }
+DevTools class >> unquoted: aString [
+	"A String's printString as the String it prints ('it''s' is it's); anything else as it is."
+	(aString byteSize >= 2 and: [(aString beginsWith: '''') and: [aString endsWith: '''']]) ifFalse: [^ aString].
+	^ (aString copyFrom: 2 to: aString byteSize - 1) copyReplaceAll: '''''' with: ''''
 ]
 
 { #category : #menus }
@@ -261,7 +295,7 @@ DevTools class >> openShortcuts [
 DevTools class >> paneKeys [
 	"Which of the Smalltalk menu's keys each kind of text pane binds: the items that apply to it (its context menu lists the same)."
 	| evaluating |
-	evaluating := #('cmd-d' 'cmd-p' 'cmd-i' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b' 'cmd-shift-i').
+	evaluating := #('cmd-d' 'cmd-p' 'cmd-i' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b' 'cmd-shift-i' 'cmd-shift-o').
 	^ {{'Workspace'. evaluating}.
 		{'Browser source'. #('cmd-s' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b')}.
 		{'Inspector evaluation pane'. evaluating}.
@@ -307,10 +341,10 @@ DevTools class >> smalltalkItem: anId [
 
 { #category : #menus }
 DevTools class >> smalltalkItems [
-	"The Smalltalk menu (the discoverability follow-up): id, title, key. Do it, Print it and Inspect it evaluate the selection or the line; Accept compiles the pane; Senders, Implementors and Browse act on the selection or the word at the insertion point, Instances of it on the class an evaluation of it answers. The shifted keys are free in the Tools, Edit and app menus."
+	"The Smalltalk menu (the discoverability follow-up): id, title, key. Do it, Print it and Inspect it evaluate the selection or the line; Accept compiles the pane; Senders, Implementors and Browse act on the selection or the word at the insertion point, Instances of it on the class an evaluation of it answers, Objects pointing to it (the pointersTo: follow-up) on the object it answers. The shifted keys are free in the Tools, Edit and app menus."
 	^ #(#(11 'Do it' 'cmd-d') #(12 'Print it' 'cmd-p') #(13 'Inspect it' 'cmd-i') #(14 'Accept' 'cmd-s')
 		#(15 'Senders of it' 'cmd-shift-n') #(16 'Implementors of it' 'cmd-shift-m') #(17 'Browse it' 'cmd-shift-b')
-		#(18 'Instances of it' 'cmd-shift-i'))
+		#(18 'Instances of it' 'cmd-shift-i') #(19 'Objects pointing to it' 'cmd-shift-o'))
 ]
 
 { #category : #menus }
