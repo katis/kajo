@@ -314,9 +314,15 @@ BrowserModel >> visibleEntries [
 { #category : #messages }
 BrowserModel >> implementors [
 	selector isNil ifTrue: [^ self].
-	self request: 'method.implementors' args: {'selector'. selector} then: [:r |
-		messagesTitle := 'implementors of ' , selector.
-		messages := (r collect: [:c | c , '>>' , selector]) asArray.
+	self implementorsOf: selector
+]
+
+{ #category : #messages }
+BrowserModel >> implementorsOf: aSelector [
+	"The methods named aSelector, in the messages list (the discoverability follow-up's Implementors of it)."
+	self request: 'method.implementors' args: {'selector'. aSelector} then: [:r |
+		messagesTitle := 'implementors of ' , aSelector.
+		messages := (r collect: [:c | c , '>>' , aSelector]) asArray.
 		self changed: #messages]
 ]
 
@@ -340,10 +346,27 @@ BrowserModel >> selectMessage: aString [
 { #category : #messages }
 BrowserModel >> senders [
 	selector isNil ifTrue: [^ self].
-	self request: 'method.senders' args: {'selector'. selector} then: [:r |
-		messagesTitle := 'senders of ' , selector.
+	self sendersOf: selector
+]
+
+{ #category : #messages }
+BrowserModel >> sendersOf: aSelector [
+	"The methods that send aSelector, in the messages list (the discoverability follow-up's Senders of it)."
+	self request: 'method.senders' args: {'selector'. aSelector} then: [:r |
+		messagesTitle := 'senders of ' , aSelector.
 		messages := r asArray.
 		self changed: #messages]
+]
+
+{ #category : #selecting }
+BrowserModel >> browseClass: aName [
+	"Show the class aName ('Foo' or 'Foo class') whatever the package filter (the discoverability follow-up's Browse it)."
+	| words |
+	words := aName substrings.
+	side := (words size = 2 and: [(words at: 2) = 'class']) ifTrue: ['class'] ifFalse: ['instance'].
+	package := nil.
+	self changed: #classes.
+	self selectClass: words first
 ]
 
 { #category : #selecting }

@@ -9,7 +9,10 @@ Class {
 		'project',
 		'menu',
 		'debuggers',
-		'targetsWatched'
+		'targetsWatched',
+		'smalltalkMenu',
+		'helpMenu',
+		'menusSupported'
 	],
 	#category : #'Tools-Windows'
 }
@@ -114,6 +117,220 @@ DevTools class >> stopped: anEvent client: aClient [
 	^ w
 ]
 
+{ #category : #it }
+DevTools class >> browseIt: aString client: aClient [
+	"Browse it: a class name (Foo, Foo class) selects the class in a browser, Foo>>bar the method; anything else is a selector whose implementors are listed."
+	| w |
+	aString isEmpty ifTrue: [^ nil].
+	w := self browserFor: aClient.
+	(aString includesSubstring: '>>') ifTrue: [^ w model selectMessage: aString].
+	((aString byteAt: 1) between: 65 and: 90) ifTrue: [^ w model browseClass: aString].
+	^ w model implementorsOf: aString
+]
+
+{ #category : #it }
+DevTools class >> browserFor: aClient [
+	"An open browser on aClient's target, or a new one."
+	^ (self windowsOf: BrowserWindow) detect: [:w | w isOpen and: [w model client == aClient]] ifNone: [self browse: aClient]
+]
+
+{ #category : #it }
+DevTools class >> implementorsOf: aSelector client: aClient [
+	aSelector isEmpty ifTrue: [^ nil].
+	^ (self browserFor: aClient) model implementorsOf: aSelector
+]
+
+{ #category : #it }
+DevTools class >> inspect: aDescription client: aClient note: aString [
+	"An inspector whose title carries aString (Instances of it: how many there were)."
+	| m |
+	(aDescription at: 'handle') isNil ifTrue: [^ nil].
+	m := InspectorModel new client: aClient; yourself.
+	m note: aString.
+	m workspace inspectAction: [:d :c | self inspect: d client: c].
+	(InspectorWindow on: m) open.
+	m inspect: (aDescription at: 'handle').
+	^ m view
+]
+
+{ #category : #it }
+DevTools class >> instancesLimit [
+	"How many instances Instances of it shows (allInstances:)."
+	^ 1000
+]
+
+{ #category : #it }
+DevTools class >> instancesOf: aSource with: aWorkspaceModel [
+	"Instances of it: aSource evaluated where aWorkspaceModel evaluates (a class, usually its name), its instanceCount, then an inspector on its first instancesLimit instances whose title says how many there were."
+	| src limit |
+	aSource isEmpty ifTrue: [^ aWorkspaceModel status: 'select a class to list its instances'].
+	src := '(' , aSource , ')'.
+	limit := self instancesLimit.
+	aWorkspaceModel evaluate: src , ' instanceCount' then: [:n | | count |
+		count := (n at: 'value') asInteger.
+		aWorkspaceModel evaluate: src , ' allInstances: ' , limit printString then: [:r |
+			aWorkspaceModel status: aSource , ': ' , (n at: 'value') , ' instances'.
+			self inspect: r client: aWorkspaceModel client
+				note: ((count notNil and: [count > limit])
+					ifTrue: [limit printString , ' of ' , count printString , ' instances']
+					ifFalse: [(n at: 'value') , ' instances'])]]
+]
+
+{ #category : #it }
+DevTools class >> sendersOf: aSelector client: aClient [
+	aSelector isEmpty ifTrue: [^ nil].
+	^ (self browserFor: aClient) model sendersOf: aSelector
+]
+
+{ #category : #menus }
+DevTools class >> contextMenuFor: someKeys action: aBlock [
+	"A pane's context menu: the Smalltalk menu's items whose keys are among someKeys (the ones that apply to the pane; the rest are left out), in the menu's order, each giving its key to aBlock. nil on a host without menus (UIKit)."
+	| items |
+	self menusSupported ifFalse: [^ nil].
+	items := self smalltalkItems select: [:i | someKeys includes: (i at: 3)].
+	^ self menu: 'Smalltalk' items: items action: [:id | aBlock value: ((items detect: [:i | i first = id]) at: 3)]
+]
+
+{ #category : #menus }
+DevTools class >> focusedPane [
+	"The text pane of a tool window that is the first responder of the frontmost window, or nil: what a Smalltalk menu item acts on."
+	self windows do: [:w | w textPanes do: [:p | p isFocused ifTrue: [^ p]]].
+	^ nil
+]
+
+{ #category : #menus }
+DevTools class >> glyphsOf: aKey [
+	"A key's name ('cmd-shift-n') as the menus show it (⇧⌘N)."
+	| parts s |
+	parts := aKey splitOn: '-'.
+	s := ''.
+	(parts includes: 'ctrl') ifTrue: [s := s , '⌃'].
+	(parts includes: 'alt') ifTrue: [s := s , '⌥'].
+	(parts includes: 'shift') ifTrue: [s := s , '⇧'].
+	(parts includes: 'cmd') ifTrue: [s := s , '⌘'].
+	^ s , parts last asUppercase
+]
+
+{ #category : #menus }
+DevTools class >> helpItem: anId [
+	anId = 31 ifTrue: [^ self openShortcuts].
+	anId = 32 ifTrue: [
+		(View openURL: self homePage) ifFalse: [Transcript showLine: 'Help: cannot open ' , self homePage].
+		^ self]
+]
+
+{ #category : #menus }
+DevTools class >> helpItems [
+	"The Help menu: id, title, key ('' for none)."
+	^ #(#(31 'Keyboard Shortcuts' '') #(32 'Kajo on GitHub' ''))
+]
+
+{ #category : #menus }
+DevTools class >> homePage [
+	^ 'https://github.com/katis/kajo'
+]
+
+{ #category : #menus }
+DevTools class >> keysOfPane: aName [
+	"The Smalltalk menu's keys a text pane binds (paneKeys)."
+	^ (self paneKeys detect: [:p | p first = aName]) at: 2
+]
+
+{ #category : #menus }
+DevTools class >> menu: aTitle items: anArray action: aBlock [
+	| m |
+	m := Menu new.
+	m title: aTitle.
+	anArray do: [:i | m addItem: i first title: (i at: 2) key: ((i at: 3) isEmpty ifTrue: [nil] ifFalse: [i at: 3])].
+	m action: aBlock.
+	^ m
+]
+
+{ #category : #menus }
+DevTools class >> menusSupported [
+	^ menusSupported ifNil: [menusSupported := View supports: Menu kind]
+]
+
+{ #category : #menus }
+DevTools class >> openShortcuts [
+	"Help > Keyboard Shortcuts: a read-only window listing every binding of the tools (shortcutsText)."
+	^ (ShortcutsWindow on: ToolModel new) open
+]
+
+{ #category : #menus }
+DevTools class >> paneKeys [
+	"Which of the Smalltalk menu's keys each kind of text pane binds: the items that apply to it (its context menu lists the same)."
+	| evaluating |
+	evaluating := #('cmd-d' 'cmd-p' 'cmd-i' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b' 'cmd-shift-i').
+	^ {{'Workspace'. evaluating}.
+		{'Browser source'. #('cmd-s' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b')}.
+		{'Inspector evaluation pane'. evaluating}.
+		{'Debugger source'. #('cmd-s' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b')}.
+		{'Debugger evaluation pane'. evaluating}}
+]
+
+{ #category : #menus }
+DevTools class >> shortcutsText [
+	"Every binding of the tools, made from the menus' item lists (toolsItems, smalltalkItems, helpItems), the panes' keys (paneKeys, which are Smalltalk items' keys) and the toolbars' commands, so the list cannot drift from what the tools do."
+	| s line |
+	s := WriteStream on: String new.
+	line := [:glyphs :title | s tab; nextPutAll: glyphs; tab; nextPutAll: title; lf].
+	s nextPutAll: 'Kajo: keyboard shortcuts'; lf; lf.
+	s nextPutAll: 'Tools menu'; lf.
+	self toolsItems do: [:i | line value: (self glyphsOf: (i at: 3)) value: (i at: 2)].
+	s lf; nextPutAll: 'Smalltalk menu (on the focused text pane; the same items in its context menu)'; lf.
+	self smalltalkItems do: [:i | line value: (self glyphsOf: (i at: 3)) value: (i at: 2)].
+	s lf; nextPutAll: 'The Smalltalk items each text pane takes'; lf.
+	self paneKeys do: [:p |
+		s tab; nextPutAll: p first; nextPutAll: ': '.
+		(p at: 2) do: [:k | s nextPutAll: (self glyphsOf: k); space; nextPutAll: ((self smalltalkItems detect: [:i | (i at: 3) = k]) at: 2)]
+			separatedBy: [s nextPutAll: ', '].
+		s lf].
+	s lf; nextPutAll: 'Help menu'; lf.
+	self helpItems do: [:i | line value: '' value: (i at: 2)].
+	s lf; nextPutAll: 'Toolbars (buttons, no keys)'; lf.
+	s tab; nextPutAll: 'Browser: '; nextPutAll: (self titlesOf: BrowserWindow toolbarItems); lf.
+	s tab; nextPutAll: 'Debugger: '; nextPutAll: (self titlesOf: DebuggerWindow toolbarItems); lf.
+	s lf; nextPutAll: 'Edit menu (the system''s): ⌘Z undo, ⇧⌘Z redo, ⌘X cut, ⌘C copy, ⌘V paste, ⌘A select all'; lf.
+	^ s contents
+]
+
+{ #category : #menus }
+DevTools class >> smalltalkItem: anId [
+	"A Smalltalk menu item, chosen with the mouse or by a key the focused pane does not bind: the focused pane's own key action runs as if its key had been pressed, when the pane binds that key (an item that does not apply to the pane does nothing). A key the pane binds never reaches the menu: the text view takes it first."
+	| item pane |
+	item := self smalltalkItems detect: [:i | i first = anId] ifNone: [^ nil].
+	pane := self focusedPane.
+	pane isNil ifTrue: [^ nil].
+	^ pane pressKey: (item at: 3)
+]
+
+{ #category : #menus }
+DevTools class >> smalltalkItems [
+	"The Smalltalk menu (the discoverability follow-up): id, title, key. Do it, Print it and Inspect it evaluate the selection or the line; Accept compiles the pane; Senders, Implementors and Browse act on the selection or the word at the insertion point, Instances of it on the class an evaluation of it answers. The shifted keys are free in the Tools, Edit and app menus."
+	^ #(#(11 'Do it' 'cmd-d') #(12 'Print it' 'cmd-p') #(13 'Inspect it' 'cmd-i') #(14 'Accept' 'cmd-s')
+		#(15 'Senders of it' 'cmd-shift-n') #(16 'Implementors of it' 'cmd-shift-m') #(17 'Browse it' 'cmd-shift-b')
+		#(18 'Instances of it' 'cmd-shift-i'))
+]
+
+{ #category : #menus }
+DevTools class >> titlesOf: anArray [
+	^ (anArray collect: [:i | i at: 2]) inject: '' into: [:a :t | a isEmpty ifTrue: [t] ifFalse: [a , ', ' , t]]
+]
+
+{ #category : #menus }
+DevTools class >> toolsItems [
+	"The Tools menu: id, title, key."
+	^ #(#(1 'Browser' 'cmd-b') #(2 'Workspace' 'cmd-k') #(3 'Test Runner' 'cmd-u') #(4 'Transcript' 'cmd-j') #(5 'Targets' 'cmd-shift-t'))
+]
+
+{ #category : #menus }
+DevTools class >> workspaceHint [
+	"The status line of a new Workspace until its first evaluation: Do it, Print it and Inspect it with their keys, from the Smalltalk menu."
+	^ ((self smalltalkItems first: 3) collect: [:i | (self glyphsOf: (i at: 3)) , ' ' , (i at: 2) asLowercase])
+		inject: '' into: [:a :t | a isEmpty ifTrue: [t] ifFalse: [a , ' · ' , t]]
+]
+
 { #category : #opening }
 DevTools class >> browse: aClient [
 	| m |
@@ -136,14 +353,14 @@ DevTools class >> inspect: aDescription client: aClient [
 
 { #category : #opening }
 DevTools class >> installMenu [
-	"The Tools menu in the menu bar, with key equivalents."
+	"The Tools, Smalltalk and Help menus in the menu bar, with key equivalents, made from toolsItems, smalltalkItems and helpItems. Answers the Tools menu."
 	menu isNil ifFalse: [^ menu].
-	menu := Menu new.
-	menu title: 'Tools'.
-	menu addItem: 1 title: 'Browser' key: 'cmd-b'; addItem: 2 title: 'Workspace' key: 'cmd-k';
-		addItem: 3 title: 'Test Runner' key: 'cmd-u'; addItem: 4 title: 'Transcript' key: 'cmd-j'; addItem: 5 title: 'Targets' key: 'cmd-shift-t'.
-	menu action: [:id | self menuItem: id].
+	menu := self menu: 'Tools' items: self toolsItems action: [:id | self menuItem: id].
 	menu installInMenuBar.
+	smalltalkMenu := self menu: 'Smalltalk' items: self smalltalkItems action: [:id | self smalltalkItem: id].
+	smalltalkMenu installInMenuBar.
+	helpMenu := self menu: 'Help' items: self helpItems action: [:id | self helpItem: id].
+	helpMenu installInMenuBar.
 	^ menu
 ]
 
@@ -243,7 +460,9 @@ DevTools class >> reset [
 	windows := nil.
 	debuggers := nil.
 	transcript := nil.
-	menu := nil
+	menu := nil.
+	smalltalkMenu := nil.
+	helpMenu := nil
 ]
 
 { #category : #windows }

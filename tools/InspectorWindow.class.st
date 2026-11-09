@@ -25,8 +25,8 @@ InspectorWindow >> build [
 	valueView autoresize: 'width top'.
 	workspaceView := self textAt: {0. 314. 520. 120} editable: true.
 	workspaceView autoresize: 'width top'.
-	workspaceView bindKeys: #('cmd-d' 'cmd-p' 'cmd-i').
-	workspaceView onKey: [:k | self evaluateIn: workspaceView with: model workspace key: k].
+	self pane: workspaceView keys: (DevTools keysOfPane: 'Inspector evaluation pane')
+		action: [:k | self key: k in: workspaceView with: model workspace].
 	self addStatusLine
 ]
 

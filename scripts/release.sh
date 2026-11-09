@@ -52,6 +52,13 @@ if [[ $dry == 0 ]]; then
     print "the Kajo checkout of $tag ($head) and the prebuilt Kajo frameworks for macOS arm64 and iOS arm64."
     print "Apple silicon Macs, macOS 15 or later; Xcode for building apps. SHA-256 in Kajo-$version.dmg.sha256."
     print
+    print "## First steps"
+    print
+    print "Open a Workspace (Tools > Workspace, ⌘K), type \`3 + 4\` and press ⌘P (Smalltalk > Print it): the answer"
+    print "appears after the expression. ⌘D does it, ⌘I inspects it; the Smalltalk menu and a right-click in any"
+    print "workspace or source pane list the rest, and Help > Keyboard Shortcuts lists every key. In Smalltalk"
+    print "\`\"…\"\` is a comment and \`'…'\` a String."
+    print
     print "## Changes"
     print
     print "(fill in)"

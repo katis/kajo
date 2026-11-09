@@ -10,7 +10,8 @@ Class {
 		'sourceView',
 		'messagesWindow',
 		'messagesTable',
-		'treeIndex'
+		'treeIndex',
+		'hinted'
 	],
 	#classInstVars : [
 		'treeForm'
@@ -68,11 +69,11 @@ BrowserWindow >> build [
 	selectorsTable columns: #('Selectors').
 	sourceView := self textAt: {0. 252. 900. 362} editable: true.
 	sourceView autoresize: 'width height'.
-	sourceView bindKeys: #('cmd-s').
+	self pane: sourceView keys: (DevTools keysOfPane: 'Browser source') action: [:k |
+		k = 'cmd-s' ifTrue: [model accept: sourceView text] ifFalse: [self key: k in: sourceView with: nil]].
 	self addStatusLine.
 	toolbar := Toolbar new.
-	#(#(1 'Instance/Class') #(2 'Hierarchy/Category') #(3 'Definition') #(4 'Comment') #(5 'New method') #(6 'New class')
-		#(7 'Senders') #(8 'Implementors') #(9 'Remove method') #(10 'Remove class')) do: [:i | toolbar addItem: i first title: (i at: 2)].
+	BrowserWindow toolbarItems do: [:i | toolbar addItem: i first title: (i at: 2)].
 	window toolbar: toolbar.
 	toolbar action: [:id | self toolbarItem: id].
 	menu := Menu new.
@@ -87,8 +88,7 @@ BrowserWindow >> build [
 	selectorsTable onSelect: [:row | | sels |
 		sels := model selectors.
 		(row between: 1 and: sels size) ifTrue: [model selectSelector: (sels at: row)]].
-	sourceView onKey: [:k | k = 'cmd-s' ifTrue: [model accept: sourceView text]].
-	sourceView onChange: [:v | self colour]
+	sourceView onChange: [:v | self colour. self edited]
 ]
 
 { #category : #building }
@@ -113,6 +113,16 @@ BrowserWindow >> colour [
 		b := TextView offsetOfLine: model errorLine + 1 column: 1 in: text.
 		b > a ifTrue: [styles := styles , {a. b - 1. 'background:red'}]].
 	sourceView styles: styles
+]
+
+{ #category : #updating }
+BrowserWindow >> edited [
+	"The source pane was edited by hand: with a method shown and no compile error named, the status line says how to accept it (once per method shown; the discoverability follow-up)."
+	hinted == true ifTrue: [^ self].
+	(model sourceKind == #method or: [model sourceKind == #newMethod]) ifFalse: [^ self].
+	model errorLine isNil ifFalse: [^ self].
+	hinted := true.
+	model status: (DevTools glyphsOf: 'cmd-s') , ' accept'
 ]
 
 { #category : #updating }
@@ -159,9 +169,16 @@ BrowserWindow >> update: anAspect [
 	anAspect == #categories ifTrue: [^ categoriesTable list: model categories].
 	anAspect == #selectors ifTrue: [^ selectorsTable list: model selectors].
 	anAspect == #selector ifTrue: [^ selectorsTable selectRow: ((model selectors indexOf: model selector) max: 0)].
-	anAspect == #source ifTrue: [sourceView text: model source. ^ self colour].
+	anAspect == #source ifTrue: [hinted := false. sourceView text: model source. ^ self colour].
 	anAspect == #errorLine ifTrue: [^ self colour].
 	anAspect == #messages ifTrue: [^ self showMessages]
+]
+
+{ #category : #building }
+BrowserWindow class >> toolbarItems [
+	"The toolbar's commands: id, title."
+	^ #(#(1 'Instance/Class') #(2 'Hierarchy/Category') #(3 'Definition') #(4 'Comment') #(5 'New method') #(6 'New class')
+		#(7 'Senders') #(8 'Implementors') #(9 'Remove method') #(10 'Remove class'))
 ]
 
 { #category : #forms }

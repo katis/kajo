@@ -5,7 +5,8 @@ Class {
 	#instVars : [
 		'model',
 		'window',
-		'statusLabel'
+		'statusLabel',
+		'panes'
 	],
 	#classInstVars : [
 		'savedFrames'
@@ -16,6 +17,12 @@ Class {
 { #category : #accessing }
 ToolWindow >> model [
 	^ model
+]
+
+{ #category : #accessing }
+ToolWindow >> textPanes [
+	"The text panes the Smalltalk menu can act on (pane:keys:action:)."
+	^ panes ifNil: [#()]
 ]
 
 { #category : #accessing }
@@ -67,6 +74,17 @@ ToolWindow >> makeWindow: aTitle [
 ]
 
 { #category : #building }
+ToolWindow >> pane: aTextView keys: someKeys action: aBlock [
+	"aTextView is a text pane of this window (the discoverability follow-up): it binds someKeys (Smalltalk menu keys, DevTools paneKeys), reports them to aBlock, and gets a context menu of the same items, which runs aBlock exactly as the key does. The Smalltalk menu finds it when it is focused (textPanes)."
+	aTextView bindKeys: someKeys.
+	aTextView onKey: aBlock.
+	(DevTools contextMenuFor: someKeys action: [:k | aTextView pressKey: k]) ifNotNil: [:m | aTextView contextMenu: m].
+	panes isNil ifTrue: [panes := OrderedCollection new].
+	panes add: aTextView.
+	^ aTextView
+]
+
+{ #category : #building }
 ToolWindow >> table: anArray at: aFrame [
 	"A table with columns anArray at {x. y. width. height}."
 	| t |
@@ -83,6 +101,49 @@ ToolWindow >> textAt: aFrame editable: aBoolean [
 	t x: aFrame first y: (aFrame at: 2) width: (aFrame at: 3) height: (aFrame at: 4).
 	t editable: aBoolean.
 	^ t
+]
+
+{ #category : #it }
+ToolWindow >> isWordByte: aByte [
+	"A byte of an identifier or a keyword: a letter, a digit, a colon, an underscore."
+	^ (aByte between: 48 and: 58) or: [(aByte between: 65 and: 90) or: [(aByte between: 97 and: 122) or: [aByte = 95]]]
+]
+
+{ #category : #it }
+ToolWindow >> itIn: aTextView [
+	"What an item on 'it' acts on: the selection, trimmed, or else the word the insertion point is in or after."
+	| text sel start stop |
+	text := aTextView text ifNil: [''].
+	sel := aTextView selection.
+	(sel at: 2) >= sel first ifTrue: [^ (text copyFrom: sel first to: (sel at: 2)) trimmed].
+	start := sel first min: text byteSize + 1.
+	stop := start - 1.
+	[start > 1 and: [self isWordByte: (text byteAt: start - 1)]] whileTrue: [start := start - 1].
+	[stop < text byteSize and: [self isWordByte: (text byteAt: stop + 1)]] whileTrue: [stop := stop + 1].
+	^ stop < start ifTrue: [''] ifFalse: [text copyFrom: start to: stop]
+]
+
+{ #category : #it }
+ToolWindow >> key: aKey in: aTextView with: aWorkspaceModelOrNil [
+	"The Smalltalk menu's items on a text pane: Do it, Print it, Inspect it and Instances of it evaluate through aWorkspaceModelOrNil (the pane's evaluation context), Senders, Implementors and Browse open a browser on the target. Accept is each window's own."
+	(#('cmd-d' 'cmd-p' 'cmd-i') includes: aKey) ifTrue: [
+		^ aWorkspaceModelOrNil ifNotNil: [:w | self evaluateIn: aTextView with: w key: aKey]].
+	aKey = 'cmd-shift-n' ifTrue: [^ DevTools sendersOf: (self selectorIn: aTextView) client: model client].
+	aKey = 'cmd-shift-m' ifTrue: [^ DevTools implementorsOf: (self selectorIn: aTextView) client: model client].
+	aKey = 'cmd-shift-b' ifTrue: [^ DevTools browseIt: (self itIn: aTextView) client: model client].
+	aKey = 'cmd-shift-i' ifTrue: [^ aWorkspaceModelOrNil ifNotNil: [:w | DevTools instancesOf: (self itIn: aTextView) with: w]]
+]
+
+{ #category : #it }
+ToolWindow >> selectorIn: aTextView [
+	"The selector it names: a keyword message's keywords joined (at: 1 put: 2 is at:put:), else its first word (a #symbol's without the #)."
+	| it words keywords |
+	it := self itIn: aTextView.
+	(it beginsWith: '#') ifTrue: [it := it allButFirst].
+	words := it substrings.
+	keywords := words select: [:w | (w endsWith: ':') and: [w byteSize > 1]].
+	keywords isEmpty ifFalse: [^ keywords inject: '' into: [:a :w | a , w]].
+	^ words isEmpty ifTrue: [''] ifFalse: [words first]
 ]
 
 { #category : #opening }

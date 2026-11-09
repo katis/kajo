@@ -8,7 +8,8 @@ Class {
 		'slots',
 		'history',
 		'seen',
-		'workspace'
+		'workspace',
+		'note'
 	],
 	#category : #'Tools-Models'
 }
@@ -16,6 +17,12 @@ Class {
 { #category : #accessing }
 InspectorModel >> handle [
 	^ handle
+]
+
+{ #category : #accessing }
+InspectorModel >> note: aStringOrNil [
+	"Said in the title after the object (Instances of it: how many instances there were)."
+	note := aStringOrNil
 ]
 
 { #category : #accessing }
@@ -31,7 +38,9 @@ InspectorModel >> slots [
 
 { #category : #accessing }
 InspectorModel >> title [
-	^ object isNil ifTrue: ['Inspector'] ifFalse: [(object at: 'class') , ' ' , ((object at: 'value') copyFrom: 1 to: ((object at: 'value') byteSize min: 40))]
+	| t |
+	t := object isNil ifTrue: ['Inspector'] ifFalse: [(object at: 'class') , ' ' , ((object at: 'value') copyFrom: 1 to: ((object at: 'value') byteSize min: 40))].
+	^ note isNil ifTrue: [t] ifFalse: [t , ' (' , note , ')']
 ]
 
 { #category : #accessing }

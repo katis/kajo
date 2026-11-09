@@ -38,8 +38,7 @@ DebuggerWindow >> build [
 	| toolbar split |
 	self makeWindow: model title.
 	toolbar := Toolbar new.
-	#(#(1 'Proceed') #(2 'Restart') #(3 'Retry send') #(4 'Into') #(5 'Over') #(6 'Out') #(7 'Terminate') #(8 'Define method'))
-		do: [:i | toolbar addItem: i first title: (i at: 2)].
+	DebuggerWindow toolbarItems do: [:i | toolbar addItem: i first title: (i at: 2)].
 	window toolbar: toolbar.
 	toolbar action: [:id | self command: id].
 	framesTable := self table: #('Frames') at: {0. 0. 900. 170}.
@@ -47,8 +46,8 @@ DebuggerWindow >> build [
 	framesTable onSelect: [:row | (row between: 1 and: model frames size) ifTrue: [model selectFrame: row]].
 	sourceView := self textAt: {0. 172. 900. 250} editable: true.
 	sourceView autoresize: 'width height'.
-	sourceView bindKeys: #('cmd-s').
-	sourceView onKey: [:k | k = 'cmd-s' ifTrue: [model save: sourceView text]].
+	self pane: sourceView keys: (DevTools keysOfPane: 'Debugger source') action: [:k |
+		k = 'cmd-s' ifTrue: [model save: sourceView text] ifFalse: [self key: k in: sourceView with: nil]].
 	split := window add: SplitView new.
 	split x: 0 y: 424 width: 900 height: 190.
 	split vertical: true.
@@ -59,8 +58,8 @@ DebuggerWindow >> build [
 	workspaceView := split add: TextView new.
 	workspaceView x: 0 y: 0 width: 500 height: 190.
 	workspaceView editable: true.
-	workspaceView bindKeys: #('cmd-d' 'cmd-p' 'cmd-i').
-	workspaceView onKey: [:k | self evaluateIn: workspaceView with: model workspace key: k].
+	self pane: workspaceView keys: (DevTools keysOfPane: 'Debugger evaluation pane')
+		action: [:k | self key: k in: workspaceView with: model workspace].
 	self addStatusLine
 ]
 
@@ -96,4 +95,10 @@ DebuggerWindow >> update: anAspect [
 { #category : #updating }
 DebuggerWindow >> workspaceView [
 	^ workspaceView
+]
+
+{ #category : #building }
+DebuggerWindow class >> toolbarItems [
+	"The toolbar's commands: id, title."
+	^ #(#(1 'Proceed') #(2 'Restart') #(3 'Retry send') #(4 'Into') #(5 'Over') #(6 'Out') #(7 'Terminate') #(8 'Define method'))
 ]
