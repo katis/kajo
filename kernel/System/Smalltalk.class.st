@@ -72,14 +72,13 @@ Smalltalk class >> classCount [
 
 { #category : #classes }
 Smalltalk class >> classNamed: aString [
-	"The class named aString, or nil (a table by name, rebuilt when a class is missing from it)."
-	| sym |
+	"The class named aString, or nil (a table by name, rebuilt when a class is missing from it). The table is read once into a temporary and a rebuild answers its own table, so a Process never reads another one's table while it is being filled."
+	| sym names |
 	sym := Symbol lookup: aString.
 	sym isNil ifTrue: [^ nil].
-	classNames isNil ifTrue: [self rebuildClassNames].
-	^ classNames at: sym ifAbsent: [
-		self rebuildClassNames.
-		classNames at: sym ifAbsent: [nil]]
+	names := classNames.
+	names isNil ifTrue: [names := self rebuildClassNames].
+	^ names at: sym ifAbsent: [self rebuildClassNames at: sym ifAbsent: [nil]]
 ]
 
 { #category : #classes }
@@ -118,8 +117,12 @@ Smalltalk class >> primGarbageCollect [
 
 { #category : #classes }
 Smalltalk class >> rebuildClassNames [
-	classNames := IdentityDictionary new.
-	self allClasses do: [:c | classNames at: c name put: c]
+	"A new table of every class by name, filled before it is published (concurrent Processes look classes up: a table published empty and then filled let one of them miss Object, found under load by the tags' tools test). Answers it."
+	| names |
+	names := IdentityDictionary new.
+	self allClasses do: [:c | names at: c name put: c].
+	classNames := names.
+	^ names
 ]
 
 { #category : #classes }

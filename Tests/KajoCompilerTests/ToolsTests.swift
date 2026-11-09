@@ -136,7 +136,9 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         vm.openProtocol()
         vm.start()
         let p = try #require(vm.spawn("start", receiver: "DevProtocol"))
-        #expect(drive(vm) { vm.state(of: p) == .terminated })
+        // Something that must come waits long everywhere (AGENTS.md): 30 s
+        // ran out once under ThreadSanitizer in the full suite.
+        #expect(drive(vm, seconds: 120) { vm.state(of: p) == .terminated })
         #expect(vm.result(of: p) == .bool(true))
         vm.release(p)
         server.start()
