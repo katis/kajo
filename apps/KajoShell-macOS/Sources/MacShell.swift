@@ -21,6 +21,7 @@ import KajoShellCore
     var product: ProductMode?
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        LaunchTrace.step("did-finish-launching")
         let options = LaunchOptions()
         if options["mode"] == nil {
             startProduct(options)
@@ -28,6 +29,7 @@ import KajoShellCore
         }
         let h = AppKitHost(statusWindow: true, keepDisplayAwake: true)
         host = h
+        LaunchTrace.step("host-ready")
         // Module 9d: the Mac serving over TCP shows how to pair in its
         // status line (as 9b's socket's token is shown there); no button.
         let p = PairingScreen(host: h, style: .statusLine)
@@ -61,6 +63,25 @@ import KajoShellCore
     static let delegate = AppDelegate()
 
     static func main() {
+        // `kajo-launch-report` among the arguments: a `launch step=` line per
+        // step of the launch (the first-launch follow-up).
+        LaunchTrace.step("main")
+        // A measurement launch (any `mode=`) holds the display for its whole
+        // life, taken before the wake below so the display is never on
+        // without it (the first-launch follow-up, docs/modules/first-launch.md:
+        // the golden launches held no display assertion, so with the user
+        // idle past the display-sleep time powerd asked for the display off
+        // at every exit, and the off it asked for between the last golden
+        // launch and the first scenario launch landed inside that scenario's
+        // window, 2.8 to 5 s with no frames, the assertion the scenario took
+        // at its link's start notwithstanding; a released assertion keeps
+        // the display on for the gap to the next launch instead). Released
+        // when the process exits. No setting is changed.
+        if CommandLine.arguments.contains(where: { $0.hasPrefix("mode=") }) {
+            var display: IOPMAssertionID = 0
+            _ = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
+                                            IOPMAssertionLevel(kIOPMAssertionLevelOn), "Kajo shell launch" as CFString, &display)
+        }
         // Wake an asleep display first (the mini's TV sleeps after ten
         // minutes), as a key press would. No setting is changed.
         var activity: IOPMAssertionID = 0

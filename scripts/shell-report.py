@@ -15,7 +15,13 @@ missed, fallbacks and the longest stop (from gc_stopsByKind) per file and in
 all, and the rows that missed a frame, fell back or delivered no frames
 (a display asleep). Exit status 1 when a launch failed or a checksum
 disagreed, 0 otherwise (missed frames and fallbacks are reported, not
-judged)."""
+judged).
+
+The warm-up launch (docs/modules/first-launch.md): shell-matrix.sh runs one
+idle launch before its first row into warmup.txt; it is never a row of a
+table or of the bar, and both outputs print it on a line of its own before
+the tables (frames missed, the longest gap and where it starts in the
+window) when the file exists, so its effect stays visible."""
 import statistics
 import sys
 from collections import defaultdict
@@ -99,8 +105,27 @@ def row_name(r):
     return " ".join(f"{k}={r[k]}" for k in keys if k in r)
 
 
+def warmup_line(d):
+    """The warm-up launch's numbers on one line, or None without one."""
+    rows = lines(d / "warmup.txt")
+    if not rows:
+        return None
+    parts = []
+    for r in rows:
+        if r.get("_failed"):
+            parts.append("launch failed")
+        else:
+            parts.append(f"missed {r.get('missed', '-')} of {r.get('expected', '-')}, max gap {r.get('gap_max_ms', '-')} ms"
+                         f" at {r.get('gap_max_at_ms', '-')} ms of the window, gaps over 100 ms {r.get('gaps100', '-')}")
+    return "warm-up launch (not a row): " + "; ".join(parts)
+
+
 def bar(d):
     files = ["drift", "golden", "scenarios", "events", "hog"]
+    w = warmup_line(d)
+    if w:
+        print(w)
+        print()
     print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | sweep stops (longest ms) | longest stop ms |")
     print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
     tot = defaultdict(float)
@@ -164,6 +189,9 @@ def main():
     d = Path(sys.argv[1])
     fails = sum(1 for f in ["golden", "scenarios", "events", "hog", "drift"] for r in lines(d / f"{f}.txt") if r.get("_failed"))
     print(f"launches failed: {fails}\n")
+    w = warmup_line(d)
+    if w:
+        print(w + "\n")
 
     g = group(lines(d / "golden.txt"), ["kind", "kernel", "workers"])
     if g:

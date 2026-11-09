@@ -9,6 +9,12 @@
 # parts (default all): golden scenarios events hog drift. RUNS (3), WORKERS
 # (background workers in the scenarios: 7 on the Mac, 5 on the phone),
 # SECONDS_ (10) override.
+#
+# The first-launch follow-up (docs/modules/first-launch.md): before its first
+# row the matrix runs one idle launch of the shell, the warm-up, into
+# warmup.txt (tag=warmup); it is not a row (shell-report.py prints its
+# numbers on a line of their own, never in a table or the bar). WARMUP=0
+# leaves it out.
 set -uo pipefail
 root=${0:A:h:h}
 target=${1:?mac|device}
@@ -25,6 +31,9 @@ else
   GW=(1 2 6)
 fi
 drifted=0
+if [[ ${WARMUP:-1} == 1 ]]; then
+  one $out/warmup.txt mode=scenario scenario=idle young=offload workers=$W seconds=$SECS tag=warmup run=1
+fi
 for part in ${=parts}; do
   case $part in
     drift)
