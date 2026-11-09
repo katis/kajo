@@ -496,7 +496,7 @@ of 255 and 218 of 218).
 - Instances of it is not offered on source panes (the brief's list).
 - The iPad.
 
-### Open questions for the owner (built as recommended)
+### Open questions for the owner (built as recommended; answered by the owner on 2026-11-09: `pointersTo:` is its own module, no Smalltalk items in the Edit menu, and **no default limit** for `allInstances` and `allSubInstances`, Pharo's rule, built in the `pointersTo:` follow-up together with `pointersTo`'s default; the tools keep their bounded list)
 
 1. `pointersTo:` with the same walk? Built: not now. (The PLAN commit
    62e4281 of 2026-11-09 queues it as a module of its own after this
