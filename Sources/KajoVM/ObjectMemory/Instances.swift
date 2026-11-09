@@ -65,17 +65,22 @@ extension ObjectMemory {
 //   `MethodLayout.literals`). Pharo's literal frame is the method's own
 //   slots, and the developer asks which method uses the object, so a
 //   method whose literal frame holds the target is the holder, and that
-//   literal frame Array is not listed for it (a first pass over the
-//   methods notes those frames, because a frame's entry may come before
-//   its method's). A block method is held in its outer method's frame,
-//   so the outer method is listed for the block method too.
+//   literal frame Array is not listed for it. A method's frame is read
+//   where the walk meets the method; a frame's entry may come before its
+//   method's, so the first read-only Array found holding the target (every
+//   literal frame is read-only, which the loader checks, and few other
+//   holders are) makes the walk note every method's frame that holds it
+//   in one pass over the methods, and frames are skipped from then on. A
+//   block method is held in its outer method's frame, so the outer method
+//   is listed for the block method too.
 // - Process stacks are not heap objects (module 3) and are not read; a
 //   saved Process's stack chunks (module 8c, Arrays of verbatim words)
 //   are, so a saved frame's reference is found as a slot of its chunk.
 //
-// World stopped and nothing young, so the loads are the marker's relaxed
-// loads with no hazard slot or pin: no relocation runs (the hook
-// abandoned the cycle) and no mutator stores.
+// World stopped and nothing young, so the slots are read with plain loads
+// and no hazard slot or pin: no relocation runs (the hook abandoned the
+// cycle), no mutator stores and the marker is parked; the stop's lock
+// orders every earlier store before them.
 
 extension ObjectMemory {
     /// Visit every old object with a slot holding `target`, in table order,
@@ -87,7 +92,10 @@ extension ObjectMemory {
         let hw = highWater
         let map = oldMap
         let mapWords = Int((hw &+ 63) &>> 6)
-        let frames = literalFramesHolding(target, words: &words)
+        // The literal frames holding the target, found on the first
+        // read-only Array that holds it (every literal frame is read-only,
+        // a rule the loader checks; most holders are not).
+        var frames: Set<UInt64>? = nil
         var scanned: UInt64 = 0
         var found = 0
         for w in 0..<mapWords {
@@ -103,17 +111,16 @@ extension ObjectMemory {
                 let h = headerWord(raw)
                 if h & Header.bytesBit != 0 { continue }
                 let n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
-                var i = 0
-                while i < n && loadAtomic(bodyOffset: s, i) != target { i &+= 1 }
+                let i = firstSlot(holding: target, bodyOffset: s, count: n)
                 scanned &+= UInt64(i < n ? i &+ 1 : n)
                 var hit = i < n
-                if !frames.isEmpty {
-                    let ci = h & Header.classMask
-                    if hit && ci == WellKnown.array && frames.contains(raw) {
-                        hit = false
-                    } else if !hit && ci == WellKnown.method && n > MethodLayout.literals {
-                        hit = frames.contains(loadAtomic(bodyOffset: s, MethodLayout.literals))
-                    }
+                let ci = h & Header.classMask
+                if hit && ci == WellKnown.array && h & Header.readOnlyBit != 0 {
+                    if frames == nil { frames = literalFramesHolding(target, words: &words) }
+                    if frames.unsafelyUnwrapped.contains(raw) { hit = false }
+                } else if !hit && ci == WellKnown.method && n > MethodLayout.literals {
+                    let lf = loadAtomic(bodyOffset: s, MethodLayout.literals)
+                    hit = frames.map { $0.contains(lf) } ?? frameHolds(Oop(raw: lf), target, words: &scanned)
                 }
                 if !hit { continue }
                 found &+= 1
@@ -134,16 +141,40 @@ extension ObjectMemory {
         walkInstances(of: methodClassFlags) { m in
             guard header(m).count > UInt64(MethodLayout.literals) else { return true }
             let lf = load(m, MethodLayout.literals)
-            guard lf.isObject, isUsedReference(lf), !isBytes(lf), classIndex(of: lf) == WellKnown.array else { return true }
-            let s = stateWord(lf.raw)
-            let n = Int(header(lf).count)
-            var i = 0
-            while i < n && loadAtomic(bodyOffset: s, i) != target { i &+= 1 }
-            words &+= UInt64(i < n ? i &+ 1 : n)
-            if i < n { frames.insert(lf.raw) }
+            if frameHolds(lf, target, words: &words) { frames.insert(lf.raw) }
             return true
         }
         return frames
+    }
+
+    /// A method's literal frame `lf` (an Array) has a slot holding `target`.
+    private func frameHolds(_ lf: Oop, _ target: UInt64, words: inout UInt64) -> Bool {
+        guard lf.isObject, isUsedReference(lf), !isBytes(lf), classIndex(of: lf) == WellKnown.array else { return false }
+        let n = Int(header(lf).count)
+        let i = firstSlot(holding: target, bodyOffset: stateWord(lf.raw), count: n)
+        words &+= UInt64(i < n ? i &+ 1 : n)
+        return i < n
+    }
+
+    /// The index of the first of the `n` slots of the body at `s` that
+    /// holds `target`, or `n`. World stopped, so no mutator stores and no
+    /// relocator copies: plain loads, eight slots compared per step as
+    /// one vector compare.
+    @inline(__always)
+    private func firstSlot(holding target: UInt64, bodyOffset s: UInt64, count n: Int) -> Int {
+        let p = unsafe UnsafeRawPointer(heapBase.advanced(by: Int(truncatingIfNeeded: s) &+ 8))
+        var i = 0
+        let t = SIMD8<UInt64>(repeating: target)
+        while i &+ 8 <= n {
+            let v = unsafe p.loadUnaligned(fromByteOffset: i &<< 3, as: SIMD8<UInt64>.self)
+            if any(v .== t) { break }
+            i &+= 8
+        }
+        while i < n {
+            if unsafe p.load(fromByteOffset: i &<< 3, as: UInt64.self) == target { break }
+            i &+= 1
+        }
+        return i
     }
 
     private var methodClassFlags: [Bool] {

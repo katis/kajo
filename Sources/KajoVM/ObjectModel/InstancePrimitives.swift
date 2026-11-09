@@ -55,8 +55,10 @@
 //        there are, allocating nothing.
 //
 // 169 and 170 run in the same stop kind and hook as 167 and 168, and 169
-// counts, allocates and fills exactly as 167 does (the rule and the
-// reason above hold word for word). The walk is ObjectMemory's
+// allocates its Array in the stop as 167 does (the rule and the reason
+// above hold word for word), but walks once: the holders go into a host
+// buffer, the Array is allocated and filled from it, and only when that
+// allocation collected is the Array filled by a second walk. The walk is ObjectMemory's
 // `walkPointers`; the slots it compared are the stop record's `words`.
 
 enum InstancePrimitives {
@@ -157,9 +159,20 @@ private func pointersTo(_ m: Machine, _ target: Oop, limit: Int) -> Oop {
     inInstanceStop(m, keeping: [target]) { om, roots in
         var words: UInt64 = 0
         defer { noteStopWords(m, words) }
-        var n = 0
-        if limit > 0 { om.walkPointers(to: target.raw, words: &words) { _ in n &+= 1; return n < limit } }
+        // One walk into a host buffer, then the Array filled from it: the
+        // walk reads every slot of the heap, so a second one would double
+        // the stop. If the allocation collected, what it freed may be in
+        // the buffer, and the Array is filled by a second walk instead.
+        var found: [UInt64] = []
+        if limit > 0 { om.walkPointers(to: target.raw, words: &words) { o in found.append(o.raw); return found.count < limit } }
+        let n = found.count
+        let collections = om.counters.collections
         guard let a = om.allocate(ctx, classIndex: WellKnown.array, slots: n, fill: m.nilObject, extraRoots: roots()) else { return }
+        if om.counters.collections == collections {
+            for i in 0..<n { om.store(a, i, Oop(raw: found[i])) }
+            answer = a
+            return
+        }
         var filled = 0
         if n > 0 {
             om.walkPointers(to: target.raw, skipping: a, words: &words) { o in

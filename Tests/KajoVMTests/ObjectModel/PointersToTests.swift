@@ -107,6 +107,19 @@ method UndefinedObject countOfATemporary temps=1
   send ptrCount: 1
   return_top
 end
+; global k := nil, then nil ptrs: anObject limit: 100 in the same Process
+method UndefinedObject drop:thenPtrs: temps=0
+  push_nil
+  push_temp 0
+  push_nil
+  send g:put: 2
+  pop
+  push_nil
+  push_temp 1
+  push_int 100
+  send ptrs:limit: 2
+  return_top
+end
 method UndefinedObject collect temps=0
   push_nil
   push_nil
@@ -277,6 +290,22 @@ extension Runtime {
     for bad in [int(-1), int(Int64(Header.maxLargeCount) + 1), rt.image.nilObject] {
         #expect(rt.runOop("ptrs:limit:", [t, bad]) == rt.image.nilObject)
     }
+    rt.noFailures()
+    rt.stop()
+}
+
+@Test func whenTheAnswersAllocationCollectsTheAnswerIsExact() throws {
+    // Every allocation through the object memory collects first, so the
+    // answer's own allocation frees a garbage holder the walk listed: the
+    // Array is then filled by a second walk, and the answer is exact.
+    let rt = try Runtime(pointersSrc, background: 1, start: false, stress: .collectAtEveryAllocation,
+                         configure: { $0.nursery.bytes = 4096 * 1024 })
+    let t = rt.runOop("target")
+    _ = rt.runOop("hold:in:size:", [t, int(7), int(1)])
+    rt.scavenge()
+    let collections = rt.image.om.counters.collections
+    #expect(rt.elements(rt.runOop("drop:thenPtrs:", [int(7), t])) == [rt.image.globals])
+    #expect(rt.image.om.counters.collections > collections)
     rt.noFailures()
     rt.stop()
 }
