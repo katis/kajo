@@ -278,6 +278,49 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         #expect(t.shell.count("call.setStyles") >= 1)
     }
 
+    /// Tags as subdirectories, from the tools: a class defined in the
+    /// browser into a new tag has its file in the project's `<Tag>/`; a
+    /// definition with another tag moves the file (the old one and its
+    /// emptied directory gone); removing the class removes the file. With
+    /// the project a copy of tools/, the copy is tools/ again afterwards.
+    /// KAJO_TOOLSRUN_OUT names a directory the listings are written to.
+    @Test func aClassDefinedIntoATagFromTheBrowserMovesWithItsTag() throws {
+        let t = try LocalTools()
+        defer { t.close() }
+        let project = try temporaryDirectory("tools-tags")
+        defer { try? FileManager.default.removeItem(at: project) }
+        try FileManager.default.removeItem(at: project)
+        try FileManager.default.copyItem(atPath: toolsDirectory, toPath: project.path)
+        let out = ProcessInfo.processInfo.environment["KAJO_TOOLSRUN_OUT"]
+        func listing(_ step: String) throws -> [String] {
+            let files = try tonelFiles(in: project.path)
+            if let out { try (files.joined(separator: "\n") + "\n").write(toFile: out + "/" + step + ".txt", atomically: true, encoding: .utf8) }
+            return files
+        }
+        let before = try listing("0-before")
+        #expect(try t.probe("open:project:", [.string(t.path), .string(project.path)]) == .bool(true))
+        #expect(t.until("ready"))
+        #expect(try t.probe("defineInTag:", [.string("Probes")]) == .bool(true))
+        #expect(t.until("definedInTag:", [.string("Probes")]))
+        let defined = try listing("1-defined-in-Probes")
+        #expect(defined == (before + ["Probes/ToolsTagProbe.class.st"]).sorted())
+        let text = try String(contentsOf: project.appendingPathComponent("Probes/ToolsTagProbe.class.st"), encoding: .utf8)
+        #expect(text.hasPrefix("Class {\n\t#name : #ToolsTagProbe,\n\t#superclass : #Object,\n\t#instVars : [\n\t\t'a'\n\t]\n}\n"), "\(text)")
+        #expect(try t.probe("defineInTag:", [.string("Moved")]) == .bool(true))
+        #expect(t.until("definedInTag:", [.string("Moved")]))
+        let moved = try listing("2-moved-to-Moved")
+        #expect(moved == (before + ["Moved/ToolsTagProbe.class.st"]).sorted())
+        #expect(!FileManager.default.fileExists(atPath: project.appendingPathComponent("Probes").path))
+        #expect(try t.probe("removeTagProbe") == .bool(true))
+        #expect(t.until("tagProbeRemoved"))
+        let after = try listing("3-removed")
+        #expect(after == before)
+        #expect(!FileManager.default.fileExists(atPath: project.appendingPathComponent("Moved").path))
+        for f in after {
+            #expect(FileManager.default.contents(atPath: project.path + "/" + f) == FileManager.default.contents(atPath: toolsDirectory + "/" + f), "\(f)")
+        }
+    }
+
     @Test func anErrorInAToolStopsOnlyItsProcessAndTheToolsGoOn() throws {
         let t = try LocalTools()
         defer { t.close() }

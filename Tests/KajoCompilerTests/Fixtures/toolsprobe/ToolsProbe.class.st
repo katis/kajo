@@ -237,3 +237,41 @@ ToolsProbe class >> pair: aTarget [
 ToolsProbe class >> holdsTokenFor: anAddress [
 	^ ClientTransport targets anySatisfy: [:t | (t at: 2) = anAddress and: [t at: 3]]
 ]
+
+{ #category : #tags }
+ToolsProbe class >> defineInTag: aTag [
+	"Tags as subdirectories: accept a class definition into the local session's package (Tools) under aTag in the first browser, as a developer types it into the definition pane."
+	| m |
+	m := self browser model.
+	m selectPackage: 'Tools'.
+	m newClassTemplate.
+	m accept: 'Object subclass: #ToolsTagProbe
+	instanceVariableNames: ''a''
+	classVariableNames: ''''
+	package: #Tools
+	tag: #' , aTag.
+	^ true
+]
+
+{ #category : #tags }
+ToolsProbe class >> definedInTag: aTag [
+	"The browser has the define's reply for aTag: the class is in that tag and the files the target named (written by the client's transport before the reply reached the tools) include the tag's file."
+	| c |
+	c := Smalltalk at: #ToolsTagProbe ifAbsent: [^ false].
+	(Smalltalk tagOf: c) = aTag asSymbol ifFalse: [^ false].
+	^ self browser model filesWritten anySatisfy: [:f | (f at: 'path') = (aTag , '/ToolsTagProbe.class.st')]
+]
+
+{ #category : #tags }
+ToolsProbe class >> removeTagProbe [
+	| m |
+	m := self browser model.
+	m selectClass: 'ToolsTagProbe'.
+	m removeClass.
+	^ true
+]
+
+{ #category : #tags }
+ToolsProbe class >> tagProbeRemoved [
+	^ (Smalltalk includesKey: #ToolsTagProbe) not and: [self browser model status beginsWith: 'removed']
+]
