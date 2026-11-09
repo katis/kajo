@@ -1,0 +1,15 @@
+"An assertion that did not hold. Not an Error: on: Error do: in the code under test does not catch it."
+Class {
+	#name : #TestFailure,
+	#superclass : #Exception
+}
+
+{ #category : #accessing }
+TestFailure >> defaultAction [
+	^ UnhandledError new exception: self; signal
+]
+
+{ #category : #accessing }
+TestFailure >> isResumable [
+	^ false
+]

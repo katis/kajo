@@ -1,0 +1,15 @@
+"An error. Unhandled, it signals UnhandledError, whose default action reports it on the Transcript and ends the Process."
+Class {
+	#name : #Error,
+	#superclass : #Exception
+}
+
+{ #category : #accessing }
+Error >> defaultAction [
+	^ UnhandledError new exception: self; signal
+]
+
+{ #category : #accessing }
+Error >> isResumable [
+	^ false
+]
