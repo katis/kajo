@@ -98,6 +98,9 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
 /// background workers meanwhile. The frames are the display link's across
 /// the whole session; one result line at the end.
 ///
+/// The discoverability follow-up: `session=instances` (local target only)
+/// runs `DevSessionBench startInstances:` instead of the session.
+///
 /// Module 9d: `target=<name|address> [targets=<file>] [project=<dir>]
 /// [package=Kernel]` runs the session against another target (the phone)
 /// instead of the image's own socket: the client transport reads the
@@ -205,6 +208,14 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         var selector = typing > 0 ? "startTyping:" : "start:package:"
         var args: [ShellValue] = [.string(server?.path ?? "")]
         if typing == 0 { args.append(.string(classes > 0 ? "Generated" : "Tools")) }
+        // The discoverability follow-up: `session=instances` on the local
+        // target, the bar's instance checks and a Workspace evaluating
+        // `String allInstances: 100000` ten times, each a step whose frames
+        // are counted (`steps_ms_missed`).
+        if target == nil && typing == 0 && options["session"] == "instances" {
+            selector = "startInstances:"
+            args = [.string(server?.path ?? "")]
+        }
         if let target {
             selector = "startRemote:package:project:"
             args = [.string(target), .string(options.string("package", "Kernel")), options["project"].map { .string($0) } ?? .nil]

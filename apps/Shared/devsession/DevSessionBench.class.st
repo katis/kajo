@@ -389,6 +389,52 @@ DevSessionBench class >> fixAndProceed [
 	self when: [d state == #running] then: [self end]
 ]
 
+{ #category : #instances }
+DevSessionBench class >> checkInstances [
+	"The discoverability follow-up's bar on this image, evaluated through the tools' own client (the local target is this image): after a collection, ToolWindow allSubInstances against DevTools windows, Class allSubInstances against the classes, String under a limit, SmallInteger's instances; the answer on a transcript line 'devsession: instances <printString>'."
+	| w |
+	w := WorkspaceModel new client: client; yourself.
+	self begin: 'instances.check'.
+	w evaluate: 'Smalltalk garbageCollect. {ToolWindow allSubInstances size. DevTools windows size. Class allSubInstances size. Smalltalk allClasses size. (String allInstances: 1000) size. String instanceCount. SmallInteger allInstances}'
+		then: [:r | Transcript show: 'devsession: instances ' , (r at: 'value'); cr; flush].
+	self when: [w lastResult notNil] then: [self end]
+]
+
+{ #category : #instances }
+DevSessionBench class >> evaluateInstances: aCount in: aWorkspaceWindow [
+	"Do it on the workspace's pane, by its own key action (as the Smalltalk menu's Do it runs it), aCount times, one step each, each waiting for its answer."
+	| m before |
+	aCount = 0 ifTrue: [^ self next].
+	m := aWorkspaceWindow model.
+	before := m lastResult.
+	self begin: 'instances.eval'.
+	aWorkspaceWindow textView selectFrom: 1 to: aWorkspaceWindow textView text byteSize.
+	aWorkspaceWindow textView pressKey: 'cmd-d'.
+	self when: [m lastResult notNil and: [m lastResult ~~ before]] then: [
+		(m lastResult at: 'class') = 'SmallInteger' ifFalse: [^ self fail: 'the doit answered ' , (m lastResult at: 'value')].
+		self record.
+		self evaluateInstances: aCount - 1 in: aWorkspaceWindow]
+]
+
+{ #category : #instances }
+DevSessionBench class >> startInstances: aSocketPath [
+	"The discoverability follow-up's measurement: the tools on this image, the bar's instance checks, then a Workspace evaluating String allInstances: 100000 ten times by its Do it, each a step whose frames the shell counts. The doit answers the Array's size: an Array's printString is the whole Array printed (the protocol cuts it at 4000 bytes after), and every element's printString is a new String the next walk finds, so printing it doubled the work at every evaluation."
+	steps := OrderedCollection new.
+	failure := nil.
+	DevTools openLocal: aSocketPath project: nil.
+	client := DevTools local.
+	browser := (DevTools windowsOf: BrowserWindow) first model.
+	queue := OrderedCollection new.
+	queue add: [self checkInstances].
+	queue add: [ | w |
+		w := DevTools openWorkspace: client.
+		w textView text: '(String allInstances: 100000) size'.
+		self evaluateInstances: 10 in: w].
+	self begin: 'open'.
+	self when: [client isOpen and: [browser hierarchy size > 0]] then: [self end].
+	^ true
+]
+
 { #category : #typing }
 DevSessionBench class >> startTyping: aSocketPath [
 	"Open a method in a browser, put the insertion point at its end and ask the shell to type into it."
