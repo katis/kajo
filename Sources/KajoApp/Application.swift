@@ -242,8 +242,15 @@ nonisolated func appTranscriptSink() -> @Sendable ([UInt8]) -> Void {
 /// when the line is written), so a wait between the start and the first
 /// frame shows where it is.
 public enum LaunchTrace {
-    static let enabled = CommandLine.arguments.contains("kajo-launch-report")
+    public static let enabled = CommandLine.arguments.contains("kajo-launch-report")
     static let start: Double? = LaunchReport.processStart()
+
+    /// Milliseconds from the process's start to the wall-clock time `wall`
+    /// (seconds since 1970), or nil without a start (the first-launch
+    /// follow-up: the measurement's own records on the launch's clock).
+    public static func processMs(atWall wall: Double) -> Double? {
+        start.map { ((wall - $0) * 10_000).rounded() / 10 }
+    }
 
     /// The step `name` has ended; `detail` is appended to the line as is.
     public static func step(_ name: String, _ detail: String = "") {

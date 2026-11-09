@@ -123,11 +123,17 @@ import KajoVM
     var startNs: UInt64 = 0
 
     let pairing: PairingPresenter?
+    /// The first-launch follow-up: the link's gaps over 100 ms (always)
+    /// and, with `kajo-launch-report` or `trace=1`, the heartbeat and the
+    /// system's notifications beside them.
+    let gapRecorder: FrameGaps
+    var windowFirstFrame = false
 
     public init(_ options: LaunchOptions, platform: ShellPlatform, pairing: PairingPresenter? = nil) {
         self.pairing = pairing
         self.options = options
         self.platform = platform
+        gapRecorder = FrameGaps(tracing: LaunchTrace.enabled || options.string("trace", "0") == "1")
         name = options.string("scenario", "idle")
         seconds = options.double("seconds", 10)
         warmup = options.double("warmup", 1)
@@ -144,6 +150,7 @@ import KajoVM
     /// After the first frame (iOS kills an app that blocks its main thread
     /// at launch).
     public func start(resources: ShellResources = .main) {
+        LaunchTrace.step("mode-start")
         var o = Headless.Options()
         o.workers = options.int("workers", 5)
         o.heapMiB = options.int("heap", name == "ring" ? 600 : 512)
@@ -165,7 +172,9 @@ import KajoVM
             Output.shared.emit(resultLine("scenario", options, "scenario=\(name) FAILED=1 error=\("\(error)".replacingOccurrences(of: " ", with: "_"))"))
             finish(2)
         }
+        LaunchTrace.step("image-opened")
         runtime.start()
+        LaunchTrace.step("vm-started")
         if debugStop {
             let path = options.string("protocol", FileManager.default.temporaryDirectory.appendingPathComponent("kajo-shell-\(getpid()).sock").path)
             do { protocolServer = try runtime.serveProtocol(socket: path) } catch {
@@ -202,11 +211,13 @@ import KajoVM
         while vm.state(of: p) != .terminated && ShellVM.now() < end { _ = vm.runTurn(budgetNs: 5_000_000) }
         latencyLabel = Int(vm.result(of: p)?.int ?? 0)
         vm.release(p)
+        LaunchTrace.step("window-opened")
         // The background load, one Process per background worker.
         if let l = vm.spawn("startLoad:workers:", receiver: "ShellBench", arguments: [.string(name), .int(Int64(o.workers))]) {
             vm.waitUntilTerminated(l)
             vm.release(l)
         }
+        LaunchTrace.step("load-started")
         runtime.postFrames = true
         runtime.ticking = true
         if budgetOff { runtime.budgetOffNs = UInt64(max(1, seconds - 1) * 1e9) }
@@ -215,6 +226,8 @@ import KajoVM
         measureStart = t0 + warmup
         measureEnd = measureStart + seconds + afterSeconds
         platform.startDisplayLink { [unowned self] ts, target in self.tick(ts, target) }
+        gapRecorder.start(window: nil)
+        LaunchTrace.step("link-started")
         if eventRate > 0 { startEvents() }
         DispatchQueue.main.asyncAfter(deadline: .now() + warmup) { MainActor.assumeIsolated { self.begin() } }
         if noClient {
@@ -239,6 +252,8 @@ import KajoVM
 
     func tick(_ ts: Double, _ target: Double) {
         ticksTotal += 1
+        if ticksTotal == 1 { LaunchTrace.step("first-tick") }
+        if !finished { gapRecorder.tick(ts) }
         lastTickTs = ts
         let now = Double(ShellVM.now()) / 1e9
         // By timestamp, not by `measuring`: the window's frames are those
@@ -246,11 +261,13 @@ import KajoVM
         if !finished && ts >= measureStart && ts <= measureEnd {
             frameTimes.append(ts)
             callbackLate.append((now - ts) * 1000)
+            if !windowFirstFrame { windowFirstFrame = true; LaunchTrace.step("window-first-frame") }
         }
         runtime.tick(timestamp: ts)
     }
 
     func noteTurn(_ t: ShellTurn, _ k: TurnKind) {
+        gapRecorder.turnEnded()
         guard measuring else { return }
         turns += 1
         let now = ShellVM.now()
@@ -268,6 +285,7 @@ import KajoVM
     }
 
     func noteView(_ c: ViewCall) {
+        gapRecorder.viewCalled()
         guard c.handle == latencyLabel, c.op == "set", c.arguments.count == 2,
               c.arguments[0] == .string("text"), let s = c.arguments[1].string, let seq = Int(s),
               seq >= 0, seq < stamps.count else { return }
@@ -315,6 +333,7 @@ import KajoVM
     }
 
     func begin() {
+        LaunchTrace.step("window-start")
         measuring = true
         mainBase = vm.mainThreadCounters
         counterBase = Dictionary(vm.counters.map { ($0.name, $0.value) }, uniquingKeysWith: { a, _ in a })
@@ -379,7 +398,11 @@ import KajoVM
         finished = true
         measuring = false
         eventTimer?.cancel()
+        gapRecorder.finish()
         platform.stopDisplayLink()
+        LaunchTrace.step("window-end")
+        gapRecorder.stop()
+        for l in gapRecorder.lines(windowStart: measureStart, windowEnd: measureEnd) { appLog(l) }
         let nominal = Double(platform.maximumFramesPerSecond)
         let fa = FrameAccount(timestamps: frameTimes, start: measureStart, end: measureEnd, nominalHz: nominal)
         let fa120 = FrameAccount(timestamps: frameTimes, start: measureStart, end: measureEnd, nominalHz: 120)
@@ -491,6 +514,10 @@ import KajoVM
         for (k, v) in vm.collectorReport(seconds: Double(ShellVM.now() - startNs) / 1e9) {
             line += " gc_\(k)=\(v.replacingOccurrences(of: " ", with: "_"))"
         }
+        // The first-launch follow-up: the window's gaps over 100 ms and
+        // where the longest starts (ms from the window's start).
+        let lg = longGaps(frameTimes, start: measureStart, end: measureEnd)
+        line += " gaps100=\(lg.count) gap_max_at_ms=\(f1(lg.maxAtMs))"
         line += " load_failures=\(loadFailures()) thermal_end=\(Telemetry.thermal()) screen_max_fps=\(platform.maximumFramesPerSecond)"
         Output.shared.emit(resultLine("scenario", options, line))
         finish(0)
