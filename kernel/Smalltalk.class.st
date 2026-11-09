@@ -356,6 +356,20 @@ Smalltalk class >> primInstanceCountOf: aBehaviorOrArray [
 ]
 
 { #category : #primitives }
+Smalltalk class >> primPointerCountTo: anObject [
+	"Primitive 170 (the pointersTo: follow-up): how many objects primPointersTo:limit: would find with no limit, allocating nothing; nil when refused."
+	<primitive: 170>
+	^ nil
+]
+
+{ #category : #primitives }
+Smalltalk class >> primPointersTo: anObject limit: anInteger [
+	"Primitive 169 (the pointersTo: follow-up): an Array of every object in the heap with a slot holding anObject, at most anInteger of them, found in one stop after every young object is promoted (see Object>>pointersTo). nil when refused: a limit outside 0 to 16777215, or a heap so full that nothing young could be promoted."
+	<primitive: 169>
+	^ nil
+]
+
+{ #category : #primitives }
 Smalltalk class >> primReadFile: aPath [
 	"The UTF-8 text of the file aPath names under the opened directory, or nil."
 	<primitive: 149>

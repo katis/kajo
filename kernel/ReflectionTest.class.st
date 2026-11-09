@@ -124,3 +124,101 @@ ReflectionTest >> testTheLimitHolds [
 	self should: [ReflectionTestProbe allInstances: nil] raise: Error.
 	self assert: keep size equals: 5
 ]
+
+{ #category : #pointers }
+ReflectionTest >> testADroppedReferenceDisappearsAfterACollection [
+	| o a |
+	o := ReflectionTestProbe new.
+	a := Array with: o.
+	self assert: o pointerCount equals: 1.
+	a := nil.
+	Smalltalk garbageCollect.
+	self assert: o pointerCount equals: 0
+]
+
+{ #category : #pointers }
+ReflectionTest >> testALargeHolderIsFound [
+	| o a |
+	o := ReflectionTestProbe new.
+	a := Array new: 10000.
+	a at: 10000 put: o.
+	self assert: o pointersTo size equals: 1.
+	self assert: o pointersTo first == a
+]
+
+{ #category : #pointers }
+ReflectionTest >> testAWeakHolderIsFound [
+	| o w |
+	o := ReflectionTestProbe new.
+	w := WeakArray new: 2.
+	w at: 2 put: o.
+	self assert: (o pointersTo identityIncludes: w)
+]
+
+{ #category : #pointers }
+ReflectionTest >> testAnImmediateHasHolders [
+	| a |
+	a := Array with: 3.
+	self assert: (3 pointersTo: 1) notEmpty.
+	self assert: (3 pointersTo identityIncludes: a)
+]
+
+{ #category : #pointers }
+ReflectionTest >> testAnObjectHeldByOneArrayAnswersThatArray [
+	| o a |
+	o := ReflectionTestProbe new.
+	a := Array with: o.
+	self assert: o pointersTo size equals: 1.
+	self assert: o pointersTo first == a
+]
+
+{ #category : #pointers }
+ReflectionTest >> testAnObjectHeldOnlyByATemporaryAnswersNothing [
+	"Process stacks are not in the heap: a temporary is no holder."
+	| o |
+	o := ReflectionTestProbe new.
+	self assert: o pointersTo equals: #().
+	self assert: o pointerCount equals: 0
+]
+
+{ #category : #pointers }
+ReflectionTest >> testTheHolderOfAMethodLiteralIsTheMethod [
+	| holders |
+	"The Symbol below is a literal of this method only: its holders are the method (its literal frame is not listed) and the symbol table."
+	holders := #aLiteralOfThisTestOnly pointersTo.
+	self assert: (holders identityIncludes: ReflectionTest >> #testTheHolderOfAMethodLiteralIsTheMethod).
+	self deny: (holders identityIncludes: (ReflectionTest >> #testTheHolderOfAMethodLiteralIsTheMethod) literals)
+]
+
+{ #category : #pointers }
+ReflectionTest >> testThePointerCountEqualsTheSizeUnderTheLimit [
+	| o keep |
+	o := ReflectionTestProbe new.
+	keep := (1 to: 5) collect: [:i | Array with: o].
+	"The block's closure holds o as well until a collection frees it."
+	self assert: o pointersTo size equals: o pointerCount.
+	self assert: o pointerCount >= 5
+]
+
+{ #category : #pointers }
+ReflectionTest >> testThePointerLimitHolds [
+	| o keep |
+	o := ReflectionTestProbe new.
+	keep := (1 to: 5) collect: [:i | Array with: o].
+	self assert: (o pointersTo: 3) size equals: 3.
+	self assert: (o pointersTo: 0) equals: #().
+	self should: [o pointersTo: -1] raise: Error.
+	self should: [o pointersTo: 16777216] raise: Error.
+	self should: [o pointersTo: nil] raise: Error.
+	self assert: keep size equals: 5
+]
+
+{ #category : #pointers }
+ReflectionTest >> testThePointersAnswerIsNotItsOwnElement [
+	| a |
+	a := nil pointersTo: 1000.
+	self deny: (a identityIncludes: a).
+	a := Array new: 1.
+	a at: 1 put: a.
+	self assert: (a pointersTo identityIncludes: a)
+]

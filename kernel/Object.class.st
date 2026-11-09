@@ -343,6 +343,32 @@ Object >> setReadOnly: aBoolean [
 	^ self error: 'this object cannot change its read-only state'
 ]
 
+{ #category : #reflection }
+Object >> pointerCount [
+	"How many objects hold the receiver in a slot (primitive 170: the walk of pointersTo, nothing allocated). See pointersTo."
+	| n |
+	n := Smalltalk primPointerCountTo: self.
+	n isNil ifTrue: [^ self error: 'cannot count the objects pointing to an object: the heap is full'].
+	^ n
+]
+
+{ #category : #reflection }
+Object >> pointersTo [
+	"Every object with a slot holding the receiver, at most 100 000 of them (pointersTo: for more), as Pharo's pointersTo. The objects are found in one stop of the world after every young object is promoted, by comparing every slot of every object in the heap with the receiver: named and indexed slots, a weak slot as any other, every slot of an Array past 4095 slots. An object's class is not a slot (see allInstances). A method whose literals include the receiver is listed itself, not its literal frame. Garbage counts until a collection frees it (send Smalltalk garbageCollect first for the live holders only). The stacks of running Processes are not in the heap and are not searched: an object held only by a temporary or an argument of a running method answers #(). The world runs again between two sends, so a holder that stores or drops the receiver afterwards is not seen. The receiver may be an immediate (3 pointersTo lists every object holding 3), and the receiver holding itself is listed; the answer is never one of its own elements."
+	^ self pointersTo: 100000
+]
+
+{ #category : #reflection }
+Object >> pointersTo: aLimit [
+	"As pointersTo, at most aLimit holders (an Integer from 0 to 16777215, the largest Array): primitive 169, one walk of old space in a stop."
+	| a |
+	(aLimit isInteger and: [aLimit between: 0 and: 16777215]) ifFalse: [
+		^ self error: 'the limit of pointersTo: is an Integer from 0 to 16777215, not ' , aLimit printString].
+	a := Smalltalk primPointersTo: self limit: aLimit.
+	a isNil ifTrue: [^ self error: 'cannot list the objects pointing to an object: the heap is full'].
+	^ a
+]
+
 { #category : #testing }
 Object >> isArray [
 	^ false
