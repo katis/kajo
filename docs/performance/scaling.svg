@@ -21,21 +21,21 @@
 <text x="435.0" y="236" fill="currentColor" text-anchor="middle">speedup, process wall time (the line is 8×)</text>
 <line x1="670.0" y1="52" x2="670.0" y2="202" stroke="currentColor" stroke-opacity="0.6"/>
 <text x="192" y="73.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm) fib</text>
-<rect x="200.0" y="62" width="432.0" height="16" fill="#2563eb"/>
-<text x="638.0" y="73.5" fill="currentColor">7.35×</text>
+<rect x="200.0" y="62" width="437.4" height="16" fill="#2563eb"/>
+<text x="643.4" y="73.5" fill="currentColor">7.45×</text>
 <text x="192" y="97.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk) fib</text>
-<rect x="200.0" y="86" width="429.4" height="16" fill="#2563eb"/>
-<text x="635.4" y="97.5" fill="currentColor">7.31×</text>
+<rect x="200.0" y="86" width="434.1" height="16" fill="#2563eb"/>
+<text x="640.1" y="97.5" fill="currentColor">7.39×</text>
 <text x="192" y="121.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm) dispatch</text>
-<rect x="200.0" y="110" width="417.4" height="16" fill="#2563eb"/>
-<text x="623.4" y="121.5" fill="currentColor">7.11×</text>
+<rect x="200.0" y="110" width="418.6" height="16" fill="#2563eb"/>
+<text x="624.6" y="121.5" fill="currentColor">7.12×</text>
 <text x="192" y="145.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk) dispatch</text>
-<rect x="200.0" y="134" width="390.8" height="16" fill="#2563eb"/>
-<text x="596.8" y="145.5" fill="currentColor">6.65×</text>
+<rect x="200.0" y="134" width="395.7" height="16" fill="#2563eb"/>
+<text x="601.7" y="145.5" fill="currentColor">6.74×</text>
 <text x="192" y="169.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm) binarytrees</text>
-<rect x="200.0" y="158" width="358.5" height="16" fill="#2563eb"/>
-<text x="564.5" y="169.5" fill="currentColor">6.10×</text>
+<rect x="200.0" y="158" width="374.1" height="16" fill="#2563eb"/>
+<text x="580.1" y="169.5" fill="currentColor">6.37×</text>
 <text x="192" y="193.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk) binarytrees</text>
-<rect x="200.0" y="182" width="357.9" height="16" fill="#2563eb"/>
-<text x="563.9" y="193.5" fill="currentColor">6.09×</text>
+<rect x="200.0" y="182" width="373.1" height="16" fill="#2563eb"/>
+<text x="579.1" y="193.5" fill="currentColor">6.35×</text>
 </svg>

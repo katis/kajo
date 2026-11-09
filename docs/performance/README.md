@@ -6,7 +6,7 @@ number, table and graph between `generated` markers is written by
 `scripts/perf-report.py` from the raw files and is never edited by hand.
 
 <!-- generated: meta -->
-Measured 2026-11-07 19:34 EET at commit `e2dac1f` on Apple M2 Pro, 8 P-cores + 4 E-cores, 32 GB, Mac14,12, macOS 27.2 (26B123); 5 interleaved rounds, every run bounded at 120 s; the time is the process's wall time.
+Measured 2026-11-09 02:34 EET at commit `49984bb` on Apple M2 Pro, 8 P-cores + 4 E-cores, 32 GB, Mac14,12, macOS 27.2 (26B123); 5 interleaved rounds, every run bounded at 120 s; the time is the process's wall time.
 <!-- /generated -->
 
 ## 0. What kind of VM this is
@@ -171,8 +171,13 @@ to within 3 percent of Ruby, with Java `-Xint`, Node `--jitless` and
 Lua 5.4 still 16, 25 and 30 percent faster. LuaJIT's hand-written interpreter stays 1.5 to 2.1 times
 faster on the three (2.3 to 2.6 before); the allocation kernel did not
 move, because it is the collector's. The kernel's collections against
-Pharo went from 4.3 to 3.8 times; the rest of that gap is the library
-(section 5), not the interpreter.
+Pharo went from 4.3 to 3.8 times; the rest of that gap was the library
+(section 5), not the interpreter, and the collections-speed follow-up of
+2026-11-08 took it to 2.8 (6.26 s to 4.45; the rows here are from the
+re-run of 2026-11-09 on 49984bb, every other runtime within 2 percent of
+its 2026-11-07 row). The same re-run has binarytrees at 8 workers 4
+percent faster (1.80 and 1.85 s against 1.88 and 1.94) from the sweep
+stop's removal below.
 
 ## 2. Sends
 
@@ -183,22 +188,22 @@ Pharo went from 4.3 to 3.8 times; the rest of that gap is the library
 
 | runtime | median s | min–max s | spread | time against Kajo (kasm) | M calls/s |
 |---|--:|--:|--:|--:|--:|
-| Java (G1) | 0.681 | 0.674–0.687 | 2.0% | 0.05× | 1172.1 |
-| C (clang -O2) | 0.715 | 0.712–0.717 | 0.7% | 0.05× | 1117.8 |
-| LuaJIT | 1.39 | 1.33–1.43 | 7.6% | 0.10× | 576.7 |
-| Node (V8) | 1.83 | 1.83–1.83 | 0.3% | 0.13× | 436.3 |
-| Pharo 12 (Cog JIT) | 2.30 | 2.29–2.31 | 0.8% | 0.17× | 347.2 |
-| Ruby --yjit | 2.81 | 2.81–2.82 | 0.3% | 0.20× | 283.9 |
-| LuaJIT -joff | 6.52 | 6.50–6.53 | 0.4% | 0.47× | 122.5 |
-| Ruby | 12.7 | 12.7–12.8 | 1.1% | 0.91× | 62.9 |
-| Lua 5.4 | 12.8 | 12.8–12.8 | 0.2% | 0.92× | 62.4 |
-| **Kajo (kasm)** | 13.9 | 13.9–14.0 | 1.1% | 1.00× | 57.4 |
-| **Kajo (Smalltalk)** | 14.6 | 14.6–14.6 | 0.2% | 1.05× | 54.7 |
-| Java -Xint | 16.4 | 16.3–16.5 | 1.0% | 1.18× | 48.6 |
-| CPython | 21.5 | 21.4–21.6 | 0.8% | 1.54× | 37.2 |
-| Node --jitless | 21.7 | 21.5–21.9 | 1.7% | 1.56× | 36.9 |
-| **Kajo (kasm), 8 workers (aggregate)** | 1.89 | 1.89–1.90 | 0.8% | 0.14× | 421.9 |
-| **Kajo (Smalltalk), 8 workers (aggregate)** | 2.00 | 2.00–2.01 | 0.7% | 0.14× | 399.5 |
+| Java (G1) | 0.675 | 0.669–0.689 | 3.0% | 0.05× | 1183.3 |
+| C (clang -O2) | 0.714 | 0.705–0.718 | 1.9% | 0.05× | 1119.0 |
+| LuaJIT | 1.37 | 1.31–1.38 | 5.4% | 0.10× | 583.0 |
+| Node (V8) | 1.82 | 1.81–1.83 | 0.8% | 0.13× | 439.9 |
+| Pharo 12 (Cog JIT) | 2.29 | 2.28–2.29 | 0.6% | 0.16× | 349.4 |
+| Ruby --yjit | 2.81 | 2.80–2.81 | 0.3% | 0.20× | 284.5 |
+| LuaJIT -joff | 6.52 | 6.49–6.61 | 1.8% | 0.47× | 122.6 |
+| Ruby | 12.8 | 12.7–12.9 | 1.5% | 0.91× | 62.6 |
+| Lua 5.4 | 12.8 | 12.8–12.8 | 0.1% | 0.91× | 62.5 |
+| **Kajo (kasm)** | 14.0 | 13.9–14.0 | 0.6% | 1.00× | 57.0 |
+| **Kajo (Smalltalk)** | 14.8 | 14.7–14.8 | 0.8% | 1.06× | 54.0 |
+| Java -Xint | 16.4 | 16.3–16.5 | 0.9% | 1.17× | 48.8 |
+| CPython | 21.4 | 21.3–21.7 | 1.5% | 1.53× | 37.3 |
+| Node --jitless | 21.7 | 21.5–21.8 | 1.6% | 1.55× | 36.7 |
+| **Kajo (kasm), 8 workers (aggregate)** | 1.88 | 1.87–1.91 | 2.1% | 0.13× | 424.6 |
+| **Kajo (Smalltalk), 8 workers (aggregate)** | 2.00 | 1.98–2.02 | 2.2% | 0.14× | 399.0 |
 
 **dispatch** (100,000,000 sends over three classes plus an indexed read per run)
 
@@ -206,22 +211,22 @@ Pharo went from 4.3 to 3.8 times; the rest of that gap is the library
 
 | runtime | median s | min–max s | spread | time against Kajo (kasm) | M sends/s |
 |---|--:|--:|--:|--:|--:|
-| LuaJIT | 0.106 | 0.103–0.113 | 8.9% | 0.03× | 944.3 |
-| Node (V8) | 0.248 | 0.244–0.251 | 2.9% | 0.06× | 402.6 |
-| C (clang -O2) | 0.253 | 0.250–0.256 | 2.3% | 0.06× | 394.9 |
-| Java (G1) | 0.380 | 0.372–0.381 | 2.3% | 0.09× | 263.2 |
-| Pharo 12 (Cog JIT) | 0.744 | 0.731–0.750 | 2.4% | 0.18× | 134.3 |
-| Java -Xint | 2.70 | 2.70–2.71 | 0.6% | 0.64× | 37.0 |
-| LuaJIT -joff | 2.77 | 2.76–2.84 | 2.7% | 0.66× | 36.2 |
-| **Kajo (Smalltalk)** | 3.55 | 3.55–3.55 | 0.3% | 0.85× | 28.1 |
-| Ruby --yjit | 3.81 | 3.79–3.81 | 0.7% | 0.91× | 26.2 |
-| **Kajo (kasm)** | 4.19 | 4.18–4.20 | 0.5% | 1.00× | 23.9 |
-| Lua 5.4 | 4.21 | 4.08–4.26 | 4.2% | 1.00× | 23.8 |
-| Node --jitless | 4.45 | 4.43–4.49 | 1.3% | 1.06× | 22.5 |
-| Ruby | 4.63 | 4.62–4.71 | 2.0% | 1.10× | 21.6 |
-| CPython | 18.6 | 17.3–19.7 | 12.9% | 4.42× | 5.4 |
-| **Kajo (Smalltalk), 8 workers (aggregate)** | 0.534 | 0.516–0.539 | 4.2% | 0.13× | 187.2 |
-| **Kajo (kasm), 8 workers (aggregate)** | 0.590 | 0.580–0.614 | 5.8% | 0.14× | 169.5 |
+| LuaJIT | 0.102 | 0.101–0.105 | 3.8% | 0.02× | 984.3 |
+| Node (V8) | 0.245 | 0.242–0.248 | 2.2% | 0.06× | 408.0 |
+| C (clang -O2) | 0.252 | 0.249–0.255 | 2.5% | 0.06× | 397.6 |
+| Java (G1) | 0.377 | 0.371–0.382 | 2.9% | 0.09× | 265.4 |
+| Pharo 12 (Cog JIT) | 0.730 | 0.723–0.735 | 1.6% | 0.17× | 137.0 |
+| Java -Xint | 2.69 | 2.68–2.72 | 1.3% | 0.64× | 37.2 |
+| LuaJIT -joff | 2.81 | 2.75–2.84 | 3.2% | 0.67× | 35.5 |
+| **Kajo (Smalltalk)** | 3.54 | 3.54–3.59 | 1.7% | 0.85× | 28.2 |
+| Ruby --yjit | 3.77 | 3.75–3.81 | 1.5% | 0.90× | 26.6 |
+| **Kajo (kasm)** | 4.18 | 4.18–4.18 | 0.2% | 1.00× | 23.9 |
+| Lua 5.4 | 4.22 | 4.09–4.27 | 4.3% | 1.01× | 23.7 |
+| Node --jitless | 4.40 | 4.32–4.46 | 3.1% | 1.05× | 22.7 |
+| Ruby | 4.64 | 4.61–4.65 | 1.0% | 1.11× | 21.5 |
+| CPython | 17.5 | 17.1–18.7 | 9.2% | 4.20× | 5.7 |
+| **Kajo (Smalltalk), 8 workers (aggregate)** | 0.526 | 0.509–0.541 | 6.2% | 0.13× | 190.1 |
+| **Kajo (kasm), 8 workers (aggregate)** | 0.587 | 0.584–0.597 | 2.2% | 0.14× | 170.4 |
 <!-- /generated -->
 
 ## 3. Allocation and collection
@@ -233,47 +238,50 @@ Pharo went from 4.3 to 3.8 times; the rest of that gap is the library
 
 | runtime | median s | min–max s | spread | time against Kajo (kasm) | M objects/s |
 |---|--:|--:|--:|--:|--:|
-| Java (G1) | 0.592 | 0.574–0.595 | 3.6% | 0.05× | 283.5 |
-| Java (ZGC) | 0.949 | 0.926–1.02 | 10.1% | 0.08× | 176.9 |
-| Pharo 12 (Cog JIT) | 1.90 | 1.89–1.91 | 0.9% | 0.17× | 88.4 |
-| C (clang -O2) | 2.47 | 2.45–2.47 | 0.8% | 0.22× | 68.0 |
-| Node (V8) | 2.80 | 2.79–2.85 | 2.1% | 0.24× | 60.0 |
-| LuaJIT | 6.24 | 6.20–6.31 | 1.7% | 0.54× | 26.9 |
-| Java -Xint | 9.34 | 9.33–9.34 | 0.2% | 0.82× | 18.0 |
-| LuaJIT -joff | 9.63 | 9.59–9.68 | 0.9% | 0.84× | 17.4 |
-| Ruby --yjit | 10.9 | 10.9–11.2 | 2.5% | 0.96× | 15.3 |
-| **Kajo (kasm)** | 11.5 | 11.4–11.6 | 2.0% | 1.00× | 14.6 |
-| **Kajo (Smalltalk)** | 11.8 | 11.8–11.9 | 1.0% | 1.03× | 14.2 |
-| Node --jitless | 14.0 | 13.9–14.0 | 0.6% | 1.22× | 12.0 |
-| Ruby | 18.8 | 18.6–18.9 | 1.5% | 1.64× | 8.9 |
-| Lua 5.4 | 21.3 | 21.2–21.3 | 0.7% | 1.86× | 7.9 |
-| CPython | 37.9 | 37.8–37.9 | 0.3% | 3.31× | 4.4 |
-| **Kajo (kasm), 8 workers (aggregate)** | 1.88 | 1.88–1.91 | 1.8% | 0.16× | 89.3 |
-| **Kajo (Smalltalk), 8 workers (aggregate)** | 1.94 | 1.92–1.98 | 2.8% | 0.17× | 86.7 |
+| Java (G1) | 0.586 | 0.576–0.596 | 3.3% | 0.05× | 286.5 |
+| Java (ZGC) | 0.928 | 0.892–0.985 | 10.0% | 0.08× | 180.8 |
+| Pharo 12 (Cog JIT) | 1.88 | 1.87–1.89 | 1.1% | 0.16× | 89.2 |
+| C (clang -O2) | 2.46 | 2.45–2.47 | 0.6% | 0.21× | 68.3 |
+| Node (V8) | 2.78 | 2.76–2.79 | 1.0% | 0.24× | 60.3 |
+| LuaJIT | 6.23 | 6.19–6.25 | 1.0% | 0.54× | 26.9 |
+| Java -Xint | 9.30 | 9.25–9.35 | 1.1% | 0.81× | 18.0 |
+| LuaJIT -joff | 9.58 | 9.55–9.60 | 0.6% | 0.84× | 17.5 |
+| Ruby --yjit | 10.9 | 10.8–10.9 | 1.4% | 0.95× | 15.4 |
+| **Kajo (kasm)** | 11.5 | 11.4–11.5 | 0.2% | 1.00× | 14.6 |
+| **Kajo (Smalltalk)** | 11.8 | 11.7–11.8 | 0.7% | 1.03× | 14.3 |
+| Node --jitless | 13.9 | 13.9–14.0 | 0.5% | 1.21× | 12.1 |
+| Ruby | 18.7 | 18.1–19.3 | 6.3% | 1.63× | 9.0 |
+| Lua 5.4 | 21.2 | 21.1–21.3 | 1.2% | 1.85× | 7.9 |
+| CPython | 37.8 | 37.7–37.8 | 0.4% | 3.30× | 4.4 |
+| **Kajo (kasm), 8 workers (aggregate)** | 1.80 | 1.78–1.83 | 2.7% | 0.16× | 93.3 |
+| **Kajo (Smalltalk), 8 workers (aggregate)** | 1.85 | 1.84–1.87 | 1.4% | 0.16× | 90.6 |
 
 Collector pauses where the runtime reports them (medians over the rounds of each run's own percentiles; Kajo's pauses are its stops, its young collections on one worker run on the program's own thread; the JVM's from `-Xlog:gc`; Pharo reports only counts and totals):
 
 | runtime | collections per run | pause p50 ms | pause p99 ms | pause max ms | Kajo's own young collections p50 / p99 ms |
 |---|--:|--:|--:|--:|--:|
-| Java (G1) | 12 pauses | 0.691 | 1.077 | 1.077 | - |
-| Java (ZGC) | 15 pauses | 0.005 | 0.007 | 0.007 | - |
-| Pharo 12 (Cog JIT) | 260 scavenges, 0 full (0 ms) | 0.688 (mean) | - | - | - |
-| Java -Xint | 14 pauses | 0.619 | 0.983 | 0.983 | - |
-| Kajo (kasm) | 1280 young, 36 stops | 0.089 | 0.319 | 0.319 | 1.641 / 1.884 |
-| Kajo (Smalltalk) | 1280 young, 36 stops | 0.095 | 0.276 | 0.276 | 1.636 / 1.893 |
-| Kajo (kasm), 8 workers (aggregate) | 1280 young, 30 stops | 0.222 | 30.045 | 30.045 | 2.154 / 4.390 |
-| Kajo (Smalltalk), 8 workers (aggregate) | 1280 young, 31 stops | 0.219 | 23.594 | 23.594 | 2.161 / 4.280 |
+| Java (G1) | 12 pauses | 0.717 | 1.048 | 1.048 | - |
+| Java (ZGC) | 15 pauses | 0.005 | 0.008 | 0.008 | - |
+| Pharo 12 (Cog JIT) | 260 scavenges, 0 full (0 ms) | 0.685 (mean) | - | - | - |
+| Java -Xint | 14 pauses | 0.633 | 1.100 | 1.100 | - |
+| Kajo (kasm) | 1280 young, 36 stops | 0.089 | 0.267 | 0.267 | 1.634 / 1.878 |
+| Kajo (Smalltalk) | 1280 young, 36 stops | 0.092 | 0.304 | 0.304 | 1.634 / 1.873 |
+| Kajo (kasm), 8 workers (aggregate) | 1280 young, 42 stops | 0.206 | 0.394 | 0.394 | 2.111 / 4.455 |
+| Kajo (Smalltalk), 8 workers (aggregate) | 1280 young, 39 stops | 0.220 | 0.381 | 0.381 | 2.132 / 4.369 |
 <!-- /generated -->
 
-The 19 to 30 ms stops in Kajo's 8-worker rows are seven stops a run of the
-kind the large-bytes follow-up added: an allocation that finds the entry
-table empty finishes the lazy sweep in a stop of its own (`sweepsForEntries`,
-42 ms of sweeping in stops over a 1.8 s run) instead of falling back to a
-full collection. On one worker the same program's longest stop is 0.33 ms.
-The run line's `stopsByKind` files these under `other` today; naming the
-kind and bounding the stop (apply what is swept, wait for the rest with the
-world running) is a collector follow-up listed in `docs/PLAN.md`. Every other stop kind in these runs is
-under 0.4 ms.
+Until 2026-11-08 the 8-worker rows had 19 to 30 ms stops, seven a run of the
+kind the large-bytes follow-up added: an allocation that found the entry
+table empty finished the whole lazy sweep in a stop of its own
+(`sweepsForEntries`, 42 ms of sweeping in stops over a 1.8 s run) instead of
+falling back to a full collection, filed under `other` in `stopsByKind`. The
+sweep-stop follow-up (`docs/modules/sweep-stop.md`) gave the stop its own
+kind `sweep`, bounded it to a partial apply (the pending runs handed to the
+allocators, at most 4096 words swept inside the stop) and started cycles
+from the entry table's own rate, so the rows above, from the re-run of
+2026-11-09, have a longest stop of 0.34 to 0.49 ms over the ten 8-worker
+runs (the module's own interleaved runs: 0 to 1 sweep stops a run at 0.10
+to 0.17 ms, every stop kind under 0.6 ms).
 
 ## 4. Bytecodes
 
@@ -284,22 +292,22 @@ under 0.4 ms.
 
 | runtime | median s | min–max s | spread | time against Kajo (kasm) | M iterations/s |
 |---|--:|--:|--:|--:|--:|
-| Java (G1) | 0.282 | 0.278–0.290 | 4.4% | 0.04× | 1135.6 |
-| LuaJIT | 0.407 | 0.401–0.414 | 3.1% | 0.05× | 786.0 |
-| C (clang -O2) | 0.411 | 0.400–0.425 | 6.1% | 0.05× | 778.8 |
-| Node (V8) | 0.421 | 0.417–0.429 | 3.0% | 0.05× | 759.9 |
-| Pharo 12 (Cog JIT) | 1.48 | 1.47–1.49 | 1.2% | 0.18× | 216.6 |
-| LuaJIT -joff | 4.72 | 4.71–4.73 | 0.4% | 0.59× | 67.8 |
-| Lua 5.4 | 5.61 | 5.60–5.62 | 0.4% | 0.70× | 57.0 |
-| Node --jitless | 6.02 | 5.97–6.03 | 1.0% | 0.75× | 53.2 |
-| Java -Xint | 6.77 | 6.73–6.77 | 0.7% | 0.84× | 47.3 |
-| Ruby --yjit | 7.79 | 7.76–7.80 | 0.5% | 0.97× | 41.1 |
-| Ruby | 7.80 | 7.78–7.83 | 0.6% | 0.97× | 41.0 |
-| **Kajo (kasm)** | 8.01 | 8.00–8.02 | 0.2% | 1.00× | 40.0 |
-| **Kajo (Smalltalk)** | 8.03 | 8.01–8.05 | 0.6% | 1.00× | 39.8 |
-| CPython | 46.4 | 44.9–51.8 | 14.9% | 5.79× | 6.9 |
+| Java (G1) | 0.287 | 0.286–0.291 | 1.7% | 0.04× | 1115.0 |
+| LuaJIT | 0.403 | 0.400–0.406 | 1.6% | 0.05× | 793.8 |
+| C (clang -O2) | 0.415 | 0.413–0.423 | 2.5% | 0.05× | 770.7 |
+| Node (V8) | 0.422 | 0.417–0.424 | 1.5% | 0.05× | 758.3 |
+| Pharo 12 (Cog JIT) | 1.47 | 1.47–1.48 | 0.8% | 0.18× | 217.8 |
+| LuaJIT -joff | 4.71 | 4.70–4.72 | 0.5% | 0.59× | 68.0 |
+| Lua 5.4 | 5.60 | 5.58–5.60 | 0.3% | 0.70× | 57.2 |
+| Node --jitless | 5.98 | 5.96–5.99 | 0.5% | 0.75× | 53.5 |
+| Java -Xint | 6.75 | 6.69–6.76 | 1.0% | 0.84× | 47.4 |
+| Ruby --yjit | 7.77 | 7.76–7.79 | 0.4% | 0.97× | 41.2 |
+| Ruby | 7.78 | 7.76–7.80 | 0.5% | 0.97× | 41.1 |
+| **Kajo (kasm)** | 8.00 | 7.99–8.00 | 0.1% | 1.00× | 40.0 |
+| **Kajo (Smalltalk)** | 8.04 | 8.02–8.05 | 0.3% | 1.01× | 39.8 |
+| CPython | 44.8 | 43.7–49.0 | 11.7% | 5.60× | 7.1 |
 
-Kajo (kasm) runs 918 M bytecodes/s in its own kernel time (7.99 s of the 8.01 s process).
+Kajo (kasm) runs 919 M bytecodes/s in its own kernel time (7.98 s of the 8.00 s process).
 <!-- /generated -->
 
 ## 5. The Smalltalk library against Pharo
@@ -311,8 +319,8 @@ Kajo (kasm) runs 918 M bytecodes/s in its own kernel time (7.99 s of the 8.01 s 
 
 | runtime | median s | min–max s | spread | time against Kajo (Smalltalk) |
 |---|--:|--:|--:|--:|
-| Pharo 12 (Cog JIT) | 1.63 | 1.62–1.64 | 1.7% | 0.26× |
-| **Kajo (Smalltalk)** | 6.25 | 6.23–6.27 | 0.6% | 1.00× |
+| Pharo 12 (Cog JIT) | 1.61 | 1.60–1.61 | 1.0% | 0.36× |
+| **Kajo (Smalltalk)** | 4.45 | 4.43–4.48 | 1.0% | 1.00× |
 <!-- /generated -->
 
 The program's four parts, each alone in the same harness (the
@@ -351,12 +359,12 @@ comparison's own run on the commit before the module and is not re-run.
 
 | runtime | kernel | 1 worker s | 8 workers s | speedup |
 |---|---|--:|--:|--:|
-| Kajo (kasm) | fib | 13.9 | 1.89 | 7.35× |
-| Kajo (Smalltalk) | fib | 14.6 | 2.00 | 7.31× |
-| Kajo (kasm) | dispatch | 4.19 | 0.590 | 7.11× |
-| Kajo (Smalltalk) | dispatch | 3.55 | 0.534 | 6.65× |
-| Kajo (kasm) | binarytrees | 11.5 | 1.88 | 6.10× |
-| Kajo (Smalltalk) | binarytrees | 11.8 | 1.94 | 6.09× |
+| Kajo (kasm) | fib | 14.0 | 1.88 | 7.45× |
+| Kajo (Smalltalk) | fib | 14.8 | 2.00 | 7.39× |
+| Kajo (kasm) | dispatch | 4.18 | 0.587 | 7.12× |
+| Kajo (Smalltalk) | dispatch | 3.54 | 0.526 | 6.74× |
+| Kajo (kasm) | binarytrees | 11.5 | 1.80 | 6.37× |
+| Kajo (Smalltalk) | binarytrees | 11.8 | 1.85 | 6.35× |
 <!-- /generated -->
 
 The language experiment's Rust and Swift slices (`just bench`,
@@ -368,30 +376,30 @@ From machine: Apple M2 Pro, 8 P-cores + 4 E-cores, no pinning.
 
 | kernel | variant | 1 worker ms | 8 workers ms | speedup |
 |---|---|--:|--:|--:|
-| arith | rust | 3011.1 | 416.4 | 7.23× |
-| arith | rust-native | 2993.1 | 408.1 | 7.33× |
-| arith | swift-O | 3050.7 | 426.6 | 7.15× |
-| arith | swift-Ounchecked | 3057.0 | 416.0 | 7.35× |
-| arith | rust-align32 | 3006.9 | 413.2 | 7.28× |
-| arith | swift-O-align32 | 3057.5 | 417.0 | 7.33× |
-| fib | rust | 1465.8 | 209.1 | 7.01× |
-| fib | rust-native | 1464.1 | 200.6 | 7.30× |
-| fib | swift-O | 1538.4 | 214.3 | 7.18× |
-| fib | swift-Ounchecked | 1538.5 | 220.2 | 6.99× |
-| fib | rust-align32 | 1471.5 | 208.8 | 7.05× |
-| fib | swift-O-align32 | 1554.0 | 215.2 | 7.22× |
-| sends | rust | 2382.6 | 424.1 | 5.62× |
-| sends | rust-native | 2390.0 | 412.4 | 5.80× |
-| sends | swift-O | 2524.1 | 470.4 | 5.37× |
-| sends | swift-Ounchecked | 2564.6 | 441.5 | 5.81× |
-| sends | rust-align32 | 2398.3 | 428.5 | 5.60× |
-| sends | swift-O-align32 | 2558.3 | 470.2 | 5.44× |
-| alloc | rust | 2042.1 | 472.9 | 4.32× |
-| alloc | rust-native | 2035.2 | 486.3 | 4.19× |
-| alloc | swift-O | 2090.8 | 535.8 | 3.90× |
-| alloc | swift-Ounchecked | 2124.9 | 502.7 | 4.23× |
-| alloc | rust-align32 | 2039.9 | 483.2 | 4.22× |
-| alloc | swift-O-align32 | 2097.9 | 495.7 | 4.23× |
+| arith | rust | 2996.6 | 406.7 | 7.37× |
+| arith | rust-native | 2985.4 | 411.2 | 7.26× |
+| arith | swift-O | 3046.5 | 420.1 | 7.25× |
+| arith | swift-Ounchecked | 3050.8 | 416.8 | 7.32× |
+| arith | rust-align32 | 3000.2 | 414.7 | 7.23× |
+| arith | swift-O-align32 | 3051.7 | 416.9 | 7.32× |
+| fib | rust | 1458.7 | 204.2 | 7.14× |
+| fib | rust-native | 1462.6 | 202.4 | 7.23× |
+| fib | swift-O | 1534.5 | 213.5 | 7.19× |
+| fib | swift-Ounchecked | 1536.1 | 214.6 | 7.16× |
+| fib | rust-align32 | 1470.3 | 200.4 | 7.34× |
+| fib | swift-O-align32 | 1543.5 | 215.2 | 7.17× |
+| sends | rust | 2391.9 | 422.6 | 5.66× |
+| sends | rust-native | 2380.3 | 421.7 | 5.64× |
+| sends | swift-O | 2518.0 | 461.5 | 5.46× |
+| sends | swift-Ounchecked | 2565.7 | 462.3 | 5.55× |
+| sends | rust-align32 | 2392.5 | 437.7 | 5.47× |
+| sends | swift-O-align32 | 2557.3 | 435.7 | 5.87× |
+| alloc | rust | 2040.8 | 478.0 | 4.27× |
+| alloc | rust-native | 2024.6 | 474.2 | 4.27× |
+| alloc | swift-O | 2089.3 | 526.2 | 3.97× |
+| alloc | swift-Ounchecked | 2112.6 | 497.6 | 4.25× |
+| alloc | rust-align32 | 2034.0 | 487.0 | 4.18× |
+| alloc | swift-O-align32 | 2092.0 | 510.2 | 4.10× |
 <!-- /generated -->
 
 ## 7. On the devices
@@ -403,10 +411,10 @@ From machine: Apple M2 Pro, 8 P-cores + 4 E-cores, no pinning.
 
 <!-- generated: caveats -->
 - Runtimes missing from this run: none.
-- Thermal state at the runs' starts: fair 284, nominal 57 runs.
+- Thermal state at the runs' starts: nominal 341 runs.
 - Refused runs: none; every run printed its kernel's checksum.
-- Spread of the medians ((max − min) / median over each row's 5 rounds): at most 14.9% (CPython, arith); 7 of 65 rows above 5%: CPython arith 14.9%, CPython dispatch 12.9%, Java (ZGC) binarytrees 10.1%, LuaJIT dispatch 8.9%, LuaJIT fib 7.6%, C (clang -O2) arith 6.1%, Kajo (kasm), 8 workers (aggregate) dispatch 5.8%.
-- Drift: the first kernel (fib) run again at the end took 0.978 to 1.010 times its median (LuaJIT to Ruby).
+- Spread of the medians ((max − min) / median over each row's 5 rounds): at most 11.7% (CPython, arith); 6 of 65 rows above 5%: CPython arith 11.7%, Java (ZGC) binarytrees 10.0%, CPython dispatch 9.2%, Ruby binarytrees 6.3%, Kajo (Smalltalk), 8 workers (aggregate) dispatch 6.2%, LuaJIT fib 5.4%.
+- Drift: the first kernel (fib) run again at the end took 0.972 to 1.004 times its median (Java (G1) to LuaJIT).
 - Every time is the whole process's wall time, start-up included for every runtime alike (Kajo loads its image or assembles its kasm, the JVM and Pharo start their VMs); a run of a few hundred milliseconds is mostly start-up.
 <!-- /generated -->
 
@@ -424,8 +432,8 @@ own install) and Pharo 12 from its zeroconf download into
 <!-- generated: versions -->
 | runtime | version |
 |---|---|
-| Kajo (kasm) | e2dac1f release -enable-testing aligned, Swift 6.4.2 |
-| Kajo (Smalltalk) | e2dac1f release -enable-testing aligned, Swift 6.4.2 |
+| Kajo (kasm) | 49984bb release -enable-testing aligned, Swift 6.4.2 |
+| Kajo (Smalltalk) | 49984bb release -enable-testing aligned, Swift 6.4.2 |
 | Pharo 12 (Cog JIT) | Pharo12.0.0SNAPSHOT / v10.3.12+0.4b0622446 - Commit: 4b0622446 - Date: 2026-10-23 12:16:05 +0200 |
 | C (clang -O2) | Apple clang version 21.0.0 (clang-2100.4.1.1), -O2 |
 | LuaJIT | LuaJIT 2.1.1710088188 |

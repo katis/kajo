@@ -24,45 +24,45 @@
 </g>
 <text x="435.0" y="428" fill="currentColor" text-anchor="middle">seconds per run, median of the rounds (shorter is faster), log scale (each gridline 10×)</text>
 <text x="192" y="73.5" fill="currentColor" text-anchor="end">Java (G1)</text>
-<rect x="200.8" y="62.75" width="129.1" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="336.6" y="73.5" fill="currentColor">0.681 s</text>
+<rect x="200.8" y="62.75" width="128.4" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="335.9" y="73.5" fill="currentColor">0.675 s</text>
 <text x="192" y="97.5" fill="currentColor" text-anchor="end">C (clang -O2)</text>
-<rect x="200.8" y="86.75" width="132.3" height="14.5" fill="#059669" fill-opacity="0.18" stroke="#059669" stroke-width="1.5"/>
-<text x="339.8" y="97.5" fill="currentColor">0.715 s</text>
+<rect x="200.8" y="86.75" width="132.2" height="14.5" fill="#059669" fill-opacity="0.18" stroke="#059669" stroke-width="1.5"/>
+<text x="339.7" y="97.5" fill="currentColor">0.714 s</text>
 <text x="192" y="121.5" fill="currentColor" text-anchor="end">LuaJIT</text>
-<rect x="200.8" y="110.75" width="177.3" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="384.8" y="121.5" fill="currentColor">1.39 s</text>
+<rect x="200.8" y="110.75" width="176.6" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="384.1" y="121.5" fill="currentColor">1.37 s</text>
 <text x="192" y="145.5" fill="currentColor" text-anchor="end">Node (V8)</text>
-<rect x="200.8" y="134.75" width="196.3" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="403.8" y="145.5" fill="currentColor">1.83 s</text>
+<rect x="200.8" y="134.75" width="195.8" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="403.3" y="145.5" fill="currentColor">1.82 s</text>
 <text x="192" y="169.5" fill="currentColor" text-anchor="end">Pharo 12 (Cog JIT)</text>
-<rect x="200.8" y="158.75" width="211.9" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="419.4" y="169.5" fill="currentColor">2.30 s</text>
+<rect x="200.8" y="158.75" width="211.4" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="418.9" y="169.5" fill="currentColor">2.29 s</text>
 <text x="192" y="193.5" fill="currentColor" text-anchor="end">Ruby --yjit</text>
-<rect x="200.8" y="182.75" width="225.6" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="433.1" y="193.5" fill="currentColor">2.81 s</text>
+<rect x="200.8" y="182.75" width="225.4" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="432.9" y="193.5" fill="currentColor">2.81 s</text>
 <text x="192" y="217.5" fill="currentColor" text-anchor="end">LuaJIT -joff</text>
 <rect x="200.8" y="206.75" width="282.7" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
 <text x="490.2" y="217.5" fill="currentColor">6.52 s</text>
 <text x="192" y="241.5" fill="currentColor" text-anchor="end">Ruby</text>
-<rect x="200.8" y="230.75" width="328.1" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
-<text x="535.6" y="241.5" fill="currentColor">12.7 s</text>
+<rect x="200.8" y="230.75" width="328.4" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="535.9" y="241.5" fill="currentColor">12.8 s</text>
 <text x="192" y="265.5" fill="currentColor" text-anchor="end">Lua 5.4</text>
-<rect x="200.8" y="254.75" width="328.6" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
-<text x="536.1" y="265.5" fill="currentColor">12.8 s</text>
+<rect x="200.8" y="254.75" width="328.5" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="536.0" y="265.5" fill="currentColor">12.8 s</text>
 <text x="192" y="289.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (kasm)</text>
-<rect x="200.0" y="278" width="335.8" height="16" fill="#2563eb"/>
-<text x="541.8" y="289.5" fill="currentColor">13.9 s</text>
+<rect x="200.0" y="278" width="336.3" height="16" fill="#2563eb"/>
+<text x="542.3" y="289.5" fill="currentColor">14.0 s</text>
 <text x="192" y="313.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk)</text>
-<rect x="200.0" y="302" width="339.1" height="16" fill="#2563eb"/>
-<text x="545.1" y="313.5" fill="currentColor">14.6 s</text>
+<rect x="200.0" y="302" width="340.0" height="16" fill="#2563eb"/>
+<text x="546.0" y="313.5" fill="currentColor">14.8 s</text>
 <text x="192" y="337.5" fill="currentColor" text-anchor="end">Java -Xint</text>
-<rect x="200.8" y="326.75" width="345.7" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
-<text x="553.2" y="337.5" fill="currentColor">16.4 s</text>
+<rect x="200.8" y="326.75" width="345.3" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="552.8" y="337.5" fill="currentColor">16.4 s</text>
 <text x="192" y="361.5" fill="currentColor" text-anchor="end">CPython</text>
-<rect x="200.8" y="350.75" width="363.9" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
-<text x="571.4" y="361.5" fill="currentColor">21.5 s</text>
+<rect x="200.8" y="350.75" width="363.7" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="571.2" y="361.5" fill="currentColor">21.4 s</text>
 <text x="192" y="385.5" fill="currentColor" text-anchor="end">Node --jitless</text>
-<rect x="200.8" y="374.75" width="364.4" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
-<text x="571.9" y="385.5" fill="currentColor">21.7 s</text>
+<rect x="200.8" y="374.75" width="364.7" height="14.5" fill="#d97706" fill-opacity="0.18" stroke="#d97706" stroke-width="1.5"/>
+<text x="572.2" y="385.5" fill="currentColor">21.7 s</text>
 </svg>

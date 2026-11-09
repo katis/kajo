@@ -7,24 +7,26 @@
 <text x="332.8" y="38.5" fill="currentColor">JIT</text>
 <g stroke="currentColor" stroke-opacity="0.18">
 <line x1="200.0" y1="52" x2="200.0" y2="106"/>
-<line x1="317.5" y1="52" x2="317.5" y2="106"/>
-<line x1="435.0" y1="52" x2="435.0" y2="106"/>
-<line x1="552.5" y1="52" x2="552.5" y2="106"/>
+<line x1="294.0" y1="52" x2="294.0" y2="106"/>
+<line x1="388.0" y1="52" x2="388.0" y2="106"/>
+<line x1="482.0" y1="52" x2="482.0" y2="106"/>
+<line x1="576.0" y1="52" x2="576.0" y2="106"/>
 <line x1="670.0" y1="52" x2="670.0" y2="106"/>
 </g>
 <line x1="200" y1="106" x2="670" y2="106" stroke="currentColor" stroke-opacity="0.6"/>
 <g fill="currentColor" fill-opacity="0.8" text-anchor="middle">
 <text x="200.0" y="122">0</text>
-<text x="317.5" y="122">2</text>
-<text x="435.0" y="122">4</text>
-<text x="552.5" y="122">6</text>
-<text x="670.0" y="122">8</text>
+<text x="294.0" y="122">1</text>
+<text x="388.0" y="122">2</text>
+<text x="482.0" y="122">3</text>
+<text x="576.0" y="122">4</text>
+<text x="670.0" y="122">5</text>
 </g>
 <text x="435.0" y="140" fill="currentColor" text-anchor="middle">seconds per run, median of the rounds (shorter is faster)</text>
 <text x="192" y="73.5" fill="currentColor" text-anchor="end">Pharo 12 (Cog JIT)</text>
-<rect x="200.8" y="62.75" width="94.1" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
-<text x="301.6" y="73.5" fill="currentColor">1.63 s</text>
+<rect x="200.8" y="62.75" width="149.5" height="14.5" fill="#7c3aed" fill-opacity="0.18" stroke="#7c3aed" stroke-width="1.5"/>
+<text x="357.0" y="73.5" fill="currentColor">1.61 s</text>
 <text x="192" y="97.5" fill="currentColor" text-anchor="end" font-weight="600">Kajo (Smalltalk)</text>
-<rect x="200.0" y="86" width="366.9" height="16" fill="#2563eb"/>
-<text x="572.9" y="97.5" fill="currentColor">6.25 s</text>
+<rect x="200.0" y="86" width="418.1" height="16" fill="#2563eb"/>
+<text x="624.1" y="97.5" fill="currentColor">4.45 s</text>
 </svg>
