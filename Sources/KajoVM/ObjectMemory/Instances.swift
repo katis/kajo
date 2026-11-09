@@ -117,7 +117,7 @@ extension ObjectMemory {
                 let ci = h & Header.classMask
                 if hit && ci == WellKnown.array && h & Header.readOnlyBit != 0 {
                     if frames == nil { frames = literalFramesHolding(target, words: &words) }
-                    if frames.unsafelyUnwrapped.contains(raw) { hit = false }
+                    if frames?.contains(raw) == true { hit = false }
                 } else if !hit && ci == WellKnown.method && n > MethodLayout.literals {
                     let lf = loadAtomic(bodyOffset: s, MethodLayout.literals)
                     hit = frames.map { $0.contains(lf) } ?? frameHolds(Oop(raw: lf), target, words: &scanned)
