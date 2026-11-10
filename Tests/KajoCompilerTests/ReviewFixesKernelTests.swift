@@ -204,3 +204,28 @@ import KajoApp
     vm.release(pa)
     vm.release(pb)
 }
+
+/// The review fixes, item 20 (primitives.F10): a `ShellProcess` used after
+/// `release` is refused (terminated, no result, a failure saying so, a
+/// second release a no-op) and never reads its entry, which a collection
+/// may have given to another object. On d78afcc every call read the oop.
+@Test func aReleasedShellProcessIsRefused() throws {
+    let shell = TestShell()
+    let vm = try openShell(shell)
+    defer { vm.close() }
+    let p = try #require(vm.spawn("count", receiver: "ShellFixture", main: false))
+    #expect(drive(vm) { vm.state(of: p) == .terminated })
+    #expect(vm.failure(of: p) == nil)
+    vm.release(p)
+    vm.release(p)
+    #expect(vm.state(of: p) == .terminated)
+    #expect(vm.result(of: p) == nil)
+    #expect(vm.failure(of: p) == "released by the shell")
+    vm.terminate(p)
+    vm.waitUntilTerminated(p)
+    // a Process spawned after it is held as usual
+    let q = try #require(vm.spawn("count", receiver: "ShellFixture", main: false))
+    #expect(drive(vm) { vm.state(of: q) == .terminated })
+    #expect(vm.failure(of: q) == nil)
+    vm.release(q)
+}

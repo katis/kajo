@@ -288,6 +288,12 @@ public final class ShellVM: @unchecked Sendable {
     let vm: VM
     let bridge: ShellBridge
     private let closeLock = NSLock()
+    /// The review fixes (item 20, primitives.F10): the Processes the shell
+    /// holds (spawned and not released), by id. A `ShellProcess` carries an
+    /// oop and outlives `release`; every call checks it is still held, so a
+    /// released one is refused and never reads whatever reused its entry.
+    private let heldLock = NSLock()
+    private var held: [Int64: Oop] = [:]  // under heldLock
     private var closed = false
     private var started = false
 
@@ -450,6 +456,9 @@ public final class ShellVM: @unchecked Sendable {
         defer { for a in args where a.isObject { vm.release(a) } }
         guard let p = vm.spawn(receiver: rcv, selector: selector, arguments: args, priority: priority, main: main) else { return nil }
         let id = vm.inspect { $0.load(p, ProcessLayout.id).smallIntegerValue }
+        heldLock.lock()
+        held[id] = p
+        heldLock.unlock()
         return ShellProcess(oop: p, id: id)
     }
 
@@ -473,33 +482,58 @@ public final class ShellVM: @unchecked Sendable {
         return out
     }
 
+    /// Whether the shell still holds `p` (not released).
+    func holds(_ p: ShellProcess) -> Bool {
+        heldLock.lock()
+        defer { heldLock.unlock() }
+        return held[p.id] == p.oop
+    }
+
+    /// A released Process reads as terminated: the shell let it go.
     public func state(of p: ShellProcess) -> ShellProcess.State {
+        guard holds(p) else { return .terminated }
         switch vm.state(of: p.oop) {
-        case .ready: .ready
-        case .running: .running
-        case .waiting: .waiting
-        case .terminated: .terminated
+        case .ready: return .ready
+        case .running: return .running
+        case .waiting: return .waiting
+        case .terminated: return .terminated
         }
     }
 
     /// What a terminated Process answered, as a value (nil for an object
     /// that is not one).
     public func result(of p: ShellProcess) -> ShellValue? {
+        guard holds(p) else { return nil }
         let r = vm.result(of: p.oop)
         return unsafe vm.host { w in shellValue(unsafe vm.machine(w), r) }
     }
 
     /// Why a Process was terminated by the VM (an error), if it was.
-    public func failure(of p: ShellProcess) -> String? { vm.error(of: p.oop).map { "\($0)" } }
+    public func failure(of p: ShellProcess) -> String? {
+        guard holds(p) else { return "released by the shell" }
+        return vm.error(of: p.oop).map { "\($0)" }
+    }
 
     /// Block until `p` has terminated (one watcher at a time). Not on the
     /// main thread while `p` needs main turns.
-    public func waitUntilTerminated(_ p: ShellProcess) { vm.waitUntilTerminated(p.oop) }
+    public func waitUntilTerminated(_ p: ShellProcess) {
+        guard holds(p) else { return }
+        vm.waitUntilTerminated(p.oop)
+    }
 
-    public func terminate(_ p: ShellProcess) { vm.terminate(p.oop) }
+    public func terminate(_ p: ShellProcess) {
+        guard holds(p) else { return }
+        vm.terminate(p.oop)
+    }
 
     /// The shell no longer needs `p`.
-    public func release(_ p: ShellProcess) { vm.release(p.oop) }
+    public func release(_ p: ShellProcess) {
+        heldLock.lock()
+        let mine = held[p.id] == p.oop
+        if mine { held[p.id] = nil }
+        heldLock.unlock()
+        if mine { vm.release(p.oop) }
+    }
 
     public var liveProcessCount: Int { vm.liveProcessCount }
 
