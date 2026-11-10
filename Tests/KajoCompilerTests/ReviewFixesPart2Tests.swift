@@ -361,3 +361,20 @@ final class HoldingTarget: @unchecked Sendable {
     #expect(line.timeNs <= failure.timeNs, "the reply's line was timed after its file writes")
     host.closeAll()
 }
+
+/// Item 16 (the primitives report's note, traced in the doc): a signal the
+/// shell queues for the event Semaphore holds that Semaphore by a pending
+/// root until a worker drains it, so a re-registration that drops the old
+/// Semaphore's own root cannot let it be collected, its entry reused by
+/// another Semaphore and that one signalled. On 18e274f the queued signal
+/// held no root (the count did not move).
+@Test func aQueuedShellSignalRootsItsSemaphoreUntilItIsDrained() throws {
+    let shell = TestShell()
+    let vm = try openShell(shell, workers: 1)
+    defer { vm.close() }
+    _ = try run(vm, "evaluate:", on: "Compiler", [.string("UIEventLoop eventSemaphore: Semaphore new. nil")])
+    let base = vm.vm.pendingRootCount
+    vm.post(ShellEvent(kind: .line, target: 0, value: .string("x"), timeNs: ShellVM.now()))
+    #expect(vm.vm.pendingRootCount == base + 1, "the queued signal holds no root")
+    #expect(drive(vm) { vm.vm.pendingRootCount == base })
+}

@@ -18,6 +18,11 @@ import Synchronization
     /// slot to free when the signal is drained (nil: `sem` is rooted some
     /// other way). Takes no lock for the push; waking an idle worker takes
     /// the scheduler mutex, so the untimed idle wait cannot miss it.
+    /// Root `sem` in the pending-root table from any thread, for a signal
+    /// whose drain frees it (`signalFromOutside`'s handle); -1 when the
+    /// table is full. The caller must know `sem` rooted while it asks.
+    func rootPending(_ sem: Oop) -> Int { unsafe registerPending(vm, sem) }
+
     func signalFromOutside(_ sem: Oop, handle: Int?) {
         let node = UnsafeMutablePointer<ExternalNode>.allocate(capacity: 1)
         unsafe node.initialize(to: ExternalNode(sem: sem, handle: handle ?? -1, next: 0))

@@ -53,12 +53,24 @@ import Synchronization
     }
 
     /// Any thread: queue `event` and signal the kernel's event Semaphore.
+    /// The review fixes, part 2, item 16: the queued signal holds its
+    /// Semaphore by a pending root the drain releases, taken here under the
+    /// bridge's lock, where the Semaphore is still rooted by the
+    /// registration (a re-registration frees the old root only after
+    /// `register` has taken this lock). Without it a re-registration could
+    /// drop the old Semaphore's root while the signal waited for its drain,
+    /// a collection free the Semaphore and another Semaphore take its entry,
+    /// and the drain would signal that one: an excess signal, which on a
+    /// Mutex's Semaphore breaks mutual exclusion. A full table signals as
+    /// before (the drain's check still refuses an entry that is no
+    /// Semaphore).
     func post(_ event: ShellEvent) {
         unsafe pthread_mutex_lock(lock)
         queue.append(event)
         let sem = semaphore
+        let h = sem.flatMap { s in ref.map { $0.rootPending(s) } } ?? -1
         unsafe pthread_mutex_unlock(lock)
-        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
+        if let sem, let ref { ref.signalFromOutside(sem, handle: h >= 0 ? h : nil) }
     }
 
     /// Primitive 153, inside the VM: `sem` is the event Semaphore from now
@@ -105,8 +117,9 @@ import Synchronization
             queue.insert(e, at: 0)
         }
         let sem = semaphore
+        let h = sem.flatMap { s in ref.map { $0.rootPending(s) } } ?? -1  // as post (item 16)
         unsafe pthread_mutex_unlock(lock)
-        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
+        if let sem, let ref { ref.signalFromOutside(sem, handle: h >= 0 ? h : nil) }
     }
 
     var queued: Int {
@@ -146,8 +159,9 @@ import Synchronization
         unsafe pthread_mutex_lock(protocolLock)
         requests.append((connection, json))
         let sem = requestSemaphore
+        let h = sem.flatMap { s in ref.map { $0.rootPending(s) } } ?? -1  // as post (item 16)
         unsafe pthread_mutex_unlock(protocolLock)
-        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
+        if let sem, let ref { ref.signalFromOutside(sem, handle: h >= 0 ? h : nil) }
     }
 
     /// Primitive 159: as `register`, for the protocol's Semaphore. nil when
@@ -186,8 +200,9 @@ import Synchronization
             requests.insert(r, at: 0)
         }
         let sem = requestSemaphore
+        let h = sem.flatMap { s in ref.map { $0.rootPending(s) } } ?? -1  // as post (item 16)
         unsafe pthread_mutex_unlock(protocolLock)
-        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
+        if let sem, let ref { ref.signalFromOutside(sem, handle: h >= 0 ? h : nil) }
     }
 
     var queuedRequests: Int {
