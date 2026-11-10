@@ -52,6 +52,13 @@ private let cases: [PrimitiveCase] = {
     c.append(PrimitiveCase(prim: 38, receiver: array3, args: [nil, nil, array3, nil], count: 3))
     // Large bytes: primitive 38 copies bytes too.
     c.append(PrimitiveCase(prim: 38, receiver: bytes4, args: [nil, nil, bytes4, nil], count: 4))
+    // The review fixes (items 1, 17, 21): primitive 38 over pointer objects
+    // past one polled chunk (32 768 slots), 93 given an integer where it
+    // takes a Boolean, and 148 given integers for its path and its text.
+    let array40k = "  push_lit @Array\n  push_lit 40000\n  send new: 1\n"
+    c.append(PrimitiveCase(prim: 38, receiver: array40k, args: [nil, nil, array40k, nil], count: 40000))
+    c.append(PrimitiveCase(prim: 93, receiver: array3, args: [nil], count: 3))
+    c.append(PrimitiveCase(prim: 148, receiver: "  push_nil\n", args: [nil, nil], count: 0))
     c.append(PrimitiveCase(prim: 73, receiver: "  push_lit 1.5\n", args: [nil], count: 0))
     c.append(PrimitiveCase(prim: 77, receiver: "  push_nil\n", args: [nil], count: 0))
     c.append(PrimitiveCase(prim: 91, receiver: array3, args: [nil], count: 3))
