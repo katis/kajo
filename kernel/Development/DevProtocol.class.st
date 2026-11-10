@@ -9,7 +9,8 @@ Class {
 		'pending',
 		'lock',
 		'kinds',
-		'argumentNames'
+		'argumentNames',
+		'reaper'
 	]
 }
 
@@ -151,17 +152,34 @@ DevProtocol class >> finishActiveWithError: aString [
 ]
 
 { #category : #requests }
+DevProtocol class >> reapEndedRequests [
+	"The net under every request (the review fixes, part 2, item 1). A terminated request Process answers from run:'s ensure: block; a VMError (a stack overflow, memory) ends a Process without unwinding, so while any request is pending this Process looks every 100 ms for a pending request whose Process has ended and answers it with an error: no request waits for its client's timeout and pending does not leak. It ends when nothing is pending (run: starts it again), so an idle image has no such wake-up."
+	| ended done |
+	done := false.
+	[done] whileFalse: [
+		(Delay forMilliseconds: 100) wait.
+		ended := OrderedCollection new.
+		lock critical: [
+			pending keys do: [:p | p isTerminated ifTrue: [ended add: (pending removeKey: p)]].
+			pending isEmpty ifTrue: [reaper := nil. done := true]].
+		ended do: [:entry | self reply: entry first error: 'the request''s Process ended without a reply (a VMError: the host''s log names it)']]
+]
+
+{ #category : #requests }
 DevProtocol class >> run: aSelector in: aSession with: anArray replyTo: aReplyTo [
 	"A request's Process: the method, then its reply. Errors are the reply, unless the request is <debuggable>."
 	| value method |
-	lock critical: [pending at: ProcessorScheduler activeProcess put: (Array with: aReplyTo with: aSession)].
+	lock critical: [
+		pending at: ProcessorScheduler activeProcess put: (Array with: aReplyTo with: aSession).
+		reaper isNil ifTrue: [reaper := [self reapEndedRequests] forkAt: 1]].
 	method := DevSession lookupSelector: aSelector.
-	(method hasPragma: #debuggable)
+	[(method hasPragma: #debuggable)
 		ifTrue: [value := aSession perform: aSelector withArguments: anArray]
 		ifFalse: [value := [aSession perform: aSelector withArguments: anArray] on: Error do: [:e |
 			self finishActiveWithError: e printString.
 			^ nil]].
-	self finishActive: value
+	self finishActive: value]
+		ensure: [self finishActiveWithError: 'the request''s Process ended without a reply']
 ]
 
 { #category : #requests }
@@ -252,6 +270,7 @@ DevProtocol class >> start [
 	sessions := Dictionary new.
 	pending := IdentityDictionary new.
 	kinds := nil.
+	reaper := nil.
 	semaphore := Semaphore new.
 	(self primRegister: semaphore) == self ifFalse: [semaphore := nil. ^ false].
 	process := [self serve] forkAt: 2.

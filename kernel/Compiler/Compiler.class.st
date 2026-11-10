@@ -85,8 +85,14 @@ Compiler >> analyze: aNode in: aScope [
 		^ self analyze: aNode value in: aScope].
 	c == MessageNode ifTrue: [
 		(self inlinable: aNode) ifTrue: [aNode beInlined. ^ self analyzeInlined: aNode in: aScope].
-		self analyze: aNode receiver in: aScope.
-		aNode arguments do: [:x | self analyze: x in: aScope].
+		aNode isSuper ifTrue: [
+			self analyze: aNode receiver in: aScope.
+			aNode arguments do: [:x | self analyze: x in: aScope].
+			^ self].
+		"The receiver first, then each send's arguments, innermost first: a chain by a loop."
+		s := self chainOf: aNode.
+		self analyze: s first in: aScope.
+		(s at: 2) do: [:t | t arguments do: [:x | self analyze: x in: aScope]].
 		^ self].
 	c == CascadeNode ifTrue: [
 		self analyze: aNode receiver in: aScope.
@@ -156,6 +162,18 @@ Compiler >> analyzeLoopBody: aNode in: aScope [
 { #category : #analysis }
 Compiler >> analyzeStatements: aCollection in: aScope [
 	aCollection do: [:st | self analyze: st in: aScope]
+]
+
+{ #category : #analysis }
+Compiler >> chainOf: aMessageNode [
+	"{start. sends}: the sends of the message chain that ends in aMessageNode, innermost first, and the node they start from. A chain of any length is walked by a loop, never by recursion on the receiver (Compiler.chain in the bootstrap; the stack bounds only nesting, docs/modules/reserve-and-depth.md). A super send or a send that is inlined ends the chain."
+	| sends x |
+	sends := OrderedCollection with: aMessageNode.
+	x := aMessageNode receiver.
+	[x class == MessageNode and: [x isSuper not and: [(self inlinable: x) not]]] whileTrue: [
+		sends addFirst: x.
+		x := x receiver].
+	^ Array with: x with: sends
 ]
 
 { #category : #analysis }
@@ -370,10 +388,12 @@ Compiler >> gen: aNode in: r on: e value: wantValue [
 				e add: {#source. aNode sourceStart. aNode sourceEnd}.
 				e add: {#send. #sendSuper. aNode selector. aNode arguments size}]
 			ifFalse: [
-				self gen: aNode receiver in: r on: e value: true.
-				aNode arguments do: [:x | self gen: x in: r on: e value: true].
-				e add: {#source. aNode sourceStart. aNode sourceEnd}.
-				self send: aNode selector arguments: aNode arguments size on: e].
+				b := self chainOf: aNode.
+				self gen: b first in: r on: e value: true.
+				(b at: 2) do: [:t |
+					t arguments do: [:x | self gen: x in: r on: e value: true].
+					e add: {#source. t sourceStart. t sourceEnd}.
+					self send: t selector arguments: t arguments size on: e]].
 		wantValue ifFalse: [self emit: e op: #pop].
 		^ self].
 	c == CascadeNode ifTrue: [^ self genCascade: aNode in: r on: e value: wantValue].

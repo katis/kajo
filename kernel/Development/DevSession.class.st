@@ -81,9 +81,11 @@ DevSession >> objectAt: aHandle [
 
 { #category : #handles }
 DevSession >> printOf: anObject [
+	"anObject's printString, at most 4000 bytes: printed through a LimitedWriteStream (the review fixes, part 2, item 1), which stops at the limit and prints an object already being printed as '...', so a cyclic or huge collection answers a cut text, never a stack overflow, and is never printed whole before it is cut."
 	| s |
-	s := [anObject printString] on: Error do: [:e | '<printString failed: ' , e messageText , '>'].
-	^ s byteSize > 4000 ifTrue: [(s copyFrom: 1 to: 4000) , '...'] ifFalse: [s]
+	s := LimitedWriteStream limit: 4000 onLimit: [^ s cutContents , '...'].
+	[s print: anObject] on: Error do: [:e | ^ '<printString failed: ' , e messageText , '>'].
+	^ s contents
 ]
 
 { #category : #helpers }

@@ -35,6 +35,22 @@ DevelopmentTest >> restartedSample: n log: log [
 ]
 
 { #category : #tests }
+DevelopmentTest >> testACollectionThatHoldsItselfPrintsCut [
+	"The review fixes, part 2, item 1 (kernel.F6): DevSession printOf: prints through a LimitedWriteStream, so a collection that holds itself answers a text with '...' in its place, and a collection of a million elements answers at most 4000 bytes and the cut mark without being printed whole."
+	| a text big |
+	a := OrderedCollection new.
+	a add: 1; add: a; add: 2.
+	text := DevSession new printOf: a.
+	self assert: (text includesSubstring: '...').
+	self assert: (text beginsWith: 'OrderedCollection (1 ...').
+	big := Array new: 1000000 withAll: 7.
+	text := DevSession new printOf: big.
+	self assert: text byteSize <= 4003.
+	self assert: (text endsWith: '...').
+	self assert: (DevSession new printOf: 42) = '42'
+]
+
+{ #category : #tests }
 DevelopmentTest >> testAContextRunsItsSendAgain [
 	"Context>>restartSendWith: unwinds to the sender (its ensure: blocks run) and re-executes the send: here, once, with another argument."
 	| log result |
