@@ -533,7 +533,7 @@ ToolsTests 2 of 2 under twelve busy loops before the second run.
 - No AGENTS.md or PLAN changes (the main session's).
 - The iPad.
 
-### Open questions for the owner (built as recommended)
+### Open questions for the owner (built as recommended; answered by the owner on 2026-11-10, all three as built)
 
 1. The `category:` class-creation messages as a shorthand splitting
    `'Package-Tag'`? Built: no; `package:` and `package:tag:` only, and the
