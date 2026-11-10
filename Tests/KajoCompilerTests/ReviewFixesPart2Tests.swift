@@ -203,15 +203,16 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
     }
 }
 
-/// A Unix socket that accepts one connection, writes `bytes` to it and
-/// holds it open until `stop` (item 13's targets).
+/// A Unix socket that accepts one connection, writes `bytes` to it (after
+/// the client's first line when `afterLine`) and holds it open until
+/// `stop` (item 13's targets).
 final class HoldingTarget: @unchecked Sendable {
     private let fd: Int32
     private let lock = NSLock()
     private var conn: Int32 = -1
     let path: String
 
-    init(path: String, bytes: [UInt8]) throws {
+    init(path: String, bytes: [UInt8], afterLine: Bool = false) throws {
         self.path = path
         unlink(path)
         let s = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -229,6 +230,10 @@ final class HoldingTarget: @unchecked Sendable {
             lock.lock()
             conn = c
             lock.unlock()
+            if afterLine {
+                var one = [UInt8](repeating: 0, count: 1)
+                while unsafe read(c, &one, 1) == 1 && one[0] != 10 {}
+            }
             var off = 0
             while off < bytes.count {
                 let n = bytes.withUnsafeBytes { unsafe write(c, $0.baseAddress! + off, min(65536, bytes.count - off)) }
@@ -273,7 +278,9 @@ final class HoldingTarget: @unchecked Sendable {
 /// whether or not the reader had ended (the counter is the fix's).
 @Test func theClientsDescriptorIsClosedOnceByWhoeverEndsLast() throws {
     let path = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-close-\(getpid()).sock").path
-    let t = try HoldingTarget(path: path, bytes: Array(#"{"v":1,"kind":"log","text":"x"}"#.utf8) + [10])
+    // The target sends the event after the client's first line, so the
+    // callback is set before the event can arrive.
+    let t = try HoldingTarget(path: path, bytes: Array(#"{"v":1,"kind":"log","text":"x"}"#.utf8) + [10], afterLine: true)
     defer { t.stop() }
     let c = try ProtocolClient(path: path)
     let inCallback = DispatchSemaphore(value: 0)
@@ -283,6 +290,7 @@ final class HoldingTarget: @unchecked Sendable {
         Thread.sleep(forTimeInterval: 1.5)
         seenInCallback.withLock { $0 = c.descriptorCloses }
     }
+    try c.write(Array("{}".utf8))
     #expect(inCallback.wait(timeout: .now() + 60) == .success)
     let t0 = Date()
     c.close()
