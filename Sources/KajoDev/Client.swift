@@ -23,7 +23,22 @@ public final class ProtocolClient: @unchecked Sendable {
     private var closed = false  // under changed
     private var closing = false  // under changed: close() was called
     private var nextId = 1  // under lock
-    private var fdClosed = false  // under lock
+    private var fdClosed = false  // under lock: close() was asked
+    private var readerEnded = false  // under lock
+    private var descriptorClosed = false  // under lock
+    /// How many times the descriptor was closed (always 0 or 1; the
+    /// review fixes, part 2, item 13: a test reads it).
+    var descriptorCloses: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return closesOfDescriptor
+    }
+    private var closesOfDescriptor = 0  // under lock
+    /// Lines longer than `lineLimit`, discarded (under changed).
+    private var discardedLines = 0
+    /// The longest line read (64 MiB, as the image's client and the server
+    /// bound theirs); the rest of a longer line is discarded.
+    let lineLimit: Int
     private var reader: Thread?
     private var eventHandler: (@Sendable (JSONValue) -> Void)?  // under changed
     /// Called on the reading thread for every event (not replies).
@@ -47,7 +62,8 @@ public final class ProtocolClient: @unchecked Sendable {
         try self.init(address: address, timeout: timeout)
     }
 
-    public init(address: TargetAddress, timeout: Double = 10) throws {
+    public init(address: TargetAddress, timeout: Double = 10, lineLimit: Int = 64 << 20) throws {
+        self.lineLimit = lineLimit
         fd = try openStream(address, timeout: timeout)
         let t = Thread { [self] in readLoop() }
         t.name = "kajo-client"
@@ -57,28 +73,68 @@ public final class ProtocolClient: @unchecked Sendable {
 
     deinit { close() }
 
+    /// The reader: lines bounded by `lineLimit` (a longer one is discarded
+    /// to its end and counted, and the requests waiting are answered with
+    /// an error rather than left to their timeout: the review fixes, part
+    /// 2, item 13). It owns the descriptor's end: whichever of it and
+    /// `close` comes second closes it, once, so the descriptor is never
+    /// closed under a `read` and never read after it is closed.
     private func readLoop() {
         var buffer: [UInt8] = []
+        var discarding = false
         var chunk = [UInt8](repeating: 0, count: 65536)
+        let limits = { var l = JSONLimits(); l.bytes = 64 << 20; l.stringBytes = 64 << 20; l.depth = 64; l.elements = 1 << 20; return l }()
+        func tooLong() {
+            changed.lock()
+            discardedLines += 1
+            changed.broadcast()
+            changed.unlock()
+        }
         while true {
             let n = unsafe read(fd, &chunk, chunk.count)
             if n < 0 && errno == EINTR { continue }
             if n <= 0 { break }
             var start = 0
             for i in 0..<n where chunk[i] == 10 {
-                buffer += chunk[start..<i]
-                start = i + 1
-                if case .success(let v) = parseJSON(buffer, limits: { var l = JSONLimits(); l.bytes = 64 << 20; l.stringBytes = 64 << 20; l.depth = 64; l.elements = 1 << 20; return l }()) {
-                    receive(v)
+                if discarding {
+                    discarding = false
+                } else if buffer.count + (i - start) > lineLimit {
+                    tooLong()
+                } else {
+                    buffer += chunk[start..<i]
+                    if case .success(let v) = parseJSON(buffer, limits: limits) { receive(v) }
                 }
                 buffer.removeAll(keepingCapacity: true)
+                start = i + 1
             }
-            if start < n { buffer += chunk[start..<n] }
+            if start < n && !discarding {
+                if buffer.count + (n - start) > lineLimit {
+                    buffer.removeAll()
+                    discarding = true
+                    tooLong()
+                } else {
+                    buffer += chunk[start..<n]
+                }
+            }
         }
         changed.lock()
         closed = true
         changed.broadcast()
         changed.unlock()
+        lock.lock()
+        readerEnded = true
+        let closeNow = fdClosed
+        lock.unlock()
+        if closeNow { closeDescriptor() }
+    }
+
+    private func closeDescriptor() {
+        lock.lock()
+        defer { lock.unlock() }
+        if descriptorClosed { return }
+        descriptorClosed = true
+        closesOfDescriptor += 1
+        if fd >= 0 { Darwin.close(fd) }
     }
 
     private func receive(_ v: JSONValue) {
@@ -106,6 +162,9 @@ public final class ProtocolClient: @unchecked Sendable {
         let id = nextId
         nextId += 1
         lock.unlock()
+        changed.lock()
+        let discarded = discardedLines
+        changed.unlock()
         try write(DevRequest(id: .int(Int64(id)), kind: kind, arguments: args).line)
         let key = "\(id)"
         let deadline = Date(timeIntervalSinceNow: timeout)
@@ -113,6 +172,12 @@ public final class ProtocolClient: @unchecked Sendable {
         defer { changed.unlock() }
         while replies[key] == nil {
             if closed { throw ProtocolError("the target closed the connection") }
+            // A line past the limit may have been this reply: answered, not
+            // left to the timeout (another request's reply cannot be told
+            // from it).
+            if discardedLines > discarded {
+                throw ProtocolError("a line from the target passed \(lineLimit) bytes and was discarded (it may have been the reply to \(kind))")
+            }
             if !changed.wait(until: deadline) && replies[key] == nil {
                 throw ProtocolError("no reply to \(kind) within \(timeout) s")
             }
@@ -141,6 +206,7 @@ public final class ProtocolClient: @unchecked Sendable {
         bytes.append(10)
         lock.lock()
         defer { lock.unlock() }
+        if fdClosed { throw ProtocolError("write: the connection is closed") }
         var off = 0
         while off < bytes.count {
             let n = bytes.withUnsafeBytes { unsafe Darwin.write(fd, $0.baseAddress! + off, bytes.count - off) }
@@ -179,11 +245,6 @@ public final class ProtocolClient: @unchecked Sendable {
         }
     }
 
-    private var readerDone: Bool {
-        changed.lock()
-        defer { changed.unlock() }
-        return closed
-    }
 
     public var isClosed: Bool {
         changed.lock()
@@ -205,20 +266,15 @@ public final class ProtocolClient: @unchecked Sendable {
         changed.lock()
         closing = true
         changed.unlock()
+        // The shutdown makes the reader's `read` return; the descriptor is
+        // closed by whichever of the reader and this ends second (the
+        // review fixes, part 2, item 13: it was closed after a 1 s wait
+        // whether or not the reader had ended, so a reader still in a long
+        // parse or an event callback read a closed, possibly reused one).
         shutdown(fd, SHUT_RDWR)
-        changed.lock()
-        let wasClosed = closed
-        changed.unlock()
-        if !wasClosed {
-            // the reader ends on EOF
-            var spins = 0
-            while !readerDone && spins < 200 {
-                usleep(5_000)
-                spins += 1
-            }
-        }
         lock.lock()
-        defer { lock.unlock() }
-        if fd >= 0 { Darwin.close(fd) }
+        let ended = readerEnded
+        lock.unlock()
+        if ended { closeDescriptor() }
     }
 }

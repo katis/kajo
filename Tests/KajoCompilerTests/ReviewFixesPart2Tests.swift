@@ -201,3 +201,95 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
         #expect(aside.isEmpty, "round \(round): \(aside)")
     }
 }
+
+/// A Unix socket that accepts one connection, writes `bytes` to it and
+/// holds it open until `stop` (item 13's targets).
+final class HoldingTarget: @unchecked Sendable {
+    private let fd: Int32
+    private let lock = NSLock()
+    private var conn: Int32 = -1
+    let path: String
+
+    init(path: String, bytes: [UInt8]) throws {
+        self.path = path
+        unlink(path)
+        let s = socket(AF_UNIX, SOCK_STREAM, 0)
+        var addr = ProtocolServer.address(path)
+        let r = withUnsafePointer(to: &addr) {
+            unsafe $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { unsafe bind(s, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        guard r == 0, listen(s, 1) == 0 else { throw ProtocolError("holding target: bind") }
+        fd = s
+        let t = Thread { [self] in
+            let c = accept(s, nil, nil)
+            guard c >= 0 else { return }
+            var one: Int32 = 1
+            _ = unsafe setsockopt(c, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+            lock.lock()
+            conn = c
+            lock.unlock()
+            var off = 0
+            while off < bytes.count {
+                let n = bytes.withUnsafeBytes { unsafe write(c, $0.baseAddress! + off, min(65536, bytes.count - off)) }
+                if n <= 0 { break }
+                off += n
+            }
+        }
+        t.start()
+    }
+
+    func stop() {
+        lock.lock()
+        let c = conn
+        lock.unlock()
+        if c >= 0 { close(c) }
+        shutdown(fd, SHUT_RDWR)
+        close(fd)
+        unlink(path)
+    }
+}
+
+/// Item 13 (primitives.F8): a line from the target past the client's limit
+/// (64 MiB, as the image's client and the server bound theirs) is
+/// discarded to its end and the request waiting is answered with an error
+/// at once, not left to grow the buffer until its timeout. On 18e274f the
+/// client buffered the whole line and waited out the timeout.
+@Test func aLineThatPassesTheClientsLimitIsAnAnswer() throws {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-long-\(getpid()).sock").path
+    let t = try HoldingTarget(path: path, bytes: [UInt8](repeating: 120, count: (64 << 20) + 4096) + [10])
+    defer { t.stop() }
+    let c = try ProtocolClient(path: path)
+    defer { c.close() }
+    let t0 = Date()
+    #expect(throws: ProtocolError.self) { _ = try c.send("evaluate", [("source", .string("1"))], timeout: 120) }
+    #expect(Date().timeIntervalSince(t0) < 100, "the request waited for its timeout")
+}
+
+/// Item 13: the client's descriptor is closed once, by whichever of its
+/// reader and `close` ends second: a `close` while the reader is inside an
+/// event's callback returns without closing it under the reader, and the
+/// reader closes it when it ends. On 18e274f `close` closed it after 1 s
+/// whether or not the reader had ended (the counter is the fix's).
+@Test func theClientsDescriptorIsClosedOnceByWhoeverEndsLast() throws {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-close-\(getpid()).sock").path
+    let t = try HoldingTarget(path: path, bytes: Array(#"{"v":1,"kind":"log","text":"x"}"#.utf8) + [10])
+    defer { t.stop() }
+    let c = try ProtocolClient(path: path)
+    let inCallback = DispatchSemaphore(value: 0)
+    let seenInCallback = Mutex<Int>(-1)
+    c.onEvent = { [c] _ in
+        inCallback.signal()
+        Thread.sleep(forTimeInterval: 1.5)
+        seenInCallback.withLock { $0 = c.descriptorCloses }
+    }
+    #expect(inCallback.wait(timeout: .now() + 60) == .success)
+    let t0 = Date()
+    c.close()
+    #expect(Date().timeIntervalSince(t0) < 1.0, "close waited for the reader")
+    let end = Date(timeIntervalSinceNow: 60)
+    while c.descriptorCloses == 0 && Date() < end { usleep(10_000) }
+    #expect(seenInCallback.withLock { $0 } == 0, "the descriptor was closed under the reader")
+    #expect(c.descriptorCloses == 1)
+    c.close()
+    #expect(c.descriptorCloses == 1)
+}
