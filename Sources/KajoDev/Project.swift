@@ -68,9 +68,18 @@ public struct ProjectWriter: Sendable {
                 try FileManager.default.removeItem(atPath: path)
             }
             if f["remove"] == .bool(true) {
-                if FileManager.default.fileExists(atPath: path) || ProjectWriter.isLink(path) {
+                // The review fixes (item 18, primitives.F7's second half): a
+                // remove takes one regular file or link (never followed) and
+                // never a directory, never recursively: a directory in a
+                // source file's place is a refusal.
+                if let type = (try? FileManager.default.attributesOfItem(atPath: path))?[.type] as? FileAttributeType {
+                    guard type == .typeRegular || type == .typeSymbolicLink else {
+                        throw ProtocolError("the project's \(name) is not a file: not removed")
+                    }
                     try FileManager.default.removeItem(atPath: path)
                 }
+                // An emptied tag directory goes (a Finder .DS_Store aside),
+                // only when nothing else is in it.
                 if inTag, let rest = try? FileManager.default.contentsOfDirectory(atPath: parent),
                    rest.allSatisfy({ $0 == ".DS_Store" }) {
                     try? FileManager.default.removeItem(atPath: parent)

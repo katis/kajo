@@ -190,3 +190,25 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         #expect(try c.eval("3 + 4")["value"] == .string("7"))
     }
 }
+
+/// The review fixes, item 18 (primitives.F7's second half): a remove in a
+/// reply's files takes a file or a link, never a directory: a directory in
+/// a class file's place is refused and keeps what it holds. On d78afcc
+/// `removeItem` removed it with everything in it.
+@Test func aProjectRemoveNeverTakesADirectory() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-project-remove-\(getpid())")
+    try? FileManager.default.removeItem(at: dir)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let trap = dir.appendingPathComponent("A.class.st")
+    try FileManager.default.createDirectory(at: trap, withIntermediateDirectories: true)
+    try "keep".write(to: trap.appendingPathComponent("inside.txt"), atomically: false, encoding: .utf8)
+    try "x".write(to: dir.appendingPathComponent("B.class.st"), atomically: false, encoding: .utf8)
+    let writer = ProjectWriter(directory: dir.path)
+    #expect(throws: ProtocolError.self) {
+        try writer.apply(.object([("files", .array([.object([("path", .string("A.class.st")), ("remove", .bool(true))])]))]))
+    }
+    #expect(FileManager.default.fileExists(atPath: trap.appendingPathComponent("inside.txt").path))
+    // a file is removed as before
+    _ = try writer.apply(.object([("files", .array([.object([("path", .string("B.class.st")), ("remove", .bool(true))])]))]))
+    #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("B.class.st").path))
+}
