@@ -51,10 +51,16 @@ HashedCollection >> postCopy [
 
 { #category : #accessing }
 HashedCollection >> rehashTo: newSize [
-	| old |
-	old := array.
-	array := Array new: newSize.
-	old do: [:e | e == nil ifFalse: [array at: (self indexFor: (self keyOf: e)) put: e]]
+	"The new table is filled before it replaces the old one (the review fixes, item 10): a reader meanwhile sees the old, whole table, never an empty one."
+	| new n |
+	new := Array new: newSize.
+	n := newSize.
+	array do: [:e | | i |
+		e == nil ifFalse: [
+			i := ((self hashFor: (self keyOf: e)) bitAnd: n - 1) + 1.
+			[(new at: i) == nil] whileFalse: [i := i = n ifTrue: [1] ifFalse: [i + 1]].
+			new at: i put: e]].
+	array := new
 ]
 
 { #category : #accessing }

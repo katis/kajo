@@ -7,7 +7,8 @@ Class {
 		'client',
 		'sessionPackage',
 		'handles',
-		'nextHandle'
+		'nextHandle',
+		'handleLock'
 	]
 }
 
@@ -44,7 +45,8 @@ DevSession >> setConn: anInteger client: aString package: aPackageOrNil [
 	client := aString.
 	sessionPackage := aPackageOrNil.
 	handles := Dictionary new.
-	nextHandle := 1
+	nextHandle := 1.
+	handleLock := Mutex new
 ]
 
 { #category : #handles }
@@ -60,16 +62,21 @@ DevSession >> describe: anObject [
 
 { #category : #handles }
 DevSession >> handleOf: anObject [
-	"The handle the session keeps anObject under (one per object)."
-	handles keysAndValuesDo: [:k :v | v == anObject ifTrue: [^ k]].
-	nextHandle := nextHandle + 1.
-	handles at: nextHandle put: anObject.
-	^ nextHandle
+	"The handle the session keeps anObject under (one per object). Under the session's lock (the review fixes, item 10): its requests run in Processes of their own, in parallel, and stopped Processes describe their frames through it."
+	^ handleLock critical: [ | found |
+		handles keysAndValuesDo: [:k :v | (found isNil and: [v == anObject]) ifTrue: [found := k]].
+		found ifNil: [
+			nextHandle := nextHandle + 1.
+			handles at: nextHandle put: anObject.
+			nextHandle]]
 ]
 
 { #category : #handles }
 DevSession >> objectAt: aHandle [
-	^ handles at: aHandle ifAbsent: [self error: 'no object under handle ' , aHandle printString]
+	| o |
+	o := handleLock critical: [handles at: aHandle ifAbsent: [handles]].
+	o == handles ifTrue: [^ self error: 'no object under handle ' , aHandle printString].
+	^ o
 ]
 
 { #category : #handles }
@@ -384,7 +391,7 @@ DevSession >> inspect: handle [
 DevSession >> inspectRelease: handle [
 	"Let go of the object under a handle."
 	<devProtocol>
-	handles removeKey: handle ifAbsent: [nil].
+	handleLock critical: [handles removeKey: handle ifAbsent: [nil]].
 	^ true
 ]
 

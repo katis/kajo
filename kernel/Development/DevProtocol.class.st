@@ -16,14 +16,17 @@ Class {
 { #category : #describing }
 DevProtocol class >> argumentNamesOf: aSelector [
 	"The request's argument names: the method's own argument names (from its source), kept per method (a recompiled method is another one)."
-	| m |
+	| m names |
 	m := DevSession lookupSelector: aSelector.
 	m isNil ifTrue: [^ #()].
-	argumentNames isNil ifTrue: [argumentNames := IdentityDictionary new].
-	^ argumentNames at: m ifAbsentPut: [
-		(Smalltalk sourceOf: m)
-			ifNil: [(1 to: m numArgs) collect: [:i | 'arg' , i printString]]
-			ifNotNil: [:src | ((Parser parse: src) arguments collect: [:a | a first asString]) asArray]]
+	names := self critical: [argumentNames isNil ifFalse: [argumentNames at: m ifAbsent: [nil]]].
+	names isNil ifFalse: [^ names].
+	names := (Smalltalk sourceOf: m)
+		ifNil: [(1 to: m numArgs) collect: [:i | 'arg' , i printString]]
+		ifNotNil: [:src | ((Parser parse: src) arguments collect: [:a | a first asString]) asArray].
+	^ self critical: [
+		argumentNames isNil ifTrue: [argumentNames := IdentityDictionary new].
+		argumentNames at: m ifAbsentPut: [names]]
 ]
 
 { #category : #describing }
@@ -204,6 +207,13 @@ DevProtocol class >> takeReplyOf: aProcess [
 	"{replyTo. session} of the request aProcess runs, removed: whoever takes it answers the request."
 	lock isNil ifTrue: [^ nil].
 	^ lock critical: [pending removeKey: aProcess ifAbsent: [nil]]
+]
+
+{ #category : #serving }
+DevProtocol class >> critical: aBlock [
+	"aBlock under the protocol's lock (the review fixes, item 10: the argument names table is written by the protocol Process and by request Processes); without a lock (not serving) aBlock alone."
+	lock isNil ifTrue: [^ aBlock value].
+	^ lock critical: aBlock
 ]
 
 { #category : #serving }

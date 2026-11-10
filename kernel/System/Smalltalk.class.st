@@ -9,28 +9,33 @@ Class {
 		'organizations',
 		'undeclared',
 		'packages',
-		'resumes'
+		'resumes',
+		'registryLock'
 	]
 }
 
 { #category : #'class variables' }
 Smalltalk class >> forgetUndeclared: aSymbol in: aClass [
-	undeclared isNil ifTrue: [^ nil].
-	^ (undeclared at: aClass ifAbsent: [^ nil]) removeKey: aSymbol ifAbsent: [nil]
+	^ self registry: [
+		undeclared isNil
+			ifTrue: [nil]
+			ifFalse: [(undeclared at: aClass ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSymbol ifAbsent: [nil]]]]
 ]
 
 { #category : #'class variables' }
 Smalltalk class >> noteUndeclared: aBinding in: aClass [
-	undeclared isNil ifTrue: [undeclared := IdentityDictionary new].
-	(undeclared at: aClass ifAbsentPut: [IdentityDictionary new]) at: aBinding key put: aBinding
+	self registry: [
+		undeclared isNil ifTrue: [undeclared := IdentityDictionary new].
+		(undeclared at: aClass ifAbsentPut: [IdentityDictionary new]) at: aBinding key put: aBinding]
 ]
 
 { #category : #'class variables' }
 Smalltalk class >> undeclaredBinding: aSymbol in: aClass [
 	"A Binding for a class variable aSymbol of aClass about to be declared: the one removed from aClass earlier, if any (so the methods that hold it work again), else a new one."
-	undeclared isNil ifFalse: [
-		((undeclared at: aClass ifAbsent: [nil]) ifNotNil: [:d | d at: aSymbol ifAbsent: [nil]]) ifNotNil: [:b | ^ b]].
-	^ Binding new key: aSymbol
+	| b |
+	b := self registry: [
+		undeclared isNil ifFalse: [(undeclared at: aClass ifAbsent: [nil]) ifNotNil: [:d | d at: aSymbol ifAbsent: [nil]]]].
+	^ b ifNil: [Binding new key: aSymbol]
 ]
 
 { #category : #classes }
@@ -296,10 +301,11 @@ Smalltalk class >> authorOfSelector: aSelector in: aBehavior [
 Smalltalk class >> notePackage: aStringOrNil of: aSelector in: aBehavior [
 	"A method's package when it is not its class's (an extension, module 9b); nil or the class's package forgets it."
 	(aStringOrNil isNil or: [aStringOrNil = (self packageOf: aBehavior theNonMetaClass)]) ifTrue: [
-		packages isNil ifFalse: [(packages at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSelector ifAbsent: [nil]]].
+		self registry: [packages isNil ifFalse: [(packages at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSelector ifAbsent: [nil]]]].
 		^ nil].
-	packages isNil ifTrue: [packages := IdentityDictionary new].
-	(packages at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aStringOrNil asString
+	self registry: [
+		packages isNil ifTrue: [packages := IdentityDictionary new].
+		(packages at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aStringOrNil asString]
 ]
 
 { #category : #packages }
@@ -308,7 +314,7 @@ Smalltalk class >> packageNames [
 	| out |
 	out := Set new.
 	self allClasses do: [:c | (self packageOf: c) ifNotNil: [:p | out add: p]].
-	packages isNil ifFalse: [packages do: [:d | d do: [:p | out add: p]]].
+	self registry: [packages isNil ifFalse: [packages do: [:d | d do: [:p | out add: p]]]].
 	^ out asArray sort: [:a :b | a <= b]
 ]
 
@@ -321,9 +327,10 @@ Smalltalk class >> packageOf: aClass [
 { #category : #packages }
 Smalltalk class >> packageOfSelector: aSelector in: aBehavior [
 	"The package a method belongs to: its own when it is an extension, else its class's."
-	packages isNil ifFalse: [
-		((packages at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d at: aSelector ifAbsent: [nil]]) ifNotNil: [:p | ^ p]].
-	^ self packageOf: aBehavior theNonMetaClass
+	| p |
+	p := self registry: [
+		packages isNil ifFalse: [(packages at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d at: aSelector ifAbsent: [nil]]]].
+	^ p ifNil: [self packageOf: aBehavior theNonMetaClass]
 ]
 
 { #category : #packages }
@@ -464,50 +471,48 @@ Smalltalk class >> snapshot: aPathOrNil [
 
 { #category : #sources }
 Smalltalk class >> categoryOfSelector: aSelector in: aBehavior [
-	organizations isNil ifTrue: [^ nil].
-	^ (organizations at: aBehavior ifAbsent: [^ nil]) at: aSelector ifAbsent: [nil]
+	^ self registry: [
+		organizations isNil ifFalse: [(organizations at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d at: aSelector ifAbsent: [nil]]]]
 ]
 
 { #category : #sources }
 Smalltalk class >> definitionOf: aClass [
 	"aClass's ClassDefinition, or nil."
-	definitions isNil ifTrue: [^ nil].
-	^ definitions at: aClass ifAbsent: [nil]
+	^ self registry: [definitions isNil ifFalse: [definitions at: aClass ifAbsent: [nil]]]
 ]
 
 { #category : #sources }
 Smalltalk class >> forgetCategoriesOf: aBehavior [
-	organizations isNil ifTrue: [^ nil].
-	^ organizations removeKey: aBehavior ifAbsent: [nil]
+	^ self registry: [organizations isNil ifFalse: [organizations removeKey: aBehavior ifAbsent: [nil]]]
 ]
 
 { #category : #sources }
 Smalltalk class >> forgetCategoryOf: aSelector in: aBehavior [
-	organizations isNil ifTrue: [^ nil].
-	^ (organizations at: aBehavior ifAbsent: [^ nil]) removeKey: aSelector ifAbsent: [nil]
+	^ self registry: [
+		organizations isNil ifFalse: [(organizations at: aBehavior ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aSelector ifAbsent: [nil]]]]
 ]
 
 { #category : #sources }
 Smalltalk class >> forgetClass: aClass [
 	"Every record of aClass and its class side: definition, sources, categories (Smalltalk removeClass:)."
-	self forgetDefinitionOf: aClass.
-	sources isNil ifFalse: [sources removeKey: aClass ifAbsent: [nil]. sources removeKey: aClass class ifAbsent: [nil]].
-	organizations isNil ifFalse: [organizations removeKey: aClass ifAbsent: [nil]. organizations removeKey: aClass class ifAbsent: [nil]].
-	packages isNil ifFalse: [packages removeKey: aClass ifAbsent: [nil]. packages removeKey: aClass class ifAbsent: [nil]].
-	undeclared isNil ifFalse: [undeclared removeKey: aClass ifAbsent: [nil]].
+	self registry: [
+		self forgetDefinitionOf: aClass.
+		sources isNil ifFalse: [sources removeKey: aClass ifAbsent: [nil]. sources removeKey: aClass class ifAbsent: [nil]].
+		organizations isNil ifFalse: [organizations removeKey: aClass ifAbsent: [nil]. organizations removeKey: aClass class ifAbsent: [nil]].
+		packages isNil ifFalse: [packages removeKey: aClass ifAbsent: [nil]. packages removeKey: aClass class ifAbsent: [nil]].
+		undeclared isNil ifFalse: [undeclared removeKey: aClass ifAbsent: [nil]]].
 	classNames := nil
 ]
 
 { #category : #sources }
 Smalltalk class >> forgetDefinitionOf: aClass [
-	definitions isNil ifTrue: [^ nil].
-	^ definitions removeKey: aClass ifAbsent: [nil]
+	^ self registry: [definitions isNil ifFalse: [definitions removeKey: aClass ifAbsent: [nil]]]
 ]
 
 { #category : #sources }
 Smalltalk class >> forgetSourceOf: aCompiledMethod [
-	sources isNil ifTrue: [^ nil].
-	^ (sources at: aCompiledMethod methodClass ifAbsent: [^ nil]) removeKey: aCompiledMethod ifAbsent: [nil]
+	^ self registry: [
+		sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aCompiledMethod ifAbsent: [nil]]]]
 ]
 
 { #category : #sources }
@@ -527,29 +532,32 @@ Smalltalk class >> instanceVariableNamesOf: aClass [
 { #category : #sources }
 Smalltalk class >> noteCategory: aSymbol of: aSelector in: aBehavior [
 	"A method's category, kept per class and side by selector (module 8e)."
-	organizations isNil ifTrue: [organizations := IdentityDictionary new].
-	(organizations at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aSymbol
+	self registry: [
+		organizations isNil ifTrue: [organizations := IdentityDictionary new].
+		(organizations at: aBehavior ifAbsentPut: [IdentityDictionary new]) at: aSelector put: aSymbol]
 ]
 
 { #category : #sources }
 Smalltalk class >> noteDefinition: aClassDefinition of: aClass [
-	definitions isNil ifTrue: [definitions := IdentityDictionary new].
-	definitions at: aClass put: aClassDefinition
+	self registry: [
+		definitions isNil ifTrue: [definitions := IdentityDictionary new].
+		definitions at: aClass put: aClassDefinition]
 ]
 
 { #category : #sources }
 Smalltalk class >> noteSource: aString of: aCompiledMethod [
 	"Kept per class: one dictionary of every source would pass the 3071 entries an object of one block can hash (a kernel of 1536 methods filled it, module 8d)."
-	sources isNil ifTrue: [sources := IdentityDictionary new].
-	(sources at: aCompiledMethod methodClass ifAbsentPut: [IdentityDictionary new]) at: aCompiledMethod put: aString
+	self registry: [
+		sources isNil ifTrue: [sources := IdentityDictionary new].
+		(sources at: aCompiledMethod methodClass ifAbsentPut: [IdentityDictionary new]) at: aCompiledMethod put: aString]
 ]
 
 { #category : #sources }
 Smalltalk class >> recordDefinitions: anArray [
 	"The image build hands every class definition over, superclasses first (module 8e): the name, the superclass, the instance variables, the class-side instance variables, the tag (empty for none: tags as subdirectories, in the category's place), the format kind, the package (module 9b) and the comment, a line each (the comment last; names separated by blanks)."
-	| lf |
+	| lf table |
 	lf := String with: Character lf.
-	definitions := IdentityDictionary new.
+	table := IdentityDictionary new.
 	anArray do: [:s | | fields start cls |
 		fields := OrderedCollection new.
 		start := 1.
@@ -559,13 +567,14 @@ Smalltalk class >> recordDefinitions: anArray [
 			start := j + 1].
 		fields add: (s copyFrom: start to: s byteSize).
 		cls := self at: (fields at: 1) asSymbol.
-		definitions at: cls put: (ClassDefinition
+		table at: cls put: (ClassDefinition
 			instVarNames: ((fields at: 3) substrings collect: [:n | n asSymbol])
 			classInstVarNames: ((fields at: 4) substrings collect: [:n | n asSymbol])
 			package: ((fields at: 7) isEmpty ifTrue: [nil] ifFalse: [fields at: 7])
 			tag: ((fields at: 5) isEmpty ifTrue: [nil] ifFalse: [(fields at: 5) asSymbol])
 			kind: (fields at: 6) asSymbol
-			comment: (fields at: 8))]
+			comment: (fields at: 8))].
+	self registry: [definitions := table]
 ]
 
 { #category : #sources }
@@ -592,17 +601,27 @@ Smalltalk class >> recordSources: anArray [
 ]
 
 { #category : #sources }
+Smalltalk class >> registry: aBlock [
+	"aBlock with the registries (sources, categories, packages, definitions, undeclared Bindings, the pragma index) to itself (the review fixes, item 10: protocol requests run in Processes of their own, in parallel, and wrote them unsynchronized). A Mutex, so the same Process may enter again; made at the image build's first note (one Process), kept in the image."
+	registryLock isNil ifTrue: [registryLock := Mutex new].
+	^ registryLock critical: aBlock
+]
+
+{ #category : #sources }
 Smalltalk class >> replaceSources: anAssociationList of: aBehavior [
 	"Every source of aBehavior's methods anew, selector -> source (after a redefinition forwarded its methods to their new selves, whose identity hashes the old table does not know)."
-	sources isNil ifTrue: [sources := IdentityDictionary new].
-	sources removeKey: aBehavior ifAbsent: [nil].
-	anAssociationList do: [:a | self noteSource: a value of: (aBehavior compiledMethodAt: a key)]
+	| d |
+	d := IdentityDictionary new.
+	anAssociationList do: [:a | d at: (aBehavior compiledMethodAt: a key) put: a value].
+	self registry: [
+		sources isNil ifTrue: [sources := IdentityDictionary new].
+		sources at: aBehavior put: d]
 ]
 
 { #category : #sources }
 Smalltalk class >> sourceOf: aCompiledMethod [
-	sources isNil ifTrue: [^ nil].
-	^ (sources at: aCompiledMethod methodClass ifAbsent: [^ nil]) at: aCompiledMethod ifAbsent: [nil]
+	^ self registry: [
+		sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d at: aCompiledMethod ifAbsent: [nil]]]]
 ]
 
 { #category : #system }

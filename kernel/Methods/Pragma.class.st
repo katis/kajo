@@ -61,7 +61,7 @@ Pragma >> setSelector: aSymbol arguments: anArray [
 
 { #category : #accessing }
 Pragma class >> allNamed: aSymbol [
-	^ (self index at: aSymbol ifAbsent: [#()]) asArray
+	^ Smalltalk registry: [(self index at: aSymbol ifAbsent: [#()]) asArray]
 ]
 
 { #category : #accessing }
@@ -81,27 +81,37 @@ Pragma class >> consumesPragmas [
 
 { #category : #accessing }
 Pragma class >> index [
-	PragmaIndex table isNil ifTrue: [self rebuildIndex].
-	^ PragmaIndex table
+	"The index, built when there is none (under Smalltalk registry:, which its readers and writers hold)."
+	^ PragmaIndex table ifNil: [self rebuildIndex]
+]
+
+{ #category : #accessing }
+Pragma class >> note: aMethod in: anIndex [
+	aMethod pragmas do: [:p | (anIndex at: p selector ifAbsentPut: [OrderedCollection new]) add: p]
 ]
 
 { #category : #accessing }
 Pragma class >> noteInstalled: aMethod [
 	aMethod isNil ifTrue: [^ self].
-	aMethod pragmas do: [:p | (self index at: p selector ifAbsentPut: [OrderedCollection new]) add: p]
+	Smalltalk registry: [self note: aMethod in: self index]
 ]
 
 { #category : #accessing }
 Pragma class >> noteRemoved: aMethod [
 	aMethod isNil ifTrue: [^ self].
-	aMethod pragmas do: [:p |
-		(self index at: p selector ifAbsent: [nil]) ifNotNil: [:list | list remove: p ifAbsent: [nil]]]
+	Smalltalk registry: [
+		aMethod pragmas do: [:p |
+			(self index at: p selector ifAbsent: [nil]) ifNotNil: [:list | list remove: p ifAbsent: [nil]]]]
 ]
 
 { #category : #accessing }
 Pragma class >> rebuildIndex [
-	PragmaIndex table: IdentityDictionary new.
-	Smalltalk allBehaviors do: [:c | c methodsDo: [:m | self noteInstalled: m]]
+	"A new index filled before it is published (the review fixes, item 10: it was published empty and then filled, the shape 211a6ee fixed for class names); built and published under Smalltalk registry:, so no installation in between is lost. Answers it."
+	^ Smalltalk registry: [ | d |
+		d := IdentityDictionary new.
+		Smalltalk allBehaviors do: [:c | c methodsDo: [:m | self note: m in: d]].
+		PragmaIndex table: d.
+		d]
 ]
 
 { #category : #'instance creation' }

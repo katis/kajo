@@ -22,7 +22,7 @@ Ephemeron >> key [
 
 { #category : #accessing }
 Ephemeron >> mourn [
-	self class registry remove: self ifAbsent: [nil].
+	Smalltalk registry: [self class registry remove: self ifAbsent: [nil]].
 	finalizer ifNotNil: [:b | b cull: value]
 ]
 
@@ -73,7 +73,7 @@ Ephemeron class >> key: aKey value: aValue [
 Ephemeron class >> key: aKey value: aValue finalizer: aBlock [
 	| e |
 	e := self basicNew setKey: aKey value: aValue finalizer: aBlock.
-	self registry add: e.
+	Smalltalk registry: [self registry add: e].
 	self ensureFinalizationProcess.
 	^ e
 ]
