@@ -98,21 +98,37 @@ func youngNewRecordLocked(_ vm: VMPointer, _ ri: Int) {
 /// body with no hazard slot, enter a blocking region, wait while the
 /// test's gate is closed, read through the address, leave the region. The
 /// epoch rule is what keeps the body (the region keeps the epoch word).
+///
+/// The review fixes (item 11, interpreter.F3): it was dispatched in every
+/// build and read any slot, weak ones included, without the keep-alive
+/// barrier. It now fails unless the VM's test switch `slowPeek` is on (only
+/// the young-collection tests set it; there is no VM without a config, and
+/// a standalone interpreter has none, so it fails there too): a runtime
+/// switch like the other test-only paths, because the product and the
+/// tests run the same build. Its read keeps a weak referent alive as every
+/// slot-reading primitive's does.
 func primSlowPeek(_ m: Machine, _ c: PrimitiveCall) -> Oop {
+    let w = unsafe workerOf(m.state)
+    guard let vm = unsafe w.pointee.vm, unsafe vm.pointee.config.testSwitches.slowPeek else { return .none }
     guard c.argc == 1, c.receiver.isObject, c.arg0.isSmallInteger, !m.om.isBytes(c.receiver) else { return .none }
     let i = Int(c.arg0.smallIntegerValue) - 1
     guard i >= 0, UInt64(i) < m.om.count(of: c.receiver) else { return .none }
-    let w = unsafe workerOf(m.state)
     let om = m.om
     let addr = unsafe (om.heapBase + Int(truncatingIfNeeded: om.stateWord(c.receiver.raw) &+ 8) + i &* 8)
         .assumingMemoryBound(to: Atomic<UInt64>.self)
-    guard let vm = unsafe w.pointee.vm, let y = unsafe vm.pointee.young else {
-        return Oop(raw: unsafe addr.pointee.load(ordering: .relaxed))
+    guard let y = unsafe vm.pointee.young else {
+        let v = Oop(raw: unsafe addr.pointee.load(ordering: .relaxed))
+        unsafe keepAliveRead(m.state, c.receiver, i, v)
+        return v
     }
     unsafe blockingBegin(vm, w)
     unsafe y.pointee.peekHeld.pointee.store(1, ordering: .releasing)
     while unsafe y.pointee.peekGate.pointee.load(ordering: .acquiring) != 0 { usleep(100) }
     let v = unsafe addr.pointee.load(ordering: .relaxed)
     unsafe blockingEnd(vm, w)
+    // No keep-alive here: the read is through an address held across a
+    // blocking region on purpose (the epoch rule's test reads a reused
+    // eden in its broken variant), which a barrier on the value could not
+    // make sound; the switch keeps it out of every program.
     return Oop(raw: v)
 }

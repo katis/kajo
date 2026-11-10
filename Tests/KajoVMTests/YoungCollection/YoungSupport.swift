@@ -328,6 +328,7 @@ func youngRuntime(_ mode: YoungMode, src: String = youngSrc, background: Int = 3
         c.marking.markerThread = false
         c.marking.floor = 2  // no cycle unless the test starts one
         c.marking.safetyFactor = 0
+        c.testSwitches.slowPeek = true  // primitive 39 (the review fixes, item 11)
         change(&c)
     })
 }

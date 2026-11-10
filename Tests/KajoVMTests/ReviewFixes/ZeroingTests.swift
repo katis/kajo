@@ -308,3 +308,41 @@ private func huntWhileFilling(seeBuilding: Bool) throws -> Int64 {
 @Test func withoutTheMarkAStringIsSeenHalfFilled() throws {
     #expect(try huntWhileFilling(seeBuilding: true) >= 1)
 }
+
+// MARK: - item 11: test primitive 39
+
+private let peekSource = """
+method Object slowPeek: temps=0 prim=39
+  push_int -1
+  return_top
+end
+; (Array with: 7) slowPeek: 1
+method UndefinedObject peek temps=1
+  push_lit @Array
+  push_int 1
+  send new: 1
+  store_temp 0
+  push_temp 0
+  push_int 1
+  push_int 7
+  send at:put: 2
+  pop
+  push_temp 0
+  push_int 1
+  send slowPeek: 1
+  return_top
+end
+"""
+
+/// The review fixes, item 11 (interpreter.F3): primitive 39 fails unless
+/// a test turns it on (the method's fallback answers -1); on d78afcc it
+/// answered the slot (7) in every VM.
+@Test(arguments: [false, true])
+func testPrimitive39RunsOnlyWhenATestAsks(_ on: Bool) throws {
+    let rt = try Runtime(peekSource, background: 1, start: true, configure: { $0.testSwitches.slowPeek = on })
+    let p = rt.spawn("peek")
+    #expect(rt.waitAllTerminated(60))
+    #expect(rt.result(p) == (on ? 7 : -1))
+    rt.vm.release(p)
+    rt.stop()
+}

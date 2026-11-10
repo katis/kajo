@@ -125,6 +125,10 @@ struct VMTestSwitches: Sendable {
     /// objects a polled primitive is still building.
     var buildingPauseUs = 0
     var walksSeeBuilding = false
+    /// The review fixes (item 11, interpreter.F3): test primitive 39
+    /// (`slowPeek:`) runs only when a test sets this; in every other VM it
+    /// fails, so no program reads a slot through it.
+    var slowPeek = false
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no
