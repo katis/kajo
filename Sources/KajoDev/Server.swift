@@ -264,7 +264,8 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
                 close(c)
                 return
             }
-            if refusing() {
+            var pauseEnded: (@Sendable (Bool, Int) -> Void)?
+            if refusing(&pauseEnded) {
                 lock.unlock()
                 stats.add(\.refusedConnections)
                 close(c)
@@ -279,6 +280,7 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
             let evict = unpaired.count >= currentLimits.unpairedConnections ? unpaired.first : nil
             connections[id] = conn
             lock.unlock()
+            pauseEnded?(false, 0)
             if let evict {
                 stats.add(\.unpairedClosed)
                 evict.close()
@@ -420,15 +422,19 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         return true
     }
 
-    /// Under lock: whether the listener refuses now (and when a pause
-    /// ends, that it no longer does).
-    private func refusing() -> Bool {
+    /// Under lock: whether the listener refuses now. The caller that finds
+    /// a pause over is handed the report of its end in `ended` and makes
+    /// it after it unlocks, on its own thread, as `noteFailure` reports the
+    /// pause's start. (It went to a global queue until the review fixes'
+    /// gate run: under ThreadSanitizer and twelve busy loops the queue's
+    /// thread did not run it in 120 s. The callback must not block: the
+    /// accept loop is one of the callers.)
+    private func refusing(_ ended: inout (@Sendable (Bool, Int) -> Void)?) -> Bool {
         guard refusingUntil != 0 else { return false }
         if currentClock() < refusingUntil { return true }
         refusingUntil = 0
         failureTimes.removeAll()
-        let r = refusingAction
-        DispatchQueue.global().async { r?(false, 0) }
+        ended = refusingAction
         return false
     }
 
@@ -454,8 +460,11 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
     /// Whether the listener refuses connections now.
     public var isRefusing: Bool {
         lock.lock()
-        defer { lock.unlock() }
-        return refusing()
+        var pauseEnded: (@Sendable (Bool, Int) -> Void)?
+        let r = refusing(&pauseEnded)
+        lock.unlock()
+        pauseEnded?(false, 0)
+        return r
     }
 
     /// Module 9d: a new token (the phone's button). Every connection ends:
