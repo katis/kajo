@@ -14,6 +14,10 @@ import Testing
 /// A raw TCP connection to loopback `port`.
 private func rawConnect(_ port: Int) -> Int32 {
     let fd = socket(AF_INET, SOCK_STREAM, 0)
+    // A write to a connection the server closed must fail, not raise
+    // SIGPIPE in the test process (the 1 MiB below is cut off on purpose).
+    var one: Int32 = 1
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
     var a = sockaddr_in()
     a.sin_family = sa_family_t(AF_INET)
     a.sin_port = in_port_t(UInt16(port).bigEndian)
@@ -89,6 +93,8 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         defer { Connection.sendWindowUs.store(0, ordering: .relaxed) }
         for round in 0..<20 {
             #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
+            var one: Int32 = 1
+            setsockopt(pair[0], SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
             let stats = ServerStats()
             let conn = Connection(id: round, fd: pair[0], stats: stats)
             let group = DispatchGroup()
