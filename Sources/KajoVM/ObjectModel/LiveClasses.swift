@@ -875,8 +875,13 @@ private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         // (written beside it and renamed over it).
         guard let named = sourcesPath(m, rel, creatingDirectory: true) else { return .none }
         let path = named.path
-        let tmp = path + ".kajo-tmp"
-        guard writeFile(tmp, bytes), unsafe rename(tmp, path) == 0 else {
+        // The review fixes (item 17, primitives.F6): a temporary of its own
+        // per write (148 runs outside a stop, so two Processes may write one
+        // file at once), created exclusively and never a name another write
+        // made; the one rename replaces the file whole, so the file holds one
+        // writer's whole text, never a mix.
+        guard let tmp = writeTemporary(beside: path, bytes) else { return .none }
+        guard unsafe rename(tmp, path) == 0 else {
             _ = unsafe unlink(tmp)
             return .none
         }
@@ -890,22 +895,37 @@ private func filePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     return m.newString(bytes)
 }
 
-/// Write `bytes` to a new file at `path`: a link or file already there is
-/// removed first (the link itself, never what it names), and the open
-/// creates exclusively without following a link, so a link planted in its
-/// place between the two refuses the write instead of leading out.
-private func writeFile(_ path: String, _ bytes: [UInt8]) -> Bool {
-    _ = unsafe unlink(path)
-    let fd = unsafe open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
-    guard fd >= 0 else { return false }
-    defer { close(fd) }
-    var off = 0
-    while off < bytes.count {
-        let k = bytes.withUnsafeBytes { unsafe write(fd, $0.baseAddress! + off, bytes.count - off) }
-        if k <= 0 { return false }
-        off += k
+/// Write `bytes` to a new temporary file beside `path` and answer its
+/// name: `<path>.kajo-tmp-<16 hex digits>`, random per write, created
+/// exclusively without following a link (a name that exists, a link
+/// included, is never opened, written or removed: another name is tried,
+/// eight at most). nil when none could be written (it is removed then).
+func writeTemporary(beside path: String, _ bytes: [UInt8]) -> String? {
+    for _ in 0..<8 {
+        var r: UInt64 = 0
+        unsafe arc4random_buf(&r, 8)
+        let hex = String(r, radix: 16)
+        let tmp = path + ".kajo-tmp-" + String(repeating: "0", count: 16 - hex.count) + hex
+        let fd = unsafe open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o644)
+        if fd < 0 {
+            if errno == EEXIST { continue }
+            return nil
+        }
+        var off = 0, ok = true
+        while off < bytes.count {
+            let k = bytes.withUnsafeBytes { unsafe write(fd, $0.baseAddress! + off, bytes.count - off) }
+            if k < 0 && errno == EINTR { continue }
+            if k <= 0 { ok = false; break }
+            off += k
+        }
+        close(fd)
+        if !ok {
+            _ = unsafe unlink(tmp)
+            return nil
+        }
+        return tmp
     }
-    return true
+    return nil
 }
 
 private func readFile(_ path: String) -> [UInt8]? {

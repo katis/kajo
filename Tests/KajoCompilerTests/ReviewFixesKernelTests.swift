@@ -145,3 +145,62 @@ import KajoApp
     _ = host.viewCall(ViewCall(op: "release", handle: Int(h), arguments: []))
 }
 #endif
+
+/// The review fixes, item 17 (primitives.F6): two Processes on two workers
+/// write one file 150 times each, one 300 000 bytes, the other 200 000,
+/// while the test reads it: every read and the end hold one writer's whole
+/// text. On d78afcc both wrote through one temporary name (the second
+/// write's unlink removed the first's, a rename moved a half-written file
+/// into place).
+@Test func twoWritersOfOneFileNeverTearIt() throws {
+    let dir = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-148-\(getpid())")
+    try? FileManager.default.removeItem(at: dir)
+    try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: dir) }
+    let files = miniKernel + [tonel("W", "Object", """
+    W class >> write: p contents: s [
+        <primitive: 148>
+        ^ nil
+    ]
+    W class >> loop: n [
+        | s ok |
+        s := String new: n.
+        ok := 0.
+        1 to: 150 do: [:i | (self write: 'same.txt' contents: s) == true ifTrue: [ok := ok + 1]].
+        ^ ok
+    ]
+    W class >> a [ ^ self loop: 300000 ]
+    W class >> b [ ^ self loop: 200000 ]
+    """)]
+    var o = KernelBuild.Options()
+    o.initialize = false
+    o.heapMiB = 64
+    let image = try Image.load(image: try KernelBuild.build(files, options: o).image)
+    defer { image.destroy() }
+    var vc = VMConfig()
+    vc.backgroundWorkers = 2
+    vc.sourcesDirectory = dir.path
+    let vm = VM(image: image, config: vc)
+    vm.start()
+    defer { vm.shutdown(); vm.destroy() }
+    let cls = image.om.classOop(try #require(image.classIndex(named: "W")))
+    let pa = try #require(vm.spawn(receiver: cls, selector: "a")), pb = try #require(vm.spawn(receiver: cls, selector: "b"))
+    var torn = 0, reads = 0
+    let path = dir.appendingPathComponent("same.txt").path
+    while vm.liveProcessCount > 0 {
+        if let d = FileManager.default.contents(atPath: path) {
+            reads += 1
+            if d.count != 300_000 && d.count != 200_000 { torn += 1 }
+        }
+    }
+    vm.waitUntilAllTerminated()
+    let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? -1
+    #expect(size == 300_000 || size == 200_000)
+    #expect(torn == 0, "\(torn) of \(reads) reads held neither text")
+    // Each write that answered true put its whole text in place.
+    #expect(vm.result(of: pa) == Oop(smallInteger: 150) && vm.result(of: pb) == Oop(smallInteger: 150))
+    // No temporary is left behind.
+    #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["same.txt"])
+    vm.release(pa)
+    vm.release(pb)
+}
