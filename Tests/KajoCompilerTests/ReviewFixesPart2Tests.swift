@@ -85,3 +85,19 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
     #expect(IdentifierRule.classify(0xE9) == 1 && IdentifierRule.classify(0x663) == 2 && IdentifierRule.classify(0xD7) == 0)
     #expect(IdentifierRule.classify(0x5F) == 1 && IdentifierRule.classify(0x30) == 2 && IdentifierRule.classify(0xD800) == 0)
 }
+
+/// Item 3 (kernel.F8): the bootstrap's Tonel reader finds the body's `[`
+/// outside a comment in the pattern, as the kernel's does
+/// (TonelTest>>testACommentInAPatternKeepsItsBrackets): the method reads
+/// back as it was written. On 18e274f the comment's `[` was taken for the
+/// body and the file was refused.
+@Test func aCommentInAPatternKeepsItsBrackets() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("KajoVMTests/Fixtures/fuzz/syntax/pattern-comment.class.st")
+    let text = try [UInt8](Data(contentsOf: url))
+    let c = try readTonel(text, file: "pattern-comment.class.st")
+    #expect(c.methods.count == 2)
+    #expect(String(decoding: c.methods[0].source, as: UTF8.self) == "at: i \"index in [1, size]\" put: v\n\t^ v\n")
+    #expect(String(decoding: c.methods[1].source, as: UTF8.self) == "foo\n\t^ 1\n")
+    #expect(FuzzSyntax.run(text))
+}

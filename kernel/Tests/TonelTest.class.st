@@ -92,6 +92,35 @@ TonelTest >> testAClassDefinedAndRedefinedFromTonel [
 ]
 
 { #category : #tests }
+TonelTest >> testACommentInAPatternKeepsItsBrackets [
+	"The review fixes, part 2, item 3 (kernel.F8): a comment in a method's pattern may hold [ and ]; the reader looks for the body's [ outside comments, so the file the writer wrote reads back and is written again byte for byte. A comment before the pattern is skipped as blank space, as it was."
+	| text c doc |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	text := '"A pattern with a comment (TonelTest)."
+Class {
+	#name : #LiveTonelSample,
+	#superclass : #Object
+}
+
+{ #category : #accessing }
+LiveTonelSample >> at: i "index in [1, size]" put: v [
+	^ v
+]
+'.
+	c := Smalltalk readTonel: text.
+	self assert: (c new at: 1 put: 7) = 7.
+	self assert: c tonelSource = text.
+	doc := TonelReader read: (text , '
+{ #category : #accessing }
+LiveTonelSample >> "helper [x]" foo [
+	^ 1
+]
+').
+	self assert: doc methods size = 2.
+	self assert: ((doc methods at: 2) at: 3) = ('foo' , (String with: Character lf with: Character tab) , '^ 1' , (String with: Character lf))
+]
+
+{ #category : #tests }
 TonelTest >> testATagIsTheFilesDirectory [
 	"Tags as subdirectories: a class's tag comes from the path its file is read from, relative to its package's directory, never from a key; an old Kajo file's #category and a Pharo file's #package and #tag are read and ignored, and the next write leaves them out."
 	| c old pharo |

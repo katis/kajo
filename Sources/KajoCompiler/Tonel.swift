@@ -307,8 +307,20 @@ struct TonelReader {
             _ = try space()
             let patternStart = i
             let patternLine = line
-            // the pattern runs to the first [ outside a string
+            // the pattern runs to the first [ outside a comment (the review
+            // fixes, part 2, item 3: a comment in a pattern, `at: i "in
+            // [1, size]" put: v`, keeps its brackets; a pattern holds no
+            // string)
             while i < b.count && b[i] != 91 {
+                if b[i] == 34 {
+                    i += 1
+                    while i < b.count && b[i] != 34 {
+                        if b[i] == 10 { line += 1 }
+                        i += 1
+                    }
+                    if i < b.count { i += 1 }
+                    continue
+                }
                 if b[i] == 10 { line += 1 }
                 i += 1
             }

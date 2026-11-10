@@ -187,9 +187,18 @@ TonelReader >> readMethodInto: aDocument [
 	position := position + 2.
 	self space.
 	patternStart := position.
+	"The pattern runs to the first [ outside a comment (the review fixes, part 2, item 3: a comment in a pattern keeps its brackets; a pattern holds no string)."
 	[position < limit and: [self byte ~= 91]] whileTrue: [
-		self byte = 10 ifTrue: [line := line + 1].
-		position := position + 1].
+		self byte = 34
+			ifTrue: [
+				position := position + 1.
+				[position < limit and: [self byte ~= 34]] whileTrue: [
+					self byte = 10 ifTrue: [line := line + 1].
+					position := position + 1].
+				position < limit ifTrue: [position := position + 1]]
+			ifFalse: [
+				self byte = 10 ifTrue: [line := line + 1].
+				position := position + 1]].
 	position >= limit ifTrue: [^ self fail: 'a method without a body'].
 	open := position.
 	close := self matchingBracket: open.
