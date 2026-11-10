@@ -106,8 +106,9 @@ func makeMethodObjects<H: MethodHeap>(_ top: MethodParts, blocks: [MethodParts],
             let args = try heap.pointers(WellKnown.array, values.count)
             heap.keep(args)
             for (i, v) in values.enumerated() { om.store(args, i, v) }
-            om.setReadOnly(args, true)
+            readOnlyPinned(args)
             let po = try heap.pointers(WellKnown.pragma, PragmaLayout.size)
+            if heap.pinsForGood { om.pinForGood(po) }
             heap.keep(po)
             om.store(po, PragmaLayout.selector, sel)
             om.store(po, PragmaLayout.arguments, args)

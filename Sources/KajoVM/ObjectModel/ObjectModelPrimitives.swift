@@ -98,8 +98,17 @@ func objectModelPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         return m.boolean(found != .none)
     case 91, 92: return primInstVarAt(m, c, put: n == 92)
     case 93:
+        // The review fixes (item 1, primitives.F1 = interpreter.F1): the bit
+        // is never cleared on an object pinned for good. Every object the
+        // VM makes read-only is pinned for good (a method's bytecodes,
+        // literal frame and literals, its pragmas and their arguments,
+        // Symbols, class pools), and the interpreter trusts the verified
+        // bytes and literals it reads from them; sealing the Method does
+        // not protect them, since `slotAt:` (117) reaches them. A frame pin
+        // is not that and does not refuse.
         guard c.argc == 1, c.receiver.isObject, c.arg0 == m.trueObject || c.arg0 == m.falseObject,
-              !m.om.isSealed(m.classIndex(of: c.receiver)) else { return .none }
+              !m.om.isSealed(m.classIndex(of: c.receiver)),
+              c.arg0 == m.trueObject || !m.om.header(c.receiver).isPinnedForGood else { return .none }
         let was = m.om.isReadOnly(c.receiver)
         m.om.setReadOnly(c.receiver, c.arg0 == m.trueObject)
         return m.boolean(was)

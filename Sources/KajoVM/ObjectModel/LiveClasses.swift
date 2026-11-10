@@ -278,6 +278,7 @@ private func defineClass(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<
             om.store(pool, i, b)
         }
         om.setReadOnly(pool, true)
+        om.pinForGood(pool)  // the review fixes, item 1: primitive 93 never clears it
     }
     guard let metaObject = alloc(WellKnown.metaclass, MetaclassLayout.size) else { return .failure(Refusal("the heap is full")) }
     let index = reuse ?? om.registerClass(.none)
@@ -572,6 +573,7 @@ private func redefine(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<Oop
         keep.append(a)
         for (i, b) in p.bindings.enumerated() { om.store(a, i, b) }
         om.setReadOnly(a, true)
+        om.pinForGood(a)  // the review fixes, item 1: primitive 93 never clears it
         poolObjects.append(a)
     }
     var plan: ReshapePlan

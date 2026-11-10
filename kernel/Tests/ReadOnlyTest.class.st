@@ -10,6 +10,21 @@ ReadOnlyTest >> literalArray [
 ]
 
 { #category : #accessing }
+ReadOnlyTest >> testAMethodsPartsStayReadOnly [
+	"The review fixes, item 1: primitive 93 never clears the bit of what the VM pinned for good (a method's bytecodes, literal frame and literals, Symbols): slotAt: reaches them, and the interpreter trusts what it verified."
+	| m |
+	m := Object >> #printString.
+	self should: [(m slotAt: 1) beWritable] raise: Error.
+	self assert: (m slotAt: 1) isReadOnly.
+	self should: [(m slotAt: 2) beWritable] raise: Error.
+	self assert: (m slotAt: 2) isReadOnly.
+	self should: [m bytecodes beWritable] raise: Error.
+	self should: [#printString beWritable] raise: Error.
+	self assert: #printString isReadOnly.
+	self assert: 42 printString = '42'
+]
+
+{ #category : #accessing }
 ReadOnlyTest >> testInstanceVariableStoreIntoReadOnly [
 	| assoc r |
 	assoc := 1 -> 2.

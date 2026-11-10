@@ -733,7 +733,9 @@ extension Image {
         }
         let mc = om.classOop(metaclassIndex(of: classesByName[d.name]!))
         guard om.load(mc, MetaclassLayout.classPool) == nilObject else { throw fail("\(d.name)'s class pool is defined twice") }
-        let pool = try allocate(WellKnown.array, slots: d.classVariables.count)
+        // The review fixes (item 1): pinned for good as every object the VM
+        // makes read-only is, so primitive 93 never makes it writable.
+        let pool = try allocatePinned(WellKnown.array, slots: d.classVariables.count)
         om.store(mc, MetaclassLayout.classPool, pool)
         for (i, name) in d.classVariables.enumerated() {
             let key = try intern(name)

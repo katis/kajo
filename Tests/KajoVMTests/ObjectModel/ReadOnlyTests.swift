@@ -209,3 +209,47 @@ end
         try h.om.reshape(classIndex: cell, namedSlots: 2, layout: [0, 1, nil], fill: h.image.nilObject)
     }
 }
+
+/// The review fixes, item 1 (primitives.F1 = interpreter.F1): primitive 93
+/// never clears the read-only bit of an object pinned for good: a method's
+/// bytecodes and literal frame (which `slotAt:` reaches), its literals and
+/// Symbols. Setting the bit still works, an ordinary read-only Array still
+/// becomes writable, and the method still runs. On d78afcc 93 cleared both
+/// and answered true.
+@Test func primitive93NeverUnprotectsAMethodsParts() throws {
+    let h = try omHarness(readOnlySrc + runOf("""
+      push_lit @Cell
+      send basicNew 0
+      store_temp 2
+      push_temp 2
+      push_int 7
+      send x: 1
+      pop
+      push_temp 2
+      send x 0
+      return_top
+    """, temps: 1))
+    defer { h.destroy() }
+    let m = h.interpreter.machine
+    let cell = try #require(h.image.classIndex(named: "Cell"))
+    let meth = try #require(h.image.lookup(cell, h.image.symbol("x:")!))
+    let bytecodes = h.om.load(meth, MethodLayout.bytecodes), literals = h.om.load(meth, MethodLayout.literals)
+    let run = try #require(h.image.lookup(WellKnown.undefinedObject, h.image.symbol("run:of:")!))
+    let symbol = try #require(h.image.symbol("x:"))
+    func set(_ o: Oop, _ on: Bool) -> Oop {
+        objectModelPrimitive(93, m, PrimitiveCall(receiver: o, argc: 1, arg0: on ? h.image.trueObject : h.image.falseObject,
+                                                   arg1: .none))
+    }
+    for o in [bytecodes, literals, h.om.load(run, MethodLayout.literals), symbol] {
+        #expect(h.om.header(o).isPinnedForGood)
+        #expect(set(o, false) == .none, "93 cleared the bit of \(o)")
+        #expect(h.om.isReadOnly(o))
+        #expect(set(o, true) == h.image.trueObject)  // setting it is allowed (it answers the old state)
+    }
+    #expect(try h.value() == 7)
+    // an ordinary read-only Array still becomes writable
+    let a = m.allocate(WellKnown.array, slots: 1)
+    #expect(set(a, true) == h.image.falseObject)
+    #expect(set(a, false) == h.image.trueObject)
+    #expect(!h.om.isReadOnly(a))
+}
