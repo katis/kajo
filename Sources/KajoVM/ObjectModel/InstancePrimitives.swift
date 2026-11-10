@@ -82,7 +82,7 @@ func instancePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 168:
         guard c.argc == 1, let classes = instanceClassFlags(m, c.arg0) else { return .none }
         var n = -1
-        inInstanceStop(m, keeping: [c.arg0]) { om, _ in n = om.walkInstances(of: classes) { _ in true } }
+        inInstanceStop(m, keeping: [c.arg0]) { om, _, building in n = om.walkInstances(of: classes, building: building) { _ in true } }
         return n < 0 ? .none : Oop(smallInteger: Int64(n))
     case 169:
         guard c.argc == 2, c.arg1.isSmallInteger else { return .none }
@@ -93,9 +93,9 @@ func instancePrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         guard c.argc == 1 else { return .none }
         var n = -1
         let target = c.arg0
-        inInstanceStop(m, keeping: [target]) { om, _ in
+        inInstanceStop(m, keeping: [target]) { om, _, building in
             var words: UInt64 = 0
-            n = om.walkPointers(to: target.raw, words: &words) { _ in true }
+            n = om.walkPointers(to: target.raw, building: building, words: &words) { _ in true }
             noteStopWords(m, words)
         }
         return n < 0 ? .none : Oop(smallInteger: Int64(n))
@@ -129,20 +129,24 @@ private func instanceClassFlags(_ m: Machine, _ o: Oop) -> [Bool]? {
 }
 
 /// Run `work` in a stop of kind `instances` after the promote-all hook,
-/// with the stop's roots; `work` does not run when the hook leaves anything
+/// with the stop's roots and the objects polled primitives are still
+/// building (pending roots marked so, which no walk answers: the review
+/// fixes, item 2); `work` does not run when the hook leaves anything
 /// young. Outside a VM (a lone interpreter) with this interpreter's roots.
-private func inInstanceStop(_ m: Machine, keeping: [Oop], _ work: (ObjectMemory, _ roots: () -> [Oop]) -> Void) {
+private func inInstanceStop(_ m: Machine, keeping: [Oop],
+                            _ work: (ObjectMemory, _ roots: () -> [Oop], _ building: Set<UInt64>) -> Void) {
     let om = m.om
     if let vm = unsafe workerOf(m.state).pointee.vm {
         unsafe stopWorld(vm, workerOf(m.state), retry: true, keeping: keeping) { stop in
             unsafe markStop(vm, .instances)
             guard om.prepareOldSpaceOperation(stop.roots()).isEmpty else { return }
-            work(om) { stop.roots() }
+            let building = unsafe vm.pointee.config.testSwitches.walksSeeBuilding ? [] : pendingBuildingObjects(vm)
+            work(om, { stop.roots() }, building)
         }
         unsafe workerOf(m.state).pointee.seenEpoch = vm.pointee.safepoint.pointee.epoch
     } else {
         let roots = m.rootsForPause() + keeping
-        if om.prepareOldSpaceOperation(roots).isEmpty { work(om) { roots } }
+        if om.prepareOldSpaceOperation(roots).isEmpty { work(om, { roots }, []) }
     }
     m.flushCache()
 }
@@ -156,7 +160,7 @@ private func noteStopWords(_ m: Machine, _ words: UInt64) {
 private func pointersTo(_ m: Machine, _ target: Oop, limit: Int) -> Oop {
     var answer = Oop.none
     let ctx = unsafe m.state.pointee.context
-    inInstanceStop(m, keeping: [target]) { om, roots in
+    inInstanceStop(m, keeping: [target]) { om, roots, building in
         var words: UInt64 = 0
         defer { noteStopWords(m, words) }
         // One walk into a host buffer, then the Array filled from it: the
@@ -164,7 +168,9 @@ private func pointersTo(_ m: Machine, _ target: Oop, limit: Int) -> Oop {
         // the stop. If the allocation collected, what it freed may be in
         // the buffer, and the Array is filled by a second walk instead.
         var found: [UInt64] = []
-        if limit > 0 { om.walkPointers(to: target.raw, words: &words) { o in found.append(o.raw); return found.count < limit } }
+        if limit > 0 {
+            om.walkPointers(to: target.raw, building: building, words: &words) { o in found.append(o.raw); return found.count < limit }
+        }
         let n = found.count
         let collections = om.counters.collections
         guard let a = om.allocate(ctx, classIndex: WellKnown.array, slots: n, fill: m.nilObject, extraRoots: roots()) else { return }
@@ -175,7 +181,7 @@ private func pointersTo(_ m: Machine, _ target: Oop, limit: Int) -> Oop {
         }
         var filled = 0
         if n > 0 {
-            om.walkPointers(to: target.raw, skipping: a, words: &words) { o in
+            om.walkPointers(to: target.raw, skipping: a, building: building, words: &words) { o in
                 om.store(a, filled, o)
                 filled &+= 1
                 return filled < n
@@ -198,13 +204,13 @@ private func pointersTo(_ m: Machine, _ target: Oop, limit: Int) -> Oop {
 private func allInstances(_ m: Machine, classes: [Bool], limit: Int, keeping: [Oop]) -> Oop {
     var answer = Oop.none
     let ctx = unsafe m.state.pointee.context
-    inInstanceStop(m, keeping: keeping) { om, roots in
+    inInstanceStop(m, keeping: keeping) { om, roots, building in
         var n = 0
-        if limit > 0 { om.walkInstances(of: classes) { _ in n &+= 1; return n < limit } }
+        if limit > 0 { om.walkInstances(of: classes, building: building) { _ in n &+= 1; return n < limit } }
         guard let a = om.allocate(ctx, classIndex: WellKnown.array, slots: n, fill: m.nilObject, extraRoots: roots()) else { return }
         var filled = 0
         if n > 0 {
-            om.walkInstances(of: classes, skipping: a) { o in
+            om.walkInstances(of: classes, skipping: a, building: building) { o in
                 om.store(a, filled, o)
                 filled &+= 1
                 return filled < n

@@ -19,7 +19,12 @@ extension ObjectMemory {
     /// flags by class index), in table order, until `visit` answers false.
     /// Answers the entries visited. World stopped, nothing young.
     @discardableResult
-    func walkInstances(of classes: [Bool], skipping skip: Oop = .none, _ visit: (Oop) -> Bool) -> Int {
+    /// `building`: pending roots a polled primitive is still building
+    /// (zeroing a long ByteArray, filling a String), never visited: no
+    /// Process may name an object before it is whole (the review fixes,
+    /// item 2).
+    func walkInstances(of classes: [Bool], skipping skip: Oop = .none, building: Set<UInt64> = [],
+                       _ visit: (Oop) -> Bool) -> Int {
         let hw = highWater
         let map = oldMap
         let words = Int((hw &+ 63) &>> 6)
@@ -37,6 +42,7 @@ extension ObjectMemory {
                 if EntryState.isFree(stateWord(raw)) { continue }
                 let ci = Header(raw: headerWord(raw)).classIndex
                 guard ci < UInt64(classes.count), classes[Int(ci)], raw != skip.raw else { continue }
+                if !building.isEmpty && building.contains(raw) { continue }
                 found &+= 1
                 if !visit(Oop(raw: raw)) { return found }
             }
@@ -88,7 +94,8 @@ extension ObjectMemory {
     /// visited. Answers the objects visited; `words` grows by the slots
     /// compared. World stopped, nothing young.
     @discardableResult
-    func walkPointers(to target: UInt64, skipping skip: Oop = .none, words: inout UInt64, _ visit: (Oop) -> Bool) -> Int {
+    func walkPointers(to target: UInt64, skipping skip: Oop = .none, building: Set<UInt64> = [], words: inout UInt64,
+                      _ visit: (Oop) -> Bool) -> Int {
         let hw = highWater
         let map = oldMap
         let mapWords = Int((hw &+ 63) &>> 6)
@@ -108,6 +115,7 @@ extension ObjectMemory {
                 let raw = e &<< 4
                 let s = stateWord(raw)
                 if raw == skip.raw || EntryState.isFree(s) { continue }
+                if !building.isEmpty && building.contains(raw) { continue }
                 let h = headerWord(raw)
                 if h & Header.bytesBit != 0 { continue }
                 let n = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)

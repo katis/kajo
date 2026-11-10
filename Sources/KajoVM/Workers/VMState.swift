@@ -38,6 +38,11 @@ import Synchronization
     let pending: UnsafeMutablePointer<PendingState>
     let pendingSlots: UnsafeMutablePointer<UInt64>
     let pendingNext: UnsafeMutablePointer<Int>
+    /// The review fixes (item 2): 1 where the pending root is an object a
+    /// polled primitive is still building (a long ByteArray being zeroed,
+    /// a String being filled), which the instance walks skip. Under
+    /// `pendingLock`, beside `pendingSlots`.
+    let pendingBuilding: UnsafeMutablePointer<UInt8>
     let pendingLock: UnsafeMutablePointer<pthread_mutex_t>
 
     /// Host calls use the host worker one at a time.
@@ -318,6 +323,9 @@ enum Counter: Int, CaseIterable {
     /// rule asked for the marker to be raised (the table would empty at
     /// the observed rate before the running cycle ends).
     case entryRateRaises
+    /// The review fixes (item 2): a long ByteArray's zeroing that found its
+    /// object's length or body changed after a poll and stopped.
+    case zeroingCutOff
 }
 
 /// A snapshot of the counters.

@@ -46,6 +46,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe pendingSlots.initialize(repeating: 0, count: config.pendingCapacity)
         let pendingNext = UnsafeMutablePointer<Int>.allocate(capacity: config.pendingCapacity)
         unsafe pendingNext.initialize(repeating: -1, count: config.pendingCapacity)
+        let pendingBuilding = UnsafeMutablePointer<UInt8>.allocate(capacity: config.pendingCapacity)
+        unsafe pendingBuilding.initialize(repeating: 0, count: config.pendingCapacity)
         let stops = unsafe UnsafeMutablePointer<StopRecord>.allocate(capacity: SafepointState.stopLog)
         let raw = unsafe UnsafeMutableRawPointer.allocate(byteCount: MemoryLayout<VMState>.stride, alignment: 128)
         unsafe state = raw.bindMemory(to: VMState.self, capacity: 1)
@@ -56,7 +58,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             safepointLock: makeMutex(), safepointCond: makeCond(),
             sched: lined(SchedulerState(hopLatencies: RecordRing(capacity: config.logCapacity))), queues: queues, records: records, schedLock: makeMutex(), schedCond: makeCond(),
             doneCond: makeCond(), externalHead: lined(Atomic<UInt>(0)), pending: lined(PendingState()),
-            pendingSlots: pendingSlots, pendingNext: pendingNext, pendingLock: makeMutex(), hostLock: makeMutex(),
+            pendingSlots: pendingSlots, pendingNext: pendingNext, pendingBuilding: pendingBuilding, pendingLock: makeMutex(), hostLock: makeMutex(),
             workerShared: shared, errors: lined(ErrorLog()), errorsLock: makeMutex(), counters: counters,
             finalization: lined(FinalizationState()), epoch: lined(Atomic<UInt64>(1)), hazardsHeld: lined(Atomic<Int>(0)),
             enterWindow: lined(EnterWindowHook()), saveHold: lined(Atomic<Bool>(false)), slowPolls: lined(Atomic<Int>(0)),
@@ -193,6 +195,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe s.records.deallocate()
         unsafe s.pendingSlots.deallocate()
         unsafe s.pendingNext.deallocate()
+        unsafe s.pendingBuilding.deallocate()
         unsafe s.counters.deinitialize(count: Counter.allCases.count)
         unsafe s.counters.deallocate()
         for unsafe m in unsafe [s.safepointLock, s.schedLock, s.pendingLock, s.hostLock, s.errorsLock] { unsafe freeMutex(m) }

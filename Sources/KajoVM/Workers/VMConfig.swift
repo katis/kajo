@@ -118,6 +118,13 @@ struct VMTestSwitches: Sendable {
     /// Large bytes: the byte primitives' polled loops never poll (the
     /// broken variant of "no primitive over bytes keeps a stop waiting").
     var noBytePolls = false
+    /// The review fixes (item 2): a polled primitive building a new object
+    /// (a long ByteArray's zeroing, a fresh String's fill) sleeps this many
+    /// microseconds after each chunk (0: never), so a test can land a stop
+    /// inside it; and the broken variant in which the instance walks answer
+    /// objects a polled primitive is still building.
+    var buildingPauseUs = 0
+    var walksSeeBuilding = false
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no

@@ -50,7 +50,10 @@ struct ExternalNode {
 // MARK: - pending roots
 
 /// Root `sem` until its operation completes. -1 when the table is full.
-func registerPending(_ vm: VMPointer, _ sem: Oop) -> Int {
+/// `building`: `sem` is an object a polled primitive is still building
+/// (nothing else may name it until it is whole), which the instance walks
+/// of primitives 167 to 170 skip (the review fixes, item 2).
+func registerPending(_ vm: VMPointer, _ sem: Oop, building: Bool = false) -> Int {
     unsafe lockCounted(vm.pointee.pendingLock, vm, contended: .pendingContended)
     defer { unsafe pthread_mutex_unlock(vm.pointee.pendingLock) }
     let st = unsafe vm.pointee.pending
@@ -64,6 +67,7 @@ func registerPending(_ vm: VMPointer, _ sem: Oop) -> Int {
         return -1
     }
     unsafe vm.pointee.pendingSlots[h] = sem.raw
+    unsafe vm.pointee.pendingBuilding[h] = building ? 1 : 0
     unsafe st.pointee.count += 1
     return h
 }
@@ -72,10 +76,23 @@ func unregisterPending(_ vm: VMPointer, _ h: Int) {
     if h < 0 { return }
     unsafe lockCounted(vm.pointee.pendingLock, vm, contended: .pendingContended)
     unsafe vm.pointee.pendingSlots[h] = 0
+    unsafe vm.pointee.pendingBuilding[h] = 0
     unsafe vm.pointee.pendingNext[h] = vm.pointee.pending.pointee.free
     unsafe vm.pointee.pending.pointee.free = h
     unsafe vm.pointee.pending.pointee.count -= 1
     unsafe pthread_mutex_unlock(vm.pointee.pendingLock)
+}
+
+/// The pending roots that polled primitives are still building (world
+/// stopped, or any time: under `pendingLock`).
+func pendingBuildingObjects(_ vm: VMPointer) -> Set<UInt64> {
+    var out = Set<UInt64>()
+    unsafe pthread_mutex_lock(vm.pointee.pendingLock)
+    for i in unsafe 0..<vm.pointee.pending.pointee.highWater where unsafe vm.pointee.pendingBuilding[i] != 0 {
+        unsafe out.insert(vm.pointee.pendingSlots[i])
+    }
+    unsafe pthread_mutex_unlock(vm.pointee.pendingLock)
+    return out
 }
 
 // MARK: - draining

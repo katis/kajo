@@ -81,24 +81,38 @@ extension Machine {
 
     /// Zero a long byte object that `tryAllocateLarge` left unzeroed
     /// (`deferZero`): its bytes after the first word, in chunks. The object
-    /// is a pending root while it polls (nothing else holds it yet); with
-    /// the pending table full it is zeroed without polls (counted).
+    /// is a pending root while it polls (nothing else holds it yet), marked
+    /// as being built so the instance walks (167 to 170) do not answer it
+    /// half zeroed; with the pending table full it is zeroed without polls
+    /// (counted). The review fixes (item 2, collectors.F1): after a poll
+    /// that parked, the object's length and body are read again, and a
+    /// change (a two-way become in that stop; unreachable while the walks
+    /// skip it, kept as the other polled loops keep it) stops the zeroing,
+    /// since whatever the object became is already whole. Every chunk is
+    /// bounded by the length read after the poll, by `zeroBytes`' own check.
     func zeroLongBytes(_ o: Oop) {
         let om = self.om
-        let total = Int(truncatingIfNeeded: om.bodyWords(entry: o.raw) &- 1) &<< 3  // the byte words
+        let words = om.bodyWords(entry: o.raw)
+        let body = om.stateWord(o.raw)
+        let total = Int(truncatingIfNeeded: words &- 1) &<< 3  // the byte words
         let w = unsafe workerOf(state)
         let vm = unsafe w.pointee.vm
-        let h = unsafe vm.map { unsafe registerPending($0, o) } ?? -1
+        let h = unsafe vm.map { unsafe registerPending($0, o, building: true) } ?? -1
         var i = 8  // the first byte word was zeroed with the back reference
         var stretch = 0
         while i < total {
             let end = Swift.min(total, i &+ ByteWork.chunk)
-            om.zeroBytes(o, from: i, to: end)
+            guard om.zeroBytes(o, from: i, to: end) else { break }
             stretch &+= end &- i
             i = end
             if i < total && h >= 0 {
-                _ = byteWorkPoll(stretch)
+                buildingPause()
+                let parked = byteWorkPoll(stretch)
                 stretch = 0
+                if parked && (om.bodyWords(entry: o.raw) != words || om.stateWord(o.raw) != body) {
+                    if let vm = unsafe vm { unsafe vm.count(.zeroingCutOff) }
+                    break
+                }
             }
         }
         byteWorkEnd(stretch)
@@ -113,7 +127,7 @@ extension Machine {
     /// chunk. Otherwise byte by byte through the entries, as before. False
     /// when a stop changed an object's length under it (the primitive
     /// fails).
-    func copyBytesPolled(_ src: Oop, _ i: Int, into dst: Oop, _ j: Int, _ n: Int) -> Bool {
+    func copyBytesPolled(_ src: Oop, _ i: Int, into dst: Oop, _ j: Int, _ n: Int, building: Bool = false) -> Bool {
         let om = self.om
         if n <= ByteWork.chunk {
             copyBytes(src, i, into: dst, j, n)
@@ -127,6 +141,7 @@ extension Machine {
             let stretch = end &- k
             k = end
             if k < n {
+                if building { buildingPause() }
                 if byteWorkPoll(stretch), om.count(of: src) != ls || om.count(of: dst) != ld { return false }
             } else {
                 byteWorkEnd(stretch)
@@ -165,10 +180,16 @@ extension Machine {
 extension ObjectMemory {
     /// Bytes [from, to) of the byte object `o` set to zero: one memset from
     /// the body the entry leads to now. A run's bytes only (never moved).
-    func zeroBytes(_ o: Oop, from: Int, to: Int) {
-        assert(isUsedReference(o) && header(o).isBytes && header(o).isLarge && to <= Int(bodyWords(entry: o.raw) &- 1) &<< 3)
+    /// False, writing nothing, unless `o` is a used large byte object whose
+    /// byte words reach `to` now (the review fixes, item 2: a real check in
+    /// every build, never an `assert`).
+    func zeroBytes(_ o: Oop, from: Int, to: Int) -> Bool {
+        guard from >= 8, from <= to, isUsedReference(o) else { return false }
+        let h = header(o)
+        guard h.isBytes, h.isLarge, to <= Int(truncatingIfNeeded: bodyWords(entry: o.raw) &- 1) &<< 3 else { return false }
         let off = Int(truncatingIfNeeded: stateWord(o.raw)) &+ 8 &+ from
         _ = unsafe memset(heapBase + off, 0, to &- from)
+        return true
     }
 
     /// `n` bytes from `src` at `i` to `dst` at `j`, one memmove from the
@@ -186,11 +207,12 @@ extension ObjectMemory {
 
 extension Machine {
     /// A new object only this primitive holds stays a pending root while
-    /// it polls: the handle to release (negative: the table was full, and
+    /// it polls, marked as being built (the instance walks skip it until it
+    /// is whole: the review fixes, item 2, collectors.F4): the handle to release (negative: the table was full, and
     /// the caller must not poll).
     func holdPending(_ o: Oop) -> Int {
         guard let vm = unsafe workerOf(state).pointee.vm else { return -1 }
-        return unsafe registerPending(vm, o)
+        return unsafe registerPending(vm, o, building: true)
     }
 
     func releasePending(_ h: Int) {
@@ -214,7 +236,16 @@ extension Machine {
             byteWorkEnd(n)
             return true
         }
-        return copyBytesPolled(src, i, into: dst, j, n)
+        return copyBytesPolled(src, i, into: dst, j, n, building: true)
+    }
+
+    /// The tests' `buildingPauseUs`: a sleep between two chunks of a
+    /// polled primitive that builds a new object (never set outside tests).
+    @inline(never)
+    func buildingPause() {
+        guard let vm = unsafe workerOf(state).pointee.vm else { return }
+        let us = unsafe vm.pointee.config.testSwitches.buildingPauseUs
+        if us > 0 { _ = usleep(UInt32(us)) }
     }
 
     /// Primitive 121 for long objects: nil when a stop changed a length.
