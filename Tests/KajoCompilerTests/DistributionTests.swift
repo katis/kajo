@@ -83,7 +83,7 @@ import Testing
         fm.createFile(atPath: cli, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
         // No such directory: the command to run instead, nothing made.
         guard case .needsPermission(let command) = CommandLineTool.install(cli: cli, into: bin) else { Issue.record("missing dir"); return }
-        #expect(command.contains("ln -sf '\(cli)' \(bin)/kajo"))
+        #expect(command.contains("ln -sf '\(cli)' '\(bin)/kajo'"))
         #expect(!fm.fileExists(atPath: bin))
         try fm.createDirectory(atPath: bin, withIntermediateDirectories: true)
         #expect(CommandLineTool.install(cli: cli, into: bin) == .linked(bin + "/kajo"))

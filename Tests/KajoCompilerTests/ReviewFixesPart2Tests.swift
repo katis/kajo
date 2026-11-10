@@ -1,8 +1,10 @@
 import Foundation
+import Synchronization
 import Testing
 @testable import KajoCompiler
 @testable import KajoDev
 @testable import KajoVM
+@testable import KajoShellCore
 
 /// The review fixes, part 2 (docs/modules/review-fixes.md "As built (part
 /// 2)"): the protocol's net under every request (item 1).
@@ -145,4 +147,29 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
     #expect(sources.count >= 150)
     let d = try agreement(sources)
     #expect(d.isEmpty, "\(d.count) of \(sources.count) disagree: \(d.map { "\($0.0.prefix(60)) => \($0.1.prefix(160))" }.joined(separator: " | "))")
+}
+
+/// Item 12 (tools.F6): the `sudo` line Install Command Line Tool shows
+/// quotes every path, so an app under a path with a space or an apostrophe
+/// gives a line that pastes: run through `sh` with `sudo` replaced by a
+/// printer, each path is one word, as it was. On 18e274f the directory and
+/// the link were unquoted.
+@Test func theSudoLineQuotesItsPaths() throws {
+    let fm = FileManager.default
+    let d = fm.temporaryDirectory.appendingPathComponent("kajo-sudo-\(getpid())/Joni's Apps").path
+    defer { try? fm.removeItem(atPath: (d as NSString).deletingLastPathComponent) }
+    let cli = d + "/Kajo.app/Contents/Helpers/kajo"
+    try fm.createDirectory(atPath: (cli as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+    fm.createFile(atPath: cli, contents: Data("#!/bin/sh\n".utf8), attributes: [.posixPermissions: 0o755])
+    let bin = d + "/no such bin"
+    guard case .needsPermission(let command) = CommandLineTool.install(cli: cli, into: bin) else { Issue.record("no command"); return }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", "sudo() { printf '[%s]\\n' \"$@\"; }; " + command]
+    let out = Pipe()
+    p.standardOutput = out
+    try p.run()
+    p.waitUntilExit()
+    let words = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n").map(String.init)
+    #expect(words == ["[mkdir]", "[-p]", "[\(bin)]", "[ln]", "[-sf]", "[\(cli)]", "[\(bin)/kajo]"], "\(words)")
 }

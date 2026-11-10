@@ -135,6 +135,11 @@ public enum CheckoutInstaller {
 /// File > Install Command Line Tool...: `<dir>/kajo` as a symbolic link to
 /// the bundled CLI, made only when the developer asks.
 public enum CommandLineTool {
+    /// `s` as one word for a shell: in single quotes, a quote in it as
+    /// `'\''` (the review fixes, part 2, item 12: an app under a path with
+    /// an apostrophe or a space gave a line that did not paste).
+    static func shellQuoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
+
     public enum Outcome: Equatable, Sendable {
         case linked(String)
         /// The directory cannot be written (on a fresh Mac /usr/local/bin is
@@ -148,7 +153,7 @@ public enum CommandLineTool {
     public static func install(cli: String, into dir: String) -> Outcome {
         let fm = FileManager.default
         let link = dir + "/kajo"
-        let command = "sudo mkdir -p \(dir) && sudo ln -sf '\(cli)' \(link)"
+        let command = "sudo mkdir -p \(shellQuoted(dir)) && sudo ln -sf \(shellQuoted(cli)) \(shellQuoted(link))"
         guard fm.isExecutableFile(atPath: cli) else { return .failed("no kajo in the app at \(cli)") }
         if let a = try? fm.attributesOfItem(atPath: link) {
             guard a[.type] as? FileAttributeType == .typeSymbolicLink,
