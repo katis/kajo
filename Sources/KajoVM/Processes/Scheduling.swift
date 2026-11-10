@@ -79,8 +79,25 @@ func dequeueLocked(_ vm: VMPointer, main: Bool, minPriority: Int, for w: WorkerP
             if next == nilObject { unsafe vm.pointee.queues[queueCount + q] = 0 }
             unsafe clearingStore(w, head, ProcessLayout.next, nilObject)  // a deletion: the SATB barrier sees it
             unsafe setIntSlot(w, head, ProcessLayout.state, Int(ProcessState.running.rawValue))
-            let r = unsafe records(vm, intSlot(om, head, ProcessLayout.record))
+            let ri = intSlot(om, head, ProcessLayout.record)
+            let r = unsafe records(vm, ri)
             unsafe r.pointee.runningOn = w.pointee.index
+            // The review fixes (item 14, kernel.F12): a Process resumed after a
+            // wait that a signal completed (it took the signal) and asked to
+            // terminate meanwhile runs on to its next poll, where the
+            // terminate is taken as for a running Process: the instructions
+            // right after `wait` (critical:'s `caught := true`, no send and no
+            // poll between) run first, so the ensure block knows it holds the
+            // Semaphore. A Process unlinked from its wait by the interrupt
+            // itself has no wait length any more (`interrupt`) and runs it at
+            // once, as every other resumed Process does.
+            let afterWait = unsafe r.pointee.waitSendLength > 0
+            unsafe r.pointee.waitSendLength = 0
+            if unsafe afterWait && r.pointee.interrupt == InterruptKind.terminate {
+                unsafe w.pointee.interrupt = 0
+                unsafe vm.shared(w.pointee.index).pointee.attention.store(ri + 1, ordering: .relaxed)
+                return head
+            }
             // Module 9b: an interrupt goes with the Process to its worker.
             unsafe w.pointee.interrupt = r.pointee.interrupt
             unsafe r.pointee.interrupt = 0

@@ -26,6 +26,9 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
     unsafe s.pointee.countdown = w.pointee.pollEvery
     // Module 9b: a stepped Process polls at every send and backward jump.
     if unsafe r.pointee.stepMode != 0 { unsafe s.pointee.countdown = 1 }
+    // The review fixes (item 14): a terminate left for the first poll
+    // (`dequeueLocked`) is taken at the next send or backward jump.
+    if unsafe vm.shared(w.pointee.index).pointee.attention.load(ordering: .relaxed) == ri + 1 { unsafe s.pointee.countdown = 1 }
     unsafe w.pointee.freshSlice = true
     unsafe vm.count(.slices)
     let sp = intSlot(om, p, ProcessLayout.sp), pc = intSlot(om, p, ProcessLayout.pc)

@@ -10,12 +10,12 @@ Class {
 
 { #category : #accessing }
 Mutex >> critical: aBlock [
-	| me |
+	"As Semaphore>>critical: (the review fixes, item 14): the wait inside the protected block, caught set right after it."
+	| me caught |
 	me := ProcessorScheduler activeProcess.
 	owner == me ifTrue: [^ aBlock value].
-	semaphore wait.
-	owner := me.
-	^ aBlock ensure: [owner := nil. semaphore signal]
+	caught := false.
+	^ [semaphore wait. caught := true. owner := me. aBlock value] ensure: [caught ifTrue: [owner := nil. semaphore signal]]
 ]
 
 { #category : #accessing }

@@ -431,6 +431,10 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
 
     func terminate(_ p: Oop) { unsafe host { w in unsafe terminateProcess(state, w, p) } }
 
+    /// Primitive 155's work from the host (tests): ask `p` to run the
+    /// interrupt `kind` when next resumed.
+    func interruptProcess(_ p: Oop, kind: Int) -> Bool { unsafe host { w in unsafe interrupt(state, w, p, kind: kind) } }
+
     /// Terminate every live Process (running ones at their next budget check).
     func terminateAll() {
         let live: [Oop] = schedRead { s in
