@@ -367,16 +367,29 @@ final class HoldingTarget: @unchecked Sendable {
 /// root until a worker drains it, so a re-registration that drops the old
 /// Semaphore's own root cannot let it be collected, its entry reused by
 /// another Semaphore and that one signalled. On 18e274f the queued signal
-/// held no root (the count did not move).
+/// held no root (the count did not move). Counted on a VM not started, so
+/// no worker drains between the post and the count.
 @Test func aQueuedShellSignalRootsItsSemaphoreUntilItIsDrained() throws {
+    // A VM not started: no worker drains, so the queued signal's root is
+    // there to count (with a worker the drain can come before the count).
     let shell = TestShell()
-    let vm = try openShell(shell, workers: 1)
+    var o = Headless.Options()
+    o.heapMiB = 256
+    o.workers = 1
+    let vm = try ShellVM(image: shellImage, options: o, callbacks: shell.callbacks)
     defer { vm.close() }
-    _ = try run(vm, "evaluate:", on: "Compiler", [.string("UIEventLoop eventSemaphore: Semaphore new. nil")])
+    let sem = try #require(vm.image.om.allocate(vm.image.context, classIndex: WellKnown.semaphore, slots: SemaphoreLayout.size,
+                                                 fill: vm.image.nilObject))
+    vm.image.om.store(sem, SemaphoreLayout.excessSignals, Oop(smallInteger: 0))
+    let h = unsafe registerPending(vm.vm.state, sem)
+    #expect(h >= 0)
+    let (old, owed) = vm.bridge.register(sem, handle: h)
+    #expect(old < 0 && owed == 0)
     let base = vm.vm.pendingRootCount
     vm.post(ShellEvent(kind: .line, target: 0, value: .string("x"), timeNs: ShellVM.now()))
     #expect(vm.vm.pendingRootCount == base + 1, "the queued signal holds no root")
-    #expect(drive(vm) { vm.vm.pendingRootCount == base })
+    vm.post(ShellEvent(kind: .line, target: 0, value: .string("y"), timeNs: ShellVM.now()))
+    #expect(vm.vm.pendingRootCount == base + 2)
 }
 
 /// Item 18, part 1's tests owed: the accept loop's failure path through an
