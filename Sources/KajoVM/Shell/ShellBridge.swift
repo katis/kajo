@@ -30,6 +30,17 @@ import Synchronization
     /// by the host before the image resumes, and by a host that starts
     /// serving; read by any worker.
     let stopsForDebugger: Atomic<Bool>
+    /// Tests (the review fixes, item 19): this many of primitives 154's and
+    /// 160's allocations fail as a full heap's would.
+    let failAllocations = Atomic<Int>(0)
+
+    func failNextAllocation() -> Bool {
+        while true {
+            let n = failAllocations.load(ordering: .relaxed)
+            if n <= 0 { return false }
+            if failAllocations.compareExchange(expected: n, desired: n - 1, ordering: .relaxed).exchanged { return true }
+        }
+    }
 
     init(_ callbacks: ShellCallbacks, stopsForDebugger: Bool = false) {
         self.callbacks = callbacks
@@ -79,6 +90,23 @@ import Synchronization
             head = 0
         }
         return e
+    }
+
+    /// The review fixes (item 19, primitives.F9): primitive 154 could not
+    /// allocate the event's Array (the heap full): `e` goes back to the
+    /// queue's head and the Semaphore is signalled again for it (its signal
+    /// was taken by the wait that came for it), so nothing is lost.
+    func putBack(_ e: ShellEvent) {
+        unsafe pthread_mutex_lock(lock)
+        if head > 0 {
+            head -= 1
+            queue[head] = e
+        } else {
+            queue.insert(e, at: 0)
+        }
+        let sem = semaphore
+        unsafe pthread_mutex_unlock(lock)
+        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
     }
 
     var queued: Int {
@@ -146,6 +174,20 @@ import Synchronization
             requestHead = 0
         }
         return r
+    }
+
+    /// As `putBack`, for a request primitive 160 could not allocate.
+    func putBackRequest(_ r: (Int, [UInt8])) {
+        unsafe pthread_mutex_lock(protocolLock)
+        if requestHead > 0 {
+            requestHead -= 1
+            requests[requestHead] = r
+        } else {
+            requests.insert(r, at: 0)
+        }
+        let sem = requestSemaphore
+        unsafe pthread_mutex_unlock(protocolLock)
+        if let sem, let ref { ref.signalFromOutside(sem, handle: nil) }
     }
 
     var queuedRequests: Int {

@@ -114,8 +114,13 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 154:
         guard c.argc == 0, let bridge else { return .none }
         guard let e = bridge.take() else { return m.nilObject }
+        let a = bridge.failNextAllocation() ? Oop.none : eventArray(m, e)
+        if a == .none {
+            bridge.putBack(e)  // the heap is full: nothing is lost (item 19)
+            return .none
+        }
         unsafe vm.count(.shellEvents)
-        return eventArray(m, e)
+        return a
     // Module 9b: the development protocol (docs/modules/development-protocol.md).
     case 159:
         guard c.argc == 1, let bridge, !m.om.isReleaseImage, c.arg0.isObject,
@@ -132,10 +137,12 @@ func shellPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 160:
         guard c.argc == 0, let bridge, !m.om.isReleaseImage else { return .none }
         guard let (conn, json) = bridge.takeRequest() else { return m.nilObject }
-        let text = m.newString(json)
-        if text == .none { return .none }
-        let a = m.allocate(WellKnown.array, slots: 2, keeping: text)
-        if a == .none { return .none }
+        let text = bridge.failNextAllocation() ? Oop.none : m.newString(json)
+        let a = text == .none ? Oop.none : m.allocate(WellKnown.array, slots: 2, keeping: text)
+        if a == .none {
+            bridge.putBackRequest((conn, json))  // the heap is full: nothing is lost (item 19)
+            return .none
+        }
         m.store(a, 0, Oop(smallInteger: Int64(conn)), .atPut)
         m.store(a, 1, text, .atPut)
         unsafe vm.count(.protocolRequests)

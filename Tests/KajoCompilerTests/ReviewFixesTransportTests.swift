@@ -212,3 +212,18 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
     _ = try writer.apply(.object([("files", .array([.object([("path", .string("B.class.st")), ("remove", .bool(true))])]))]))
     #expect(!FileManager.default.fileExists(atPath: dir.appendingPathComponent("B.class.st").path))
 }
+
+/// The review fixes, item 19 (primitives.F9): primitive 160 that cannot
+/// allocate (a full heap, here the bridge's test hook) puts the request
+/// back and signals for it again; it is answered. On d78afcc it was
+/// dequeued, lost, and the client waited for its timeout.
+@Test func aRequestTheImageCannotAllocateIsNotLost() throws {
+    let t = try TCPTarget()
+    defer { t.close() }
+    let c = try t.client()
+    defer { c.close() }
+    try c.open(token: t.target.server.token, client: "developer", timeout: 60)
+    t.target.vm.bridge.failAllocations.store(3, ordering: .relaxed)
+    #expect(try c.eval("3 + 4")["value"] == .string("7"))
+    #expect(t.target.vm.bridge.failAllocations.load(ordering: .relaxed) == 0)
+}
