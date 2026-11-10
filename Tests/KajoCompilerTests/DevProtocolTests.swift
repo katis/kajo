@@ -408,6 +408,45 @@ extension ProtocolClient {
         for _ in 0..<3000 where (try s.request("process.list").array ?? []).contains(where: { $0["process"] == pid }) { usleep(10_000) }
         #expect(!(try s.request("process.list").array ?? []).contains { $0["process"] == pid })
     }
+
+    /// The review fixes, item 3 (interpreter.F2): a Process waiting in
+    /// `critical:` that is suspended and proceeded waits again; it enters
+    /// only once the Semaphore is signalled. On d78afcc the proceed
+    /// returned from `wait` unsignalled and the Process entered at once.
+    @Test func aSuspendedWaiterWaitsAgainWhenProceeded() throws {
+        let t = try RunningTarget()
+        defer { t.close() }
+        let s = try t.session()
+        let id = try s.eval("""
+            | m | m := Semaphore forMutualExclusion. m wait. SampleDebug result: m.
+            ([m critical: [SampleDebug result: #entered]] forkAt: 0) id
+            """)["value"]?.string ?? ""
+        let pid = JSONValue.int(Int64(id) ?? -1)
+        var waiting = false
+        for _ in 0..<3000 {
+            waiting = (try s.request("process.list").array ?? []).contains { $0["process"] == pid && $0["state"]?.string?.contains("waiting") == true }
+            if waiting { break }
+            usleep(10_000)
+        }
+        #expect(waiting)
+        let mark = s.eventMark
+        _ = try s.request("process.suspend", [("process", pid)])
+        let e = try s.stopped(since: mark, process: pid)
+        #expect(e["reason"] == .string("suspended"))
+        _ = try s.request("process.proceed", [("process", pid)])
+        // Proceeded, it is waiting again, not in the critical section.
+        var again = false
+        for _ in 0..<3000 {
+            again = (try s.request("process.list").array ?? []).contains { $0["process"] == pid && $0["state"]?.string?.contains("waiting") == true }
+            if again { break }
+            usleep(10_000)
+        }
+        #expect(again)
+        usleep(200_000)
+        #expect(try s.eval("SampleDebug result == #entered")["value"] == .string("false"))
+        _ = try s.eval("SampleDebug result signal")
+        try s.waitForResult("#entered")
+    }
 }
 
 /// A connection that sends raw lines and reads replies one by one (events

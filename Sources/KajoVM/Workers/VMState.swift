@@ -260,6 +260,11 @@ struct SchedulerState {
     var stepMode = 0
     var stepFrame = 0
     var stepFresh = false
+    /// The review fixes (item 3): the length of the `wait` send a waiting
+    /// Process is suspended after (its saved pc ends it), so a debug stop
+    /// asked while it waits rewinds to the send and proceeding waits
+    /// again. Written under the scheduler lock when it starts waiting.
+    var waitSendLength = 0
 }
 
 /// Guarded by the pending-root mutex.

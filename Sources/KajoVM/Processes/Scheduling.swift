@@ -391,6 +391,7 @@ func waitSemaphore(_ vm: VMPointer, _ w: WorkerPointer, _ sem: Oop, argc: Int) -
     }
     let p = unsafe w.pointee.current
     unsafe records(vm, w.pointee.record).pointee.runnableSince = 0
+    unsafe records(vm, w.pointee.record).pointee.waitSendLength = argc == 0 ? w.pointee.interp.sendLength : 0
     unsafe suspendAfterPrimitiveLocked(vm, w, argc: argc, result: sem)
     unsafe setIntSlot(w, p, ProcessLayout.state, Int(ProcessState.waiting.rawValue))
     unsafe barrierStore(w, p, ProcessLayout.waitingOn, sem, .waitingOn)

@@ -164,8 +164,27 @@ func interrupt(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop, kind: Int) -> Bool
             unsafe vm.shared(r.pointee.runningOn).pointee.attention.store(ri + 1, ordering: .relaxed)
         }
     } else if state == Int(ProcessState.waiting.rawValue) {
-        // Resumed after its wait's send: a stop there is after a send.
-        if kind == InterruptKind.debugStop { unsafe r.pointee.interrupt = InterruptKind.debugStopAfterSend }
+        // The review fixes (item 3, interpreter.F2): a debug stop of a
+        // waiting Process rewinds its saved pc to the `wait` send, as a
+        // poll's rewind does for a running one, so proceeding sends `wait`
+        // again: the Process waits again, or passes if the Semaphore has an
+        // excess signal by then. The operands are exact: `wait` takes no
+        // argument, and `suspendAfterPrimitiveLocked` left the Semaphore
+        // (the primitive's result is its receiver) in the receiver's slot,
+        // which is the send's operand at its start. Without a recorded
+        // send (none was) it stops after the send as before. Terminate
+        // (kind 1) unwinds from after the wait, where no `ensure:` of
+        // `critical:` was entered yet.
+        let len = unsafe r.pointee.waitSendLength
+        if kind == InterruptKind.debugStop {
+            let pc = intSlot(om, p, ProcessLayout.pc)
+            if len > 0 && pc >= len {
+                unsafe setIntSlot(w, p, ProcessLayout.pc, pc - len)
+            } else {
+                unsafe r.pointee.interrupt = InterruptKind.debugStopAfterSend
+            }
+        }
+        unsafe r.pointee.waitSendLength = 0
         unsafe unlinkLocked(vm, w, p)
         unsafe clearingStore(w, p, ProcessLayout.waitingOn, vm.pointee.nilObject)  // a deletion: the SATB barrier sees it
         needMain = unsafe makeReadyLocked(vm, w, p, fromBlocked: true)
