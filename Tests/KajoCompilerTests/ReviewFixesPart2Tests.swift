@@ -5,6 +5,7 @@ import Testing
 @testable import KajoDev
 @testable import KajoVM
 @testable import KajoShellCore
+@testable import KajoAppDevelopment
 
 /// The review fixes, part 2 (docs/modules/review-fixes.md "As built (part
 /// 2)"): the protocol's net under every request (item 1).
@@ -292,4 +293,44 @@ final class HoldingTarget: @unchecked Sendable {
     #expect(c.descriptorCloses == 1)
     c.close()
     #expect(c.descriptorCloses == 1)
+}
+
+/// Item 14 (the primitives report's note): the token store answers a new
+/// token only when it was written whole and renamed into place, otherwise
+/// the old one stands and the error says why; a token file anyone else
+/// could read, or a link in its place, is replaced by a new token. The
+/// assertions compare tokens and read lengths and modes, and print no
+/// token (each comparison is a Bool). On 18e274f renew answered a token it
+/// had not written, and load kept a token from a file of mode 0644.
+@Test func theTokenStoreKeepsOnlyWhatItWroteAndRefusesAWideMode() throws {
+    let fm = FileManager.default
+    let dir = fm.temporaryDirectory.appendingPathComponent("kajo-token-\(getpid())").path
+    try? fm.removeItem(atPath: dir)
+    defer { _ = chmod(dir, 0o700); try? fm.removeItem(atPath: dir) }
+    let store = PairingTokenStore(directory: dir)
+    let first = store.load()
+    #expect(first.utf8.count == 20)
+    #expect(Bool(store.load() == first))
+    #expect((try fm.attributesOfItem(atPath: store.path)[.posixPermissions] as? Int) == 0o600)
+    // A directory that refuses the new file: renew throws, the old stands.
+    #expect(chmod(dir, 0o500) == 0)
+    #expect(throws: PairingTokenStore.StoreError.self) { _ = try store.renew() }
+    #expect(chmod(dir, 0o700) == 0)
+    #expect(Bool(store.load() == first))
+    // A mode wider than 0600: replaced by a new token, written 0600.
+    #expect(chmod(store.path, 0o644) == 0)
+    let second = store.load()
+    #expect(Bool(second != first) && second.utf8.count == 20)
+    #expect((try fm.attributesOfItem(atPath: store.path)[.posixPermissions] as? Int) == 0o600)
+    #expect(Bool(store.load() == second))
+    // A link in the file's place: replaced, the link's target untouched.
+    let elsewhere = dir + "/elsewhere"
+    try Data(second.utf8).write(to: URL(fileURLWithPath: elsewhere))
+    #expect(chmod(elsewhere, 0o600) == 0)
+    try fm.removeItem(atPath: store.path)
+    try fm.createSymbolicLink(atPath: store.path, withDestinationPath: elsewhere)
+    let third = store.load()
+    #expect(Bool(third != second))
+    #expect((try fm.attributesOfItem(atPath: store.path)[.type] as? FileAttributeType) == .typeRegular)
+    #expect(Bool(String(decoding: try Data(contentsOf: URL(fileURLWithPath: elsewhere)), as: UTF8.self) == second))
 }

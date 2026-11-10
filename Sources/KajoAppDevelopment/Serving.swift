@@ -62,30 +62,68 @@ public struct PairingTokenStore: Sendable, CustomReflectable {
         #endif
     }
 
-    /// The kept token, or a new one written.
-    public func load() -> String {
-        if let d = FileManager.default.contents(atPath: path), let t = String(data: d, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-           t.utf8.count == 20, t.utf8.allSatisfy({ (48...57).contains($0) || (97...122).contains($0) }) {
-            return t
-        }
-        return renew()
+    /// Why a token could not be kept (never the token itself).
+    public struct StoreError: Error, CustomStringConvertible, Sendable {
+        public let description: String
     }
 
-    /// A new token, written with mode 0600 (made in a file created that way,
-    /// then moved over the old one).
+    /// The kept token, or a new one written. A token file anyone but the
+    /// user could read (any mode bit beyond 0600), or that is not a regular
+    /// file, is replaced by a new token (the review fixes, part 2, item 14,
+    /// open question 2: pairing is repeated once). When no token can be
+    /// written, one in memory serves this launch.
+    public func load() -> String { loadReporting().token }
+
+    /// `load`, with why the token could not be kept, if it could not.
+    public func loadReporting() -> (token: String, problem: String?) {
+        var st = stat()
+        if unsafe lstat(path, &st) == 0 {
+            let regular = st.st_mode & S_IFMT == S_IFREG
+            if regular && st.st_mode & 0o077 == 0, let d = FileManager.default.contents(atPath: path),
+               let t = String(data: d, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+               t.utf8.count == 20, t.utf8.allSatisfy({ (48...57).contains($0) || (97...122).contains($0) }) {
+                return (t, nil)
+            }
+        }
+        do {
+            return (try renew(), nil)
+        } catch {
+            return (ProtocolServer.makeToken(), "\(error)")
+        }
+    }
+
+    /// A new token, written with mode 0600 in a file created that way, then
+    /// renamed over the old one; answered only when it was written whole
+    /// and renamed into place, otherwise the old token stands and the error
+    /// says why (the review fixes, part 2, item 14).
     @discardableResult
-    public func renew() -> String {
+    public func renew() throws(StoreError) -> String {
         let t = ProtocolServer.makeToken()
         let dir = (path as NSString).deletingLastPathComponent
         try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let tmp = path + ".new"
         unsafe unlink(tmp)
         let fd = unsafe open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        guard fd >= 0 else { return t }
+        guard fd >= 0 else { throw StoreError(description: "cannot create \(tmp): errno \(errno)") }
         let bytes = Array(t.utf8)
-        _ = bytes.withUnsafeBytes { unsafe write(fd, $0.baseAddress!, bytes.count) }
-        close(fd)
-        unsafe rename(tmp, path)
+        var off = 0
+        while off < bytes.count {
+            let n = bytes.withUnsafeBytes { unsafe write(fd, $0.baseAddress! + off, bytes.count - off) }
+            if n < 0 && errno == EINTR { continue }
+            if n <= 0 { break }
+            off += n
+        }
+        let synced = fsync(fd) == 0
+        let closed = close(fd) == 0
+        guard off == bytes.count, synced, closed else {
+            unsafe unlink(tmp)
+            throw StoreError(description: "the token was not written whole to \(tmp)")
+        }
+        guard unsafe rename(tmp, path) == 0 else {
+            let e = errno
+            unsafe unlink(tmp)
+            throw StoreError(description: "cannot rename \(tmp) over \(path): errno \(e)")
+        }
         return t
     }
 }
@@ -219,7 +257,9 @@ extension ShellRuntime {
                          imageName: String, serviceName: String? = nil, pairing presenter: PairingPresenter?) throws -> ProtocolServer? {
         if vm.isReleaseImage { return nil }
         let shell = vm
-        let token = store?.load() ?? ProtocolServer.makeToken()
+        let loaded: (token: String, problem: String?) = store?.loadReporting() ?? (ProtocolServer.makeToken(), nil)
+        let token = loaded.token
+        if let problem = loaded.problem { appLog("serving token_kept=0 problem=\(problem.replacingOccurrences(of: " ", with: "_"))") }
         LaunchTrace.step("token")
         let server = try ProtocolServer(tcpPort: port, loopbackOnly: loopbackOnly, token: token) { conn, json in
             shell.postRequest(connection: conn, json: json)
@@ -248,7 +288,16 @@ extension ShellRuntime {
         let state = serving
         presenter?.onNewToken = { [weak server] in
             guard let server else { return }
-            let t = store?.renew() ?? ProtocolServer.makeToken()
+            let t: String
+            do {
+                t = try store?.renew() ?? ProtocolServer.makeToken()
+            } catch {
+                // The old token stands; the screen and the console say why.
+                appLog("new_token=refused problem=\("\(error)".replacingOccurrences(of: " ", with: "_"))")
+                pairing.update { $0.status = "the new token could not be kept: \(error)" }
+                show()
+                return
+            }
             server.replaceToken(t)
             state.client?.addTarget(ClientHost.Target(name: "local", path: server.path, token: t))
             pairing.update { $0.token = t }
