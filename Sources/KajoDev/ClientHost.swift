@@ -316,6 +316,10 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         if let package { args.append(("package", .string(package))) }
         c.open(DevRequest(id: .string("session"), kind: "session.open", arguments: args).line)
         c.readLines(limit: 64 << 20) { line, tooLong in
+            // The line's events carry the time it was read, before the
+            // file writes below (the review fixes, part 2, item 15: "the
+            // time it happened").
+            let read = ShellVM.now()
             let value = tooLong ? clientError("a line longer than 64 MiB from the target") : ClientHost.check(line)
             lock.lock()
             lines += 1
@@ -329,7 +333,7 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
                                     timeNs: ShellVM.now()))
                 }
             }
-            let now = ShellVM.now()
+            let now = read
             // Large bytes, part 3: one `line` event up to what the host
             // hands the image as one String (16 MiB - 1), measured cheaper
             // than 16 KiB pieces for the image that reads it; pieces past it.

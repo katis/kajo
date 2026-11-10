@@ -334,3 +334,30 @@ final class HoldingTarget: @unchecked Sendable {
     #expect((try fm.attributesOfItem(atPath: store.path)[.type] as? FileAttributeType) == .typeRegular)
     #expect(Bool(String(decoding: try Data(contentsOf: URL(fileURLWithPath: elsewhere)), as: UTF8.self) == second))
 }
+
+/// Item 15 (the primitives report's note): a reply's `line` event carries
+/// the time the line was read, before its files are written: a reply whose
+/// file write fails posts the failure (timed when it happened) after the
+/// line was read, so the line's time is the earlier. On 18e274f the line
+/// was timed after the writes.
+@Test func aReplysLineIsTimedWhenItWasRead() throws {
+    let path = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-time-\(getpid()).sock").path
+    let project = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-time-project-\(getpid())").path
+    try FileManager.default.createDirectory(atPath: project, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(atPath: project) }
+    let events = Mutex<[ShellEvent]>([])
+    let host = ClientHost()
+    host.setSink { e in events.withLock { $0.append(e) } }
+    host.addTarget(ClientHost.Target(name: "t", path: path, token: "t"))
+    let reply = #"{"v":1,"kind":"reply","id":"x","ok":true,"result":{"files":[{"path":"../Outside.class.st","text":"x"}]}}"#
+    let listener = try FakeTarget(path: path, lines: [reply])
+    defer { listener.stop() }
+    let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path), .string("developer"), .nil, .string(project)]))?.int)
+    let end = ShellVM.now() + 30_000_000_000
+    while ShellVM.now() < end && !events.withLock({ $0.contains { $0.kind == .lost } }) { usleep(2000) }
+    let lines = events.withLock { $0 }.filter { $0.kind == .line && $0.target == Int(conn) }
+    let failure = try #require(lines.first { $0.value.string?.contains("client.error") == true })
+    let line = try #require(lines.first { $0.value.string?.contains("\"reply\"") == true })
+    #expect(line.timeNs <= failure.timeNs, "the reply's line was timed after its file writes")
+    host.closeAll()
+}
