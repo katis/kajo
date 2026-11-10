@@ -102,6 +102,14 @@ build_frameworks() {
       line=$(grep -m1 -E "swiftc -module-name $m .*-target arm64" $work/fw-$p.log)
       flags=$(print -r -- $line | tr ' ' '\n' | grep -E '^(-O|-Onone|-whole-module-optimization|-strict-memory-safety|-enable-library-evolution|-swift-version|6|-target|arm64-apple-.*|-D.*|-enable-testing|-g)$' | tr '\n' ' ')
       print "$p $m: $flags" >> $work/flags.txt
+      # Asserted, not only recorded (the review fixes, part 2, item 12): a
+      # product's build mode is read from its compile line.
+      local words=" $flags"
+      if [[ -z $line || $words != *" -O "* || $words != *" -whole-module-optimization "* || $words != *" -strict-memory-safety "* \
+            || $words == *" -Onone "* || $words == *" -enable-testing "* || $words == *" -g "* ]]; then
+        log "frameworks $p $m: FAILED the compile flags (${flags:-no compile line found}): -O -whole-module-optimization -strict-memory-safety wanted, no -Onone, -enable-testing or -g"
+        return 1
+      fi
     done
   done
   for m in KajoVM KajoApp KajoAppDevelopment KajoDev; do
