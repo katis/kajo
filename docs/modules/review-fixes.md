@@ -610,6 +610,21 @@ wrote none of it); now the save is refused while any record has one
 - Item 23 checks the traced depth as well as the marker: `terminateTo:`
   drops a moved frame's marker, so the marker rule alone misses the
   restart path.
+- Three test faults found by the first `just check` runs, each fixed in
+  the tests and the run started again: the 1 MiB write to a connection
+  the server closes raised SIGPIPE in the test process (`swift-test`,
+  signal 13; the raw sockets set `SO_NOSIGPIPE`, 3dc41ae); the
+  concurrent-writer test's reads were autoreleased into a pool never
+  drained, and ThreadSanitizer's allocator ran out of chunks (`tsan`,
+  `CHECK failed sanitizer_allocator_secondary.h:42`; a pool per read,
+  b6e7be8); and under the sanitizer 20 connects at once overflowed the
+  listen backlog of 16 (three reset by the kernel, never accepted, so
+  `unpairedClosed` read 17) and `RegistryTest`'s 60 s wait ran out
+  (connects paced to the accepts, `ProtocolServer.acceptedCount`;
+  RegistryTest's bound 600 s and its work lighter: 480 handles, 8
+  rebuilds read 100 times, 4 x 20 compiles; d59d0fc). The failures on
+  8a8847d quoted above are of the heavier RegistryTest (1600 handles, 30
+  rebuilds, 4 x 40 compiles).
 
 ### Not done
 
@@ -641,3 +656,61 @@ wrote none of it); now the save is refused while any record has one
    weak slots that answers nil for an unmarked referent until the pass has
    run, with the sweep waiting for it)? Recommended: not now; the measured
    cost is proportional to weak slots, which no kernel table approaches.
+5. New: `theServerServesTCPWithTheTokenRuleAndTheLimits` waits 120 s for
+   a report on a global queue and ran out once under the sanitizer and
+   twelve busy loops in this module's gate run (passing three reruns).
+   Recommended: wait for it as long as the gate's own bound (the
+   assertion unchanged), in part 2.
+
+### `just check 8a8847d`
+
+The fourth run, on d59d0fc (the code of the module's last code commit;
+the three runs before it stopped at the test faults listed under
+Deviations), the core tier, every gate, 13 216 s, swift.org 6.4.2:
+
+    2026-11-10 13:12:47 d59d0fc check-tier core: 59 files from 8a8847d...HEAD (8a8847d...d59d0fc) and the working tree
+    2026-11-10 13:13:10 d59d0fc end clean-build rc=0 23s
+    2026-11-10 13:20:05 d59d0fc end swift-test rc=0 415s
+    2026-11-10 13:28:19 d59d0fc end swift-test-load rc=0 494s
+    2026-11-10 14:21:16 d59d0fc end tsan rc=0 3177s
+    2026-11-10 15:26:37 d59d0fc end tsan-load rc=1 3921s
+    2026-11-10 15:26:52 d59d0fc end ios-check rc=0 15s
+    2026-11-10 15:27:11 d59d0fc end arc-check rc=0 19s
+    2026-11-10 15:28:25 d59d0fc end golden rc=0 74s
+    2026-11-10 15:30:06 d59d0fc end test-release rc=0 101s
+    2026-11-10 15:30:27 d59d0fc end model-check rc=0 21s
+    2026-11-10 15:31:39 d59d0fc end soak rc=0 72s
+    2026-11-10 15:41:43 d59d0fc end fuzz-kasm rc=0 604s
+    2026-11-10 15:51:47 d59d0fc end fuzz-snapshot rc=0 604s
+    2026-11-10 16:01:58 d59d0fc end fuzz-syntax rc=0 611s
+    2026-11-10 16:12:07 d59d0fc end fuzz-protocol rc=0 609s
+    2026-11-10 16:14:11 d59d0fc end apps rc=0 124s
+    2026-11-10 16:15:30 d59d0fc end kernel-test rc=0 79s
+    2026-11-10 16:19:33 d59d0fc end new-check rc=0 243s
+    2026-11-10 16:24:54 d59d0fc end ab rc=0 321s
+    2026-11-10 16:38:41 d59d0fc end matrix-mac rc=0 827s
+    2026-11-10 16:53:03 d59d0fc end matrix-iphone rc=0 862s
+    2026-11-10 16:53:03 d59d0fc check-tier done core failed=1 13216s
+
+Every gate passed but `tsan-load`, which failed one existing test of
+module 9d, `PhoneTransportTests.theServerServesTCPWithTheTokenRuleAndThe
+Limits`: its last check, that the listener's pause-ended report arrives
+(dispatched to a global queue when the fake clock moves a minute on),
+waited its 120 s and saw `[true]` for `[true, false]`; that report is
+posted by `refusing()`, which this module did not change, and the same
+check had already passed its `!server.isRefusing`, which is the call that
+dispatches it. This is the wait AGENTS.md records ("a wait for a report
+that runs on a global queue is a wait for the queue's thread, not a
+bound"), now past 120 s with the suite 30 tests longer. Run again three
+times under the sanitizer and twelve busy loops it passed every time
+(34.6, 34.8 and 34.7 s). Not changed here; the test's bound is open question 5. ThreadSanitizer reported nothing in `tsan`
+or `tsan-load`; `swift-test` and `tsan` ran 418 + 136 tests; the kernel
+tests 240 of 240 (and 240 of 240 on the iPhone by `scripts/device.sh
+tests`, thermal nominal); the fuzzers "libFuzzer build: ok" at 1.61,
+0.82, 3.35 and 2.21 million runs (kasm, snapshot, syntax, protocol); the
+gate's A/B 0.996 to 1.003 at 1 worker and 0.981 to 1.029 at 8, checksums
+the same; the Mac matrix's bar: 156 rows, 0 launches failed, the ring
+under `young=stw` 188 to 190 frames behind 9 fallbacks a launch and the
+hog with the budget off 1193 by design, every other row 0; the iPhone's
+(5 workers): 0 fallbacks, the ring under `young=stw` 2 to 5 frames behind
+scavenges of 13.95 to 17.89 ms, the hog by design, every other row 0.
