@@ -45,6 +45,9 @@ classify() {
   case $1 in
     Sources/KajoVM/(ObjectMemory|Interpreter|Loader|Workers|Processes|Nursery|Marking|Relocation|YoungCollection|ObjectModel)/*) print core ;;
     kernel/*|tools/*|apps/Shared/smalltalk/*) print smalltalk ;;
+    # Tests' Markdown files are fixtures read byte for byte (the perf
+    # report's, the app project's): before *.md (the review fixes, part 2).
+    Tests/*) print swift ;;
     docs/*|*.md) print none ;;
     *) print swift ;;
   esac
@@ -63,16 +66,22 @@ fuzzers_for() {
 
 rank() { case $1 in none) print 0 ;; smalltalk) print 1 ;; swift) print 2 ;; core) print 3 ;; esac }
 
-cd $root
+# KAJO_CHECK_REPO: the repository whose diff decides (the test's scratch
+# repository); the gates run in this checkout.
+cd ${KAJO_CHECK_REPO:-$root}
 if [[ -n $paths ]]; then
   if [[ $paths == - ]]; then files=("${(@f)$(cat)}"); else files=("${(@f)$(cat $paths)}"); fi
   source_desc="the paths in $paths"
 else
   base=${base:-origin/master}
   git rev-parse -q --verify "$base^{commit}" > /dev/null || { print "check-tier: no commit $base"; exit 2 }
-  files=("${(@f)$( { git diff --name-only $base...HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)}")
+  # --no-renames: a rename is its old path and its new one, so a file
+  # moved out of the core still owes the core tier (the review fixes,
+  # part 2, item 10).
+  files=("${(@f)$( { git diff --name-only --no-renames $base...HEAD; git diff --name-only --no-renames HEAD; git ls-files --others --exclude-standard; } | sort -u)}")
   source_desc="$base...HEAD ($(git rev-parse --short $base)...$(git rev-parse --short HEAD)) and the working tree"
 fi
+cd $root
 files=(${files:#})
 
 decided=none

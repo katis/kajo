@@ -38,6 +38,29 @@ expect swift kasm Sources/fuzz-kasm/FuzzKasm.swift
 expect swift snapshot Sources/fuzz-snapshot/FuzzSnapshot.swift
 expect swift "protocol syntax" Sources/KajoDev/Client.swift Sources/KajoCompiler/Parser.swift
 expect swift "kasm snapshot syntax protocol" scripts/fuzz.sh
+# The review fixes, part 2, item 10 (tools.F4): a Markdown fixture under
+# Tests/ is Swift's, not docs.
+expect swift - Tests/KajoCompilerTests/Fixtures/perf/README.golden.md
+expect swift - Tests/KajoCompilerTests/Fixtures/app-project/Sample/README.md
+expect swift - Tests/KajoCompilerTests/Fixtures/perf/README.in.md docs/x.md
+# A rename is judged by both of its paths: a scratch repository whose one
+# commit moves a file out of the core, committed and then in the working
+# tree (plain mv and add, never git mv in this checkout's tree).
+scratch=$(mktemp -d ${TMPDIR:-/tmp}/kajo-tier-XXXXXX)
+renamed() {
+  (cd $scratch && git init -q && git config user.email t@t && git config user.name t \
+    && mkdir -p Sources/KajoVM/Marking Sources/KajoVM/Shell && print 'let x = 1' > Sources/KajoVM/Marking/X.swift \
+    && git add . && git commit -qm base && mv Sources/KajoVM/Marking/X.swift Sources/KajoVM/Shell/X.swift \
+    && git add -A . && { [[ $1 == staged ]] || git commit -qm move })
+  KAJO_CHECK_REPO=$scratch $root/scripts/check-tier.sh --dry-run HEAD~${2} | sed -n 's/^tier: //p'
+}
+for how in committed staged; do
+  rm -rf $scratch/*(N) $scratch/.git(N)
+  [[ $how == committed ]] && got=$(renamed committed 1) || got=$(renamed staged 0)
+  n=$((n + 1))
+  [[ $got == core ]] || { print "FAIL: a $how rename out of the core -> tier '$got', want core"; fail=1 }
+done
+rm -rf $scratch
 expect core - Sources/KajoVM/Interpreter/Interpreter.swift
 expect core - Sources/KajoVM/Loader/Image.swift Sources/KajoDev/Client.swift kernel/Object.class.st
 for d in ObjectMemory Interpreter Loader Workers Processes Nursery Marking Relocation YoungCollection ObjectModel; do
