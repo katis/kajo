@@ -75,6 +75,16 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         public init() {}
     }
     private var currentLimits = Limits()  // under lock
+    /// Tests (the review fixes, part 2, item 18): this many of the accept
+    /// loop's next `accept` calls fail with EMFILE without being made, so
+    /// the failure path is run without lowering the process's descriptor
+    /// limit.
+    private var injectedAcceptFailures = 0  // under lock
+    func injectAcceptFailures(_ n: Int) {
+        lock.lock()
+        injectedAcceptFailures = n
+        lock.unlock()
+    }
     private var currentClock: @Sendable () -> UInt64 = { ShellVM.now() }  // under lock
     public var limits: Limits {
         get { lock.lock(); defer { lock.unlock() }; return currentLimits }
@@ -241,11 +251,13 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         while true {
             lock.lock()
             let fd = listenFD
+            let injected = injectedAcceptFailures > 0
+            if injected { injectedAcceptFailures -= 1 }
             lock.unlock()
             if fd < 0 { return }
-            let c = accept(fd, nil, nil)
+            let c = injected ? -1 : accept(fd, nil, nil)
             if c < 0 {
-                let e = errno
+                let e = injected ? EMFILE : errno
                 if e == EINTR { continue }
                 lock.lock()
                 let gone = stopped || listenFD < 0

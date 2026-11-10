@@ -378,3 +378,65 @@ final class HoldingTarget: @unchecked Sendable {
     #expect(vm.vm.pendingRootCount == base + 1, "the queued signal holds no root")
     #expect(drive(vm) { vm.vm.pendingRootCount == base })
 }
+
+/// Item 18, part 1's tests owed: the accept loop's failure path through an
+/// injected `accept` result (EMFILE three times, not the process's
+/// descriptor limit lowered): the failures are counted and waited out and
+/// the next connection is served.
+@Test func theAcceptLoopWaitsOutInjectedFailures() throws {
+    let t = try TCPTarget()
+    defer { t.close() }
+    t.target.server.injectAcceptFailures(3)
+    let c1 = try t.client()
+    defer { c1.close() }
+    try c1.open(token: t.target.server.token, client: "developer", timeout: 60)
+    let c2 = try t.client()
+    defer { c2.close() }
+    try c2.open(token: t.target.server.token, client: "developer", timeout: 60)
+    #expect(try c2.eval("3 + 4")["value"] == .string("7"))
+    #expect(t.target.server.stats.values.acceptFailures == 3)
+}
+
+/// Item 18: the client side of part 1's item 5 (`ClientConnection`): eight
+/// threads sending while the connection is released; no write block runs
+/// after the descriptor is closed, and a send after the release is
+/// refused (20 rounds).
+@Test func noClientWriteRunsAfterItsConnectionIsReleased() throws {
+    for round in 0..<20 {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("kajo-cw-\(getpid())-\(round).sock").path
+        let t = try HoldingTarget(path: path, bytes: [])
+        defer { t.stop() }
+        let c = ClientConnection(id: round, address: .unix(path), project: nil)
+        #expect(c.connect() == nil)
+        c.open(Array(#"{"v":1,"id":"session","kind":"session.open","args":{}}"#.utf8))
+        let go = DispatchSemaphore(value: 0)
+        let group = DispatchGroup()
+        for _ in 0..<8 {
+            DispatchQueue.global().async(group: group) {
+                go.wait()
+                for _ in 0..<200 { _ = c.send(Array(#"{"v":1,"id":1,"kind":"evaluate","args":{"source":"1"}}"#.utf8)) }
+            }
+        }
+        for _ in 0..<8 { go.signal() }
+        usleep(500)
+        c.release()
+        #expect(group.wait(timeout: .now() + 60) == .success)
+        #expect(!c.send(Array("{}".utf8)))
+        #expect(c.lateWriteCount == 0, "round \(round)")
+    }
+}
+
+/// Item 18: primitive 154's put-back on its own (part 1 tested it through
+/// 160's): an event the image cannot allocate is put back at the queue's
+/// head and the next take answers it.
+@Test func anEventTheImageCannotAllocateIsNotLost() throws {
+    let shell = TestShell()
+    let vm = try openShell(shell, workers: 1)
+    defer { vm.close() }
+    _ = try run(vm, "evaluate:", on: "Compiler", [.string("UIEventLoop eventSemaphore: Semaphore new. nil")])
+    vm.post(ShellEvent(kind: .line, target: 0, value: .string("kept"), timeNs: ShellVM.now()))
+    vm.bridge.failAllocations.store(1, ordering: .relaxed)
+    #expect(try run(vm, "evaluate:", on: "Compiler", [.string("UIEventLoop nextEvent isNil")]) == .bool(true))
+    #expect(vm.bridge.failAllocations.load(ordering: .relaxed) == 0)
+    #expect(try run(vm, "evaluate:", on: "Compiler", [.string("UIEventLoop nextEvent at: 3")]) == .string("kept"))
+}

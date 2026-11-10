@@ -438,7 +438,17 @@ final class ClientConnection: @unchecked Sendable {
     private var ready = false  // under lock: session.open was queued
     private var held: [[UInt8]] = []  // under lock: lines sent before that
     private var closed = false  // under lock
+    private var descriptorClosed = false  // under lock
+    /// Write blocks that ran after the descriptor was closed (must stay 0;
+    /// the review fixes, part 2, item 18: the client side of item 5).
+    private(set) var lateWrites = 0  // under lock
     private let queue: DispatchQueue
+
+    var lateWriteCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return lateWrites
+    }
 
     init(id: Int, address: TargetAddress, project: String?) {
         self.id = id
@@ -496,7 +506,12 @@ final class ClientConnection: @unchecked Sendable {
     }
 
     private func write(_ f: Int32, _ line: [UInt8]) {
-        queue.async {
+        queue.async { [self] in
+            lock.lock()
+            let late = descriptorClosed
+            if late { lateWrites += 1 }
+            lock.unlock()
+            if late { return }
             var bytes = line
             bytes.append(10)
             var off = 0
@@ -574,5 +589,8 @@ final class ClientConnection: @unchecked Sendable {
         // all of them are ahead of this; none can follow it.
         queue.sync {}
         if f >= 0 { Darwin.close(f) }
+        lock.lock()
+        descriptorClosed = true
+        lock.unlock()
     }
 }
