@@ -55,7 +55,15 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         var l = server.limits
         l.unpairedNs = 2_000_000_000
         server.limits = l
-        let idle = (0..<20).map { _ in rawConnect(t.port) }
+        // One at a time, each accepted before the next (a listen backlog of
+        // 16 overflowed under ThreadSanitizer and the kernel reset three:
+        // closed, but never the server's to count).
+        let idle = (0..<20).map { k -> Int32 in
+            let fd = rawConnect(t.port)
+            let end = ShellVM.now() + 30_000_000_000
+            while server.acceptedCount < k + 1 && ShellVM.now() < end { usleep(1000) }
+            return fd
+        }
         defer { idle.forEach { close($0) } }
         // The first twelve were closed to make room for the last eight ...
         #expect(idle.prefix(12).allSatisfy { closedByServer($0, within: 30) })

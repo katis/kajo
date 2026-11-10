@@ -527,6 +527,14 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         for c in open { c.send(line) }
     }
 
+    /// Connections accepted so far (tests: pace connects so the listen
+    /// backlog never overflows).
+    var acceptedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return nextConnection - 1
+    }
+
     public var sessionCount: Int {
         lock.lock()
         defer { lock.unlock() }
