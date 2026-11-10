@@ -73,6 +73,10 @@ reason, which the kernel signals as a **ClassDefinitionError**:
   along the chain (the superclasses' pools are read from their Bindings'
   keys) and shadowing no instance variable (`namesProblem`, which `Plan`
   in KajoCompiler now calls for the build, with the build's messages);
+  since the review fixes, part 2 (item 4), primitive 146 runs the same
+  names rule for the class and every class below it against the change,
+  from the names the kernel gives as the specification's fifth part,
+  each list's length checked against the slots the class will have;
 - the Bindings' class a fixed, unsealed class of at least two slots;
 - room in the class table (`LoaderLimits.maxClassIndex`).
 

@@ -136,6 +136,7 @@ by the first pattern it matches, and the diff owes the highest:
 |---|---|
 | core | `Sources/KajoVM/(ObjectMemory\|Interpreter\|Loader\|Workers\|Processes\|Nursery\|Marking\|Relocation\|YoungCollection\|ObjectModel)/*` |
 | smalltalk | `kernel/*`, `tools/*`, `apps/Shared/smalltalk/*` |
+| swift | `Tests/*` before `*.md` (since the review fixes, part 2: a Markdown fixture is read byte for byte by a test); both diffs run with `--no-renames`, so a rename is judged by its old path and its new one; a matrix gate fails when its matrix, its report or its bar fails, and `--bar` over no rows exits 1 |
 | none | `docs/*`, `*.md` (so `experiments/*/RESULTS.md`, `AGENTS.md`) |
 | swift | everything else: `Sources/` outside the core (`KajoVM/Shell/`, `KajoVM/Headless.swift` among them), `Tests/`, `Package.swift`, `scripts/`, `justfile`, `apps/` but its Smalltalk, `models/`, `experiments/` code |
 

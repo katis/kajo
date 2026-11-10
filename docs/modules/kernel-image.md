@@ -555,9 +555,11 @@ From kernel.md and ADR 0009, each with its reason:
 - **Float has no transcendental functions** (only the 8a primitives:
   arithmetic, `sqrt`, `truncated`, `exponent`, `timesTwoPower:`).
 - **Character classification and case are ASCII**; above 127 every
-  non-separator counts as a letter, and the Smalltalk scanner takes such
-  scalars in identifiers where Swift's takes Unicode letters (the kernel's
-  identifiers are ASCII).
+  non-separator counts as a letter. Identifiers are not: since the review
+  fixes, part 2 (item 2), both scanners ask one predicate,
+  `IdentifierRule` (the bootstrap's, through primitive 171 for the
+  Smalltalk scanner): a Unicode alphabetic scalar starts and continues an
+  identifier, a non-ASCII numeric one only continues it.
 - **String `collect:` answers a String** (Pharo's), so its block answers
   Characters.
 
