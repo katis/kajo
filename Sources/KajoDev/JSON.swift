@@ -112,6 +112,11 @@ struct JSONReader {
     mutating func object(depth: Int) throws -> JSONValue {
         i += 1
         var fields: [(String, JSONValue)] = []
+        // The review fixes (item 16, primitives.F5): the keys seen so far
+        // in a Set, so the duplicate check is linear in the object's size
+        // (a search of the members made it quadratic, reachable before the
+        // token and from a target).
+        var keys = Set<String>()
         skip()
         if i < bytes.count && bytes[i] == 125 {
             i += 1
@@ -121,7 +126,7 @@ struct JSONReader {
             skip()
             guard i < bytes.count, bytes[i] == 34 else { throw fail("expected a key") }
             let k = try string()
-            if fields.contains(where: { $0.0 == k }) { throw fail("the key \(k) twice") }
+            if !keys.insert(k).inserted { throw fail("the key \(k) twice") }
             skip()
             guard i < bytes.count, bytes[i] == 58 else { throw fail("expected :") }
             i += 1

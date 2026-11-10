@@ -142,4 +142,30 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         }
         #expect(count == "1")
     }
+
+    /// Item 16 (primitives.F5): one object of 100 000 distinct keys (the
+    /// client's limits allow a million) is read in a CPU budget; with the
+    /// members searched for each key it took about 5 x 10^9 comparisons.
+    @Test func theDuplicateKeyCheckIsLinear() throws {
+        var line = Array("{".utf8)
+        for k in 0..<100_000 {
+            if k > 0 { line.append(44) }
+            line += Array("\"k\(k)\":1".utf8)
+        }
+        line.append(125)
+        var limits = JSONLimits()
+        limits.bytes = 1 << 26
+        limits.elements = 1 << 20
+        func cpu() -> UInt64 { clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) }
+        let t0 = cpu()
+        guard case .success(.object(let fields)) = parseJSON(line, limits: limits) else {
+            Issue.record("refused")
+            return
+        }
+        let ns = cpu() - t0
+        #expect(fields.count == 100_000)
+        #expect(ns < (compilerTestsUnderThreadSanitizer ? 60 : 10) * 1_000_000_000, "\(Double(ns) / 1e9) s of CPU")
+        // and a duplicate is still refused
+        if case .success = parseJSON(Array(#"{"a":1,"b":2,"a":3}"#.utf8)) { Issue.record("a duplicate key accepted") }
+    }
 }
