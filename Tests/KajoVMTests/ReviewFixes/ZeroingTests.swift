@@ -559,3 +559,62 @@ end
     rt.vm.release(p)
     rt.stop()
 }
+
+// MARK: - item 24: a save while an interrupt is pending
+
+private let pendingSaveSource = """
+method UndefinedObject waitOn3 temps=0
+  push_nil
+  push_int 3
+  send globalAt: 1
+  send wait 0
+  pop
+  push_int 1
+  return_top
+end
+method UndefinedObject save: temps=0 prim=142
+  push_int -1
+  return_top
+end
+method UndefinedObject saveNow temps=0
+  push_nil
+  push_nil
+  send save: 1
+  return_top
+end
+method Process stopForDebugger temps=0
+  push_self
+  return_top
+end
+"""
+
+/// The review fixes, item 24 (interpreter.F5): a Process asked to stop for
+/// the debugger (interrupt kind 2) that has not run it yet keeps the save
+/// from happening (the primitive fails, its fallback answers -1, counted);
+/// once it has run, the save goes through. On d78afcc the save answered
+/// false (saved) and the image held the Process with no trace of the ask.
+@Test func aSaveWaitsForPendingInterrupts() throws {
+    let rt = try Runtime(pendingSaveSource, background: 1, start: false)
+    rt.semaphore(global: 3)
+    let p = rt.spawn("waitOn3")
+    _ = rt.vm.runOneSlice(worker: 1)
+    #expect(rt.state(p) == .waiting)
+    #expect(rt.vm.interruptProcess(p, kind: InterruptKind.debugStop))
+    // The saver first (a higher priority): P is ready with its interrupt.
+    let s1 = rt.spawn("saveNow", priority: 2)
+    _ = rt.vm.runOneSlice(worker: 1)
+    #expect(rt.state(s1) == .terminated)
+    #expect(rt.result(s1) == -1)
+    #expect(rt.vm.counters[.snapshotsRefusedPending] == 1)
+    // P runs its interrupt and waits again; now the save goes through.
+    for _ in 0..<100 where rt.vm.runOneSlice(worker: 1) {}
+    #expect(rt.state(p) == .waiting)
+    let s2 = rt.spawn("saveNow", priority: 2)
+    for _ in 0..<100 where rt.vm.runOneSlice(worker: 1) {}
+    #expect(rt.vm.result(of: s2) == rt.image.falseObject)
+    rt.vm.release(s1)
+    rt.vm.release(s2)
+    rt.vm.terminate(p)
+    rt.vm.release(p)
+    rt.stop()
+}

@@ -331,6 +331,9 @@ enum Counter: Int, CaseIterable {
     /// The review fixes (item 2): a long ByteArray's zeroing that found its
     /// object's length or body changed after a poll and stopped.
     case zeroingCutOff
+    /// The review fixes (item 24): saves refused because a Process had an
+    /// interrupt or a terminate request still to run.
+    case snapshotsRefusedPending
 }
 
 /// A snapshot of the counters.

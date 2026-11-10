@@ -134,6 +134,21 @@ private func anotherProcessRuns(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
     return false
 }
 
+/// World stopped: a record has an interrupt or a terminate request that
+/// has not run yet (counted `snapshotsRefusedPending`).
+private func pendingInterrupts(_ vm: VMPointer) -> Bool {
+    unsafe schedLock(vm)
+    defer { unsafe schedUnlock(vm) }
+    for i in unsafe 0..<vm.pointee.sched.pointee.recordHighWater {
+        let r = unsafe records(vm, i)
+        if unsafe r.pointee.process != .none && (r.pointee.interrupt != 0 || r.pointee.terminateRequested) {
+            unsafe vm.count(.snapshotsRefusedPending)
+            return true
+        }
+    }
+    return false
+}
+
 /// One live Process as the stop found it.
 private struct LiveProcess {
     let process: Oop
@@ -151,6 +166,13 @@ private func saveInStop(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext
     let nilObj = unsafe vm.pointee.nilObject
     let special = image.specialObjects
     guard om.count(of: special) > UInt64(SpecialObjects.scheduler) else { return nil }  // a version 1 image
+    // The review fixes (item 24, interpreter.F5): an interrupt (a suspend, a
+    // step's stop, a terminate's unwinding) or a terminate request still
+    // pending lives in the host's record only, which the image does not
+    // hold: saved, the Process would resume as if nothing was asked. The
+    // save is refused (as one that finds the heap full is) until each has
+    // run; the kernel's snapshot: says so and may try again.
+    if unsafe pendingInterrupts(vm) { return nil }
     // Signals land before the save, in both systems.
     if unsafe externalPending(vm) { unsafe drainExternal(vm, w) }
     // Garbage stays out of the image; the snapshot needs nothing young
