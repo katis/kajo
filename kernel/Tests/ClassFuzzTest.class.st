@@ -77,19 +77,26 @@ ClassFuzzTest >> exercise: aClass [
 
 { #category : #tests }
 ClassFuzzTest >> testSeededReshapesAreRefusedOrAccepted [
+	"500 seeded mutations of a redefinition specification (module 8e), each refused or accepted; since the review fixes, part 2, item 4, the specification names the classes' variables (its fifth part), every twentieth one breaks those names, and after every accepted one the image build's names rule holds over every class (primitive 146 with an empty change checks them)."
 	<slow>
-	| c objs seed accepted refused |
+	| c objs seed accepted refused names meta others |
 	Smalltalk isReleaseImage ifTrue: [^ self].
 	c := Smalltalk primDefineClass: {#ClassFuzzR. Object. #(#a #b). #(). #(). #fixed. nil. 0. 0}.
 	self deny: c isString.
 	objs := (1 to: 5) collect: [:i | c basicNew instVarAt: 1 put: i; yourself].
+	others := ((Smalltalk allBehaviors reject: [:x | x isMeta or: [x == c or: [(Smalltalk definitionOf: x) isNil]]])
+		collect: [:x | {x. (Smalltalk instanceVariableNamesOf: x) asArray. (Smalltalk instanceVariableNamesOf: x class) asArray}]) asArray.
+	names := #(#a #b).
+	meta := #().
 	seed := 16rB0D7.
 	accepted := 0. refused := 0.
-	1 to: 500 do: [:k | | n spec kind r shape |
+	1 to: 500 do: [:k | | n spec kind r shape row after |
 		seed := self next: seed.
 		n := c instSize.
 		shape := {c. n + 1. (1 to: n) asArray , #(0)}.
-		spec := {{shape}. {}. {}. nil}.
+		after := (1 to: n + 1) collect: [:i | (i <= names size ifTrue: [names at: i] ifFalse: [('v' , i printString) asSymbol])].
+		row := {c. after asArray. meta}.
+		spec := {{shape}. {}. {}. nil. {row}}.
 		kind := seed \\ 8.
 		r := seed // 11.
 		kind = 0 ifTrue: [shape at: 1 put: (self strangers at: r \\ self strangers size + 1)].
@@ -97,14 +104,24 @@ ClassFuzzTest >> testSeededReshapesAreRefusedOrAccepted [
 		kind = 2 ifTrue: [(shape at: 3) at: r \\ (n + 1) + 1 put: (#(-1 99 0 1) at: r // 3 \\ 4 + 1)].
 		kind = 3 ifTrue: [spec at: 2 put: {{c. {Object >> #printOn:. 3}}}].
 		kind = 4 ifTrue: [spec at: 3 put: {{c. {Binding new. 3}}}].
-		kind = 5 ifTrue: [spec at: 1 put: {{c class. 7. #(1 2 3 4 5 0 0)}. shape}].
+		kind = 5 ifTrue: [spec at: 1 put: {{c class. 7. #(1 2 3 4 5 0 0)}. shape}. row at: 3 put: #(#m1 #m2)].
 		kind = 6 ifTrue: [spec at: r \\ 3 + 1 put: (self strangers at: r // 3 \\ self strangers size + 1)].
 		kind = 7 ifTrue: [shape at: 3 put: (n = 0 ifTrue: [#(0)] ifFalse: [(Array new: n + 1 withAll: 1)])].
+		"every twentieth: the names broken (a name twice, the class's names missing, one name too many)"
+		k \\ 20 = 0 ifTrue: [
+			(k // 20) \\ 3 = 0 ifTrue: [row at: 2 put: (after copyWith: after first) asArray].
+			(k // 20) \\ 3 = 1 ifTrue: [spec at: 5 put: #()].
+			(k // 20) \\ 3 = 2 ifTrue: [row at: 2 put: (after copyWith: #extra) asArray]].
 		r := [Smalltalk primRedefine: spec] on: Error do: [:e | e return: e messageText].
 		r isString ifTrue: [refused := refused + 1] ifFalse: [
 			accepted := accepted + 1.
+			names := row at: 2.
+			meta := row at: 3.
 			"every instance kept its first slot where the layout put it, and has the class's slots"
-			objs do: [:o | self assert: o basicSize = 0. self assert: (o class == c)]]].
+			objs do: [:o | self assert: o basicSize = 0. self assert: (o class == c)].
+			"the image build's names rule over every class, this one as the specification named it"
+			r := Smalltalk primRedefine: {#(). #(). #(). nil. others , {{c. names. meta}}}.
+			self assert: r isNil description: r printString]].
 	Transcript show: 'ClassFuzzTest: 500 reshapes, ' , refused printString , ' refused, ' , accepted printString , ' accepted'; cr.
 	self assert: accepted + refused = 500.
 	self assert: refused > 100.

@@ -380,12 +380,22 @@ private struct ShapeChange {
 ///     new method replaces (a removed one, or an earlier version still
 ///     referenced) sends to its receiver once forwarded to a stub
 ///     (`makeStub`); nil refuses a change that finds such a method.
+///   5 names (the review fixes, part 2, item 4): each {class. every
+///     instance variable name, inherited first. every class-side instance
+///     variable name, inherited first}, Symbols, as they will be after the
+///     change, for every class at or below a class whose shape or pool
+///     changes (needed when 1 or 3 is not empty; with neither, any classes
+///     given are only checked). Each list's length must be the slots the
+///     class will have; then ClassRules' names rule, the image build's, runs
+///     for each class given against the pools the change leaves, so a
+///     redefinition that a subclass's names clash with is refused before
+///     anything changes, and an empty change with names checks them.
 /// All checked, every method made and verified, every object allocated,
 /// before anything changes; then, without a failure possible: forwarding,
 /// the reshape, the formats, the dictionaries, the pools.
 private func redefine(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<Oop, Refusal> {
     let om = m.om
-    guard let parts = m.arrayElements(spec), parts.count == 3 || parts.count == 4, let shapeSpecs = m.arrayElements(parts[0]),
+    guard let parts = m.arrayElements(spec), (3...5).contains(parts.count), let shapeSpecs = m.arrayElements(parts[0]),
           let methodSpecs = m.arrayElements(parts[1]), let poolSpecs = m.arrayElements(parts[2]) else {
         return .failure(Refusal("the specification is not an Array of three Arrays"))
     }
@@ -546,6 +556,12 @@ private func redefine(_ m: Machine, spec: Oop, roots: () -> [Oop]) -> Result<Oop
         }
         if newPools.contains(where: { $0.meta == meta }) { return .failure(Refusal("\(m.behaviorName(e[0])): two pools")) }
         newPools.append((meta, bs))
+    }
+    // --- names: the build's names rule over every class at or below a
+    // changed one, with the names the kernel gives and the pools after the
+    // change (the review fixes, part 2, item 4)
+    if let problem = namesProblemAfter(m, parts.count > 4 ? parts[4] : m.nilObject, shapes: shapes, pools: newPools) {
+        return .failure(Refusal(problem))
     }
     // --- allocate: dictionaries, pools, then the bodies
     let ctx = unsafe m.state.pointee.context
@@ -943,4 +959,104 @@ private func readFile(_ path: String) -> [UInt8]? {
         if out.count > Header.maxLargeCount { return nil }
     }
     return out
+}
+
+/// Item 5 of the redefine specification, checked: nil, or what the image
+/// build would refuse in the classes as the change leaves them.
+private func namesProblemAfter(_ m: Machine, _ table: Oop, shapes: [ShapeChange], pools: [(meta: Oop, bindings: [Oop])]) -> String? {
+    let om = m.om
+    func symbols(_ o: Oop) -> [String]? {
+        guard let xs = m.arrayElements(o) else { return nil }
+        var out: [String] = []
+        for x in xs {
+            guard m.classIndex(of: x) == WellKnown.symbol, let t = m.symbolText(x) else { return nil }
+            out.append(t)
+        }
+        return out
+    }
+    var given: [UInt64: (all: [String], meta: [String])] = [:]
+    if table != m.nilObject {
+        guard let rows = m.arrayElements(table) else { return "the names are not an Array" }
+        for r in rows {
+            guard let e = m.arrayElements(r), e.count == 3, let ci = m.behaviorIndex(e[0]), !m.isMetaclass(e[0]),
+                  let all = symbols(e[1]), let meta = symbols(e[2]) else {
+                return "a names entry is not {a class. Symbols. Symbols}"
+            }
+            if given[ci] != nil { return "\(m.behaviorName(e[0])): its names twice" }
+            given[ci] = (all, meta)
+        }
+    }
+    func slotsAfter(_ i: UInt64) -> Int { shapes.first { $0.index == i }?.newSlots ?? om.classFormat(i).namedSlots }
+    // The classes whose shape or pool changes, by their instance side.
+    var changed = Set<UInt64>()
+    for sc in shapes {
+        if m.isMetaclass(sc.behavior) {
+            if let ci = m.behaviorIndex(om.load(sc.behavior, MetaclassLayout.thisClass)) { changed.insert(ci) }
+        } else {
+            changed.insert(sc.index)
+        }
+    }
+    var poolAfter: [Oop: [String]] = [:]
+    for p in pools {
+        var keys: [String] = []
+        for b in p.bindings { keys.append(m.symbolText(om.load(b, BindingLayout.key)) ?? "") }
+        poolAfter[p.meta] = keys
+        if let ci = m.behaviorIndex(om.load(p.meta, MetaclassLayout.thisClass)) { changed.insert(ci) }
+    }
+    func poolKeys(_ c: Oop) -> [String] {
+        let meta = om.classOop(m.classIndex(of: c))
+        if let k = poolAfter[meta] { return k }
+        var out: [String] = []
+        if let bs = m.arrayElements(om.load(meta, MetaclassLayout.classPool)) {
+            for b in bs where b.isObject && !om.isBytes(b) && om.count(of: b) >= UInt64(BindingLayout.size) {
+                if let k = m.symbolText(om.load(b, BindingLayout.key)) { out.append(k) }
+            }
+        }
+        return out
+    }
+    // Every live class at or below a changed one must be given.
+    if !changed.isEmpty {
+        for i in 1..<UInt64(om.classCount) where om.classOop(i) != .none {
+            let c = om.classOop(i)
+            if m.isMetaclass(c) || m.isObsolete(c) || given[i] != nil { continue }
+            var x = c
+            var steps = om.classCount
+            while x != m.nilObject && om.isBehavior(x) && steps > 0 {
+                if let xi = m.behaviorIndex(x), changed.contains(xi) { return "\(m.behaviorName(c)): its names are not given" }
+                x = om.load(x, ClassLayout.superclass)
+                steps -= 1
+            }
+        }
+    }
+    for (ci, names) in given.sorted(by: { $0.key < $1.key }) {
+        let c = om.classOop(ci)
+        let name = m.behaviorName(c)
+        let mi = m.classIndex(of: c)
+        guard names.all.count == slotsAfter(ci) else { return "\(name): \(names.all.count) instance variable names for \(slotsAfter(ci)) slots" }
+        guard names.meta.count == slotsAfter(mi) - ClassLayout.size else {
+            return "\(name): \(names.meta.count) class-side instance variable names for \(slotsAfter(mi) - ClassLayout.size) slots"
+        }
+        let sup = om.load(c, ClassLayout.superclass)
+        var supAll = 0, supMeta = 0
+        if sup != m.nilObject, let si = m.behaviorIndex(sup) {
+            supAll = slotsAfter(si)
+            supMeta = max(0, slotsAfter(m.classIndex(of: sup)) - ClassLayout.size)
+        }
+        guard supAll <= names.all.count, supMeta <= names.meta.count else { return "\(name): fewer names than its superclass's" }
+        var inherited: [String: String] = [:]
+        var x = sup
+        var steps = om.classCount
+        while x != m.nilObject && om.isBehavior(x) && steps > 0 {
+            for k in poolKeys(x) where inherited[k] == nil { inherited[k] = m.behaviorName(x) }
+            x = om.load(x, ClassLayout.superclass)
+            steps -= 1
+        }
+        if let problem = ClassRules.namesProblem(className: name, instanceVariables: names.all, classInstanceVariables: names.meta,
+                                                 ownInstanceVariables: Array(names.all[supAll...]),
+                                                 ownClassInstanceVariables: Array(names.meta[supMeta...]),
+                                                 classVariables: poolKeys(c), inherited: inherited) {
+            return problem
+        }
+    }
+    return nil
 }

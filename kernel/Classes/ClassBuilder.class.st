@@ -115,7 +115,7 @@ ClassBuilder class >> redefine: aClass instanceVariableNames: ivars classVariabl
 	failures isEmpty ifFalse: [
 		^ ClassDefinitionError new signal: aClass name , ': ' , failures size printString , ' methods do not compile: ' , (failures inject: '' into: [:a :e | a isEmpty ifTrue: [e] ifFalse: [a , '; ' , e]])].
 	(shapes isEmpty and: [pools isEmpty and: [methods isEmpty]]) ifTrue: [^ aClass].
-	result := Smalltalk primRedefine: (Array with: shapes asArray with: methods asArray with: pools asArray with: #methodRemovedByRedefinition).
+	result := Smalltalk primRedefine: {shapes asArray. methods asArray. pools asArray. #methodRemovedByRedefinition. self namesAfter: aClass own: own ownMeta: ownC}.
 	result isString ifTrue: [^ ClassDefinitionError new signal: aClass name , ': ' , result].
 	"The records follow the image: definitions, sources (the replaced methods were forwarded to their new selves), categories, the pragma index, the class variables."
 	shapes do: [:s | | b | b := s first.
@@ -184,6 +184,35 @@ ClassBuilder class >> inheritedKindFrom: aClass [
 { #category : #private }
 ClassBuilder class >> kindOf: aClass [
 	^ (Smalltalk definitionOf: aClass) ifNil: [#fixed] ifNotNil: [:d | d kind]
+]
+
+{ #category : #private }
+ClassBuilder class >> namesAfter: aClass own: own ownMeta: ownC [
+	"{class. every instance variable name. every class-side instance variable name} (Symbols, inherited first) for aClass and every class below it, as they will be once aClass's own names are own and ownC (the review fixes, part 2, item 4): primitive 146 runs the image build's names rule over them against the pools the change leaves, and refuses a redefinition the written sources could not be built from."
+	| rows queue all meta |
+	rows := OrderedCollection new.
+	all := IdentityDictionary new.
+	meta := IdentityDictionary new.
+	all at: aClass put: (Smalltalk instanceVariableNamesOf: aClass superclass) , own.
+	meta at: aClass put: (aClass superclass isNil ifTrue: [#()] ifFalse: [Smalltalk instanceVariableNamesOf: aClass superclass class]) , ownC.
+	queue := OrderedCollection with: aClass.
+	[queue isEmpty] whileFalse: [ | c |
+		c := queue removeFirst.
+		rows add: {c. (all at: c) asArray. (meta at: c) asArray}.
+		c subclasses do: [:sub |
+			(Smalltalk definitionOf: sub) ifNotNil: [:d |
+				all at: sub put: (all at: c) , d instVarNames asArray.
+				meta at: sub put: (meta at: c) , d classInstVarNames asArray.
+				queue add: sub]]].
+	^ rows asArray
+]
+
+{ #category : #private }
+ClassBuilder class >> namesProblemIn: classes [
+	"nil when the image build's names rule holds for every class of classes as the image records their names, else the VM's reason (primitive 146 with an empty change: it only checks)."
+	| r |
+	r := Smalltalk primRedefine: {#(). #(). #(). nil. (classes collect: [:c | {c. (Smalltalk instanceVariableNamesOf: c) asArray. (Smalltalk instanceVariableNamesOf: c class) asArray}]) asArray}.
+	^ r isString ifTrue: [r] ifFalse: [nil]
 ]
 
 { #category : #private }

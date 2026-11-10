@@ -38,7 +38,7 @@ private let redefineFiles: [(file: String, text: [UInt8])] = miniKernel + [objec
     R class >> garbageThenRedefine [
         cls basicNew.
         cls basicNew.
-        (self redefine: {{{cls. 3. #(0 2 1)}}. {}. {}. nil}) == nil ifFalse: [^ -1].
+        (self redefine: {{{cls. 3. #(0 2 1)}}. {}. {}. nil. {{cls. #(#z #y #x). #()}}}) == nil ifFalse: [^ -1].
         ^ 1
     ]
     """),

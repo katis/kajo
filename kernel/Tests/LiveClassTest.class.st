@@ -17,6 +17,26 @@ LiveClassTest >> tearDown [
 ]
 
 { #category : #tests }
+LiveClassTest >> testARedefinitionThatTheSubclassesNamesClashWithIsRefused [
+	"The review fixes, part 2, item 4 (kernel.F9): primitive 146 runs the image build's names rule over the class and every subclass against the new shape. A class variable a subclass declares, an instance variable that shadows the class's own class variable, a class variable a subclass's instance variable shadows: each refused with a ClassDefinitionError and nothing changed, and the image's names still pass the rule."
+	| a b |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	a := Object subclass: #LiveClassSample instanceVariableNames: 'p' classVariableNames: 'Count' package: 'Kernel' tag: 'Tests-Live'.
+	b := a subclass: #LiveClassSampleSub instanceVariableNames: 'x Xv' classVariableNames: 'Cache' package: 'Kernel' tag: 'Tests-Live'.
+	self should: [Object subclass: #LiveClassSample instanceVariableNames: 'p' classVariableNames: 'Count Cache' package: 'Kernel' tag: 'Tests-Live'] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSample instanceVariableNames: 'p Count' classVariableNames: 'Count' package: 'Kernel' tag: 'Tests-Live'] raise: ClassDefinitionError.
+	self should: [Object subclass: #LiveClassSample instanceVariableNames: 'p' classVariableNames: 'Count Xv' package: 'Kernel' tag: 'Tests-Live'] raise: ClassDefinitionError.
+	self assert: a classVarNames asArray = #(#Count).
+	self assert: a instVarNames asArray = #(#p).
+	self assert: b classVarNames asArray = #(#Cache).
+	self assert: (ClassBuilder namesProblemIn: {a. b}) isNil.
+	"an accepted redefinition: a new instance variable and class variable that clash with nothing"
+	Object subclass: #LiveClassSample instanceVariableNames: 'p q' classVariableNames: 'Count Other' package: 'Kernel' tag: 'Tests-Live'.
+	self assert: a instVarNames asArray = #(#p #q).
+	self assert: (ClassBuilder namesProblemIn: {a. b}) isNil
+]
+
+{ #category : #tests }
 LiveClassTest >> testARemovalThatBreaksAMethodChangesNothing [
 	| c x |
 	Smalltalk isReleaseImage ifTrue: [^ self].

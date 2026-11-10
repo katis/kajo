@@ -70,8 +70,8 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         b := Binding basicNew.
         b instVarAt: 1 put: #Scale.
         b instVarAt: 2 put: 3.
-        (self redefine: {{{cls. 3. #(0 2 1)}}. {}. {{cls. {b}}}. nil}) == nil ifFalse: [^ -1].
-        (self redefine: {{{cls class. 6. #(1 2 3 4 5 0)}}. {}. {}. nil}) == nil ifFalse: [^ -1].
+        (self redefine: {{{cls. 3. #(0 2 1)}}. {}. {{cls. {b}}}. nil. {{cls. #(#z #y #x). #()}}}) == nil ifFalse: [^ -1].
+        (self redefine: {{{cls class. 6. #(1 2 3 4 5 0)}}. {}. {}. nil. {{cls. #(#z #y #x). #(#k)}}}) == nil ifFalse: [^ -1].
         cls class == nil ifTrue: [^ -1].
         ^ 1
     ]
@@ -80,7 +80,7 @@ let liveClassFiles: [(file: String, text: [UInt8])] = miniKernel + [objectExtras
         (self remove: gone as: #AnObsoleteGone) == nil ifFalse: [^ -1].
         "refusals: a superclass that is not a class, a reshape that moves the class layout"
         (self primDefine: {#Bad. 3. #(). #(). #(). #fixed. nil. 0. 0}) == nil ifTrue: [^ -1].
-        (self redefine: {{{cls class. 6. #(0 2 3 4 5 1)}}. {}. {}. nil}) == nil ifTrue: [^ -1].
+        (self redefine: {{{cls class. 6. #(0 2 3 4 5 1)}}. {}. {}. nil. {{cls. #(#z #y #x). #(#k)}}}) == nil ifTrue: [^ -1].
         ^ 1
     ]
     """),
