@@ -49,3 +49,37 @@ package enum CompilerAgreement {
         return probe.compare(source, bootstrap: m?.0)
     }
 }
+
+/// The syntax fuzzer's kernel mode (the review fixes, part 2, item 7,
+/// kernel.F16): every method source, and every method of a Tonel input, is
+/// compiled by both compilers and the outcomes compared
+/// (`CompilerAgreement`); a disagreement stops the run with the source, so
+/// libFuzzer keeps the input.
+package enum KernelModeFuzz {
+    /// A probe over the kernel built from `directory` and its context.
+    package static func probe(kernelDirectory directory: String) throws -> (KernelCompilerProbe, ClassContext) {
+        let files = try KernelBuild.sources(in: [directory])
+        let built = try KernelBuild.build(files)
+        let probe = try KernelCompilerProbe(image: built.image, className: CompilerAgreement.className)
+        return (probe, CompilerAgreement.context(classNames: probe.classNames))
+    }
+
+    @discardableResult
+    package static func run(_ bytes: [UInt8], probe: KernelCompilerProbe, context: ClassContext) -> Bool {
+        var sources: [[UInt8]] = []
+        let prefix = String(decoding: bytes.prefix(16), as: UTF8.self)
+        if prefix.hasPrefix("Class") || prefix.hasPrefix("Extension") || prefix.hasPrefix("\"") {
+            guard let c = try? readTonel(bytes, file: "fuzz.st") else { return false }
+            sources = c.methods.prefix(16).filter { !$0.classSide }.map(\.source)
+        } else {
+            sources = [bytes]
+        }
+        for src in sources {
+            if let d = CompilerAgreement.compare(src, probe: probe, context: context) {
+                // fatalError's message survives an optimized build.
+                fatalError("the compilers disagree on <\(String(decoding: src, as: UTF8.self))>: \(d)")
+            }
+        }
+        return true
+    }
+}

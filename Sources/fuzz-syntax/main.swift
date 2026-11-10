@@ -21,6 +21,15 @@ public func fuzzOneInput(_ data: UnsafePointer<UInt8>, _ size: Int) -> CInt {
     return 0
 }
 
+/// The kernel mode (the review fixes, part 2, item 7): `KAJO_FUZZ_KERNEL`
+/// names the kernel's source directory, and every input is compiled by
+/// the kernel's compiler beside the bootstrap's and the outcomes compared.
+let kernelModeDirectory: String? = {
+    guard let v = unsafe getenv("KAJO_FUZZ_KERNEL") else { return nil }
+    let s = unsafe String(cString: v)
+    return s.isEmpty ? nil : s
+}()
+
 let fuzzStackBytes: Int = {
     guard let v = unsafe getenv("KAJO_FUZZ_STACK_KB"), let kb = Int(unsafe String(cString: v)) else { return 512 << 10 }
     return kb << 10
@@ -42,9 +51,21 @@ final class FuzzStack: @unchecked Sendable {
         let arg = unsafe Unmanaged.passRetained(self).toOpaque()
         let rc = unsafe pthread_create(&thread, &attr, { p in
             let s = unsafe Unmanaged<FuzzStack>.fromOpaque(p).takeRetainedValue()
+            // The kernel mode's probe lives on this thread (it is not
+            // Sendable): made at the first input.
+            var kernel: (KernelCompilerProbe, ClassContext)? = nil
             while true {
                 s.go.wait()
-                s.compiled = FuzzSyntax.run(s.input)
+                if let dir = kernelModeDirectory {
+                    if kernel == nil {
+                        do { kernel = try KernelModeFuzz.probe(kernelDirectory: dir) } catch {
+                            preconditionFailure("fuzz-syntax kernel mode: the kernel in \(dir) did not build: \(error)")
+                        }
+                    }
+                    s.compiled = KernelModeFuzz.run(s.input, probe: kernel!.0, context: kernel!.1)
+                } else {
+                    s.compiled = FuzzSyntax.run(s.input)
+                }
                 s.done.signal()
             }
         }, arg)
@@ -66,6 +87,7 @@ let fuzzStack: FuzzStack? = fuzzStackBytes == 0 ? nil : FuzzStack(stackBytes: fu
 /// input compiled.
 @discardableResult
 func onFuzzStack(_ bytes: [UInt8]) -> Bool {
+    precondition(fuzzStack != nil || kernelModeDirectory == nil, "fuzz-syntax: the kernel mode runs on its fuzz thread (KAJO_FUZZ_STACK_KB > 0)")
     guard let s = fuzzStack else { return FuzzSyntax.run(bytes) }
     return s.run(bytes)
 }

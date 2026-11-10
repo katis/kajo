@@ -911,6 +911,13 @@ func integerLiteral(negative: Bool, _ mag: [UInt8]) -> Literal {
 
 /// Parse a method's source (pattern, pragmas, temporaries, statements).
 func parseMethod(_ source: [UInt8], file: String, line: Int = 1) throws(CompileError) -> MethodNode {
+    // A method's source becomes a String in the image (its recorded
+    // source), and every String there is valid UTF-8: the scanner checks
+    // the scalars it reads, but not a comment's bytes, so the whole source
+    // is checked first (found by the syntax fuzzer's kernel mode, the
+    // review fixes, part 2, item 7; the kernel's compiler is never handed
+    // other bytes).
+    guard String(validating: source, as: UTF8.self) != nil else { throw CompileError("invalid UTF-8", file: file, line: line) }
     var p = try Parser(source, file: file, line: line)
     return try p.parseMethod()
 }

@@ -2,7 +2,11 @@
 # Fuzz one of the readers of untrusted bytes (the kasm and snapshot loaders,
 # module 8b's Smalltalk syntax: Tonel files and method sources, and module
 # 9b's development protocol requests):
-#   scripts/fuzz.sh kasm|snapshot|syntax|protocol [seconds]
+#   scripts/fuzz.sh kasm|snapshot|syntax|syntax-kernel|protocol [seconds]
+# syntax-kernel is the syntax target's kernel mode (the review fixes, part
+# 2, item 7): every input is compiled by the kernel's compiler too, in a
+# kernel image built from kernel/ at the start, and the two outcomes are
+# compared; a disagreement is a crash with the source in its message.
 # libFuzzer needs a toolchain with libclang_rt.fuzzer_osx.a. Xcode's has
 # none ("unsupported option '-sanitize=fuzzer' for target
 # 'arm64-apple-macos15.0'"); a swift.org toolchain does. It is selected with
@@ -16,11 +20,15 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 root=$PWD
-target=${1:?kasm, snapshot, syntax or protocol}
+target=${1:?kasm, snapshot, syntax, syntax-kernel or protocol}
 seconds=${2:-60}
-[[ $target == kasm || $target == snapshot || $target == syntax || $target == protocol ]] || { echo "target: kasm, snapshot, syntax or protocol"; exit 2; }
-seeds=$root/Tests/KajoVMTests/Fixtures/fuzz/$target
+[[ $target == kasm || $target == snapshot || $target == syntax || $target == syntax-kernel || $target == protocol ]] || { echo "target: kasm, snapshot, syntax, syntax-kernel or protocol"; exit 2; }
 run=$root/.build/fuzz-run/$target
+if [[ $target == syntax-kernel ]]; then
+  export KAJO_FUZZ_KERNEL=$root/kernel
+  target=syntax
+fi
+seeds=$root/Tests/KajoVMTests/Fixtures/fuzz/$target
 mkdir -p $run/corpus
 log=$run/libfuzzer-build.log
 toolchains=${KAJO_FUZZ_TOOLCHAINS:-swift}

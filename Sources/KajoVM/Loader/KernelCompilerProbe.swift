@@ -53,6 +53,12 @@ package final class KernelCompilerProbe {
     /// the disagreement. `bootstrap` is the bootstrap's method, nil when it
     /// refused the source.
     package func compare(_ source: [UInt8], bootstrap: AssembledMethod?) -> String? {
+        // A String in the image is valid UTF-8 (every path that makes one
+        // validates, the protocol's reader too): the kernel's compiler is
+        // never handed other bytes, so they are the bootstrap's alone.
+        guard String(validating: source, as: UTF8.self) != nil else {
+            return bootstrap == nil ? nil : "the bootstrap accepted bytes that are not UTF-8"
+        }
         var handles: [RootHandle] = []
         defer { for h in handles { image.om.removeRoot(h) } }
         guard let text = try? image.allocateBytes(WellKnown.string, source, roots: []) else { return "the probe could not allocate the source" }
