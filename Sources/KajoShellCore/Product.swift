@@ -102,17 +102,36 @@ public enum CheckoutInstaller {
         if fm.fileExists(atPath: to + "/" + marker) { return .present }
         let t0 = Date()
         let parent = (to as NSString).deletingLastPathComponent
-        let partial = to + ".partial-\(ProcessInfo.processInfo.processIdentifier)"
+        // One temporary folder per attempt (two attempts in one process, as
+        // the tests make, never share one).
+        let partial = to + ".partial-\(ProcessInfo.processInfo.processIdentifier)-\(UInt32.random(in: 0...UInt32.max))"
         do {
             try fm.createDirectory(atPath: parent, withIntermediateDirectories: true)
             try? fm.removeItem(atPath: partial)
             try fm.copyItem(atPath: from, toPath: partial)
             let bytes = directoryBytes(partial)
             try Data("Kajo checkout, copied by the Kajo app from \(from)\n".utf8).write(to: URL(fileURLWithPath: partial + "/" + marker))
-            if fm.fileExists(atPath: to) {
-                try fm.moveItem(atPath: to, toPath: to + ".incomplete-\(Int(Date().timeIntervalSince1970))")
+            // Another launch may have completed the copy meanwhile (two
+            // copies of the app, a relaunch): a folder with the marker is
+            // complete and stays; only one without it is moved aside, and a
+            // final rename that loses to a complete copy is that copy (the
+            // review fixes, part 2, item 12).
+            if fm.fileExists(atPath: to + "/" + marker) {
+                try? fm.removeItem(atPath: partial)
+                return .present
             }
-            try fm.moveItem(atPath: partial, toPath: to)
+            if fm.fileExists(atPath: to) {
+                try fm.moveItem(atPath: to, toPath: to + ".incomplete-\(Int(Date().timeIntervalSince1970))-\(ProcessInfo.processInfo.processIdentifier)")
+            }
+            do {
+                try fm.moveItem(atPath: partial, toPath: to)
+            } catch {
+                if fm.fileExists(atPath: to + "/" + marker) {
+                    try? fm.removeItem(atPath: partial)
+                    return .present
+                }
+                throw error
+            }
             return .copied(bytes, Date().timeIntervalSince(t0) * 1000)
         } catch {
             try? fm.removeItem(atPath: partial)

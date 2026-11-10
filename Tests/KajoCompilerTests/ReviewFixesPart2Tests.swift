@@ -173,3 +173,31 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
     let words = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n").map(String.init)
     #expect(words == ["[mkdir]", "[-p]", "[\(bin)]", "[ln]", "[-sf]", "[\(cli)]", "[\(bin)/kajo]"], "\(words)")
 }
+
+/// Item 12 (tools.F6): eight launches installing one version at once never
+/// label a complete checkout incomplete: each answers copied or present,
+/// one complete checkout is left and nothing is moved aside. On 18e274f a
+/// launch that found the folder another had just completed moved it aside.
+@Test func concurrentInstallsLeaveOneCompleteCheckout() throws {
+    let fm = FileManager.default
+    let d = fm.temporaryDirectory.appendingPathComponent("kajo-install-race-\(getpid())").path
+    defer { try? fm.removeItem(atPath: d) }
+    let from = d + "/bundle/Kajo-0.9"
+    for k in 0..<40 {
+        try fm.createDirectory(atPath: from + "/dir\(k)", withIntermediateDirectories: true)
+        fm.createFile(atPath: from + "/dir\(k)/f", contents: Data(repeating: UInt8(k), count: 8192))
+    }
+    for round in 0..<10 {
+        let to = d + "/support/\(round)"
+        let results = Mutex<[CheckoutInstall]>([])
+        DispatchQueue.concurrentPerform(iterations: 8) { _ in
+            let r = CheckoutInstaller.install(from: from, to: to)
+            results.withLock { $0.append(r) }
+        }
+        let rs = results.withLock { $0 }
+        #expect(rs.allSatisfy { if case .failed = $0 { return false }; return true }, "\(rs)")
+        #expect(fm.fileExists(atPath: to + "/" + CheckoutInstaller.marker))
+        let aside = try fm.contentsOfDirectory(atPath: d + "/support").filter { $0.hasPrefix("\(round).incomplete-") || $0.hasPrefix("\(round).partial-") }
+        #expect(aside.isEmpty, "round \(round): \(aside)")
+    }
+}
