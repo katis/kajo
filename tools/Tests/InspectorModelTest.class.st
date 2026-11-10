@@ -37,7 +37,7 @@ InspectorModelTest >> testDoPrintAndInspectIt [
 
 { #category : #tests }
 InspectorModelTest >> testObjectsPointingToTheObjectAndToASlotsValue [
-	"The pointersTo: follow-up: the slots table's context menu finds the holders of the inspected object (self, by its handle), of a slot's value with a handle (self, by that handle) and of one without (its printString evaluated), each in a new inspector."
+	"The pointersTo: follow-up: the slots table's context menu finds the holders of the inspected object (self, by its handle), of a slot's value with a handle (self, by that handle) and of one without (its printString evaluated), each in a new inspector; the object is named once, by an evaluation of self or of the printString, and asked about by the handle that answers (the review fixes, part 2, item 9)."
 	| c m w inspectors |
 	c := FakeDevClient on: [:kind :args | | src |
 		src := args at: 'source' ifAbsent: [''].
@@ -49,15 +49,17 @@ InspectorModelTest >> testObjectsPointingToTheObjectAndToASlotsValue [
 					yourself]]
 			ifFalse: [(src endsWith: 'pointerCount')
 				ifTrue: [self describe: '2' class: 'SmallInteger' handle: nil name: nil]
-				ifFalse: [(src endsWith: 'printString')
-					ifTrue: [self describe: '''a Thing''' class: 'String' handle: 30 name: nil]
-					ifFalse: [self describe: '#(a Holder a Holder)' class: 'Array' handle: 20 name: nil]]]].
+				ifFalse: [src = 'self'
+					ifTrue: [self describe: 'a Thing' class: 'Thing' handle: (args at: 'receiver') name: nil]
+					ifFalse: [src = '3'
+						ifTrue: [self describe: '3' class: 'SmallInteger' handle: nil name: nil]
+						ifFalse: [self describe: '#(a Holder a Holder)' class: 'Array' handle: 20 name: nil]]]]].
 	m := InspectorModel new client: c; yourself.
 	w := (InspectorWindow on: m) open.
 	m inspect: 2.
 	w slotsMenuItem: 41.
 	self assert: ((c sent select: [:s | s first = 'evaluate']) collect: [:s | {s last at: 'source'. s last at: 'receiver'}]) asArray
-		equals: #(#('(self) pointerCount' 2) #('(self) pointersTo: 1000' 2) #('(self) printString' 2)).
+		equals: #(#('self' 2) #('self pointerCount' 2) #('self pointersTo: 1000' 2)).
 	inspectors := DevTools windowsOf: InspectorWindow.
 	self assert: inspectors size equals: 2.
 	self assert: inspectors last model title equals: 'Array #(a Holder a Holder) (2 objects pointing to a Thing)'.
@@ -67,7 +69,7 @@ InspectorModelTest >> testObjectsPointingToTheObjectAndToASlotsValue [
 	m selectSlot: 2.
 	w slotsMenuItem: 42.
 	self assert: (((c sent select: [:s | s first = 'evaluate']) last: 3) collect: [:s | {s last at: 'source'. s last at: 'receiver'}]) asArray
-		equals: #(#('(3) pointerCount' nil) #('(3) pointersTo: 1000' nil) #('(3) printString' nil)).
+		equals: #(#('3' nil) #('(3) pointerCount' nil) #('(3) pointersTo: 1000' nil)).
 	self assert: (DevTools windowsOf: InspectorWindow) size equals: 4.
 	m selectSlot: 0.
 	w slotsMenuItem: 42.

@@ -160,19 +160,20 @@ DevTools class >> instancesLimit [
 
 { #category : #it }
 DevTools class >> instancesOf: aSource with: aWorkspaceModel [
-	"Instances of it: aSource evaluated where aWorkspaceModel evaluates (a class, usually its name), its instanceCount, then an inspector on its first instancesLimit instances whose title says how many there were."
-	| src limit |
+	"Instances of it: aSource evaluated once where aWorkspaceModel evaluates (a class, usually its name), then, about the object it answered (its handle), its instanceCount, then an inspector on its first instancesLimit instances whose title says how many there were. Evaluated once (the review fixes, part 2, item 9): a selection with a side effect runs it once, and the count and the list are of the same class."
+	| limit |
 	aSource isEmpty ifTrue: [^ aWorkspaceModel status: 'select a class to list its instances'].
-	src := '(' , aSource , ')'.
 	limit := self instancesLimit.
-	aWorkspaceModel evaluate: src , ' instanceCount' then: [:n | | count |
-		count := (n at: 'value') asInteger.
-		aWorkspaceModel evaluate: src , ' allInstances: ' , limit printString then: [:r |
-			aWorkspaceModel status: aSource , ': ' , (n at: 'value') , ' instances'.
-			self inspect: r client: aWorkspaceModel client
-				note: ((count notNil and: [count > limit])
-					ifTrue: [limit printString , ' of ' , count printString , ' instances']
-					ifFalse: [(n at: 'value') , ' instances'])]]
+	aWorkspaceModel evaluate: aSource then: [:o | | w |
+		w := self workspaceOn: o like: aWorkspaceModel.
+		w evaluate: (self receiverSourceOf: o) , ' instanceCount' then: [:n | | count |
+			count := (n at: 'value') asInteger.
+			w evaluate: (self receiverSourceOf: o) , ' allInstances: ' , limit printString then: [:r |
+				aWorkspaceModel status: aSource , ': ' , (n at: 'value') , ' instances'.
+				self inspect: r client: aWorkspaceModel client
+					note: ((count notNil and: [count > limit])
+						ifTrue: [limit printString , ' of ' , count printString , ' instances']
+						ifFalse: [(n at: 'value') , ' instances'])]]]
 ]
 
 { #category : #it }
@@ -186,20 +187,26 @@ DevTools class >> objects: aCount pointingTo: aName limit: aLimit [
 
 { #category : #it }
 DevTools class >> pointersTo: aSource with: aWorkspaceModel [
-	"Objects pointing to it (the pointersTo: follow-up): aSource evaluated where aWorkspaceModel evaluates, its pointerCount, then an inspector on the first instancesLimit objects holding it (pointersTo:) whose title says how many there were and what they point to. The count and the list are asked for before the object's printString: every answer of an evaluation gets a handle in the session, whose table would hold the object from then on."
-	| src limit |
+	"Objects pointing to it (the pointersTo: follow-up): aSource evaluated once where aWorkspaceModel evaluates, then, about the object it answered (its handle), its pointerCount, then an inspector on the first instancesLimit objects holding it (pointersTo:) whose title says how many there were and what they point to (the first evaluation's printString). Evaluated once (the review fixes, part 2, item 9): a selection with a side effect runs it once, and the count, the list and the title describe the same object. The session's handle table holds the object from that evaluation on, so it is among the holders, as it is for an inspected object."
+	| limit |
 	aSource isEmpty ifTrue: [^ aWorkspaceModel status: 'select an expression to find the objects pointing to it'].
-	src := '(' , aSource , ')'.
 	limit := self instancesLimit.
-	aWorkspaceModel evaluate: src , ' pointerCount' then: [:n | | count |
-		count := (n at: 'value') asInteger.
-		aWorkspaceModel evaluate: src , ' pointersTo: ' , limit printString then: [:r |
-			aWorkspaceModel evaluate: src , ' printString' then: [:p | | name note |
-				name := self unquoted: (p at: 'value').
-				name := name copyFrom: 1 to: (name byteSize min: 40).
+	aWorkspaceModel evaluate: aSource then: [:o | | w name |
+		w := self workspaceOn: o like: aWorkspaceModel.
+		name := self unquoted: (o at: 'value').
+		name := name copyFrom: 1 to: (name byteSize min: 40).
+		w evaluate: (self receiverSourceOf: o) , ' pointerCount' then: [:n | | count |
+			count := (n at: 'value') asInteger.
+			w evaluate: (self receiverSourceOf: o) , ' pointersTo: ' , limit printString then: [:r | | note |
 				note := self objects: count pointingTo: name limit: limit.
 				aWorkspaceModel status: note.
 				self inspect: r client: aWorkspaceModel client note: note]]]
+]
+
+{ #category : #it }
+DevTools class >> receiverSourceOf: aDescription [
+	"What names an evaluation's answer in a later evaluation: self, the receiver being its handle; an answer with no handle (nil, a Boolean, a small Integer, a Character) by its printString, which evaluates to it."
+	^ (aDescription at: 'handle') isNil ifTrue: ['(' , (aDescription at: 'value') , ')'] ifFalse: ['self']
 ]
 
 { #category : #it }
@@ -213,6 +220,15 @@ DevTools class >> unquoted: aString [
 	"A String's printString as the String it prints ('it''s' is it's); anything else as it is."
 	(aString byteSize >= 2 and: [(aString beginsWith: '''') and: [aString endsWith: '''']]) ifFalse: [^ aString].
 	^ (aString copyFrom: 2 to: aString byteSize - 1) copyReplaceAll: '''''' with: ''''
+]
+
+{ #category : #it }
+DevTools class >> workspaceOn: aDescription like: aWorkspaceModel [
+	"A workspace model on aWorkspaceModel's client whose self is the object an evaluation answered (its handle)."
+	| w |
+	w := WorkspaceModel new client: aWorkspaceModel client; yourself.
+	(aDescription at: 'handle') ifNotNil: [:h | w receiver: h].
+	^ w
 ]
 
 { #category : #menus }

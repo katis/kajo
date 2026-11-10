@@ -108,15 +108,19 @@ DiscoverabilityTest >> testInstancesOfItOpensAnInspectorWithTheCount [
 	c := FakeDevClient on: [:kind :args |
 		kind = 'inspect'
 			ifTrue: [(self describe: '#(''a'' ''b'')' class: 'Array' handle: 9) at: 'slots' put: #(); yourself]
-			ifFalse: [((args at: 'source') endsWith: 'instanceCount')
-				ifTrue: [self describe: '53254' class: 'SmallInteger' handle: nil]
-				ifFalse: [self describe: '#(''a'' ''b'')' class: 'Array' handle: 9]]].
+			ifFalse: [(args at: 'source') = 'String'
+				ifTrue: [self describe: 'String' class: 'String class' handle: 4]
+				ifFalse: [((args at: 'source') endsWith: 'instanceCount')
+					ifTrue: [self describe: '53254' class: 'SmallInteger' handle: nil]
+					ifFalse: [self describe: '#(''a'' ''b'')' class: 'Array' handle: 9]]]].
 	w := DevTools openWorkspace: c.
 	w textView text: 'String'.
 	w textView selectFrom: 3 to: 2.
 	w textView pressKey: 'cmd-shift-i'.
 	self assert: (c sent collect: [:s | s last at: 'source' ifAbsent: [nil]]) asArray
-		equals: #('(String) instanceCount' '(String) allInstances: 1000' nil).
+		equals: #('String' 'self instanceCount' 'self allInstances: 1000' nil).
+	self assert: ((c sent at: 2) last at: 'receiver') equals: 4.
+	self assert: ((c sent at: 3) last at: 'receiver') equals: 4.
 	inspector := (DevTools windowsOf: InspectorWindow) first.
 	self assert: inspector model title equals: 'Array #(''a'' ''b'') (1000 of 53254 instances)'
 ]
@@ -130,7 +134,7 @@ DiscoverabilityTest >> testObjectsPointingToItOpensAnInspectorWithTheCount [
 			ifTrue: [(self describe: '#(an Array)' class: 'Array' handle: 9) at: 'slots' put: #(); yourself]
 			ifFalse: [(src endsWith: 'pointerCount')
 				ifTrue: [self describe: '1532' class: 'SmallInteger' handle: nil]
-				ifFalse: [(src endsWith: 'printString')
+				ifFalse: [src = 'x'
 					ifTrue: [self describe: '''it''''s x''' class: 'String' handle: 11]
 					ifFalse: [self describe: '#(an Array)' class: 'Array' handle: 9]]]].
 	w := DevTools openWorkspace: c.
@@ -138,7 +142,9 @@ DiscoverabilityTest >> testObjectsPointingToItOpensAnInspectorWithTheCount [
 	w textView selectFrom: 1 to: 1.
 	w textView pressKey: 'cmd-shift-o'.
 	self assert: (c sent collect: [:s | s last at: 'source' ifAbsent: [nil]]) asArray
-		equals: #('(x) pointerCount' '(x) pointersTo: 1000' '(x) printString' nil).
+		equals: #('x' 'self pointerCount' 'self pointersTo: 1000' nil).
+	self assert: ((c sent at: 2) last at: 'receiver') equals: 11.
+	self assert: ((c sent at: 3) last at: 'receiver') equals: 11.
 	inspector := (DevTools windowsOf: InspectorWindow) first.
 	self assert: inspector model title equals: 'Array #(an Array) (1000 of 1532 objects pointing to it''s x)'.
 	self assert: w model status equals: '1000 of 1532 objects pointing to it''s x'.
@@ -169,6 +175,28 @@ DiscoverabilityTest >> testSendersImplementorsAndBrowseItOpenABrowser [
 	w textView pressKey: 'cmd-shift-b'.
 	self assert: b model className equals: 'Circle'.
 	self assert: (DevTools windowsOf: BrowserWindow) size equals: 1
+]
+
+{ #category : #tests }
+DiscoverabilityTest >> testTheSelectionIsEvaluatedOnce [
+	"The review fixes, part 2, item 9 (tools.F3): Instances of it, Objects pointing to it and the Inspector's pointers to a slot's value without a handle evaluate the selection once; every later request names the object it answered by its handle. On 18e274f the selection was evaluated two or three times."
+	| c w selection |
+	selection := 'Smalltalk at: #Counter put: Counter new'.
+	c := FakeDevClient on: [:kind :args | | src |
+		src := args at: 'source' ifAbsent: [''].
+		kind = 'inspect'
+			ifTrue: [(self describe: '#()' class: 'Array' handle: 9) at: 'slots' put: #(); yourself]
+			ifFalse: [src = selection
+				ifTrue: [self describe: 'a Counter' class: 'Counter' handle: 21]
+				ifFalse: [((src endsWith: 'Count') or: [src endsWith: 'pointerCount'])
+					ifTrue: [self describe: '2' class: 'SmallInteger' handle: nil]
+					ifFalse: [self describe: '#()' class: 'Array' handle: 9]]]].
+	w := DevTools openWorkspace: c.
+	w textView text: selection.
+	#('cmd-shift-o' 'cmd-shift-i') do: [:key |
+		w textView selectFrom: 1 to: selection byteSize.
+		w textView pressKey: key].
+	self assert: (c sent count: [:s | (s last at: 'source' ifAbsent: [nil]) = selection]) equals: 2
 ]
 
 { #category : #tests }
