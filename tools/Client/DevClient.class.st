@@ -573,8 +573,8 @@ DevClient class >> register: aClient [
 
 { #category : #requests }
 DevClient class >> notRetried [
-	"The requests not sent again after a dropped link: each may have run in the target before the link dropped, and running it twice is not running it once (a doit, a doit in a frame, a step, a test run). Every other request is idempotent (module 9b): a read, a compile of the same source, a command on a stopped Process that answers an error once it is no longer stopped."
-	^ #('evaluate' 'process.evaluate' 'process.step' 'test.run')
+	"The requests not sent again after a dropped link: each may have run in the target before the link dropped, and running it twice is not running it once (a doit, a doit in a frame, a step, a test run), or acts on a stop the developer never saw or loses the files its reply carried (the review fixes, item 13: a proceed, restart or retry reaches the Process's next stop, a suspend or terminate another state, a remove answers an error the second time and its file change is lost). Every other request is idempotent (module 9b): a read, a compile of the same source, a class definition. A request held back answers its block an error naming the dropped link."
+	^ #('evaluate' 'process.evaluate' 'process.step' 'test.run' 'process.proceed' 'process.restart' 'process.retrySend' 'process.terminate' 'process.suspend' 'method.remove' 'class.remove')
 ]
 
 { #category : #requests }

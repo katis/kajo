@@ -42,6 +42,25 @@ DevClientTest >> testADroppedLinkReconnectsAndSendsAgainWhatMayBe [
 ]
 
 { #category : #tests }
+DevClientTest >> testADroppedLinkSendsNoCommandOrRemoveAgain [
+	"The review fixes, item 13: after a dropped link the commands on a Process (proceed, restart, retrySend, terminate, suspend) and the removes are held back and fail naming the link: each may have run, and running it again acts on another stop or loses the reply's files."
+	| c failures kinds |
+	c := FakeDevClient on: [:k :a | nil].
+	c hold: true.
+	failures := OrderedCollection new.
+	kinds := #('process.proceed' 'process.restart' 'process.retrySend' 'process.terminate' 'process.suspend' 'method.remove' 'class.remove').
+	kinds do: [:k | c request: k args: {'process'. 7} then: [:r | nil] else: [:e | failures add: k -> e]].
+	self assert: c pendingCount equals: kinds size.
+	c lost: 'the target closed the connection'.
+	self assert: c pendingCount equals: 0.
+	self assert: (failures collect: [:a | a key]) asArray equals: kinds.
+	failures do: [:a | self assert: (a value includesSubstring: 'not sent again')].
+	c fireTimer.
+	c sessionOpened.
+	self assert: c retried equals: 0
+]
+
+{ #category : #tests }
 DevClientTest >> testALineIsReadAndAMalformedOneIsAnEvent [
 	| c errors seen |
 	c := FakeDevClient on: [:k :a | nil].
