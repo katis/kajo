@@ -148,8 +148,11 @@ BlockClosure >> ifError: aBlock [
 
 { #category : #exceptions }
 BlockClosure >> on: exceptionClass do: handlerBlock [
-	| result |
-	[(result := self privateOn: exceptionClass do: handlerBlock) == Exception retryMarker] whileTrue.
+	"retry runs the protected block again, retryUsing: puts its block in replacement (temp 5: Exception>>retryUsing:) and runs that instead."
+	| result protected replacement |
+	protected := self.
+	[(result := protected privateOn: exceptionClass do: handlerBlock) == Exception retryMarker] whileTrue: [
+		replacement isNil ifFalse: [protected := replacement. replacement := nil]].
 	^ result
 ]
 

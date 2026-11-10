@@ -83,6 +83,24 @@ ExceptionTest >> testNonLocalReturnRunsEnsureBlocks [
 ]
 
 { #category : #accessing }
+ExceptionTest >> testOuterLeavesTheInnerHandlerActive [
+	"The review fixes, item 9 (kernel.F3): after outer, the handler that sent it is the active one again: falling off it returns from its own on:do: (the rest of the enclosing protected block runs), and it stays the handler a second signal finds."
+	| r x count |
+	r := [([x := Warning signal: 'w'. x * 10] on: Warning do: [:e | e outer + 1]) * 100] on: Warning do: [:e | e resume: 1].
+	self assert: r = 200.
+	r := [[x := Warning signal: 'w'. x * 10] on: Warning do: [:e | e resume: e outer + 1]] on: Warning do: [:e | e resume: 1].
+	self assert: r = 20.
+	count := 0.
+	r := [[(Warning signal: 'a') + (Warning signal: 'b')] on: Warning do: [:e | count := count + 1. e outer. e resume: 1]] on: Warning do: [:e | e resume: 5].
+	self assert: count = 2.
+	self assert: r = 2.
+	count := 0.
+	r := [[Warning signal: 'a'. #body] on: Warning do: [:e | count := count + 1. e outer. count < 3 ifTrue: [e retry]. #handled]] on: Warning do: [:e | e resume: 5].
+	self assert: count = 3.
+	self assert: r == #handled
+]
+
+{ #category : #accessing }
 ExceptionTest >> testPassAndOuter [
 	| r log |
 	r := [[Error signal: 'x'] on: Error do: [:e | e pass]] on: Error do: [:e | 'outer ' , e messageText].
@@ -91,6 +109,13 @@ ExceptionTest >> testPassAndOuter [
 	r := [[(Warning signal: 'w') + 1] on: Warning do: [:e | log add: (e outer). e resume: 100]] on: Warning do: [:e | e resume: 5].
 	self assert: log asArray = #(5).
 	self assert: r = 101
+]
+
+{ #category : #accessing }
+ExceptionTest >> testPassWithNoOuterHandlerResumesAResumableException [
+	"The review fixes, item 9 (kernel.F10): pass with no enclosing handler resumes a resumable exception with its default action's value, as if this handler did not exist."
+	self assert: ([Notification signal. #after] on: Notification do: [:e | e pass]) == #after.
+	self assert: ([(Notification signal) isNil ifTrue: [#resumed] ifFalse: [#other]] on: Notification do: [:e | e pass]) == #resumed
 ]
 
 { #category : #accessing }
@@ -106,6 +131,34 @@ ExceptionTest >> testRetry [
 	count := 0.
 	r := [count := count + 1. count < 3 ifTrue: [Error signal]. count] on: Error do: [:e | e retry].
 	self assert: r = 3
+]
+
+{ #category : #accessing }
+ExceptionTest >> testRetryMarkerIsNoValueAProgramAnswers [
+	"The review fixes, item 8: the retry marker was the class ExceptionSet, so a protected block or a handler answering it retried forever (bounded here by a forked Process and a deadline)."
+	| r1 r2 done deadline |
+	done := false.
+	[r1 := [ExceptionSet] on: Error do: [:e | nil].
+	 r2 := [1 / 0] on: ZeroDivide do: [:e | ExceptionSet].
+	 done := true] fork.
+	deadline := Smalltalk microsecondClock + 30000000.
+	[done or: [Smalltalk microsecondClock > deadline]] whileFalse: [(Delay forMilliseconds: 10) wait].
+	self assert: done.
+	self assert: r1 == ExceptionSet.
+	self assert: r2 == ExceptionSet
+]
+
+{ #category : #accessing }
+ExceptionTest >> testRetryUsingRunsTheBlockUnderTheSameHandler [
+	"The review fixes, item 9 (kernel.F10): retryUsing: unwinds first and runs its block as the protected block, so the same handler catches what it signals."
+	| count r |
+	count := 0.
+	r := [1 / 0] on: ZeroDivide do: [:e |
+		count := count + 1.
+		count < 3 ifTrue: [e retryUsing: [1 / 0]] ifFalse: [#done]].
+	self assert: count = 3.
+	self assert: r == #done.
+	self assert: ([1 / 0] on: ZeroDivide do: [:e | e retryUsing: [#replaced]]) == #replaced
 ]
 
 { #category : #accessing }

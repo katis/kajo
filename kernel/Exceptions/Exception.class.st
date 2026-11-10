@@ -7,6 +7,9 @@ Class {
 		'signalContext',
 		'handlerContext',
 		'outerContext'
+	],
+	#classVars : [
+		'RetryMarker'
 	]
 }
 
@@ -61,20 +64,32 @@ Exception >> handlerContext [
 
 { #category : #handling }
 Exception >> outer [
-	"The enclosing handler's action; a resumption answers from outer."
-	| value |
+	"The enclosing handler's action; a resumption answers from outer, and the handler that sent outer is the active one again (the review fixes, item 9: return:, retry, resume: and falling off it act on its on:do:, and it stays busy). A resumption returns from outerSearch, so the restore below runs; a return or a retry by the enclosing handler unwinds past it."
+	| saved value |
 	self isResumable ifFalse: [^ self pass].
-	outerContext := thisContext.
-	value := self searchFrom: handlerContext sender.
+	saved := handlerContext.
+	value := self outerSearch.
 	outerContext := nil.
+	handlerContext := saved.
+	saved tempAt: 3 put: true.
 	^ value
 ]
 
 { #category : #handling }
+Exception >> outerSearch [
+	"The search outer starts: a resumption by the enclosing handler answers here (resume: returns from this frame)."
+	outerContext := thisContext.
+	^ self searchFrom: handlerContext sender
+]
+
+{ #category : #handling }
 Exception >> pass [
-	"The enclosing handler handles the receiver as if this one did not exist."
+	"The enclosing handler handles the receiver as if this one did not exist. With none, the default action's value resumes a resumable exception at its signal (the review fixes, item 9, ANSI's rule) and is returned from this on:do: otherwise. An enclosing handler that resumes or returns never comes back here."
+	| value |
 	handlerContext tempAt: 3 put: nil.
-	^ self return: (self searchFrom: handlerContext sender)
+	value := self searchFrom: handlerContext sender.
+	self isResumable ifTrue: [^ self resume: value].
+	^ self return: value
 ]
 
 { #category : #handling }
@@ -98,13 +113,15 @@ Exception >> resume: aValue [
 Exception >> retry [
 	"Unwind to the on:do: and run its protected block again."
 	handlerContext tempAt: 3 put: nil.
-	handlerContext return: self class retryMarker
+	handlerContext return: Exception retryMarker
 ]
 
 { #category : #handling }
 Exception >> retryUsing: aBlock [
+	"Unwind to the on:do: and run aBlock in place of its protected block, under the same handler (the review fixes, item 9: aBlock ran before the unwinding, inside the busy handler). The on:do: frame (the handler frame's sender) takes aBlock in its fifth temp."
 	handlerContext tempAt: 3 put: nil.
-	handlerContext return: (aBlock value)
+	handlerContext sender tempAt: 5 put: aBlock.
+	handlerContext return: Exception retryMarker
 ]
 
 { #category : #handling }
@@ -171,14 +188,20 @@ Exception class >> handles: anException [
 ]
 
 { #category : #accessing }
+Exception class >> initialize [
+	"The retry marker, made once at the image build (the review fixes, item 8)."
+	RetryMarker isNil ifTrue: [RetryMarker := Object new]
+]
+
+{ #category : #accessing }
 Exception class >> new [
 	^ self basicNew initialize
 ]
 
 { #category : #accessing }
 Exception class >> retryMarker [
-	"What on:do:'s loop takes as 'run the protected block again' (Exception>>retry)."
-	^ ExceptionSet
+	"What on:do:'s loop takes as 'run the protected block again' (Exception>>retry): a private object nothing else answers (the review fixes, item 8: it was the class ExceptionSet, so a protected block or handler that answered that class retried forever)."
+	^ RetryMarker ifNil: [self initialize. RetryMarker]
 ]
 
 { #category : #accessing }
