@@ -88,6 +88,18 @@ BlockClosureTest >> testWhileLoopsWithNonLiteralBlocks [
 ]
 
 { #category : #tests }
+BlockClosureTest >> testAnUncapturedLoopTempKeepsItsValue [
+	"The review fixes, part 2, item 8 (kernel.F17, documented in docs/modules/kernel-live.md): a temp of an inlined loop body that no closure captures and assigns is a frame temp, not reset between passes, in both compilers; captured and assigned, it is in the per-pass vector and starts nil each pass (Pharo nils both)."
+	| out |
+	out := OrderedCollection new.
+	1 to: 3 do: [:i | | t | t isNil ifTrue: [t := 0]. t := t + 1. out add: t].
+	self assert: out asArray = #(1 2 3).
+	out := OrderedCollection new.
+	1 to: 3 do: [:i | | t | t isNil ifTrue: [t := 0]. t := t + 1. [t] value. out add: t].
+	self assert: out asArray = #(1 1 1)
+]
+
+{ #category : #tests }
 BlockClosureTest >> testLoopBodyTempsArePerIteration [
 	"Module 8d, Pharo's rule: a temp declared in an inlined loop body, captured and assigned, is a fresh variable on every pass."
 	| blocks k |

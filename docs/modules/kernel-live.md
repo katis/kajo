@@ -56,6 +56,23 @@ rule; `kernel/Compiler.class.st`, `CompilerScope.class.st`,
 - The loop counter of `to:do:` is as before: copied per iteration, never
   assigned by the program. Temps of the method (or of the enclosing real
   block) keep one vector, made once at entry.
+- A temp declared in an inlined loop body that no closure captures (or
+  that is captured but never assigned) is a frame temp of the enclosing
+  real scope and is **not** reset between passes: it keeps its value from
+  the previous pass, in both compilers (the review fixes, part 2, item 8,
+  `kernel.F17`). `1 to: 3 do: [:i | | t | t isNil ifTrue: [t := 0]. t :=
+  t + 1. out add: t]` adds 1, 2, 3; add an unrelated `[t] value` and `t`
+  becomes captured and assigned, lives in the per-pass vector, and the loop
+  adds 1, 1, 1. Pharo's Opal nils every temp of an inlined loop body at the
+  start of each pass, so there both forms add 1, 1, 1. Kajo keeps the
+  difference: resetting would cost three bytecodes (`push_nil`,
+  `store_temp`, `pop`) per temp per pass in every loop, and no method of
+  the kernel or the tools depends on either answer (the owner's open
+  question 3 of part 2, answered as recommended). A program that relies on
+  a fresh nil per pass declares the temp outside the loop and assigns it
+  first. Pinned by `BlockClosureTest>>testAnUncapturedLoopTempKeepsItsValue`,
+  which both compilers pass (the kernel's compiler by `CompilerTest`'s
+  comparison of every method), and by the compilers' corpus.
 
 Checked by `aLoopBodysCapturedAssignedTempGetsAVectorPerIteration` (one
 `push_new_array` right after the loop's `jump_if_false`, nested loops two,
