@@ -221,6 +221,13 @@ DevProtocol class >> serve [
 ]
 
 { #category : #serving }
+DevProtocol class >> sessionCount [
+	"How many sessions the transport told of are open (the review fixes, item 6: every end of a connection the image was told of reaches it as session.close)."
+	lock isNil ifTrue: [^ 0].
+	^ lock critical: [sessions size]
+]
+
+{ #category : #serving }
 DevProtocol class >> start [
 	"Serve the development protocol when the host opened a transport (kajo run --protocol, the macOS shell, a development app): the protocol Process at the highest priority. Whether unhandled errors stop their Process is the host's setting (Debugger stopsErrors), which a serving host makes; it does not depend on this Process. Answers whether it serves; false in a release image or without a transport."
 	Smalltalk isReleaseImage ifTrue: [^ false].

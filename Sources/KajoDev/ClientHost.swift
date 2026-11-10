@@ -461,12 +461,15 @@ final class ClientConnection: @unchecked Sendable {
     /// The session's request first, then whatever waited for it.
     func open(_ sessionLine: [UInt8]) {
         lock.lock()
-        let f = fd
+        defer { lock.unlock() }
         let waiting = held
         held = []
         ready = true
-        lock.unlock()
-        for l in [sessionLine] + waiting { write(f, l) }
+        // The review fixes (item 5, primitives.F3): enqueued under the lock
+        // `release` takes to retire the descriptor, so no write is queued
+        // behind its close.
+        if closed || fd < 0 { return }
+        for l in [sessionLine] + waiting { write(fd, l) }
     }
 
     /// Queue one line (a newline is added). False when closed.
@@ -481,9 +484,10 @@ final class ClientConnection: @unchecked Sendable {
             lock.unlock()
             return true
         }
-        let f = fd
+        // Enqueued under the lock (item 5): `release` retires the
+        // descriptor under it and drains the queue before closing.
+        if fd >= 0 { write(fd, line) }
         lock.unlock()
-        write(f, line)
         return true
     }
 
@@ -539,29 +543,31 @@ final class ClientConnection: @unchecked Sendable {
     /// died would (writes fail, the reader sees the end).
     func drop() {
         lock.lock()
-        let f = fd
-        lock.unlock()
-        if f >= 0 { shutdown(f, SHUT_RDWR) }
+        defer { lock.unlock() }
+        // Under the lock: `release` cannot close the number meanwhile.
+        if fd >= 0 { shutdown(fd, SHUT_RDWR) }
     }
 
     /// Any thread: end the connection (the reader sees the end).
     func close() {
         lock.lock()
+        defer { lock.unlock() }
         closed = true
-        let f = fd
-        lock.unlock()
-        if f >= 0 { shutdown(f, SHUT_RDWR) }
+        if fd >= 0 { shutdown(fd, SHUT_RDWR) }
     }
 
     /// The connection's own thread, after reading ended: the descriptor is
     /// closed once the queued writes are done, so it is never reused under
     /// one of them.
     func release() {
-        close()
         lock.lock()
+        closed = true
         let f = fd
+        if f >= 0 { shutdown(f, SHUT_RDWR) }
         fd = -1
         lock.unlock()
+        // Every write was enqueued under the lock while `fd` was set, so
+        // all of them are ahead of this; none can follow it.
         queue.sync {}
         if f >= 0 { Darwin.close(f) }
     }

@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import KajoVM
+import Synchronization
 
 // Module 9b: the target's half of the transport (docs/modules/development-protocol.md,
 // "Transport"): a Unix-domain socket the host opens (`kajo run --protocol`,
@@ -61,6 +62,16 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         public var windowNs: UInt64 = 60_000_000_000
         /// ... for this long: every connection is closed as it comes.
         public var pauseNs: UInt64 = 60_000_000_000
+        /// The review fixes (item 4, primitives.F2): a connection that has
+        /// not opened a session (presented the token) is bounded. At most
+        /// this many at once (a new one closes the oldest unpaired one) ...
+        public var unpairedConnections = 8
+        /// ... each closed once it has sent this many bytes before its
+        /// `session.open` line ends ...
+        public var unpairedBytes = 4096
+        /// ... or once this long has passed since it was accepted without
+        /// a session opened.
+        public var unpairedNs: UInt64 = 5_000_000_000
         public init() {}
     }
     private var currentLimits = Limits()  // under lock
@@ -217,7 +228,16 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         t.start()
     }
 
+    /// The review fixes (item 4, primitives.F2): only a closed listener
+    /// ends the loop. Any other `accept` failure (out of descriptors,
+    /// `EMFILE`/`ENFILE`; a connection reset in the backlog,
+    /// `ECONNABORTED`; `EAGAIN`, `ENOBUFS`) is counted and waited out, 10 ms
+    /// doubling to 100 ms, and the loop goes on: a peer that drives the
+    /// process out of descriptors no longer ends the service for good.
+    static let acceptBackoffNs: (first: UInt64, max: UInt64) = (10_000_000, 100_000_000)
+
     private func acceptLoop() {
+        var backoff = ProtocolServer.acceptBackoffNs.first
         while true {
             lock.lock()
             let fd = listenFD
@@ -225,9 +245,18 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
             if fd < 0 { return }
             let c = accept(fd, nil, nil)
             if c < 0 {
-                if errno == EINTR { continue }
-                return
+                let e = errno
+                if e == EINTR { continue }
+                lock.lock()
+                let gone = stopped || listenFD < 0
+                lock.unlock()
+                if gone { return }
+                stats.add(\.acceptFailures)
+                usleep(UInt32(backoff / 1000))
+                backoff = min(backoff * 2, ProtocolServer.acceptBackoffNs.max)
+                continue
             }
+            backoff = ProtocolServer.acceptBackoffNs.first
             configureStream(c, tcp: port != nil)
             lock.lock()
             if stopped {
@@ -243,9 +272,17 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
             }
             let id = nextConnection
             nextConnection += 1
-            let conn = Connection(id: id, fd: c, stats: stats)
+            let conn = Connection(id: id, fd: c, stats: stats, accepted: currentClock())
+            // At most `unpairedConnections` without a session: the oldest
+            // unpaired one makes room.
+            let unpaired = connections.values.filter { !$0.wasOpened }.sorted { $0.id < $1.id }
+            let evict = unpaired.count >= currentLimits.unpairedConnections ? unpaired.first : nil
             connections[id] = conn
             lock.unlock()
+            if let evict {
+                stats.add(\.unpairedClosed)
+                evict.close()
+            }
             let t = Thread { [self] in readLoop(conn) }
             t.name = "kajo-protocol-\(id)"
             t.start()
@@ -256,14 +293,35 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         var buffer: [UInt8] = []
         var chunk = [UInt8](repeating: 0, count: 65536)
         var discarding = false
+        var unpairedBytes = 0
         reading: while true {
+            // Before its session opens, a connection waits for its bytes no
+            // longer than the limit since it was accepted (item 4).
+            if !conn.wasOpened {
+                let now = clock()
+                let deadline = conn.accepted &+ limits.unpairedNs
+                if now >= deadline || !conn.readable(withinNs: deadline &- now) {
+                    stats.add(\.unpairedClosed)
+                    break
+                }
+            }
             let n = unsafe read(conn.fd, &chunk, chunk.count)
             if n < 0 && errno == EINTR { continue }
             if n <= 0 { break }
             // When the bytes arrived (a request's service time starts here).
             let readNs = ShellVM.now()
+            let unpairedLimit = conn.wasOpened ? Int.max : limits.unpairedBytes
             var start = 0
             for i in 0..<n where chunk[i] == 10 {
+                // Before its session opens, a connection sends at most the
+                // limit, newlines included (item 4).
+                if !conn.wasOpened {
+                    unpairedBytes += i + 1 - start
+                    if unpairedBytes > unpairedLimit {
+                        stats.add(\.unpairedClosed)
+                        break reading
+                    }
+                }
                 buffer += chunk[start..<i]
                 start = i + 1
                 if discarding {
@@ -274,6 +332,13 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
                 }
                 buffer.removeAll(keepingCapacity: true)
             }
+            if !conn.wasOpened && start < n {
+                unpairedBytes += n - start
+                if unpairedBytes > limits.unpairedBytes {
+                    stats.add(\.unpairedClosed)
+                    break reading
+                }
+            }
             if start < n { buffer += chunk[start..<n] }
             if buffer.count > RequestLimits.lineBytes {
                 discarding = true
@@ -283,10 +348,15 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
         lock.lock()
         connections[conn.id] = nil
         lock.unlock()
-        if conn.isOpen {
+        // The review fixes (item 6, primitives.F4): the image hears the end
+        // of every session it was told of, whoever ended the connection (the
+        // client, a new token, a dropped link, the backlog rule, `stop`):
+        // only this reader posts it, once, after its loop ends.
+        if conn.wasOpened {
             post(conn.id, DevRequest(id: .null, kind: "session.close", arguments: []).canonical)
         }
         conn.close()
+        conn.finish()
     }
 
     /// One line from a connection. False ends the connection.
@@ -488,23 +558,58 @@ public final class ProtocolServer: @unchecked Sendable, CustomReflectable {
 }
 
 /// One client's socket: its writes in order on a serial queue.
+///
+/// The review fixes (item 5, primitives.F3): a write is enqueued under the
+/// same lock that reads `closed`, and `close` sets `closed` and enqueues the
+/// shutdown under it too, so no write can be queued behind the shutdown.
+/// The descriptor itself is closed once, by the reading thread after its
+/// loop ends (`finish`), once the queue has drained: never under a write
+/// and never under the reader's own `read`, so its number is never reused
+/// under either. A write block that finds the descriptor shut down counts
+/// a late write (`lateWrites`, which must stay 0) and writes nothing.
 final class Connection: @unchecked Sendable {
     let id: Int
     let fd: Int32
     let stats: ServerStats
+    /// When it was accepted (the server's clock).
+    let accepted: UInt64
     private let queue: DispatchQueue
     private let lock = NSLock()
     private var open = false  // under lock: the session was opened
     private var pending = 0  // under lock: bytes queued
     private var closed = false  // under lock
+    private var shut = false  // the queue's own: the shutdown block ran
+    private var finished = false  // the reader's own
     /// Failed session.open requests (the reading thread's own).
     var failedOpens = 0
+    /// Tests: a sleep between the `closed` check and the enqueue of a
+    /// write (the window the old code had, now inside the lock).
+    static let sendWindowUs = Atomic<UInt32>(0)
 
-    init(id: Int, fd: Int32, stats: ServerStats) {
+    init(id: Int, fd: Int32, stats: ServerStats, accepted: UInt64 = 0) {
         self.id = id
         self.fd = fd
         self.stats = stats
+        self.accepted = accepted
         queue = DispatchQueue(label: "kajo-protocol-write-\(id)")
+    }
+
+    /// The session was opened (true from then on, closed or not).
+    var wasOpened: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return open
+    }
+
+    /// Whether bytes (or the end) arrive within `ns`.
+    func readable(withinNs ns: UInt64) -> Bool {
+        var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+        let ms = Int32(min(ns / 1_000_000 + 1, UInt64(Int32.max)))
+        while true {
+            let r = unsafe poll(&p, 1, ms)
+            if r < 0 && errno == EINTR { continue }
+            return r > 0
+        }
     }
 
     var isOpen: Bool {
@@ -532,10 +637,14 @@ final class Connection: @unchecked Sendable {
         }
         pending += line.count + 1
         let now = pending
-        lock.unlock()
-        stats.notePending(now)
+        let window = Connection.sendWindowUs.load(ordering: .relaxed)
+        if window > 0 { usleep(window) }
         let fd = self.fd
         queue.async { [self] in
+            if shut {
+                stats.add(\.lateWrites)
+                return
+            }
             var bytes = line
             bytes.append(10)
             var off = 0
@@ -551,6 +660,8 @@ final class Connection: @unchecked Sendable {
             pending -= bytes.count
             lock.unlock()
         }
+        lock.unlock()
+        stats.notePending(now)
     }
 
     func close() {
@@ -560,13 +671,22 @@ final class Connection: @unchecked Sendable {
             return
         }
         closed = true
-        lock.unlock()
-        // After the queued writes (a refusal's reply goes out first), and
-        // the fd is closed after them, so it is never reused under one.
-        queue.async { [fd] in
+        // After the queued writes (a refusal's reply goes out first); the
+        // shutdown ends the reader's `read`, and the reader closes the fd.
+        queue.async { [self] in
+            shut = true
             shutdown(fd, SHUT_RDWR)
-            Darwin.close(fd)
         }
+        lock.unlock()
+    }
+
+    /// The reading thread's last step: once every queued block has run,
+    /// close the descriptor (once).
+    func finish() {
+        queue.sync {}
+        if finished { return }
+        finished = true
+        Darwin.close(fd)
     }
 }
 
@@ -585,6 +705,13 @@ public final class ServerStats: @unchecked Sendable {
         public var delivers = 0
         public var deliverTotalNs: UInt64 = 0
         public var deliverMaxNs: UInt64 = 0
+        /// The review fixes: `accept` failures waited out (item 4),
+        /// connections closed for the unpaired limits (item 4), and write
+        /// blocks that ran after their connection's shutdown (item 5: must
+        /// stay 0).
+        public var acceptFailures = 0
+        public var unpairedClosed = 0
+        public var lateWrites = 0
         public init() {}
     }
     private let lock = NSLock()
