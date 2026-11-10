@@ -215,19 +215,212 @@ d78afcc), or says why none can.
 3. `interpreter.F2`: a suspended waiting Process re-waits on proceed
    (recommended) against Pharo's behaviour of resuming it as signalled.
 
-## Part 2 (the next agent; not this one)
+## Part 2 (briefed 2026-11-10, after part 1's hand-back)
 
-`kernel.F6` (recursion bounds in `analyze:`/`gen:` and `printOf:`),
-`kernel.F7` (identifiers above 127: the Smalltalk scanner follows the
-bootstrap's rule), `kernel.F8` (a `[` in a pattern comment: the writer
-escapes or refuses, both readers agree), `kernel.F9` (redefinition against
-subclasses' class variables and ivar/class-variable clashes in `ClassRules`),
-`kernel.F14` and `F15` (the Smalltalk generator refuses what the assembler
-refuses; the `<primitive:>` range), `kernel.F16` (the Smalltalk compiler
-fuzzed through the make primitive), `kernel.F17` (document), `tools.F3`
-(evaluate the selection once), `tools.F4` and `F5` (`check-tier.sh`:
-`--no-renames`, fixtures' `.md` owe the swift tier; the matrix gate's
-status from every step), `tools.F6`, `primitives.F8`, the notes.
+The rest of the review: the findings part 1 left, the reports' notes, and
+part 1's own "not done" where a test or a fix is cheap. Each item names its
+finding; read the full entry in `docs/reviews/2026-11-10/` (the invariant,
+the path, the neighbours, the proposed test) before building it. One finding
+or one coherent group per commit, named by its `<area>.F<n>`.
+
+### The two compilers agree, and refuse alike
+
+1. **`kernel.F6`: recursion over untrusted or cyclic input.** The Smalltalk
+   compiler's `analyze:in:` and `gen:in:on:value:` recurse on a message's
+   receiver, so a chain of thousands of unary sends (the report's 200 000
+   ` abs`) overflows the request Process's stack, which ends in a VMError
+   with no reply and a `pending` entry that is never removed. Walk chains
+   by loops as the bootstrap's `Compiler.chain` does (the
+   reserve-and-depth follow-up's rule: chains are loops, the rest is
+   bounded at 32). `DevSession printOf:` and `DebugStop>>frameDetail:
+   session:` print through a bounded stream with a set of the objects
+   being printed, so a cyclic collection answers a cut text, not a stack
+   overflow (and `DevSession>>describe:` no longer prints a whole
+   collection before cutting it, the discoverability doc's "not done").
+   And the net under both: `DevProtocol run:` answers an error reply when
+   its request Process ends without one, whatever ended it, so no request
+   waits for its client's timeout and `pending` does not leak. Tests: the
+   chain over the protocol answers a reply within a bound; a collection
+   that holds itself prints; a request whose Process is terminated from
+   outside is answered.
+2. **`kernel.F7`: one identifier rule.** The bootstrap's scanner
+   (`Syntax.swift`: a letter is ASCII or `Unicode.Scalar.properties.
+   isAlphabetic`, a run continues over letters, digits and scalars with a
+   numeric type) and the kernel's (`Scanner>>isLetterAt:`: any
+   non-separator scalar above 127) disagree, so the live system accepts a
+   method the image build refuses. The kernel's scanner follows the
+   bootstrap's rule, by construction: one primitive that answers the
+   bootstrap's own predicate for a scalar (the same Swift function, moved
+   where both can call it), not a second table. Tests: both compilers on
+   U+00D7, U+00B7, U+2192, U+1F600, U+00A0, a combining mark and a
+   non-ASCII digit, at the start and inside an identifier, agreeing on
+   accept and refuse; the new primitive in `ExtremeIntegerTests`.
+3. **`kernel.F8`: a `[` in a pattern comment.** `at: i "index in [1,
+   size]" put: v` is written as it was typed and neither Tonel reader
+   finds the pattern's end. Both readers (`Tonel.swift` and
+   `TonelReader>>readMethodInto:`) skip comments while looking for the
+   pattern's `[`; the writer and the canonical form do not change, no
+   file is rewritten. Tests: the method round-trips byte for byte through
+   both readers; a seed for the syntax fuzzer.
+4. **`kernel.F9`: a redefinition against the subtree's names.** Primitive
+   146 re-checks the class but not its subclasses: a live redefinition can
+   give a class a class variable a subclass declares, or an instance
+   variable that clashes below it, and the image build then refuses the
+   written sources. The primitive is the trust boundary: 146 runs
+   `ClassRules`' names rule for the class and every subclass against the
+   new shape before anything changes and answers the reason as a value;
+   `ClassBuilder redefine:` turns it into the usual error. Tests: each
+   clash refused with nothing changed; the reshape-spec mutation test
+   asserts that the image after every accepted redefinition passes the
+   build's rules over every class.
+5. **`kernel.F14`: the generator refuses what the assembler refuses.**
+   `BytecodeGenerator assembleWithExtraLiterals:` encodes without range
+   checks (a jump offset wraps, a count past its field is a generic
+   Error); every operand gets its refusal as a CompileError naming the
+   limit, the same limits as `Assembler.swift`. The make primitive (143)
+   bounds what it is handed by `LoaderLimits` (bytecode length by
+   `maxMethodBytes`, the literal count) as the assembler does, before the
+   verifier runs. Tests at each limit and one past it, in both compilers
+   ("every count a bytecode encodes has a refusal and a test at its
+   limit").
+6. **`kernel.F15`: the smaller disagreements.** Inlining and
+   integer-literal decisions use SmallInteger-ness as the bootstrap does
+   (not `isInteger`, which a LargeInteger literal answers too);
+   `<primitive:>` is refused out of range, twice in a method and at 0, as
+   `Compiler.swift` refuses it. Beside them a corpus: a fixture of
+   methods that exercises each construct at and past its limits, beyond
+   the kernel's own methods, compared between the compilers bytecode for
+   bytecode in the plain form (primitive 166) and refusal for refusal.
+7. **`kernel.F16`: the kernel's compiler is fuzzed.** `fuzz-syntax` gains
+   a mode in which each input is also compiled by the kernel's compiler
+   in a VM through the make primitive (beside the make-and-run mode of
+   8d, `FuzzEntry.makeAndRun`, which already holds an image) and the two
+   outcomes compared: both refuse, or both accept with
+   the same plain bytecodes and literals. A disagreement is a finding:
+   fixed here, or listed with its input as a fixture. Run it 600 s with
+   "libFuzzer build: ok" once the items above are in, on a thread with
+   the smallest stack the compiler runs on.
+8. **`kernel.F17`: document.** A temporary declared in an inlined loop
+   body that no closure captures keeps its value across passes, in both
+   compilers. Say so in `docs/modules/kernel-live.md` beside the
+   per-iteration rule, with what Pharo does, and pin it with one test
+   both compilers pass. No code change (open question 3).
+
+### The tools and the scripts
+
+9. **`tools.F3`: evaluate the selection once.** "Instances of it",
+   "Objects pointing to it" and the Inspector's pointers-to-slot evaluate
+   the selected text two or three times, so a selection with a side
+   effect runs it each time. Evaluate once to a handle, then ask about
+   the handle. Test in `DiscoverabilityTest` with `FakeDevClient`
+   counting the evaluations of the selection: one.
+10. **`tools.F4`: the tier of a fixture and of a rename.**
+    `check-tier.sh` classifies `Tests/**/*.md` fixtures as docs (the perf
+    report's golden files, the app project's README) and judges a rename
+    by its new path only. `Tests/*` is classified before `*.md`; both
+    diffs run with `--no-renames`, so a file moved out of the core still
+    owes the core tier. Cases in `check-tier-test.sh` for each.
+11. **`tools.F5`: a matrix gate fails when any step fails.** The Mac
+    matrix's brace group and `device-rows.sh` take their status from
+    `shell-report.py --bar` alone: a matrix that died early or a report
+    that failed passes. Every step's status counts, and `--bar` over a
+    directory with no rows exits 1 saying so. Tests: `shell-report.py
+    --bar` has none yet, so a fixture directory with rows and one without
+    (run by `check-tier-test.sh` or a script test beside it), and the
+    gate's command with a failing first step fails.
+12. **`tools.F6`: the small items**, each its own commit: the `sudo ln`
+    line the app shows quotes its paths; two launches at once never label
+    a complete checkout incomplete (`CheckoutInstaller.install`); the
+    `kajo` target builds with strict memory safety (a clean build to
+    count what it flags; nothing outside the core should need `unsafe`,
+    so say what does); `new-check.sh`'s "0 symbols" check has a positive
+    control (the Debug binary has some, or a broken pattern passes);
+    `dist.sh` asserts the frameworks' compile flags from the build log
+    instead of recording them (exercised by `dist.sh checkout` in `just
+    new-check`; no signed `dist` run is owed); and `Development.swift`'s
+    `Host.current().localizedName` on the main thread is traced with the
+    launch trace on the Mac and moved off it if it can wait (the
+    `hostName` lesson).
+13. **`primitives.F8`: the client's reader.** `ProtocolClient` reads
+    lines of any length and closes its descriptor after 1 s whether or
+    not its reader has ended. Lines are bounded as the server's are (the
+    limit refused and the rest of the line discarded, a reply and not a
+    hang), and the descriptor is closed once, by whoever ends last, as
+    part 1's `Connection.finish` does. Tests: a target that sends a line
+    past the limit; a close while the reader is in `read`, the descriptor
+    closed exactly once.
+
+### The reports' notes
+
+14. `PairingTokenStore.renew` answers the new token only when it was
+    written whole and renamed into place; otherwise the old token stands
+    and the failure is reported. `load` checks the file's mode: a token
+    file anyone else could read is replaced by a new token (open question
+    2). No token in a test's output, a log or the doc.
+15. `ClientHost.run` stamps a reply's `line` event when the line was
+    read, before `ProjectWriter.apply`'s file writes ("timestamp events
+    with the time they happened").
+16. `ShellBridge.post` against a concurrent re-registration: the report
+    reads the worst case as a spurious signal to another Semaphore that
+    reused the entry. An excess signal on a Mutex's Semaphore breaks
+    mutual exclusion, so trace it: if the path exists, close it (the
+    queued signal holds its Semaphore by a root the drain releases, or
+    the registration takes the lock the post holds) with the test that
+    fails without it; if it does not, write the trace down.
+17. Recorded, not built: a spoofed Bonjour name receives the token (plain
+    TCP now, PSK-TLS later, the owner's decision of 9d); ten wrong tokens
+    a minute pause the listener (by design).
+
+### Part 1's "not done"
+
+18. Tests owed: the accept loop's failure path through an injected
+    `accept` result (not by lowering the process's descriptor limit); the
+    client side of item 5 (`ClientConnection`); primitive 154's put-back
+    on its own.
+19. A waiting Process loaded from an image gets its wait length at load
+    (the loader already decodes its method to check the frame's depth at
+    the saved pc; the instruction before that pc is the send), so its
+    debug stop rewinds as a live one's does. No image format change; if
+    one is needed, stop and leave it listed.
+20. The final mark's weak pass measured in a release build
+    (`theWeakPassIsMeasuredPerSlot`'s kernel at 2^20 and 2^24 - 1 slots),
+    the number beside part 1's debug one. A measurement, not a change
+    (open question 4 of part 1).
+
+Left as part 1 left it, by decision: `UIEventLoop`'s tables and the
+tools' class-side tables stay unsynchronized (main-affine UI state).
+
+### Bar
+
+- Every fix has its test, failing on the starting commit where a test
+  can (say which cannot and why), the outputs in `failing-before.txt`.
+- The two compilers agree on every method of the image (`CompilerTest`),
+  on the new corpus and under the new fuzz mode's 600 s; every
+  disagreement the fuzzer finds is fixed or listed with its input.
+- `interpret` identical instruction for instruction (`just arc-check`,
+  the disassembly diff); the aligned A/B within noise.
+- New primitives and the make primitive's new refusals in
+  `ExtremeIntegerTests` where they take an integer.
+- The round trip (`scripts/canonical-tonel.sh --check`) clean on every
+  kernel and tools commit.
+- `scripts/check-tier-test.sh` with its new cases and the perf report's
+  fixture test pass.
+- `just check <base>` on the final code commit: the core tier (the make
+  primitive, 146, the loader), every gate, the Mac and iPhone matrices'
+  `--bar` as before.
+
+### Open questions for the owner (build the recommended option; list them)
+
+1. `kernel.F7`: identifiers follow the bootstrap's rule (Unicode
+   alphabetic, from the host's tables through one primitive), against
+   ASCII-only identifiers in both compilers (no table, no difference
+   between hosts' Unicode versions). Recommended: the bootstrap's rule.
+2. Note 14: a token file with a mode wider than 0600 is replaced by a new
+   token (recommended; pairing is repeated once), against tightening the
+   mode and keeping the token.
+3. `kernel.F17`: document the loop body's uncaptured temps (recommended,
+   three bytecodes a pass saved and no method of the kernel depends on
+   either answer), against nilling them at every pass.
 
 ## As built (part 1)
 
@@ -660,7 +853,10 @@ wrote none of it); now the save is refused while any record has one
    a report on a global queue and ran out once under the sanitizer and
    twelve busy loops in this module's gate run (passing three reruns).
    Recommended: wait for it as long as the gate's own bound (the
-   assertion unchanged), in part 2.
+   assertion unchanged), in part 2. Closed by the main session the
+   same day with a fix instead of a longer wait (0110f70, "The
+   pause-ended report" below): nothing waits on a global queue any
+   more.
 
 ### `just check 8a8847d`
 
@@ -703,7 +899,8 @@ dispatches it. This is the wait AGENTS.md records ("a wait for a report
 that runs on a global queue is a wait for the queue's thread, not a
 bound"), now past 120 s with the suite 30 tests longer. Run again three
 times under the sanitizer and twelve busy loops it passed every time
-(34.6, 34.8 and 34.7 s). Not changed here; the test's bound is open question 5. ThreadSanitizer reported nothing in `tsan`
+(34.6, 34.8 and 34.7 s). Not changed here; the test's bound is open question 5 (closed by
+0110f70, below). ThreadSanitizer reported nothing in `tsan`
 or `tsan-load`; `swift-test` and `tsan` ran 418 + 136 tests; the kernel
 tests 240 of 240 (and 240 of 240 on the iPhone by `scripts/device.sh
 tests`, thermal nominal); the fuzzers "libFuzzer build: ok" at 1.61,
@@ -714,3 +911,47 @@ under `young=stw` 188 to 190 frames behind 9 fallbacks a launch and the
 hog with the budget off 1193 by design, every other row 0; the iPhone's
 (5 workers): 0 fallbacks, the ring under `young=stw` 2 to 5 frames behind
 scavenges of 13.95 to 17.89 ms, the hog by design, every other row 0.
+
+### The pause-ended report (0110f70, the main session)
+
+The one failed gate was not the test's bound. `ProtocolServer.refusing()`
+finds, under the server's lock, that a pause has run out, and sent the
+report for it to `DispatchQueue.global()`; under ThreadSanitizer and
+twelve busy loops no thread of that queue ran the block within the
+test's 120 s. The report is now made by the caller that found the pause
+over, after its unlock: `refusing(_:)` hands the report back through an
+`inout` and `acceptLoop` and `isRefusing` call it once the lock is let
+go. No report is made under the lock (a report that asks the server
+anything would deadlock) and none waits for a queue. The test's
+assertion and its 120 s are unchanged; the report is there when
+`isRefusing` returns. Two files, `Sources/KajoDev/Server.swift` and a
+comment in `Tests/KajoCompilerTests/PhoneTransportTests.swift`; nothing
+under the core.
+
+The gates on 0110f70: `just check d59d0fc` (the Swift tier, with the
+protocol fuzzer its reader owes) and after it the two loaded test gates
+of the core tier, run through the same `gates-lib.sh`, because the
+failure was theirs:
+
+    2026-11-10 17:02:38 0110f70 check-tier swift: 3 files from d59d0fc...HEAD (d59d0fc...0110f70) and the working tree
+    2026-11-10 17:03:00 0110f70 end clean-build rc=0 22s
+    2026-11-10 17:09:41 0110f70 end swift-test rc=0 401s
+    2026-11-10 18:01:16 0110f70 end tsan rc=0 3095s
+    2026-11-10 18:02:35 0110f70 end kernel-test rc=0 79s
+    2026-11-10 18:04:37 0110f70 end apps rc=0 122s
+    2026-11-10 18:08:40 0110f70 end new-check rc=0 243s
+    2026-11-10 18:10:50 0110f70 end fuzz-protocol rc=0 130s
+    2026-11-10 18:10:50 0110f70 check-tier done swift failed=0 4092s
+    2026-11-10 18:10:51 0110f70 extra gates: swift-test-load tsan-load
+    2026-11-10 18:19:04 0110f70 end swift-test-load rc=0 493s
+    2026-11-10 19:28:04 0110f70 end tsan-load rc=0 4140s
+    2026-11-10 19:28:04 0110f70 extra gates done failed=0
+
+Every gate passed. `swift-test`, `swift-test-load`, `tsan` and
+`tsan-load` each ran 418 + 136 tests with ThreadSanitizer reporting
+nothing, and `theServerServesTCPWithTheTokenRuleAndTheLimits` passed in
+all four; the kernel tests 240 of 240; both shells and the generated
+app's products built with 0 warnings; the protocol fuzzer "libFuzzer
+build: ok" at 366 795 runs in 121 s. With it every gate of the core tier
+has passed on part 1's code: the fourth run above for all but
+`tsan-load`, this one for `tsan-load` and again for the test gates.
