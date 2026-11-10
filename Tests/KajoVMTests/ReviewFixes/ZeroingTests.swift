@@ -346,3 +346,142 @@ func testPrimitive39RunsOnlyWhenATestAsks(_ on: Bool) throws {
     rt.vm.release(p)
     rt.stop()
 }
+
+// MARK: - item 21: the pointer copies poll
+
+private let slotCount = 1 << 20
+
+private let copySource = """
+method Object p38:a:a:a: temps=0 prim=38
+  push_nil
+  return_top
+end
+method Object p96 temps=0 prim=96
+  push_nil
+  return_top
+end
+method Object p95 temps=0 prim=95
+  push_nil
+  return_top
+end
+; a := Array new: n. b := Array new: n. b replaceFrom: 1 to: n with: a startingAt: 1. c := b shallowCopy. ^ c size
+method UndefinedObject copies temps=3
+  push_lit @Array
+  push_lit \(slotCount)
+  send new: 1
+  store_temp 0
+  push_lit @Array
+  push_lit \(slotCount)
+  send new: 1
+  store_temp 1
+  push_temp 0
+  push_int 1
+  push_int 7
+  send at:put: 2
+  pop
+  push_temp 1
+  push_int 1
+  push_lit \(slotCount)
+  push_temp 0
+  push_int 1
+  send p38:a:a:a: 4
+  pop
+  push_temp 1
+  send p96 0
+  store_temp 2
+  push_temp 2
+  push_int 1
+  send at: 1
+  push_temp 2
+  send p95 0
+  add
+  return_top
+end
+"""
+
+/// The review fixes, item 21 (collectors.F2): primitive 38 over pointer
+/// objects and a large pointer object's `shallowCopy` poll between chunks
+/// of 32 768 slots (256 KiB of words): the longest stretch of work
+/// between two polls is one chunk. On d78afcc both copied 2^20 slots with
+/// no poll (the stretch was the whole copy, 8 MiB).
+@Test func thePointerCopiesPollBetweenChunks() throws {
+    let rt = try Runtime(copySource, background: 1, heapBlocks: 4096, start: true)
+    let p = rt.spawn("copies")
+    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    #expect(rt.result(p) == Int64(slotCount + 7))
+    rt.vm.release(p)
+    let c = rt.vm.byteWorkCounters
+    rt.noFailures()
+    rt.stop()
+    #expect(c.polls >= UInt64(2 * (slotCount / PointerWork.chunk - 1)), "\(c)")
+    #expect(c.longestStretch <= UInt64(ByteWork.chunk), "\(c)")
+}
+
+// MARK: - item 21: the final mark's weak pass, measured
+
+private let weakSlots = 1 << 20
+
+private let weakSource = markingSrc + """
+; global 8 := a WeakArray of n slots, each holding one old Array
+method UndefinedObject bigWeak: temps=2
+  push_lit @WeakArray
+  push_temp 0
+  send new: 1
+  store_temp 1
+  push_lit @Array
+  push_int 1
+  send new: 1
+  store_temp 2
+  push_nil
+  push_int 9
+  push_temp 2
+  send globalAt:put: 2
+  pop
+  push_int 1
+  store_temp 0
+loop:
+  push_temp 0
+  push_lit \(weakSlots)
+  le
+  jump_if_false done
+  push_temp 1
+  push_temp 0
+  push_temp 2
+  send at:put: 2
+  pop
+  push_temp 0
+  push_int 1
+  add
+  store_temp 0
+  jump loop
+done:
+  push_nil
+  push_int 8
+  push_temp 1
+  send globalAt:put: 2
+  pop
+  push_int 1
+  return_top
+end
+"""
+
+/// The review fixes, item 21 (collectors.F3): the final mark's weak pass
+/// runs in the stop, past its commit point, over every slot of every weak
+/// holder the marker met; it cannot poll (a stop) or move out of the stop
+/// without a read barrier that hides an unmarked referent from a weak
+/// read until the pass has nilled it. It is measured instead: a WeakArray
+/// of 2^20 slots, its time per slot in the cycle's record (the bound the
+/// module doc states: weakNs = slots x the per-slot cost printed here).
+@Test func theWeakPassIsMeasuredPerSlot() throws {
+    let rt = try markingRuntime(weakSource, heapBlocks: 4096)
+    #expect(rt.runInt("bigWeak:", Int64(weakSlots)) == 1)
+    rt.scavenge()
+    rt.vm.startCycle()
+    rt.finishCycle()
+    let r = try #require(rt.vm.cycleLog.last)
+    let perSlot = Double(r.weakNs) / Double(weakSlots)
+    print("weak pass: \(weakSlots) slots in \(Double(r.weakNs) / 1e6) ms, \(perSlot) ns a slot (final pause \(Double(r.finalPauseNs) / 1e6) ms)")
+    #expect(r.weakNs > 0)
+    rt.noFailures()
+    rt.stop()
+}

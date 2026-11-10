@@ -205,11 +205,41 @@ private func primShallowCopy(_ m: Machine, _ c: PrimitiveCall) -> Oop {
     // A weak receiver's copy is weak and new, so the final mark never nils
     // its slots: a referent read here must be kept alive while marking.
     let weak = m.om.classFormat(ci).isWeak
-    for i in 0..<n {
-        let v = m.om.load(c.receiver, i)
-        if weak { unsafe keepAliveRead(m.state, c.receiver, i, v) }
-        m.store(o, i, v, .instVarAtPut)
+    if n <= PointerWork.chunk {
+        for i in 0..<n {
+            let v = m.om.load(c.receiver, i)
+            if weak { unsafe keepAliveRead(m.state, c.receiver, i, v) }
+            m.store(o, i, v, .instVarAtPut)
+        }
+        return o
     }
+    // The review fixes (item 21, collectors.F2): a large copy polls between
+    // chunks, the copy a pending root marked as being built (no walk answers
+    // it half filled); the receiver must keep its count across a poll that
+    // parked (a become in that stop), or the primitive fails. A full pending
+    // table copies unpolled, counted. Every slot is read through the entry
+    // and the receiver's weak keep-alive is decided per slot as before.
+    let h = m.holdPending(o)
+    defer { m.releasePending(h) }
+    if h < 0, let vm = unsafe workerOf(m.state).pointee.vm { unsafe vm.count(.largeTriggersUnrooted) }
+    let len = m.om.count(of: c.receiver)
+    var i = 0, stretch = 0
+    while i < n {
+        let end = Swift.min(n, i &+ PointerWork.chunk)
+        stretch &+= (end &- i) &<< 3
+        while i < end {
+            let v = m.om.load(c.receiver, i)
+            if weak { unsafe keepAliveRead(m.state, c.receiver, i, v) }
+            m.store(o, i, v, .instVarAtPut)
+            i &+= 1
+        }
+        if i < n && h >= 0 {
+            let parked = m.byteWorkPoll(stretch)
+            stretch = 0
+            if parked && m.om.count(of: c.receiver) != len { return .none }
+        }
+    }
+    m.byteWorkEnd(stretch)
     return o
 }
 

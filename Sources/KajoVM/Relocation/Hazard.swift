@@ -107,12 +107,39 @@ func primReplace(_ m: Machine, _ c: PrimitiveCall) -> Oop {
         }
         return rcv
     }
-    let d = unsafe hazardAcquire(vm, w, 0, rcv)
-    let s = unsafe hazardAcquire(vm, w, 1, src)
-    unsafe copySlots(vm, w, om, rcv.raw, d, Int(start - 1), src.raw, s, Int(from - 1), Int(n))
-    unsafe hazardRelease(vm, w, 1)
-    unsafe hazardRelease(vm, w, 0)
+    // The review fixes (item 21, collectors.F2): a copy past one chunk of
+    // `PointerWork.chunk` slots (256 KiB of words, as the byte primitives'
+    // chunk) polls between chunks with no hazard held, the bodies
+    // re-acquired after it (a relocation may have moved one meanwhile);
+    // after a poll that parked, both objects must keep their counts (a
+    // two-way become in that stop), or the primitive fails with the slots
+    // before it copied, as the polled byte primitives do.
+    let total = Int(n)
+    let rlen = om.count(of: rcv), slen = om.count(of: src)
+    let m0 = m
+    var done = 0
+    while done < total {
+        let k = Swift.min(total &- done, PointerWork.chunk)
+        let d = unsafe hazardAcquire(vm, w, 0, rcv)
+        let s = unsafe hazardAcquire(vm, w, 1, src)
+        unsafe copySlots(vm, w, om, rcv.raw, d, Int(start - 1) &+ done, src.raw, s, Int(from - 1) &+ done, k)
+        unsafe hazardRelease(vm, w, 1)
+        unsafe hazardRelease(vm, w, 0)
+        done &+= k
+        if done < total {
+            if m0.byteWorkPoll(k &<< 3), om.count(of: rcv) != rlen || om.count(of: src) != slen { return .none }
+        } else if total > PointerWork.chunk {
+            m0.byteWorkEnd(k &<< 3)
+        }
+    }
     return rcv
+}
+
+/// The review fixes (item 21): the slots a pointer copy (primitive 38,
+/// `shallowCopy`) moves between two polls: 32 768, 256 KiB of words, the
+/// byte primitives' chunk (`ByteWork.chunk`), counted as its bytes.
+enum PointerWork {
+    static let chunk = ByteWork.chunk >> 3
 }
 
 /// The copy loop under the hazard slots: `n` slots from the source `so`'s
