@@ -62,14 +62,18 @@ Transcript class >> print: anObject [
 
 { #category : #accessing }
 Transcript class >> show: anObject [
-	lock critical: [stream nextPutAll: (anObject isString ifTrue: [anObject] ifFalse: [anObject displayString])]
+	"The text is made before the lock is taken (the review fixes, item 7): a displayString that fails, or that writes to the Transcript itself, runs outside the lock; inside it only a String is appended."
+	| text |
+	text := self textOf: anObject.
+	lock critical: [stream nextPutAll: text]
 ]
 
 { #category : #accessing }
 Transcript class >> showLine: aString [
 	"aString and the end of the line as one transcript event, whatever other Processes show meanwhile (show: then cr are two steps another Process's line can fall between: the development answers' reports come from many Processes at once)."
-	| line |
-	lock critical: [stream nextPutAll: aString. line := stream contents. stream resetContents].
+	| text line |
+	text := self textOf: aString.
+	lock critical: [stream nextPutAll: text. line := stream contents. stream resetContents].
 	self emitEvent: 'transcript' fields: {'text'. line}
 ]
 
@@ -81,4 +85,14 @@ Transcript class >> space [
 { #category : #accessing }
 Transcript class >> tab [
 	self show: (String with: Character tab)
+]
+
+{ #category : #accessing }
+Transcript class >> textOf: anObject [
+	"A String for anObject, made outside the lock: itself when it is one, else its displayString (which must answer a String)."
+	| text |
+	anObject isString ifTrue: [^ anObject].
+	text := anObject displayString.
+	text isString ifFalse: [^ self error: 'displayString did not answer a String'].
+	^ text
 ]
