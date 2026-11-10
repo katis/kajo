@@ -187,11 +187,18 @@ import KajoApp
     let pa = try #require(vm.spawn(receiver: cls, selector: "a")), pb = try #require(vm.spawn(receiver: cls, selector: "b"))
     var torn = 0, reads = 0
     let path = dir.appendingPathComponent("same.txt").path
+    // Each read in an autorelease pool of its own (Foundation's file data
+    // is autoreleased: an undrained loop held hundreds of thousands of
+    // buffers and ran ThreadSanitizer's allocator out of chunks), a read
+    // every 0.2 ms.
     while vm.liveProcessCount > 0 {
-        if let d = FileManager.default.contents(atPath: path) {
-            reads += 1
-            if d.count != 300_000 && d.count != 200_000 { torn += 1 }
+        autoreleasepool {
+            if let d = FileManager.default.contents(atPath: path) {
+                reads += 1
+                if d.count != 300_000 && d.count != 200_000 { torn += 1 }
+            }
         }
+        usleep(200)
     }
     vm.waitUntilAllTerminated()
     let size = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? -1
