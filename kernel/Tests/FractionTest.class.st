@@ -5,6 +5,18 @@ Class {
 }
 
 { #category : #accessing }
+FractionTest >> testAFractionHashesAsTheFloatItEquals [
+	"The review fixes, item 22: a = b implies a hash = b hash, across Fraction and Float."
+	self assert: (1/2) = 0.5.
+	self assert: (1/2) hash = 0.5 hash.
+	self assert: (3/4) hash = 0.75 hash.
+	self assert: (1/3) hash = (1/3) asFloat hash.
+	self assert: ((Set new add: 1/2; yourself) includes: 0.5).
+	self assert: ((Set new add: 0.75; yourself) includes: 3/4).
+	self assert: (2/4) hash = (1/2) hash
+]
+
+{ #category : #accessing }
 FractionTest >> testArithmetic [
 	self assert: (1 / 2) + (1 / 3) = (5 / 6).
 	self assert: (1 / 2) - (1 / 3) = (1 / 6).

@@ -75,7 +75,8 @@ Fraction >> generality [
 
 { #category : #accessing }
 Fraction >> hash [
-	^ numerator hash bitXor: denominator hash
+	"The hash of the Float it is equal to (the review fixes, item 22): a Fraction and a Float compare as Floats (Float's generality), so equal ones hash alike; two equal Fractions have the same terms and so the same Float."
+	^ self asFloat hash
 ]
 
 { #category : #accessing }
