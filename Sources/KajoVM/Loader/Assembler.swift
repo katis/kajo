@@ -472,6 +472,18 @@ package func assemble(_ m: AsmMethod, limits: LoaderLimits = LoaderLimits()) thr
         }
     }
 
+    // The heap verifier's header rule (`argc + temps <= maxTemps`, a block's
+    // temps counting its copied values and its closure word), here too: the
+    // bootstrap compiler's methods come through `AsmMethod`, not the kasm
+    // parser, which checked it, so the compilers' corpus found 257 temps and
+    // 256-argument blocks accepted here and refused by the make primitive
+    // (the review fixes, part 2, item 6).
+    if argc + m.temps > limits.maxTemps {
+        throw fail(.badOperand, "arguments and temps exceed \(limits.maxTemps)", m.line)
+    }
+    for b in m.blocks where b.args + b.copied + b.temps + 1 > limits.maxTemps {
+        throw fail(.badOperand, "block \(b.name): arguments, copied values and temps exceed \(limits.maxTemps)", b.line)
+    }
     var blocks: [AssembledMethod] = []
     for (k, b) in m.blocks.enumerated() {
         let r = try assembleBody(Body(lines: b.body, argc: b.args, addressable: b.args + b.copied + b.temps, isBlock: true,

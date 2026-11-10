@@ -101,3 +101,48 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
     #expect(String(decoding: c.methods[1].source, as: UTF8.self) == "foo\n\t^ 1\n")
     #expect(FuzzSyntax.run(text))
 }
+
+/// Item 5 (kernel.F14): every count a bytecode encodes, at its limit and
+/// one past it, refused alike by both compilers (the make primitive's
+/// verifier and bound behind the kernel's): a keyword send of 255 and 256
+/// arguments, a block copying 255 and 256 values, 32 760 and 32 763 bytes
+/// of bytecode, 4095 and 4096 literals (the source map counts). On
+/// 18e274f the kernel's generator wrapped or raised a generic Error.
+@Test func bothCompilersRefuseAtEveryEncodingLimit() throws {
+    func keywordSend(_ n: Int) -> String { "f ^ self " + (1...n).map { "k\($0): 1" }.joined(separator: " ") }
+    func copying(_ n: Int) -> String {
+        // temps a block reads and nothing assigns: copied, not in a vector
+        "f | " + (1...n).map { "t\($0)" }.joined(separator: " ") + " | ^ [" + (1...n).map { "t\($0)" }.joined(separator: ". ") + "]"
+    }
+    func chain(_ k: Int) -> String { "f ^ 1" + String(repeating: " abs", count: k) }
+    func selectors(_ n: Int) -> String { "f " + (1...n).map { "self s\($0)" }.joined(separator: ". ") }
+    // The big pairs (a method of 32 760 bytes, 4094 selectors) take minutes
+    // in the Smalltalk compiler under ThreadSanitizer: the small ones there.
+    let all = [keywordSend(255), keywordSend(256), copying(255), copying(256), chain(10_919), chain(10_920),
+               selectors(4094), selectors(4095)]
+    let cases = compilerTestsUnderThreadSanitizer ? Array(all.prefix(4)) : all
+    let ctx0 = CompilerAgreement.context(classNames: Set(["Object"]))
+    let accepted = cases.map { (try? compileMethod(Array($0.utf8), file: "limits", in: ctx0)) != nil }
+    #expect(accepted == Array([true, false, true, false, true, false, true, false].prefix(cases.count)), "\(accepted)")
+    let d = try agreement(cases)
+    #expect(d.isEmpty, "\(d.count) disagree: \(d.map { "\($0.0.prefix(40))…: \($0.1.prefix(200))" })")
+}
+
+/// Item 6 (kernel.F15): the compilers' corpus, methods that exercise each
+/// construct at and past its limits beyond the kernel's own methods
+/// (literals at the SmallInteger boundary, every inlining decision with
+/// SmallInteger and LargeInteger operands, the primitive pragma's rules,
+/// names and scoping, nesting 31 to 33, 254 to 257 temps, block arities,
+/// malformed sources), compiled by both compilers and compared bytecode
+/// for bytecode in the plain form and refusal for refusal. On 18e274f the
+/// kernel's compiler inlined a LargeInteger step, missed a LargeInteger
+/// limit's hidden temp and accepted `<primitive: 0>` and two primitives.
+@Test func bothCompilersAgreeOnTheCorpus() throws {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/compiler-corpus/corpus.txt")
+    var text = try String(contentsOf: url, encoding: .utf8)
+    if text.hasSuffix("\n") { text.removeLast() }
+    let sources = text.components(separatedBy: "\n\u{1E}\n")
+    #expect(sources.count >= 150)
+    let d = try agreement(sources)
+    #expect(d.isEmpty, "\(d.count) of \(sources.count) disagree: \(d.map { "\($0.0.prefix(60)) => \($0.1.prefix(160))" }.joined(separator: " | "))")
+}

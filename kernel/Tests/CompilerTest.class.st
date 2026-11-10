@@ -45,6 +45,27 @@ CompilerTest >> testCompiledCodeRunsTheSame [
 ]
 
 { #category : #accessing }
+CompilerTest >> testEncodingLimitsAreCompileErrors [
+	"The review fixes, part 2, item 5 (kernel.F14): the generator refuses an operand past its field with a CompileError naming the limit, as the assembler does (a keyword send of 256 arguments was ByteArray at:put:'s Error); the make primitive refuses more than 32 760 bytes of bytecode before its verifier, and a CompiledCode whose integer fields are extreme is refused, never a trap."
+	| src code e |
+	src := WriteStream on: String new.
+	src nextPutAll: 'f ^ self'.
+	1 to: 256 do: [:i | src nextPutAll: ' k'; print: i; nextPutAll: ': 1'].
+	e := [Compiler compile: src contents in: Object. nil] on: CompileError do: [:x | x messageText].
+	self assert: (e notNil and: [e includesSubstring: '255']).
+	code := CompiledCode new setSelector: #f bytecodes: (ByteArray new: 32761) literals: #() numArgs: 0 numTemps: 0 maxStack: 1 primitive: 0 flags: 0 numCopied: 0.
+	e := [code makeMethodIn: Object. nil] on: CompileError do: [:x | x messageText].
+	self assert: (e notNil and: [e includesSubstring: 'more than 32760 bytes']).
+	#(-4611686018427387904 4611686018427387903 -1) do: [:n |
+		#(1 2 3 4 5 6) do: [:field | | f |
+			f := Array new: 6 withAll: 0.
+			f at: 3 put: 1.
+			f at: field put: n.
+			code := CompiledCode new setSelector: #f bytecodes: #[14] literals: #() numArgs: (f at: 1) numTemps: (f at: 2) maxStack: (f at: 3) primitive: (f at: 4) flags: (f at: 5) numCopied: (f at: 6).
+			self should: [code makeMethodIn: Object] raise: CompileError]]
+]
+
+{ #category : #accessing }
 CompilerTest >> testEveryMethodCompilesAsTheBootstrapDid [
 	<slow>
 	| checked failures |
@@ -82,6 +103,21 @@ CompilerTest >> testIdentifiersFollowTheBootstrapsRule [
 	self assert: (Scanner identifierClassOf: 16rD7) = 0.
 	self assert: (Scanner identifierClassOf: -1) = 0.
 	self assert: (Scanner identifierClassOf: 16r110000) = 0
+]
+
+{ #category : #accessing }
+CompilerTest >> testIntegersAndPrimitivesAsTheBootstrapDecides [
+	"The review fixes, part 2, item 6 (kernel.F15): inlining and the hidden limit temp ask whether a literal is a SmallInteger, as the bootstrap's .integer does (a LargeInteger literal is not one), and <primitive:> takes a SmallInteger 1...255, once. ReviewFixesPart2Tests compares the two compilers over a corpus of such methods."
+	| code |
+	code := Compiler compile: 'f 1 to: 10 by: 4611686018427387904 do: [:i | i]' in: Object.
+	self assert: (code literals includes: #to:by:do:).
+	code := Compiler compile: 'f 1 to: 100000000000000000000 do: [:i | i]' in: Object.
+	self assert: code numTemps = 2.
+	code := Compiler compile: 'f 1 to: 10 do: [:i | i]' in: Object.
+	self assert: code numTemps = 1.
+	#('f <primitive: 0> ^ 1' 'f <primitive: 256> ^ 1' 'f <primitive: 1> <primitive: 2> ^ 1' 'f <primitive: ''x''> ^ 1' 'f <primitive: 4611686018427387904> ^ 1') do: [:src |
+		self should: [Compiler compile: src in: Object] raise: CompileError].
+	self assert: (Compiler compile: 'f <primitive: 255> ^ 1' in: Object) primitive = 255
 ]
 
 { #category : #accessing }

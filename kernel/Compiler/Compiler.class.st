@@ -207,7 +207,7 @@ Compiler >> inlinable: s [
 	(#(#whileTrue #whileFalse #repeat) includes: sel) ifTrue: [^ self isBlock: s receiver args: 0].
 	sel == #to:do: ifTrue: [^ self isBlock: a last args: 1].
 	sel == #to:by:do: ifTrue: [
-		^ (self isBlock: a last args: 1) and: [(a at: 2) class == LiteralNode and: [(a at: 2) value isInteger and: [(a at: 2) value ~= 0]]]].
+		^ (self isBlock: a last args: 1) and: [(a at: 2) class == LiteralNode and: [(a at: 2) value class == SmallInteger and: [(a at: 2) value ~= 0]]]].
 	^ false
 ]
 
@@ -218,7 +218,8 @@ Compiler >> isBlock: aNode args: n [
 
 { #category : #analysis }
 Compiler >> isIntegerLiteral: aNode [
-	^ aNode class == LiteralNode and: [aNode value isInteger]
+	"A SmallInteger literal, as the bootstrap's .integer (a LargeInteger literal is not one: the review fixes, part 2, item 6)."
+	^ aNode class == LiteralNode and: [aNode value class == SmallInteger]
 ]
 
 { #category : #analysis }
@@ -277,7 +278,12 @@ Compiler >> compile: aString [
 	flags := 0.
 	pragmas := OrderedCollection new.
 	tree pragmas do: [:p |
-		p first == #primitive: ifTrue: [primitive := (p at: 2) first] ifFalse: [
+		p first == #primitive: ifTrue: [ | n |
+			"The bootstrap's rule (Compiler.swift): a SmallInteger 1...255, once (the review fixes, part 2, item 6)."
+			n := (p at: 2) first.
+			(n class == SmallInteger and: [n between: 1 and: 255]) ifFalse: [^ self fail: 'primitive: takes 1...255' line: (p at: 3)].
+			primitive = 0 ifFalse: [^ self fail: 'two primitives' line: (p at: 3)].
+			primitive := n] ifFalse: [
 		p first == #unwind ifTrue: [flags := flags bitOr: 1] ifFalse: [
 		p first == #handler ifTrue: [flags := flags bitOr: 2] ifFalse: [
 		pragmas add: (Pragma selector: p first arguments: (p at: 2))]]]].

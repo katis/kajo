@@ -33,22 +33,28 @@ BytecodeGenerator >> assembleWithExtraLiterals: extra [
 	1 to: n do: [:i | | op wide |
 		op := (ins at: i) first.
 		wide := (BytecodeGenerator isExtensible: op) and: [((ins at: i) at: 2) > 255].
-		offsets at: i + 1 put: (offsets at: i) + (BytecodeGenerator length: op) + (wide ifTrue: [2] ifFalse: [0])].
+		offsets at: i + 1 put: (offsets at: i) + (BytecodeGenerator length: op) + (wide ifTrue: [2] ifFalse: [0]).
+		(offsets at: i + 1) > BytecodeGenerator maxMethodBytes ifTrue: [
+			^ self fail: 'more than ' , BytecodeGenerator maxMethodBytes printString , ' bytes of bytecode']].
 	bytes := WriteStream on: (ByteArray new: 0).
 	1 to: n do: [:i | | inst op a o rel |
 		inst := ins at: i.
 		op := inst first.
 		a := inst at: 2.
 		((BytecodeGenerator isExtensible: op) and: [a > 255]) ifTrue: [
+			a > 65535 ifTrue: [^ self fail: 'operand ' , a printString , ' exceeds 65535'].
 			bytes nextPut: (BytecodeGenerator number: #ext); nextPut: (a bitShift: -8).
 			a := a bitAnd: 255].
 		bytes nextPut: (BytecodeGenerator number: op).
 		o := BytecodeGenerator operands: op.
 		o == #index ifTrue: [bytes nextPut: a].
 		o == #int8 ifTrue: [bytes nextPut: (a bitAnd: 255)].
-		(#(#send #closure #vectorSlot) includes: o) ifTrue: [bytes nextPut: a; nextPut: (inst at: 3)].
+		(#(#send #closure #vectorSlot) includes: o) ifTrue: [
+			((inst at: 3) between: 0 and: 255) ifFalse: [^ self fail: 'operand ' , (inst at: 3) printString , ' exceeds 255'].
+			bytes nextPut: a; nextPut: (inst at: 3)].
 		o == #jump ifTrue: [
 			rel := (offsets at: (labels at: (inst at: 4))) - (offsets at: i + 1).
+			(rel between: -32768 and: 32767) ifFalse: [^ self fail: 'jump too far'].
 			bytes nextPut: (rel bitAnd: 255); nextPut: ((rel bitShift: -8) bitAnd: 255)]].
 	k := self maxStackOf: ins.
 	sources isEmpty ifFalse: [
@@ -60,7 +66,14 @@ BytecodeGenerator >> assembleWithExtraLiterals: extra [
 			BytecodeGenerator putUnsigned: (s at: 3) - (s at: 2) on: map.
 			pc].
 		literals add: map contents].
+	literals size > BytecodeGenerator maxLiterals ifTrue: [^ self fail: 'more than ' , BytecodeGenerator maxLiterals printString , ' literals'].
 	^ {bytes contents. literals asArray. k. sources notEmpty}
+]
+
+{ #category : #accessing }
+BytecodeGenerator >> fail: aString [
+	"A refusal at an encoding limit (the review fixes, part 2, item 5: the assembler's limits, Assembler.swift), a CompileError as every other refusal."
+	^ CompileError new line: 0; signal: aString
 ]
 
 { #category : #accessing }
@@ -132,6 +145,18 @@ BytecodeGenerator class >> literal: a sameAs: b [
 	(a isKindOf: CompiledCode) ifTrue: [^ a == b].
 	(a isKindOf: Pragma) ifTrue: [^ a == b].
 	^ a = b
+]
+
+{ #category : #accessing }
+BytecodeGenerator class >> maxLiterals [
+	"The literal frame's limit: one heap block of slots, LoaderLimits' maxLiterals (Header.maxSlots); the source map counts."
+	^ 4095
+]
+
+{ #category : #accessing }
+BytecodeGenerator class >> maxMethodBytes [
+	"The bytecode's limit: one heap block of bytes, LoaderLimits' maxMethodBytes (Header.maxBytes), which keeps every jump within an Int16. The make primitive refuses more too."
+	^ 32760
 ]
 
 { #category : #accessing }

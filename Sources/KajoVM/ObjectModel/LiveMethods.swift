@@ -247,6 +247,12 @@ struct CodeReader {
         if isBlock && om.load(o, CompiledCodeLayout.selector) != nilObject { return refuse("a block method with a selector") }
         let bc = om.load(o, CompiledCodeLayout.bytecodes)
         guard bc.isObject, om.classIndex(of: bc) == WellKnown.byteArray, om.isBytes(bc) else { return refuse("bytecodes not a ByteArray") }
+        // The review fixes, part 2, item 5 (kernel.F14): the assembler's
+        // bound, before the verifier reads anything (a method fits one
+        // block, which keeps every jump within an Int16).
+        if om.count(of: bc) > UInt64(LoaderLimits().maxMethodBytes) {
+            return refuse("more than \(LoaderLimits().maxMethodBytes) bytes of bytecode")
+        }
         let lits = om.load(o, CompiledCodeLayout.literals)
         guard lits.isObject, om.classIndex(of: lits) == WellKnown.array, !om.isBytes(lits) else { return refuse("literals not an Array") }
         let n = Int(om.count(of: lits))
