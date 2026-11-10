@@ -81,7 +81,8 @@ let package = Package(
         // development protocol. No UI here.
         .executableTarget(
             name: "kajo",
-            dependencies: ["KajoVM", "KajoCompiler", "KajoDev", "KajoGenerator"]
+            dependencies: ["KajoVM", "KajoCompiler", "KajoDev", "KajoGenerator"],
+            swiftSettings: [.strictMemorySafety()]
         ),
         // libFuzzer targets for the kasm and snapshot loaders (`just fuzz`).
         // Built plainly they replay a corpus and mutate it.

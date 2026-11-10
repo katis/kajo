@@ -164,7 +164,7 @@ case "run":
     case .success(let checksum):
         let counters = outcome.counters.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
         let report = outcome.report.map { "\($0.name)=\($0.value)" }.joined(separator: " ")
-        print("checksum=\(checksum) ms=\(String(format: "%.1f", outcome.milliseconds)) workers=\(options.workers) \(counters) \(report)")
+        print("checksum=\(checksum) ms=\(oneDecimal(outcome.milliseconds)) workers=\(options.workers) \(counters) \(report)")
     case .failure(let f):
         fail("kajo: \(f)", 1)
     }
@@ -202,7 +202,7 @@ case "build-image":
         let r = try KernelBuild.build(KernelBuild.sources(in: dirs), options: options)
         for w in r.warnings { FileHandle.standardError.write((w + "\n").data(using: .utf8)!) }
         guard FileManager.default.createFile(atPath: out, contents: Data(r.image)) else { fail("cannot write \(out)") }
-        print("\(out): \(r.classes) classes, \(r.methods) methods, \(r.image.count) bytes, \(String(format: "%.0f", Date().timeIntervalSince(t0) * 1000)) ms\(options.release ? ", release image" : "")")
+        print("\(out): \(r.classes) classes, \(r.methods) methods, \(r.image.count) bytes, \(Int((Date().timeIntervalSince(t0) * 1000).rounded())) ms\(options.release ? ", release image" : "")")
     } catch {
         fail("kajo build-image: \(error)", 1)
     }
@@ -298,7 +298,10 @@ func serveTarget(image: [UInt8], options: Headless.Options, socket: String, name
         print("kajo: development protocol on \(socket)")
     }
     print("kajo: token \(target.server.token)")
-    fflush(stdout)
+    // C's stdout is a global the strict memory safety check calls unsafe:
+    // the one unsafe construct of this target (the review fixes, part 2,
+    // item 12).
+    unsafe fflush(stdout)
     signal(SIGINT, SIG_IGN)
     signal(SIGTERM, SIG_IGN)
     let sources = [SIGINT, SIGTERM].map { sig -> DispatchSourceSignal in
@@ -311,4 +314,11 @@ func serveTarget(image: [UInt8], options: Headless.Options, socket: String, name
     _ = sources
     target.close()
     exit(0)
+}
+
+/// `x` with one decimal, as `%.1f` wrote it (String(format:) takes C
+/// varargs, which strict memory safety calls unsafe).
+func oneDecimal(_ x: Double) -> String {
+    let n = Int((x * 10).rounded())
+    return "\(n < 0 && n > -10 ? "-" : "")\(n / 10).\(abs(n % 10))"
 }
