@@ -485,3 +485,77 @@ end
     rt.noFailures()
     rt.stop()
 }
+
+// MARK: - item 23: primitive 156 from a frame an interrupt made
+
+private let resendSource = """
+method Context sender temps=0 prim=100
+  push_nil
+  return_top
+end
+method Context primResend: temps=0 prim=156
+  push_int -1
+  return_top
+end
+method Object yourself temps=0
+  push_self
+  return_top
+end
+; global 3's Semaphore yourself wait (two adjacent sends)
+method UndefinedObject waiter temps=0
+  push_nil
+  push_int 3
+  send globalAt: 1
+  send yourself 0
+  send wait 0
+  pop
+  push_int 1
+  return_top
+end
+; the interrupt's frame resends its caller's send with {the Semaphore}
+method Process stopForDebugger temps=1
+  push_lit @Array
+  push_int 1
+  send new: 1
+  store_temp 0
+  push_temp 0
+  push_int 1
+  push_nil
+  push_int 3
+  send globalAt: 1
+  send at:put: 2
+  pop
+  push_this_context
+  send sender 0
+  push_temp 0
+  send primResend: 1
+  return_top
+end
+method Process stopForDebuggerAfterSend temps=0
+  push_self
+  send stopForDebugger 0
+  return_top
+end
+"""
+
+/// The review fixes, item 23 (interpreter.F4): the frame an interrupt
+/// makes sits above its caller's operands, so primitive 156 from it would
+/// leave one operand too many; it is refused (the method's fallback
+/// answers), and the Process waits again with its stack as it was. On
+/// d78afcc the resend ran (one resend counted) and the saved sp grew.
+@Test func aResendFromAnInterruptsFrameIsRefused() throws {
+    let rt = try Runtime(resendSource, background: 1, start: false)
+    rt.semaphore(global: 3)
+    let p = rt.spawn("waiter")
+    _ = rt.vm.runOneSlice(worker: 1)
+    #expect(rt.state(p) == .waiting)
+    let sp0 = rt.vm.inspect { $0.load(p, ProcessLayout.sp) }
+    #expect(rt.vm.interruptProcess(p, kind: InterruptKind.debugStop))
+    for _ in 0..<100 where rt.vm.runOneSlice(worker: 1) {}
+    #expect(rt.state(p) == .waiting)
+    #expect(rt.vm.counters[.resends] == 0)
+    #expect(rt.vm.inspect { $0.load(p, ProcessLayout.sp) } == sp0)
+    rt.vm.terminate(p)
+    rt.vm.release(p)
+    rt.stop()
+}

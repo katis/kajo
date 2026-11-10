@@ -312,6 +312,21 @@ private func resend(_ m: Machine, _ target: Oop, _ operands: Oop) -> Oop {
     let rh = regs.hdr
     guard rh > 0, let sh = unsafe liveFrame(s, target), unsafe callerHeader(base, rh) == sh,
           operands.isObject, m.classIndex(of: operands) == WellKnown.array else { return .none }
+    // The review fixes (item 23, interpreter.F4): a frame the VM made with a
+    // marker (an interrupt's `stopForDebugger` or `terminateUnwinding`, a
+    // refused store's `modificationForbiddenAt:value:`, a non-local
+    // return's `cannotReturn:`) sits above its caller's operands, not at a
+    // send's receiver slot, so a resend from it would leave one operand
+    // too many against the verifier's depth at the send. Refused.
+    let marker: Int64
+    let cw0 = unsafe base[rh + Frame.context]
+    if cw0 & Oop.objectTagMask == 0 {
+        let mk = om.load(Oop(raw: cw0), ContextLayout.marker)
+        marker = mk.isSmallInteger ? mk.smallIntegerValue : 0
+    } else {
+        marker = cw0 == Frame.emptyContext ? 0 : Int64(untagged(cw0))
+    }
+    guard marker != FrameMarker.discard && marker != FrameMarker.cascade else { return .none }
     let returnPC = unsafe untagged(base[rh + Frame.callerPC])
     let method = unsafe Oop(raw: base[sh])
     guard let send = sendEnding(m, method: method, at: returnPC),
@@ -326,6 +341,18 @@ private func resend(_ m: Machine, _ target: Oop, _ operands: Oop) -> Oop {
     guard start >= 0 else { return .none }
     let rfp = unsafe frameFP(om, base, rh)
     let n = send.argc + 1
+    // The review fixes (item 23): R's receiver slot must be where the send
+    // at `start` put its receiver, by the verifier's traced depth there
+    // (the loader's rule for a saved frame). A frame the VM made above the
+    // operands, moved down by `terminateTo:` (which drops its marker, so the
+    // check above cannot see it), sits one word higher and is refused.
+    let mc = om.load(method, MethodLayout.methodClass)
+    let ci = mc.isObject && om.isBehavior(mc) ? om.load(mc, ClassLayout.classIndex) : .none
+    guard ci.isSmallInteger else { return .none }
+    var depths: VerifiedCode? = nil
+    guard verifyHeapMethod(om, method, classIndex: UInt64(ci.smallIntegerValue), nilObject: m.nilObject, traced: { depths = $0 }) == nil,
+          let v = depths, let k = v.instructions.firstIndex(where: { $0.offset == start }), v.depths[k] >= n,
+          rfp == sh + Frame.context + v.depths[k] - n + 1 else { return .none }
     guard unsafe base + rfp + n + 2 < s.pointee.stackEnd else { return .none }
     // R goes: its Context (if any) is detached first.
     let cw = unsafe base[rh + Frame.context]
