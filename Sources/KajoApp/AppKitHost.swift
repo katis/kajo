@@ -137,7 +137,8 @@ final class FlippedView: NSView {
             guard a.count == 1, case .string(let k) = a[0] else { return nil }
             return get9c(e, k) ?? get(e, k)
         case "frame":
-            guard a.count == 4, let x = a[0].double, let y = a[1].double, let w = a[2].double, let h = a[3].double else { return nil }
+            guard a.count == 4, let x = geometryArgument(a[0]), let y = geometryArgument(a[1]), let w = geometryArgument(a[2]),
+                  let h = geometryArgument(a[3]) else { return nil }
             if let win = e.window {
                 let screen = win.screen ?? NSScreen.main
                 let top = screen?.visibleFrame.maxY ?? 800
@@ -148,7 +149,7 @@ final class FlippedView: NSView {
             }
             return .nil
         case "origin":
-            guard a.count == 2, let x = a[0].double, let y = a[1].double else { return nil }
+            guard a.count == 2, let x = geometryArgument(a[0]), let y = geometryArgument(a[1]) else { return nil }
             e.view.setFrameOrigin(NSPoint(x: x, y: y))
             return .nil
         case "add":
@@ -216,7 +217,7 @@ final class FlippedView: NSView {
             e.view.wantsLayer = true
             e.view.layer?.backgroundColor = color(v.string ?? "").cgColor
         case ("x", _), ("y", _), ("width", _), ("height", _):
-            guard let d = v.double else { return false }
+            guard let d = geometryArgument(v) else { return false }
             var f = e.view.frame
             switch k {
             case "x": f.origin.x = d
@@ -231,7 +232,7 @@ final class FlippedView: NSView {
     }
 
     func get(_ e: Entry, _ k: String) -> ShellValue? {
-        func num(_ d: CGFloat) -> ShellValue { d == d.rounded() ? .int(Int64(d)) : .double(Double(d)) }
+        func num(_ d: CGFloat) -> ShellValue { geometryValue(Double(d)) }
         switch (k, e.view) {
         case ("text", let l as NSTextField): return .string(l.stringValue)
         case ("text", _) where e.kind == "textView": return .string(textView(e)?.string ?? "")

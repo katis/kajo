@@ -116,13 +116,14 @@ import UIKit
             guard a.count == 1, case .string(let k) = a[0] else { return nil }
             return get(e, k)
         case "frame":
-            guard a.count == 4, let x = a[0].double, let y = a[1].double, let w = a[2].double, let h = a[3].double else { return nil }
+            guard a.count == 4, let x = geometryArgument(a[0]), let y = geometryArgument(a[1]), let w = geometryArgument(a[2]),
+                  let h = geometryArgument(a[3]) else { return nil }
             // The iOS shell is one full-screen window: a Window's frame is
             // its content size request only.
             if e.kind != "window" { e.view.frame = CGRect(x: x, y: y, width: w, height: h) }
             return .nil
         case "origin":
-            guard a.count == 2, let x = a[0].double, let y = a[1].double else { return nil }
+            guard a.count == 2, let x = geometryArgument(a[0]), let y = geometryArgument(a[1]) else { return nil }
             e.view.frame.origin = CGPoint(x: x, y: y)
             return .nil
         case "add":
@@ -189,7 +190,7 @@ import UIKit
         case ("hidden", _): e.view.isHidden = v == .bool(true)
         case ("color", _): e.view.backgroundColor = color(v.string ?? "")
         case ("x", _), ("y", _), ("width", _), ("height", _):
-            guard let d = v.double else { return false }
+            guard let d = geometryArgument(v) else { return false }
             switch k {
             case "x": e.view.frame.origin.x = d
             case "y": e.view.frame.origin.y = d
@@ -210,7 +211,7 @@ import UIKit
     }
 
     func get(_ e: Entry, _ k: String) -> ShellValue? {
-        func num(_ d: CGFloat) -> ShellValue { d == d.rounded() ? .int(Int64(d)) : .double(Double(d)) }
+        func num(_ d: CGFloat) -> ShellValue { geometryValue(Double(d)) }
         switch (k, e.view) {
         case ("text", let l as UILabel): return .string(l.text ?? "")
         case ("text", let t as UITextView): return .string(t.text ?? "")

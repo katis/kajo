@@ -109,3 +109,39 @@ private final class Stepped {
         t.end()
     }
 }
+
+#if os(macOS)
+import KajoApp
+
+/// The review fixes, item 12 (tools.F1): a view's geometry set to a huge
+/// or non-finite value reads back without trapping. AppKit keeps a view's
+/// frame within 2^45 (a width of 1.0e20 reads back 35 184 372 088 832, an
+/// integer), so the report's trap is not reached through an NSView, but a
+/// non-finite one raised AppKit's exception at set (the test process died
+/// on it), so geometry arguments must be finite now; the
+/// conversion itself (`geometryValue`) is what a UIView or a window
+/// reaches, checked at its edges: on d78afcc `Int64(d)` trapped for any
+/// integral |d| >= 2^63 and for infinity.
+@MainActor @Test func aHugeGeometryReadsBackWithoutATrap() throws {
+    let host = AppKitHost(statusWindow: false, keepDisplayAwake: false)
+    let h = try #require(host.viewCall(ViewCall(op: "create", handle: 0, arguments: [.string("view")]))?.int)
+    for (k, v) in [("width", 1.0e20), ("x", -3.0e19), ("height", Double.infinity), ("y", -Double.infinity), ("width", Double.nan)] {
+        let set = host.viewCall(ViewCall(op: "set", handle: Int(h), arguments: [.string(k), .double(v)]))
+        #expect(v.isFinite ? set != nil : set == nil, "\(k) := \(v) answered \(String(describing: set))")
+        let back = host.viewCall(ViewCall(op: "get", handle: Int(h), arguments: [.string(k)]))
+        #expect(back?.double != nil, "\(k) := \(v) read back as \(String(describing: back))")
+    }
+    _ = host.viewCall(ViewCall(op: "set", handle: Int(h), arguments: [.string("height"), .int(40)]))
+    #expect(host.viewCall(ViewCall(op: "get", handle: Int(h), arguments: [.string("height")])) == .int(40))
+    #expect(geometryValue(1.0e20) == .double(1.0e20))
+    #expect(geometryValue(-9.3e18) == .double(-9.3e18))
+    #expect(geometryValue(.infinity) == .double(.infinity))
+    #expect(geometryValue(-.infinity) == .double(-.infinity))
+    if case .double(let d) = geometryValue(.nan) { #expect(d.isNaN) } else { Issue.record("NaN as an integer") }
+    #expect(geometryValue(9_007_199_254_740_992) == .double(9_007_199_254_740_992))
+    #expect(geometryValue(9_007_199_254_740_991) == .int(9_007_199_254_740_991))
+    #expect(geometryValue(-12) == .int(-12))
+    #expect(geometryValue(2.5) == .double(2.5))
+    _ = host.viewCall(ViewCall(op: "release", handle: Int(h), arguments: []))
+}
+#endif

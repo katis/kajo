@@ -500,7 +500,7 @@ extension AppKitHost: NSTextViewDelegate {
             guard let s = e.view as? NSSplitView else { return nil }
             s.isVertical = v == .bool(true)
         case "contentWidth", "contentHeight":
-            guard e.kind == "scroll", let doc = (e.view as? NSScrollView)?.documentView, let d = v.double else { return nil }
+            guard e.kind == "scroll", let doc = (e.view as? NSScrollView)?.documentView, let d = geometryArgument(v) else { return nil }
             var f = doc.frame
             if k == "contentWidth" { f.size.width = d } else { f.size.height = d }
             doc.frame = f
@@ -612,7 +612,7 @@ extension AppKitHost: NSTextViewDelegate {
         case ("selectRow", let t as TableSource):
             t.select(Int(a.first?.int ?? 0))
         case ("setPosition", _):
-            guard let s = e.view as? NSSplitView, a.count == 2, let i = a[0].int, let p = a[1].double,
+            guard let s = e.view as? NSSplitView, a.count == 2, let i = a[0].int, let p = geometryArgument(a[1]),
                   i >= 1, i < s.subviews.count else { return nil }
             s.setPosition(p, ofDividerAt: Int(i) - 1)
         case ("addItem", let t as ToolbarHost):

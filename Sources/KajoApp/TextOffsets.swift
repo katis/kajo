@@ -1,4 +1,5 @@
 import Foundation
+import KajoVM
 
 // Module 9c: what both shells' text views share (docs/modules/developer-ui.md,
 // "The second round of view wrappers"). The image's positions in a String
@@ -60,4 +61,23 @@ public enum TextOffsets {
         parts.append(String(c))
         return parts.joined(separator: "-")
     }
+}
+
+/// The review fixes (item 12, tools.F1): a view's geometry read back for
+/// the image. A whole number is a SmallInteger only while every integer up
+/// to it is exact in a Double (|d| < 2^53); anything else (a fraction, a
+/// huge or non-finite value a program set) is a Double. `Int64(d)` of an
+/// integral Double past Int64's range, or of infinity, trapped the host.
+public func geometryValue(_ d: Double) -> ShellValue {
+    d.isFinite && d.magnitude < 9_007_199_254_740_992 && d == d.rounded() ? .int(Int64(d)) : .double(d)
+}
+
+/// A geometry argument a program gives (x, y, width, height, a frame, an
+/// origin, a scroll or divider position): a finite number, else nil and the
+/// call is refused (a clean Smalltalk error). AppKit raises an exception
+/// for a non-finite frame and UIKit's CALayer for an invalid geometry, both
+/// fatal on the main thread (the review fixes, item 12).
+public func geometryArgument(_ v: ShellValue) -> Double? {
+    guard let d = v.double, d.isFinite else { return nil }
+    return d
 }
