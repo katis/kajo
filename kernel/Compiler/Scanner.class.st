@@ -1,4 +1,4 @@
-"Smalltalk method syntax to tokens: the bootstrap compiler's scanner (Sources/KajoCompiler/Syntax.swift) in Smalltalk, token for token. Positions are byte offsets into the source String. Token kinds are Symbols: #identifier #keyword #binary #integer #float #string #character #symbol #literalArrayStart #byteArrayStart #assign #caret #period #semicolon #colon #leftParen #rightParen #leftBracket #rightBracket #leftBrace #rightBrace #bar #end. Identifiers are ASCII letters, digits and _, and any non-separator scalar above 127 (the Swift one takes Unicode letters)."
+"Smalltalk method syntax to tokens: the bootstrap compiler's scanner (Sources/KajoCompiler/Syntax.swift) in Smalltalk, token for token. Positions are byte offsets into the source String. Token kinds are Symbols: #identifier #keyword #binary #integer #float #string #character #symbol #literalArrayStart #byteArrayStart #assign #caret #period #semicolon #colon #leftParen #rightParen #leftBracket #rightBracket #leftBrace #rightBrace #bar #end. Identifiers follow the bootstrap's one rule, asked of the VM (primitive 171, Scanner class>>identifierClassOf:, the review fixes, part 2): a letter (ASCII A-Z, a-z, _ or a Unicode alphabetic scalar) starts one, and letters, ASCII digits and other numeric scalars continue it."
 Class {
 	#name : #Scanner,
 	#superclass : #Object,
@@ -44,7 +44,7 @@ Scanner >> fail: aString line: anInteger [
 Scanner >> identifierRun [
 	| s |
 	s := position.
-	[(self isLetterAt: position) or: [self isDigitByte: (self byteAt: position)]] whileTrue: [
+	[self isIdentifierPartAt: position] whileTrue: [
 		position := position + (source scalarSizeAt: position)].
 	^ source copyFrom: s to: position - 1
 ]
@@ -60,12 +60,23 @@ Scanner >> isDigitByte: b [
 ]
 
 { #category : #accessing }
+Scanner >> isIdentifierPartAt: i [
+	"Whether the scalar at i continues an identifier: a letter, an ASCII digit, or another numeric scalar (the bootstrap's rule, primitive 171)."
+	| b |
+	i >= limit ifTrue: [^ false].
+	b := source byteAt: i.
+	b < 128 ifTrue: [^ (b between: 65 and: 90) or: [(b between: 97 and: 122) or: [b = 95 or: [b between: 48 and: 57]]]].
+	^ (source isBoundary: i) and: [(Scanner identifierClassOf: (source scalarAt: i) value) > 0]
+]
+
+{ #category : #accessing }
 Scanner >> isLetterAt: i [
+	"Whether the scalar at i starts an identifier: ASCII A-Z, a-z, _ or a Unicode alphabetic scalar (the bootstrap's rule, primitive 171)."
 	| b |
 	i >= limit ifTrue: [^ false].
 	b := source byteAt: i.
 	b < 128 ifTrue: [^ (b between: 65 and: 90) or: [(b between: 97 and: 122) or: [b = 95]]].
-	^ (source isBoundary: i) and: [(source scalarAt: i) isSeparator not]
+	^ (source isBoundary: i) and: [(Scanner identifierClassOf: (source scalarAt: i) value) = 1]
 ]
 
 { #category : #accessing }
@@ -286,6 +297,13 @@ Scanner >> tokenLine [
 { #category : #accessing }
 Scanner >> value [
 	^ value
+]
+
+{ #category : #accessing }
+Scanner class >> identifierClassOf: anInteger [
+	"What the scalar anInteger is to an identifier, by the one rule both compilers follow (the VM's IdentifierRule, the bootstrap scanner's own function): 1 a letter (starts and continues one), 2 a digit or another numeric scalar (continues one), 0 neither, and 0 for an integer that is no scalar."
+	<primitive: 171>
+	^ self error: 'identifierClassOf: takes an Integer'
 ]
 
 { #category : #accessing }

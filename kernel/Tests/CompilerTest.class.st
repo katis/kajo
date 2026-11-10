@@ -63,6 +63,28 @@ CompilerTest >> testEveryMethodCompilesAsTheBootstrapDid [
 ]
 
 { #category : #accessing }
+CompilerTest >> testIdentifiersFollowTheBootstrapsRule [
+	"The review fixes, part 2, item 2 (kernel.F7): an identifier starts with a letter (ASCII, _ or Unicode alphabetic) and continues with letters, digits and other numeric scalars, the bootstrap's rule through primitive 171. U+00D7, U+00B7, U+2192, U+1F600, U+00A0 and a combining mark are refused at the start and inside; a non-ASCII digit only continues one; letters do both. ReviewFixesPart2Tests checks the bootstrap agrees on each."
+	| accepts |
+	accepts := [:id | [Compiler compile: 'f | ' , id , ' | ' , id , ' := 3. ^ ' , id in: Object. true] on: CompileError do: [:e | false]].
+	#(16rD7 16rB7 16r2192 16r1F600 16rA0 16r301) do: [:v | | c |
+		c := (Character value: v) asString.
+		self deny: (accepts value: c , 'x').
+		self deny: (accepts value: 'x' , c , 'y')].
+	self deny: (accepts value: (Character value: 16r663) asString , 'x').
+	self assert: (accepts value: 'x' , (Character value: 16r663) asString).
+	#(16rE9 16r3BB) do: [:v | | c |
+		c := (Character value: v) asString.
+		self assert: (accepts value: c , 'x').
+		self assert: (accepts value: 'x' , c , 'y')].
+	self assert: (Scanner identifierClassOf: 16rE9) = 1.
+	self assert: (Scanner identifierClassOf: 16r663) = 2.
+	self assert: (Scanner identifierClassOf: 16rD7) = 0.
+	self assert: (Scanner identifierClassOf: -1) = 0.
+	self assert: (Scanner identifierClassOf: 16r110000) = 0
+]
+
+{ #category : #accessing }
 CompilerTest >> testParserErrors [
 	#('f ^' 'f [' 'f x := 1' 'f: a a := 1' 'f | a a |' 'f ^ 1. 2' 'f #(' 'f ''abc' 'f "x' 'f ^ 16r' 'f ^ (1' 'f ^ [:x 1]' 'f ^ #[256]' 'f ^ a ; b') do: [:src |
 		self should: [Compiler compile: src in: Object] raise: CompileError]

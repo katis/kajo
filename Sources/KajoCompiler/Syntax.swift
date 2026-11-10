@@ -120,17 +120,16 @@ struct Scanner {
         return (v, n)
     }
 
-    func isLetter(_ v: UInt32) -> Bool {
-        if v < 0x80 { return (v >= 65 && v <= 90) || (v >= 97 && v <= 122) || v == 95 }
-        return Unicode.Scalar(v)?.properties.isAlphabetic ?? false
-    }
+    /// The one identifier rule both compilers ask (KajoVM's
+    /// `IdentifierRule`, primitive 171 for the kernel's scanner).
+    func isLetter(_ v: UInt32) -> Bool { IdentifierRule.isLetter(v) }
 
     func isDigit(_ v: UInt32) -> Bool { v >= 48 && v <= 57 }
 
     /// Letters, digits and `_` from `pos`.
     mutating func identifierRun() -> String {
         let s = pos
-        while let (v, n) = scalar(at: pos), isLetter(v) || isDigit(v) || (v >= 0x80 && Unicode.Scalar(v)?.properties.numericType != nil) {
+        while let (v, n) = scalar(at: pos), IdentifierRule.continues(v) {
             pos += n
         }
         return String(decoding: bytes[s..<pos], as: UTF8.self)

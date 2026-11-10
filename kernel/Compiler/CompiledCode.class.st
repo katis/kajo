@@ -98,6 +98,31 @@ CompiledCode >> primitive [
 ]
 
 { #category : #accessing }
+CompiledCode >> sameCodeAs: aCompiledCode [
+	"nil when the receiver and aCompiledCode, another CompiledCode (the bootstrap compiler's, KernelCompilerProbe), hold the same code: selector, plain bytecodes, header and literals, block methods compared the same way; else the first difference."
+	| theirs |
+	(aCompiledCode isKindOf: CompiledCode) ifFalse: [^ 'not a CompiledCode'].
+	selector == aCompiledCode selector ifFalse: [^ 'selector ' , selector printString , ' against ' , aCompiledCode selector printString].
+	bytecodes = aCompiledCode bytecodes ifFalse: [^ 'bytecodes ' , bytecodes printString , ' against ' , aCompiledCode bytecodes printString].
+	numArgs = aCompiledCode numArgs ifFalse: [^ 'argument count'].
+	numTemps = aCompiledCode numTemps ifFalse: [^ 'temps ' , numTemps printString , ' against ' , aCompiledCode numTemps printString].
+	maxStack = aCompiledCode maxStack ifFalse: [^ 'maxStack ' , maxStack printString , ' against ' , aCompiledCode maxStack printString].
+	primitive = aCompiledCode primitive ifFalse: [^ 'primitive ' , primitive printString , ' against ' , aCompiledCode primitive printString].
+	flags = aCompiledCode flags ifFalse: [^ 'flags ' , flags printString , ' against ' , aCompiledCode flags printString].
+	numCopied = aCompiledCode numCopied ifFalse: [^ 'copied values'].
+	theirs := aCompiledCode literals.
+	literals size = theirs size ifFalse: [^ 'literal count ' , literals size printString , ' against ' , theirs size printString].
+	1 to: literals size do: [:i | | mine other d |
+		mine := literals at: i.
+		other := theirs at: i.
+		d := (mine isKindOf: CompiledCode)
+			ifTrue: [(mine sameCodeAs: other) ifNotNil: [:x | 'block: ' , x]]
+			ifFalse: [self literal: mine matches: other].
+		d ifNotNil: [:x | ^ 'literal ' , i printString , ': ' , x]].
+	^ nil
+]
+
+{ #category : #accessing }
 CompiledCode >> selector [
 	^ selector
 ]

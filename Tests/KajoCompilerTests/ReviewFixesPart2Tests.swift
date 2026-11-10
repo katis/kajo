@@ -51,3 +51,37 @@ import Testing
         #expect(try s.eval("3 + 4")["value"] == .string("7"))
     }
 }
+
+/// The compilers' comparison over sources (items 2, 5, 6): one probe per
+/// test over the project's kernel image.
+func agreement(_ sources: [String]) throws -> [(String, String)] {
+    let probe = try KernelCompilerProbe(image: projectImage, className: CompilerAgreement.className)
+    let ctx = CompilerAgreement.context(classNames: probe.classNames)
+    var out: [(String, String)] = []
+    for s in sources {
+        if let d = CompilerAgreement.compare(Array(s.utf8), probe: probe, context: ctx) { out.append((s, d)) }
+    }
+    return out
+}
+
+/// Item 2 (kernel.F7): one identifier rule. U+00D7, U+00B7, U+2192,
+/// U+1F600, U+00A0, a combining mark (U+0301) and a non-ASCII digit
+/// (U+0663), each at the start and inside an identifier, and two letters
+/// for contrast (U+00E9, U+03BB): both compilers accept and refuse alike.
+/// On 18e274f the kernel's scanner took every non-separator scalar above
+/// 127 as a letter and accepted what the bootstrap refuses.
+@Test func bothCompilersFollowOneIdentifierRule() throws {
+    var sources: [String] = []
+    for s in ["\u{D7}", "\u{B7}", "\u{2192}", "\u{1F600}", "\u{A0}", "\u{301}", "\u{663}", "\u{E9}", "\u{3BB}"] {
+        for id in ["\(s)x", "x\(s)y", "x\(s)"] {
+            sources.append("f | \(id) | \(id) := 3. ^ \(id)")
+            sources.append("\(id) ^ 1")
+            sources.append("f ^ #\(id)")
+        }
+    }
+    let d = try agreement(sources)
+    #expect(d.isEmpty, "\(d.count) disagree, the first: \(d.first.map { "\($0.0): \($0.1)" } ?? "")")
+    // The rule itself, as primitive 171 answers it.
+    #expect(IdentifierRule.classify(0xE9) == 1 && IdentifierRule.classify(0x663) == 2 && IdentifierRule.classify(0xD7) == 0)
+    #expect(IdentifierRule.classify(0x5F) == 1 && IdentifierRule.classify(0x30) == 2 && IdentifierRule.classify(0xD800) == 0)
+}

@@ -83,6 +83,9 @@ private let cases: [PrimitiveCase] = {
     c.append(PrimitiveCase(prim: 169, receiver: "  push_nil\n", args: ["  push_lit @Array\n", nil], count: 0))
     c.append(PrimitiveCase(prim: 169, receiver: "  push_nil\n", args: [nil, nil], count: 0))
     c.append(PrimitiveCase(prim: 170, receiver: "  push_nil\n", args: [nil], count: 0))
+    // The review fixes, part 2, item 2: the identifier rule's primitive
+    // (171) takes a scalar's integer; anything that is no scalar answers 0.
+    c.append(PrimitiveCase(prim: 171, receiver: "  push_nil\n", args: [nil], count: 0x10FFFF))
     return c
 }()
 

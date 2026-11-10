@@ -170,6 +170,8 @@ package final class Image {
     }
 
     func classIndex(named name: String) -> UInt64? { classesByName[name] }
+    /// Every class name (the compilers' comparison, KernelCompilerProbe).
+    var classNames: Set<String> { Set(classesByName.keys) }
 
     /// A class's name from its class object (`Foo class` for a metaclass).
     func className(_ index: UInt64) -> String? {
@@ -225,7 +227,7 @@ package final class Image {
         return o
     }
 
-    fileprivate func allocateBytes(_ cls: UInt64 = WellKnown.byteArray, _ bytes: [UInt8], roots: [Oop]) throws(LoadError) -> Oop {
+    func allocateBytes(_ cls: UInt64 = WellKnown.byteArray, _ bytes: [UInt8], roots: [Oop]) throws(LoadError) -> Oop {
         guard let o = om.allocateBytes(context, classIndex: cls, count: bytes.count, extraRoots: roots) else {
             throw LoadError(.heapFull, "the heap has no room for the image")
         }

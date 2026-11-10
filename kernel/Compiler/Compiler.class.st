@@ -687,6 +687,23 @@ Compiler class >> inlinedSelectors [
 	^ #(#ifTrue: #ifFalse: #and: #or: #ifNil: #timesRepeat: #ifTrue:ifFalse: #ifFalse:ifTrue: #ifNotNil: #ifNil:ifNotNil: #ifNotNil:ifNil: #whileTrue: #whileFalse: #whileTrue #whileFalse #repeat #to:do: #to:by:do:)
 ]
 
+{ #category : #comparing }
+Compiler class >> compare: aString in: aClass with: bootstrapCode [
+	"The two compilers side by side (the review fixes, part 2: the corpus and the syntax fuzzer's kernel mode, KernelCompilerProbe): aString compiled by this compiler in aClass and made by the VM (its verifier, as the bootstrap's assembler runs it), against bootstrapCode, the bootstrap compiler's CompiledCode of the same source, nil when it refused. Answers nil when they agree, both refusing or both accepting the same plain bytecodes, literals and header, else the difference as a String. Any other error, here or in the compiler, is a difference too."
+	^ [ | mine made |
+		mine := [self compile: aString in: aClass] on: CompileError do: [:e | e].
+		(mine isKindOf: CompileError) ifFalse: [
+			made := [mine makeMethodIn: aClass] on: CompileError do: [:e | e].
+			(made isKindOf: CompileError) ifTrue: [mine := made]].
+		bootstrapCode isNil
+			ifTrue: [(mine isKindOf: CompileError) ifTrue: [nil] ifFalse: ['the bootstrap refused it and this compiler accepted it']]
+			ifFalse: [
+				(mine isKindOf: CompileError)
+					ifTrue: ['this compiler refused it (' , mine messageText , ') and the bootstrap accepted it']
+					ifFalse: [mine sameCodeAs: bootstrapCode]]]
+		on: Error do: [:e | 'this compiler signalled ' , e class name , ': ' , ([e messageText] on: Error do: [:x | '?'])]
+]
+
 { #category : #debugging }
 Compiler class >> code: aCompiledCode matching: aCompiledMethod find: aTarget [
 	"The CompiledCode in aCompiledCode's tree that stands where aTarget stands in aCompiledMethod's (block methods are literals in the same places in both), or nil."

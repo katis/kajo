@@ -56,6 +56,7 @@ func primitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
     case 150...154, 159...161, 164, 165: return shellPrimitive(n, m, c)  // modules 9a to 9c and the development answers, Shell/ShellPrimitives.swift
     case 155...158, 162: return debuggingPrimitive(n, m, c)  // module 9b, Processes/Debugging.swift
     case 167...170: return instancePrimitive(n, m, c)  // discoverability and pointersTo:, ObjectModel/InstancePrimitives.swift
+    case 171: return identifierPrimitive(c)  // the review fixes, part 2, ObjectModel/IdentifierRule.swift
     case 40...79, 90...136: return objectModelPrimitive(n, m, c)  // module 8, ObjectModel/
     default: return .none
     }

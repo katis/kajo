@@ -30,3 +30,22 @@ public enum FuzzSyntax {
         return true
     }
 }
+
+/// The two compilers side by side (the review fixes, part 2, items 6 and
+/// 7): a method source compiled by the bootstrap compiler here and by the
+/// kernel's compiler in a kernel image (`KernelCompilerProbe`), both in
+/// `MakeFuzzSample` (instance variables a and b, as the fuzz context's
+/// Object), the outcomes compared. nil when they agree.
+package enum CompilerAgreement {
+    package static let className = "MakeFuzzSample"
+
+    package static func context(classNames: Set<String>) -> ClassContext {
+        ClassContext(className: className, classSide: false, instanceVariables: ["a", "b"],
+                     isClassName: { classNames.contains($0) })
+    }
+
+    package static func compare(_ source: [UInt8], probe: KernelCompilerProbe, context: ClassContext) -> String? {
+        let m = try? compileMethod(source, file: "agreement", in: context)
+        return probe.compare(source, bootstrap: m?.0)
+    }
+}
