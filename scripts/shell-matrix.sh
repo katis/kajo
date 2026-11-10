@@ -71,3 +71,7 @@ for part in ${=parts}; do
       done ;;
   esac
 done
+# Reaching the end is success: each launch's failure is a FAILED row the bar
+# counts; a status other than 0 means the script itself died (the review
+# fixes, part 2, item 11: the gates read it).
+exit 0

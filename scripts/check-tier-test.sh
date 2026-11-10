@@ -79,6 +79,20 @@ check_gates "clean-build swift-test tsan kernel-test apps new-check" scripts/gat
 check_gates "clean-build swift-test tsan kernel-test apps new-check fuzz-protocol" Sources/KajoDev/Client.swift
 check_gates "clean-build swift-test tsan kernel-test apps new-check model-check" models/Package.swift
 check_gates "clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden test-release model-check soak fuzz-kasm fuzz-snapshot fuzz-syntax fuzz-protocol apps kernel-test new-check ab matrix-mac matrix-iphone" Sources/KajoVM/Marking/Marker.swift
+# The review fixes, part 2, item 11 (tools.F5): shell-report.py --bar over a
+# directory with rows passes and over one with none fails, and the Mac
+# matrix gate's command fails when its matrix step fails (the scripts stood
+# in for by GL_MAC_SHELL and GL_SHELL_MATRIX).
+bars=$(mktemp -d ${TMPDIR:-/tmp}/kajo-bar-XXXXXX)
+mkdir -p $bars/rows $bars/none
+print 'mode=golden kind=st kernel=fib workers=1 run=1 ok=1 checksum=5' > $bars/rows/golden.txt
+$root/scripts/shell-report.py --bar $bars/rows > /dev/null; rc=$?
+n=$((n + 1)); [[ $rc == 0 ]] || { print "FAIL: --bar over rows: rc=$rc"; fail=1 }
+$root/scripts/shell-report.py --bar $bars/none > /dev/null; rc=$?
+n=$((n + 1)); [[ $rc == 1 ]] || { print "FAIL: --bar over no rows: rc=$rc"; fail=1 }
+rc=$( GL_ROOT=$root GL_OUT=$bars/gate GL_MAC_SHELL=true GL_SHELL_MATRIX=false zsh -c 'source $GL_ROOT/scripts/gates-lib.sh; gl_spec matrix-mac; cd $GL_ROOT; zsh -c "$spec_cmd" > /dev/null 2>&1; print $?' )
+n=$((n + 1)); [[ $rc != 0 ]] || { print "FAIL: the matrix gate passed with its matrix step failing"; fail=1 }
+rm -rf $bars
 # docs only: exit 0 at once, saying so.
 out=$(print docs/x.md | $root/scripts/check-tier.sh --paths -); rc=$?
 n=$((n + 1))

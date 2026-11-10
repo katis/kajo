@@ -63,7 +63,11 @@ gl_spec() {
     mac-shell-tests) spec_cmd="rm -f $o/mac-tests-rows.txt; scripts/mac-shell.sh build && scripts/mac-shell.sh run $o/mac-tests-rows.txt mode=tests; cat $o/mac-tests-rows.txt"
                      spec_check=mactests ;;
     ab)              spec_cmd="scripts/ab.sh ${GL_AB_BASE:-<merge base>} $o/ab"; spec_timeout=7200 ;;
-    matrix-mac)      spec_cmd="scripts/mac-shell.sh build && { RUNS=$GL_RUNS scripts/shell-matrix.sh mac $o/matrix-mac; scripts/shell-report.py $o/matrix-mac > $o/matrix-mac/report.md; scripts/shell-report.py --bar $o/matrix-mac; }"
+    # Every step's status counts (the review fixes, part 2, item 11): the
+    # matrix, the report and the bar each fail the gate, the later steps
+    # still run so the output says what there was. GL_MAC_SHELL and
+    # GL_SHELL_MATRIX stand in for the scripts in check-tier-test.sh.
+    matrix-mac)      spec_cmd="${GL_MAC_SHELL:-scripts/mac-shell.sh} build && { rc=0; mkdir -p $o/matrix-mac; RUNS=$GL_RUNS ${GL_SHELL_MATRIX:-scripts/shell-matrix.sh} mac $o/matrix-mac || rc=1; scripts/shell-report.py $o/matrix-mac > $o/matrix-mac/report.md || rc=1; scripts/shell-report.py --bar $o/matrix-mac || rc=1; exit \$rc; }"
                      spec_timeout=$(( 7200 * GL_RUNS )) ;;
     matrix-*)        local label=${id#matrix-}
                      [[ -n ${GL_UDID[$label]:-} ]] || return 1

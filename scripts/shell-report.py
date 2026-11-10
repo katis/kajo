@@ -180,6 +180,12 @@ def bar(d):
     if notes:
         print()
         print("\n".join(notes))
+    if not tot["rows"]:
+        # A matrix that died before its first row passes no bar (the review
+        # fixes, part 2, item 11).
+        print()
+        print(f"- no rows in {d}: the matrix wrote nothing")
+        return 1
     return 1 if tot["failed"] or tot["sums"] else 0
 
 
