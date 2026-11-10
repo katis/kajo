@@ -404,6 +404,17 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         }
     }
 
+    /// The length of the `wait` send a waiting Process's record says it
+    /// stands after (0: none), for tests (the review fixes, part 2, item 19).
+    func waitSendLength(of p: Oop) -> Int {
+        unsafe host { _ in
+            unsafe schedLock(state)
+            defer { unsafe schedUnlock(state) }
+            let ri = intSlot(image.om, p, ProcessLayout.record)
+            return ri >= 0 ? unsafe records(state, ri).pointee.waitSendLength : -1
+        }
+    }
+
     func excessSignals(_ sem: Oop) -> Int64 {
         unsafe host { _ in
             unsafe schedLock(state)

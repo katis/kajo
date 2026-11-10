@@ -391,6 +391,9 @@ func installSavedProcesses(_ vm: VMPointer, _ w: WorkerPointer) -> (processes: [
             if intSlot(om, p, ProcessLayout.state) == Int(ProcessState.ready.rawValue) {
                 unsafe records(vm, ri).pointee.runnableSince = ticks()
             }
+            if intSlot(om, p, ProcessLayout.state) == Int(ProcessState.waiting.rawValue) {
+                unsafe records(vm, ri).pointee.waitSendLength = savedWaitSendLength(om, p, nilObject: nilObj, word)
+            }
             unsafe youngNewRecordLocked(vm, ri)
             unsafe setIntSlot(w, p, ProcessLayout.record, ri)
             unsafe vm.pointee.sched.pointee.liveProcesses += 1
@@ -420,6 +423,30 @@ func installSavedProcesses(_ vm: VMPointer, _ w: WorkerPointer) -> (processes: [
     unsafe clearingStore(w, image.specialObjects, SpecialObjects.scheduler, nilObj)
     unsafe vm.count(.processesResumed, UInt64(installed.count))
     return (installed, saver)
+}
+
+/// The review fixes, part 2, item 19: the length of the `wait` send a
+/// Process saved while waiting stands after, as `waitSemaphore` records it
+/// for a live one, so a debug stop of a resumed waiter rewinds to the send
+/// and proceeding waits again (part 1's item 3). The top frame's method is
+/// decoded (the loader verified it already, against the depth at this
+/// pc); the instruction that ends at the saved pc is the send when it is a
+/// send of no argument, else 0 (the stop is after the send, as before).
+/// No image format change: the length is the instruction's, read here.
+private func savedWaitSendLength(_ om: ObjectMemory, _ p: Oop, nilObject: Oop, _ word: (Int) -> Oop) -> Int {
+    let pc = intSlot(om, p, ProcessLayout.pc), hdr = intSlot(om, p, ProcessLayout.hdr)
+    guard pc > 0, hdr > 0 else { return 0 }
+    let m = word(hdr + Frame.method)
+    guard m.isObject, om.isUsedReference(m), om.classIndex(of: m) == WellKnown.method else { return 0 }
+    let mc = om.load(m, MethodLayout.methodClass)
+    guard mc.isObject, om.isBehavior(mc) else { return 0 }
+    let ci = om.load(mc, ClassLayout.classIndex)
+    guard ci.isSmallInteger, ci.smallIntegerValue > 0 else { return 0 }
+    var code: VerifiedCode? = nil
+    guard verifyHeapMethod(om, m, classIndex: UInt64(ci.smallIntegerValue), nilObject: nilObject, traced: { code = $0 }) == nil,
+          let v = code, let i = v.instructions.first(where: { $0.offset + $0.length == pc }),
+          i.op == .send || i.op == .sendSuper, i.b == 0 else { return 0 }
+    return i.length
 }
 
 /// Words a resumed stack needs: past sp, and past every frame's deepest

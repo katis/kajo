@@ -378,3 +378,20 @@ func shapesImage() throws -> (bytes: [UInt8], ids: [Int64]) {
     #expect(r.result(p) == 9)
     r.stop()
 }
+
+/// The review fixes, part 2, item 19: a Process saved while it waits gets
+/// its `wait` send's length at load, as a live waiter has it, so its debug
+/// stop rewinds to the send (part 1's item 3); the three waiters of
+/// `shapesImage` each stand after a `send wait 0` of three bytes. On
+/// 18e274f a loaded waiter had none (0).
+@Test func aLoadedWaiterKnowsTheLengthOfItsWaitSend() throws {
+    let (bytes, ids) = try shapesImage()
+    let r = try Resumed(bytes, background: 1)
+    for id in ids {
+        let p = try #require(r.process(id: id))
+        #expect(r.vm.waitSendLength(of: p) == 3, "Process \(id)")
+    }
+    for _ in 0..<3 { r.vm.signal(r.vm.global(1)) }
+    r.waitAllTerminated()
+    r.stop()
+}
