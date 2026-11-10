@@ -74,7 +74,10 @@ build() {
 
 # The development objects and the shell and compiler modules, by mangled
 # module name in the symbol table.
-symbols() { for m in KajoDev KajoAppDevelopment KajoCompiler KajoShellCore; do print -n "$m=$(nm $1 2>/dev/null | grep -c "[0-9]$m") "; done }
+# KajoVM last, the positive control (the review fixes, part 2, item 12):
+# every product links the VM, so a count of 0 there means the symbol table
+# is gone (a stripped binary) and every 0 before it means nothing.
+symbols() { for m in KajoDev KajoAppDevelopment KajoCompiler KajoShellCore KajoVM; do print -n "$m=$(nm $1 2>/dev/null | grep -c "[0-9]$m") "; done }
 strs() {
   for s in _kajo-dev._tcp kajo-pairing-token; do print -n "$s=$(strings -a $1 | grep -c -- $s) "; done
   print -n "DNSServiceRegister=$(nm -u $1 2>/dev/null | grep -c _DNSServiceRegister) "
@@ -92,7 +95,7 @@ check() {
   local bytes=$(stat -f %z $bin) imgbytes=$(stat -f %z $img)
   print "$tag: binary_bytes=$bytes image_bytes=$imgbytes ${sy}${st}plist_keys=$pk image_refuses_to_serve=$rf"
   if [[ $want == release ]]; then
-    [[ $sy == *"KajoDev=0 KajoAppDevelopment=0 KajoCompiler=0 KajoShellCore=0 "* && $st == "_kajo-dev._tcp=0 kajo-pairing-token=0 DNSServiceRegister=0 " && $pk == 0 && $rf == 1 ]] \
+    [[ $sy == *"KajoDev=0 KajoAppDevelopment=0 KajoCompiler=0 KajoShellCore=0 "* && $sy != *"KajoVM=0 "* && $st == "_kajo-dev._tcp=0 kajo-pairing-token=0 DNSServiceRegister=0 " && $pk == 0 && $rf == 1 ]] \
       || { print "$tag: FAILED the release checks"; fail=1; }
   else
     [[ $sy != *"KajoDev=0 "* && $sy != *"KajoAppDevelopment=0 "* && $sy == *"KajoCompiler=0 KajoShellCore=0 "* && $st != *"DNSServiceRegister=0 "* && $pk == 2 && $rf == 0 ]] \
