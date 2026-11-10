@@ -13,6 +13,7 @@
 // (`buildingPauseUs`), and `become:`s the first long ByteArray it finds with
 // an 8-byte one.
 
+import Darwin
 import Testing
 @testable import KajoVM
 
@@ -419,9 +420,15 @@ end
 
 // MARK: - item 21: the final mark's weak pass, measured
 
-private let weakSlots = 1 << 20
+/// The slot counts measured: 2^20, or `KAJO_WEAK_SLOTS` (a comma list;
+/// the review fixes, part 2, item 20, measured 2^20 and 2^24 - 1 in a
+/// release build).
+private let weakSlotCounts: [Int] = {
+    guard let c = unsafe getenv("KAJO_WEAK_SLOTS") else { return [1 << 20] }
+    return unsafe String(cString: c).split(separator: ",").compactMap { Int($0) }
+}()
 
-private let weakSource = markingSrc + """
+private func weakSource(_ weakSlots: Int) -> String { markingSrc + """
 ; global 8 := a WeakArray of n slots, each holding one old Array
 method UndefinedObject bigWeak: temps=2
   push_lit @WeakArray
@@ -463,7 +470,7 @@ done:
   push_int 1
   return_top
 end
-"""
+""" }
 
 /// The review fixes, item 21 (collectors.F3): the final mark's weak pass
 /// runs in the stop, past its commit point, over every slot of every weak
@@ -472,8 +479,9 @@ end
 /// read until the pass has nilled it. It is measured instead: a WeakArray
 /// of 2^20 slots, its time per slot in the cycle's record (the bound the
 /// module doc states: weakNs = slots x the per-slot cost printed here).
-@Test func theWeakPassIsMeasuredPerSlot() throws {
-    let rt = try markingRuntime(weakSource, heapBlocks: 4096)
+@Test(arguments: weakSlotCounts)
+func theWeakPassIsMeasuredPerSlot(_ weakSlots: Int) throws {
+    let rt = try markingRuntime(weakSource(weakSlots), heapBlocks: max(4096, weakSlots / 4096 * 3 / 2 + 1024))
     #expect(rt.runInt("bigWeak:", Int64(weakSlots)) == 1)
     rt.scavenge()
     rt.vm.startCycle()
