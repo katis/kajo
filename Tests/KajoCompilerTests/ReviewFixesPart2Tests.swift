@@ -430,18 +430,24 @@ final class HoldingTarget: @unchecked Sendable {
         let c = ClientConnection(id: round, address: .unix(path), project: nil)
         #expect(c.connect() == nil)
         c.open(Array(#"{"v":1,"id":"session","kind":"session.open","args":{}}"#.utf8))
+        // Threads of their own, never the global queue: under the sanitizer
+        // and the full suite its threads did not come within 60 s (a wait
+        // for a global queue is a wait for its threads, not a bound).
         let go = DispatchSemaphore(value: 0)
-        let group = DispatchGroup()
+        let done = DispatchSemaphore(value: 0)
         for _ in 0..<8 {
-            DispatchQueue.global().async(group: group) {
+            Thread {
                 go.wait()
                 for _ in 0..<200 { _ = c.send(Array(#"{"v":1,"id":1,"kind":"evaluate","args":{"source":"1"}}"#.utf8)) }
-            }
+                done.signal()
+            }.start()
         }
         for _ in 0..<8 { go.signal() }
         usleep(500)
         c.release()
-        #expect(group.wait(timeout: .now() + 60) == .success)
+        var finished = 0
+        for _ in 0..<8 where done.wait(timeout: .now() + 600) == .success { finished += 1 }
+        #expect(finished == 8)
         #expect(!c.send(Array("{}".utf8)))
         #expect(c.lateWriteCount == 0, "round \(round)")
     }
