@@ -207,6 +207,12 @@ DevProtocol class >> takeReplyOf: aProcess [
 ]
 
 { #category : #serving }
+DevProtocol class >> isProtocolProcess: aProcess [
+	"Whether aProcess is the protocol Process (the review fixes, item 15)."
+	^ process notNil and: [process == aProcess]
+]
+
+{ #category : #serving }
 DevProtocol class >> isServing [
 	^ process notNil
 ]

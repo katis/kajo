@@ -168,4 +168,25 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         // and a duplicate is still refused
         if case .success = parseJSON(Array(#"{"a":1,"b":2,"a":3}"#.utf8)) { Issue.record("a duplicate key accepted") }
     }
+
+    /// Item 15 (kernel.F13): the protocol's own Process is refused for
+    /// suspend, step, evaluate and terminate, and the target still serves.
+    /// On d78afcc process.suspend parked it and nothing was served again.
+    @Test func theProtocolProcessIsNotSuspendedOrTerminated() throws {
+        let t = try TCPTarget()
+        defer { t.close() }
+        let c = try t.client()
+        defer { c.close() }
+        try c.open(token: t.target.server.token, client: "developer", timeout: 60)
+        let id = try c.eval("(ProcessorScheduler primAllProcesses detect: [:p | p notNil and: [DevProtocol isProtocolProcess: p]]) id")["value"]?.string ?? ""
+        let pid = JSONValue.int(try #require(Int64(id)))
+        for (kind, args) in [("process.suspend", [("process", pid)]), ("process.terminate", [("process", pid)]),
+                             ("process.step", [("process", pid), ("mode", .string("over"))]),
+                             ("process.evaluate", [("process", pid), ("source", .string("1"))])] {
+            let r = try c.send(kind, args, timeout: 60)
+            #expect(r["ok"] == .bool(false), "\(kind) was not refused")
+            #expect(r["error"]?.string?.contains("serves the development protocol") == true, "\(kind): \(r)")
+        }
+        #expect(try c.eval("3 + 4")["value"] == .string("7"))
+    }
 }

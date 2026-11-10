@@ -392,6 +392,7 @@ DevSession >> inspectRelease: handle [
 DevSession >> processEvaluate: process frame: frame source: source [
 	"Run a doit in a frame of a stopped Process (frame 1 is where it stopped): self is the frame's receiver, its arguments and temporaries are variables the doit reads and assigns. Answers the value described."
 	<devProtocol>
+	self refuseServing: process.
 	(self stopOf: process) command: #evaluate:frame:replyTo:session: arguments: (Array with: source with: (frame ifNil: [1]))
 		replyTo: (DevProtocol takeReplyOf: ProcessorScheduler activeProcess).
 	^ nil
@@ -445,6 +446,7 @@ DevSession >> processRetrySend: process [
 DevSession >> processStep: process mode: mode frame: frame [
 	"Step a stopped Process (mode: into, over or out; frame: which frame, 1 by default) and answer at once; the Process stops again (process.stopped, reason step) where the step ends."
 	<devProtocol>
+	self refuseServing: process.
 	(self stopOf: process) command: #step:frame:replyTo:session: arguments: (Array with: (mode ifNil: ['over']) with: (frame ifNil: [1]))
 		replyTo: (DevProtocol takeReplyOf: ProcessorScheduler activeProcess).
 	^ nil
@@ -455,6 +457,7 @@ DevSession >> processSuspend: process [
 	"Stop a running or waiting Process for the debugger where it stands (process.stopped, reason suspended)."
 	<devProtocol>
 	| p |
+	self refuseServing: process.
 	p := Debugger processWithId: process.
 	p isNil ifTrue: [^ self error: 'no Process ' , process printString].
 	^ Debugger suspend: p
@@ -465,11 +468,21 @@ DevSession >> processTerminate: process [
 	"End a Process, running its ensure: blocks: a stopped one unwinds itself, another is interrupted to (Process>>terminate); at most about Process unwindBudgetMs, then it is ended where it stands. Answers whether its unwinding ran to its end (unwound) and, when it was cut off, where it stood (cutOff)."
 	<devProtocol>
 	| stop p |
+	self refuseServing: process.
 	stop := Debugger stopWithId: process.
 	stop isNil ifFalse: [^ stop terminate].
 	p := Debugger processWithId: process.
 	p isNil ifTrue: [^ self error: 'no Process ' , process printString].
 	^ DebugStop unwound: p terminateReporting process: p
+]
+
+{ #category : #'requests-processes' }
+DevSession >> refuseServing: process [
+	"The protocol's own Process is never suspended, stepped, evaluated in or terminated through the protocol (the review fixes, item 15): every later request, the proceed that would resume it included, waits for that Process."
+	| p |
+	p := Debugger processWithId: process.
+	(p notNil and: [DevProtocol isProtocolProcess: p]) ifTrue: [
+		^ self error: 'Process ' , process printString , ' serves the development protocol: it is not suspended, stepped, evaluated in or terminated']
 ]
 
 { #category : #'requests-tests' }
