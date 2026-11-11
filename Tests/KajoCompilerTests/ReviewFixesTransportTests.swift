@@ -88,7 +88,12 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         #expect(try c.eval("3 + 4")["value"] == .string("7"))
         // A session's line is not bound by the unpaired limit.
         let long = String(repeating: "1 + ", count: 4000) + "1"
-        #expect(try c.eval(long)["value"] == .string("4001"))
+        // Compiling 4000 sends in Smalltalk under the sanitizer and twelve
+        // busy loops ran past eval's 300 s in the review fixes' part 2 gate
+        // run (unloaded the whole test took 247 s): the bound of something
+        // that must come is long, the assertion unchanged.
+        let r = try c.send("evaluate", [("source", .string(long))], timeout: compilerTestsUnderThreadSanitizer ? 1800 : 60)
+        #expect(r["result"]?["value"] == .string("4001"), "\(r)")
     }
 
     /// Item 5: no write is queued behind a connection's close. Senders on
