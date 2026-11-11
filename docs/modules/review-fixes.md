@@ -849,6 +849,10 @@ wrote none of it); now the save is refused while any record has one
    weak slots that answers nil for an unmarked referent until the pass has
    run, with the sweep waiting for it)? Recommended: not now; the measured
    cost is proportional to weak slots, which no kernel table approaches.
+   Answered by the owner on 2026-11-10, as recommended: the pass stays in
+   the stop as a documented limit (part 2's item 20 has the release
+   number: 0.73 to 0.77 ns a slot, 12.3 ms at 2^24 - 1 slots); neither
+   the read barrier nor an overrun counter is built.
 5. New: `theServerServesTCPWithTheTokenRuleAndTheLimits` waits 120 s for
    a report on a global queue and ran out once under the sanitizer and
    twelve busy loops in this module's gate run (passing three reruns).
@@ -1550,8 +1554,12 @@ runs) and again on 06e74a6 (45 163 runs, no disagreement).
 - `printOf:`'s cycle guard is its stream's `print:`; a `printOn:` that
   writes an element's `printString` (a fresh, unbounded stream) instead of
   `print:`ing it bypasses the guard and the limit for that element.
-- The weak pass is measured, not bounded (part 1's open question 4
-  stands).
+- The weak pass is measured, not bounded (part 1's open question 4,
+  answered by the owner on 2026-11-10: it stays in the stop).
+- The reaper's 100 ms wake-up lasts as long as any request pends, a
+  request that waits for hours included (noted by the main session at
+  the hand-back; a stopped Process's reply is taken by its stop, so a
+  standing debug stop does not keep it).
 - The iPad rows.
 
 ### Open questions (decisions only)
