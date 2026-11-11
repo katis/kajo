@@ -450,3 +450,51 @@ own install) and Pharo 12 from its zeroconf download into
 
 Raw files: `experiments/runtime-comparison/bench-raw.txt` (5 rounds) and `experiments/runtime-comparison/slices-raw.txt`.
 <!-- /generated -->
+
+## 10. The native engine (AOT 1)
+
+Hand-written, not generated: `scripts/perf-report.py` does not know the
+native engine yet, and **the other runtimes were not re-run** (their rows
+above stand as recorded on 2026-11-09). AOT 1 (`docs/modules/aot.md`,
+ADR 0015) compiles an image's methods to C ahead of time and runs them
+beside the interpreter; the rows below are the same five programs, the
+same Kajo binary, the interpreter against the native engine at the same
+commit, measured 2026-11-11 on the same Mac mini: aligned release build,
+five interleaved rounds, wall time of the run, the C at -O2 with the clang
+first on PATH. Median (min–max), seconds.
+
+| program | form | workers | interpreter | native | native against interpreter |
+|---|---|---|---|---|---|
+| fib | kasm | 1 | 14.00 (13.90–14.01) | 4.33 (4.31–4.34) | 3.23× faster |
+| fib | Smalltalk | 1 | 14.76 (14.72–14.82) | 4.14 (4.14–4.15) | 3.56× |
+| dispatch | kasm | 1 | 4.18 (4.18–4.18) | 2.33 (2.33–2.34) | 1.79× |
+| dispatch | Smalltalk | 1 | 3.49 (3.49–3.50) | 0.73 (0.72–0.74) | 4.77× |
+| binarytrees | kasm | 1 | 11.50 (11.45–11.62) | 8.47 (8.36–8.54) | 1.36× |
+| binarytrees | Smalltalk | 1 | 11.81 (11.79–12.12) | 8.41 (8.38–8.51) | 1.41× |
+| collections | Smalltalk | 1 | 4.36 (4.34–4.42) | 2.37 (2.36–2.39) | 1.84× |
+| arith | Smalltalk | 1 | 7.99 (7.94–8.10) | 0.76 (0.75–0.77) | 10.6× |
+| fib | kasm | 8 | 1.85 (1.84–1.87) | 0.59 (0.58–0.59) | 3.16× |
+| fib | Smalltalk | 8 | 1.94 (1.93–1.97) | 0.54 (0.54–0.55) | 3.57× |
+| dispatch | kasm | 8 | 0.57 (0.56–0.58) | 0.31 (0.30–0.32) | 1.84× |
+| dispatch | Smalltalk | 8 | 0.47 (0.46–0.49) | 0.10 (0.10–0.10) | 4.75× |
+| binarytrees | kasm | 8 | 1.74 (1.74–1.75) | 1.40 (1.40–1.41) | 1.24× |
+| binarytrees | Smalltalk | 8 | 1.78 (1.77–1.80) | 1.39 (1.38–1.43) | 1.28× |
+| collections | Smalltalk | 8 | 31.6 (31.5–32.3) | 30.5 (30.2–30.8) | 1.04× |
+| arith | Smalltalk | 8 | 1.14 (1.13–1.15) | 0.10 (0.10–0.11) | 11.1× |
+
+Checksums are equal between the engines in every row. What the numbers
+say, against the rows of sections 2 to 4 (which were not re-run): native
+fib in Kajo kasm at 4.33 s is 57.0 × 3.23 ≈ 184 M calls/s; native `arith`
+in Smalltalk (0.76 s) is faster than every interpreter of section 4 and
+than Pharo's Cog JIT (1.47 s), and native `dispatch` in Smalltalk (0.73 s)
+is level with Cog (0.730 s); C and the JITs stay 1.8 to 7 times faster than
+native Kajo on those two. Where the native engine gains least the work
+is not in the method bodies: `binarytrees` and `alloc` allocate through the
+VM's primitive (`basicNew:` is a primitive send the native code makes
+through the VM's invoke, as the interpreter does), the kasm `dispatch`
+program sends `at:` as an ordinary send to a primitive method (the
+Smalltalk form uses the inlined special send), and `collections` at eight
+workers is dominated by something both engines share (31 s against 4.4 s
+at one worker in both; not explained here). The kernels' table (cycles and
+instructions per send and per bytecode) is in `docs/modules/aot.md`, "The
+bar".

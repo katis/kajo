@@ -107,3 +107,5 @@ plus the checked build in CI, the stress modes exercised by the test suite,
 and the randomized-program oracle comparison running nightly. Fuzzing joins
 when the loaders exist; the model check precedes the relocation and young
 collection modules.
+
+AOT 1 (2026-11-11, `docs/modules/aot.md`): every layer above now runs in both engines. The random programs run under the native engine in every configuration and resume across engines both ways, the whole VM suite runs natively under `KAJO_NATIVE_HARNESS=1 KAJO_NATIVE_RUNTIME=1`, ThreadSanitizer runs the native suites with the generated C compiled `-fsanitize=thread`, and broken variants of the generator are test switches (`AOTOptions.broken*`).

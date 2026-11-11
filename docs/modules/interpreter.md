@@ -433,3 +433,5 @@ Waiting: everything with more than one worker, Processes, Semaphores,
 budgets and events (module 3), including `operationsWhileOtherWorkersRun`
 and `aFramePinnedObjectIsNotMoved` with a real frame; everything
 generational and concurrent (modules 4 to 7).
+
+AOT 1 (2026-11-11, `docs/modules/aot.md`): `interpret` has one caller, the driver `drive`, which sits above it and the native engine (`runSlice` and `Interpreter.runToReturn` call `drive`, which is `interpret` itself when no module is bound); `interpret` is unchanged instruction for instruction, and the interpreter leaves for native code only in `pollSlow` (a budget check) and `returnSlow` (a native marker).

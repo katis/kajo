@@ -970,3 +970,5 @@ The scripts:
 #   then closures and floats on m8 only (module 7 cannot load them).
 # agg.py: the median, minimum and maximum ms per kernel, workers and binary.
 ```
+
+AOT 1 (2026-11-11, `docs/modules/aot.md`): a frame's context word may also hold a native return marker, the SmallInteger `4 + resume index` (`nativeMarkerBase`), on an interpreted frame a slow path activated above a native one; `returnSlow` makes the plain return and leaves for the driver, `materialize` moves it to the Context's marker field as it moves the other three, primitive 158's step marker replaces it, and no image ever holds one.

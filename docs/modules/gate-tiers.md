@@ -446,3 +446,5 @@ gate passed. `scripts/check-tier-test.sh` passes 36 of 36. The docs-only
 case on the real diff: `just check 3f2acdd` with this doc committed on top
 (fad3bdf) printed `tier: none`, the one file and "nothing owed: docs
 only", exit 0 in 0.10 s.
+
+AOT 1 (2026-11-11, `docs/modules/aot.md`): `Sources/KajoVM/Native/` and `Sources/KajoAOT/` are core, and the core tier runs three more gates after `golden`: `native-golden`, `native-kernel-test` and `native-cc` (`scripts/native-check.sh`); `check-tier-test.sh` has the two new paths.

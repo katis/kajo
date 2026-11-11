@@ -542,3 +542,5 @@ swift build -c release --product kajo --scratch-path .build/bench-a2 $A2
 zsh bench.sh $S/start/.build/bench-a2/release/kajo .build/bench-a2/release/kajo bench.txt 5; python3 agg.py bench.txt
 zsh gates.sh    # every gate, outputs and the commit each ran on in files
 ```
+
+AOT 1 (2026-11-11, `docs/modules/aot.md`, open question 1): the saver writes a frame's native return marker as the empty context word and a Context's native marker field as 0 (patched around the snapshot), so `SavedProcessRules` still refuses every marker past 3 and a resumed Process finds its native code again at its first poll or return.
