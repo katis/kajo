@@ -64,6 +64,8 @@ public func runGolden(_ options: LaunchOptions, resources: ShellResources = .mai
         for (name, want) in GoldenKernels.kasm where which == "all" || which == name {
             let paths = [resources.kasm("prelude"), resources.kasm("lib"), resources.kasm(name)]
             let files = paths.map { (path: $0, text: (try? String(contentsOfFile: $0, encoding: .utf8)) ?? "") }
+            // AOT 1: native=1 binds the kernel's module (kasm/<name>.kasm.native.dylib).
+            o.native = shellNativeModule(for: resources.kasm(name))
             let t0 = Telemetry.thermal()
             let u0 = ProcessUsage.now()
             let r = Headless.run(files, options: o)
@@ -75,6 +77,7 @@ public func runGolden(_ options: LaunchOptions, resources: ShellResources = .mai
             let bytes = FileManager.default.contents(atPath: resources.smalltalkImage(name)).map { [UInt8]($0) } ?? []
             let t0 = Telemetry.thermal()
             let u0 = ProcessUsage.now()
+            o.native = shellNativeModule(for: resources.smalltalkImage(name))
             let r = Headless.run(image: bytes, options: o)
             failed += emitGolden("st", name, want, workers, r, t0, options, ProcessUsage.now().fields(since: u0))
         }
@@ -93,8 +96,12 @@ private func emitGolden(_ kind: String, _ name: String, _ want: Int64, _ workers
     case .failure(let f): got = "error:" + "\(f)".replacingOccurrences(of: " ", with: "_")
     }
     let qos = r.report.first { $0.name == "qos" }?.value ?? "-"
+    // AOT 1: the send count, the workers' cycles and the native binding, to
+    // compare the engines row by row.
+    func rep(_ k: String) -> String { r.report.first { $0.name == k }?.value ?? "-" }
+    let sends = r.counters.first { $0.name == "sends" }.map { "\($0.value)" } ?? "-"
     Output.shared.emit(resultLine("golden", options,
-        "kind=\(kind) kernel=\(name) workers=\(workers) checksum=\(got) expected=\(workers == 1 ? "\(want)" : "-") ok=\(ok) ms=\(f1(r.milliseconds)) qos=\(qos) thermal_start=\(thermalStart)" + usage))
+        "kind=\(kind) kernel=\(name) workers=\(workers) checksum=\(got) expected=\(workers == 1 ? "\(want)" : "-") ok=\(ok) ms=\(f1(r.milliseconds)) qos=\(qos) thermal_start=\(thermalStart) sends=\(sends) cycles=\(rep("workerCycles")) instructions=\(rep("workerInstructions")) nativeBound=\(rep("nativeBound")) nativeMethods=\(rep("nativeMethods"))" + usage))
     return ok == 0 ? 1 : 0
 }
 

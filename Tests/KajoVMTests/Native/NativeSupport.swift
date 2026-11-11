@@ -66,7 +66,11 @@ enum NativeTest {
         if underThreadSanitizer { args.insert("-fsanitize=thread", at: 0) }
         let (status, output) = run(cc, args)
         guard status == 0 else { throw CompileError(description: "clang failed (\(status)): \(output.prefix(2000))") }
-        switch NativeModule.load(dylib: lib.path) {
+        let loaded = NativeModule.load(dylib: lib.path)
+        // The mapping stays; the files go (thousands of seeds per suite).
+        try? FileManager.default.removeItem(at: c)
+        try? FileManager.default.removeItem(at: lib)
+        switch loaded {
         case .success(let m): return m
         case .failure(let e): throw CompileError(description: "\(e)")
         }

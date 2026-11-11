@@ -58,4 +58,31 @@ fi
 for k in prelude lib arith fib sends alloc ivars walk storeheavy closures floats; do
   cp Tests/KajoVMTests/Fixtures/kernels/$k.kasm $dst/kasm/
 done
+# AOT 1, part 5 (docs/modules/aot.md): KAJO_SHELL_AOT=1 in the build's
+# environment compiles each bundled image's native module beside it
+# (<image>.native.dylib, and kasm/<kernel>.kasm.native.dylib for the golden
+# kernels), which the shells bind with the launch argument native=1. The
+# default build is unchanged. iOS: Xcode's clang for the device, each dylib
+# signed with the build's identity (a dylib dlopen'ed from the bundle must
+# be signed by the app's team).
+if [[ ${KAJO_SHELL_AOT:-} == 1 ]]; then
+  gen=$scratch/aot
+  rm -rf $gen
+  mkdir -p $gen
+  native() {  # native <name> <output dylib> <kajo aot inputs...>
+    local name=$1 lib=$2; shift 2
+    $kajo aot "$@" -o $gen/$name > /dev/null
+    if [[ $platform == mac ]]; then
+      (cd $gen/$name && ls kajo_native_*.c | xargs -P 8 -I{} $clean clang -O2 -fPIC -c {} -o {}.o && $clean clang -dynamiclib -o $lib *.o)
+    else
+      (cd $gen/$name && ls kajo_native_*.c | xargs -P 8 -I{} xcrun --sdk iphoneos clang -target arm64-apple-ios18.0 -O2 -fPIC -c {} -o {}.o \
+        && xcrun --sdk iphoneos clang -target arm64-apple-ios18.0 -dynamiclib -install_name @rpath/$(basename $lib) -o $lib *.o)
+      if [[ -n ${EXPANDED_CODE_SIGN_IDENTITY:-} ]]; then /usr/bin/codesign --force --sign "$EXPANDED_CODE_SIGN_IDENTITY" $lib; fi
+    fi
+  }
+  for img in $dst/*.img; do native $(basename $img .img) $img.native.dylib $img; done
+  for k in arith fib sends alloc ivars walk storeheavy closures floats; do
+    native kasm-$k $dst/kasm/$k.kasm.native.dylib $dst/kasm/prelude.kasm $dst/kasm/lib.kasm $dst/kasm/$k.kasm
+  done
+fi
 rm -f $dst/../kajo-build.log

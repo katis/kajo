@@ -8,7 +8,7 @@
 #
 # parts (default all): golden scenarios events hog drift. RUNS (3), WORKERS
 # (background workers in the scenarios: 7 on the Mac, 5 on the phone),
-# SECONDS_ (10) override.
+# SECONDS_ (10) override; EXTRA_ARGS adds launch arguments (AOT 1: native=1).
 #
 # The first-launch follow-up (docs/modules/first-launch.md): before its first
 # row the matrix runs one idle launch of the shell, the warm-up, into
@@ -23,11 +23,12 @@ parts=${3:-"drift golden scenarios events hog drift"}
 RUNS=${RUNS:-3}
 SECS=${SECONDS_:-10}
 mkdir -p $out
+# AOT 1: EXTRA_ARGS (for example native=1) is added to every launch.
 if [[ $target == mac ]]; then
-  W=${WORKERS:-7}; one() { $root/scripts/mac-shell.sh run "$@" }
+  W=${WORKERS:-7}; one() { $root/scripts/mac-shell.sh run "$@" ${=EXTRA_ARGS:-} }
   GW=(1 2 6)
 else
-  W=${WORKERS:-5}; one() { $root/scripts/device.sh run "$@" }
+  W=${WORKERS:-5}; one() { $root/scripts/device.sh run "$@" ${=EXTRA_ARGS:-} }
   GW=(1 2 6)
 fi
 drifted=0
