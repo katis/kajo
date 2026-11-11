@@ -955,3 +955,616 @@ app's products built with 0 warnings; the protocol fuzzer "libFuzzer
 build: ok" at 366 795 runs in 121 s. With it every gate of the core tier
 has passed on part 1's code: the fourth run above for all but
 `tsan-load`, this one for `tsan-load` and again for the test gates.
+
+## As built (part 2)
+
+Built 2026-11-10 on master from 18e274f, one finding or one group per
+commit, each named by its `<area>.F<n>` (or "note" and "part 1 not done").
+The new Swift tests are in `Tests/KajoCompilerTests/ReviewFixesPart2Tests.swift`
+(and `SavedProcessTests`, `ZeroingTests`, `ExtremeIntegerTests` where their
+neighbours are), the kernel's beside their neighbours in `kernel/Tests/` and
+`tools/Tests/`. Each was run on 18e274f in a worktree (the runnable Swift
+ones copied into `Part2Before.swift`, the kernel ones into the worktree's
+class files, adapted only where they call what the fix adds; said per
+item); the outputs are in the hand-back's `failing-before.txt`.
+
+### The two compilers agree, and refuse alike
+
+**1. `kernel.F6`: recursion over untrusted or cyclic input** (48c2b11,
+15517af, 6f72cbb). The Smalltalk compiler's `analyze:in:` and
+`gen:in:on:value:` walk a message chain by a loop (`Compiler>>chainOf:`,
+the bootstrap's `Compiler.chain` rule: a super send or an inlined send ends
+a chain; the receiver first, then each send's arguments innermost first,
+the order the recursion had, so the bytecodes are unchanged and
+`CompilerTest` still agrees on every method). Code generation walks it by
+the analysis's own mark (`chainOfAnalysed:`, a send the analysis inlined
+ends it) rather than asking `inlinable:` again: with the second ask a
+4000-send evaluate took 3.3 s in the debug kernel against 3.1 s on
+18e274f; with the mark 3.15 s (found tracing the second gate run's
+failure, below). `DevSession>>printOf:` prints through a new
+kernel class `LimitedWriteStream` (Streams): at 4000 bytes its limit block
+answers from `printOf:` with the text cut on a scalar boundary and `...`,
+and its `print:` writes `...` for an object it is already printing (a set
+of the objects being printed, kept as a stack), so a cyclic collection
+answers a cut text and a collection of a million elements is never printed
+whole (the discoverability doc's "not done" for `describe:`).
+`DebugStop>>frameDetail:session:` describes through the same `printOf:`.
+The net: `DevProtocol run:` answers from an `ensure:` block when its
+Process is terminated (by anyone), and a reaper Process, started by `run:`
+under the protocol's lock when a request is pending and none runs, looks
+every 100 ms for a pending request whose Process has ended and answers it
+(`the request's Process ended without a reply`): a VMError (a stack
+overflow, memory) ends a Process without unwinding, so no `ensure:` runs
+for it. The reaper ends when nothing is pending, so an idle image has no
+such wake-up (the idle-cost lesson). Tests: `CompilerTest>>
+testALongChainIsWalkedByALoop` (120 000 ` abs`: CompiledCode or a
+CompileError; 120 000 overflowed on 18e274f and 60 000 did not, so the
+test uses 120 000, about 24 s in the debug kernel tests), `DevelopmentTest>>
+testACollectionThatHoldsItselfPrintsCut`, and `ReviewFixesPart2Protocol
+Tests` (a request ended by a stack overflow answered; a request whose
+Process another Process terminates answered; a chain of 20 000 sends over
+the protocol a reply). On 18e274f:
+
+    kernel testALongChainIsWalkedByALoop: kajo test: error: stackOverflow #= (receiver Symbol) in Collection>>[] at pc 4
+    kernel testACollectionThatHoldsItselfPrintsCut: kajo test: error: stackOverflow #printString: (receiver SmallInteger) in Integer>>printString at pc 3
+    ✘ Test aRequestEndedByAVMErrorIsAnswered() failed after 121.835 seconds with 1 issue.
+    ✘ Test aRequestWhoseProcessIsTerminatedIsAnswered() failed after 123.338 seconds with 1 issue.
+
+(the 20 000-send chain passes there: its depth is under the limit).
+
+**2. `kernel.F7`: one identifier rule** (05d0f97). The predicate is
+`IdentifierRule.classify` in KajoVM (`Sources/KajoVM/ObjectModel/
+IdentifierRule.swift`): 1 for a letter (ASCII A-Z, a-z, `_`, or a scalar
+the host's Unicode tables call alphabetic), 2 for a scalar that only
+continues an identifier (an ASCII digit, or a non-ASCII scalar with a
+numeric type that is not alphabetic), 0 otherwise and for any integer that
+is no scalar. The bootstrap's scanner calls it in `Lexer.isLetter` and
+`identifierRun` (`Sources/KajoCompiler/Syntax.swift`, the same function
+moved, no second table); the kernel's `Scanner>>isLetterAt:` and the new
+`isIdentifierPartAt:` keep the ASCII fast path and ask primitive 171,
+`Scanner class>>identifierClassOf:`, for any scalar above 127. 171 takes a
+SmallInteger and fails for anything else; it is in `ExtremeIntegerTests`.
+Tests: `bothCompilersFollowOneIdentifierRule` (U+00D7, U+00B7, U+2192,
+U+1F600, U+00A0, U+0301, U+0663 and two letters, at the start, inside and
+at the end of a temp, a selector and a Symbol: both compilers agree) and
+`CompilerTest>>testIdentifiersFollowTheBootstrapsRule`, which fails on
+18e274f ("Denial failed": the kernel accepted `×x`). The Swift test needs
+item 2's comparison probe and cannot run there.
+
+The probe, used by items 2, 5, 6 and 7: `KernelCompilerProbe` (KajoVM,
+`Loader/`) holds a kernel image and an interpreter of no VM, as the
+make-and-run mode does; for a source it builds the bootstrap's
+`AssembledMethod` as a CompiledCode (`Image.codeObject`) and runs
+`Compiler class>>compare:in:with:`, which compiles with the kernel's
+compiler, makes the method (the VM's verifier, as the bootstrap's
+assembler runs it), and compares the two CompiledCodes in their plain form
+(`CompiledCode>>sameCodeAs:`: selector, bytecodes, header, literals, block
+methods the same way). Both refusing agrees; any other error is a
+difference. `CompilerAgreement` (KajoCompiler) compiles in
+`MakeFuzzSample` (instance variables a and b, as the fuzz context's).
+
+**3. `kernel.F8`: a `[` in a pattern comment** (86df515). Both readers
+(`Tonel.swift`, `TonelReader>>readMethodInto:`) skip a comment while they
+look for the body's `[` (a pattern holds no string); the writer and the
+canonical form are unchanged and no file was rewritten. A comment before
+the pattern was never the report's problem: both readers' `space` skips
+it as blank. Tests: `TonelTest>>testACommentInAPatternKeepsItsBrackets`
+(read, compiled, written back byte for byte) and `aCommentInAPatternKeeps
+ItsBrackets` (the bootstrap reader on the new syntax seed
+`pattern-comment.class.st`). On 18e274f:
+
+    TonelTest>>testACommentInAPatternKeepsItsBrackets: errored, "line 11: unterminated comment"
+    ✘ Test aCommentInAPatternKeepsItsBrackets() recorded an issue: Caught error: pattern-comment.class.st:13: expected >> after helper
+
+**4. `kernel.F9`: a redefinition against the subtree's names** (de40db2).
+The redefine specification gains a fifth part: for every class at or
+below a class whose shape or pool changes, `{class. every instance
+variable name. every class-side instance variable name}` as they will be
+(`ClassBuilder class>>namesAfter:own:ownMeta:`, from the kernel's
+definitions). Primitive 146 (`namesProblemAfter`, `LiveClasses.swift`)
+refuses when a class at or below a changed one is missing (obsolete
+classes excepted), checks each list's length against the slots the class
+will have, then runs `ClassRules.namesProblem` for each given class with
+its own names (past its superclass's slots), its pool after the change and
+the pools of its superclasses after the change, before anything changes;
+the reason is the usual String and `ClassBuilder` signals it as a
+ClassDefinitionError. A specification with no shape and no pool only
+checks the classes given (`ClassBuilder class>>namesProblemIn:`). Without
+shapes or pools nothing is required, so a methods-only redefinition is as
+before. The raw specifications in `LiveClassTests` and
+`RedefineOrderTests` gained their names. Tests: `LiveClassTest>>
+testARedefinitionThatTheSubclassesNamesClashWithIsRefused` (a class
+variable a subclass declares, an instance variable shadowing the class's
+own class variable, a class variable a subclass's instance variable
+shadows: each refused, nothing changed, the names rule holds after; an
+unrelated redefinition accepted), and `ClassFuzzTest>>
+testSeededReshapesAreRefusedOrAccepted`, whose specifications carry the
+names (the class side's too), every twentieth one with broken names (a
+name twice, the names missing, one name too many), and which after every
+accepted redefinition runs the build's names rule over every class
+through an empty change (500 mutations: 396 refused, 104 accepted, every
+check nil). On 18e274f the clash test fails ("Expected ClassDefinitionError
+to be signaled"; its `namesProblemIn:` assertions removed there).
+
+**5. `kernel.F14`: the generator refuses what the assembler refuses**
+(2654790). `BytecodeGenerator>>assembleWithExtraLiterals:` refuses, with a
+CompileError naming the limit, an operand past 65535, a second operand
+(argc, copied count, vector temp) past 255, a jump past an Int16, more
+than `BytecodeGenerator maxMethodBytes` (32 760) bytes and more than
+`maxLiterals` (4095) literals, the source map counted: the assembler's
+limits (`Assembler.swift`). The make primitive refuses a bytecode
+ByteArray longer than `LoaderLimits.maxMethodBytes` before its verifier
+reads anything (`CodeReader.read`, `LiveMethods.swift`). Tests:
+`bothCompilersRefuseAtEveryEncodingLimit` (a keyword send of 255 and 256
+arguments, a block copying 255 and 256 values, 32 760 and 32 763 bytes,
+4095 and 4096 literals: the bootstrap accepts each at the limit and
+refuses past it, and the compilers agree on all eight; under
+ThreadSanitizer the first four only, the big pairs taking minutes in the
+Smalltalk compiler there) and `CompilerTest>>testEncodingLimitsAreCompile
+Errors` (256 arguments a CompileError naming 255; the make primitive
+refusing 32 761 bytes "more than 32760 bytes"; a CompiledCode with
+-2^62, 2^62 - 1 or -1 in each of its six integer fields refused, never a
+trap). On 18e274f the kernel test errors ("index 516 out of bounds", the
+generic Error the report named).
+
+**6. `kernel.F15`: the smaller disagreements and the corpus** (2654790).
+`Compiler>>isIntegerLiteral:` and the `to:by:do:` step test ask `class ==
+SmallInteger` (the bootstrap's `.integer`); `<primitive:>` takes a
+SmallInteger 1...255, once ("primitive: takes 1...255", "two
+primitives"). The corpus, `Tests/KajoCompilerTests/Fixtures/compiler-corpus/
+corpus.txt`, holds 154 methods: literals at the SmallInteger boundary and
+past it, radixes, every inlining decision with SmallInteger and
+LargeInteger steps and limits, the primitive pragma's rules, names and
+scoping, nesting 31, 32 and 33 of blocks, parentheses, braces, literal
+arrays and assignments, 254 to 257 temps, blocks of 15, 16, 255 and 256
+arguments, and malformed sources; `bothCompilersAgreeOnTheCorpus`
+compares them. It found one disagreement, the bootstrap's: the assembler
+accepted a method of 257 temps (with its argument) and a block of 256
+arguments that the heap verifier, so the make primitive, refuses ("a
+header value out of range": `argc + temps <= maxTemps`, a block's temps
+counting its copied values and closure word); the kasm parser checked it,
+the compiler's `AsmMethod` path did not. `assemble` now refuses both.
+Test: `CompilerTest>>testIntegersAndPrimitivesAsTheBootstrapDecides`,
+failing on 18e274f ("Assertion failed": the LargeInteger step inlined).
+
+**7. `kernel.F16`: the kernel's compiler is fuzzed** (0753e83).
+`KAJO_FUZZ_KERNEL=<kernel dir>` puts `fuzz-syntax` in its kernel mode
+(`scripts/fuzz.sh syntax-kernel <seconds>`): the fuzz thread (512 KB, the
+smallest stack the bootstrap compiler runs on) builds a kernel image from
+the directory at its first input and keeps a probe; every method source,
+and every instance-side method of a Tonel input (at most 16), is compared
+(`KernelModeFuzz.run`), and a disagreement is a fatal error whose message
+is the source and the difference, so libFuzzer keeps the input. The
+Smalltalk compiler runs on a stack of `VMConfig.maxStackWords` words, a
+Process's limit, so a VMError there is a disagreement. Runs:
+
+| run | seconds | executions | disagreements |
+|---|--:|--:|---|
+| first, the working tree after 2654790 | 60 (stopped at its crash) | 38 | `crash-2ca723e8…`, then on replay `crash-74e6ac94…` |
+| second, after the probe's UTF-8 rule | 300 (stopped) | 405 | `crash-34771487…` |
+| third, after the bootstrap's UTF-8 check | 400 | 40 960 | none |
+| the bar's run, on c84e171 (the final code) | 601 | 47 082 | none |
+
+All with "libFuzzer build: ok (Apple Swift version 6.4.2 (swift-6.4.2-RELEASE))",
+about 80 to 100 inputs a second (each one compiles in Smalltalk in an
+ASan build).
+
+The disagreements and their fate:
+- `crash-2ca723e8…` (a `replaceFrom:to:with:startingAt:` source with
+  bytes that are not UTF-8 in its `<primitive:` pragma) and `crash-74e6ac94…`
+  (a mutated Integer file, `isPrime`): the kernel's compiler overflowed
+  its stack on a String that is not UTF-8. No path hands the kernel such a
+  String (every String in the image is valid UTF-8; the protocol's reader
+  validates), so the probe now gives the kernel valid UTF-8 only and
+  counts bytes that are not as the bootstrap's alone (agreeing when the
+  bootstrap refuses them).
+- `crash-34771487…` (CompilerTest's `knownDifferences` with a bit flipped
+  in its comment): the bootstrap accepted a method whose comment is not
+  UTF-8 (the scanner validates the scalars it reads, not a comment's
+  bytes), so its recorded source would be an invalid String in the image.
+  Fixed: `parseMethod` validates the whole source first ("invalid UTF-8").
+The inputs are in the hand-back's `fuzz-kernel-findings/`.
+
+**8. `kernel.F17`: documented** (d9a2c8e). `docs/modules/kernel-live.md`
+says beside the per-iteration rule that an uncaptured (or captured but
+never assigned) temp of an inlined loop body keeps its value across
+passes in both compilers, with Pharo's behaviour (Opal nils every such
+temp each pass) and why Kajo keeps it (open question 3). Pinned by
+`BlockClosureTest>>testAnUncapturedLoopTempKeepsItsValue` (#(1 2 3), and
+#(1 1 1) with an unrelated `[t] value`), which both compilers pass (the
+kernel's by `CompilerTest`'s comparison of every method) and which passes
+on 18e274f by design; the corpus holds both forms.
+
+### The tools and the scripts
+
+**9. `tools.F3`: evaluate the selection once** (da01f76). `DevTools
+class>>instancesOf:with:` and `pointersTo:with:` evaluate the selection
+once where the workspace evaluates, then ask about the object it answered
+through a workspace model whose receiver is its handle (`self
+instanceCount`, `self allInstances: 1000`, `self pointerCount`, `self
+pointersTo: 1000`); an answer with no handle (nil, a Boolean, a small
+Integer, a Character) is named by its printString, which evaluates to it.
+The title is the first evaluation's printString. The Inspector's pointers
+to a slot's value go through the same path. From that evaluation on the
+session's handle table holds the object, so it is among the holders, as
+it already was for an inspected object. Tests: `DiscoverabilityTest>>
+testTheSelectionIsEvaluatedOnce` (one evaluation of the selection per
+action), the two existing tests' request sequences and
+`InspectorModelTest>>testObjectsPointingToTheObjectAndToASlotsValue`
+updated. On 18e274f: "Expected 2 but was 0" (the selection was sent in
+parentheses with a message, never alone, three times).
+
+**10. `tools.F4`: fixtures and renames** (8f7b584). `check-tier.sh`
+classifies `Tests/*` as swift before `*.md`, and both diffs run with
+`--no-renames`; `KAJO_CHECK_REPO` names the repository whose diff decides
+(the test's scratch repository). `check-tier-test.sh` gains three fixture
+cases and a scratch repository whose commit, then working tree, moves
+`Sources/KajoVM/Marking/X.swift` to `Sources/KajoVM/Shell/` (core both
+times). On 18e274f the fixtures were "tier: none, nothing owed: docs only"
+and the committed rename "tier: swift".
+
+**11. `tools.F5`: a matrix gate fails when any step fails** (200147c,
+979a0aa). The
+Mac matrix gate runs the matrix, the report and the bar, each failing the
+gate (`rc`), the later still running; `device-rows.sh` the same;
+`shell-matrix.sh` ends with `exit 0`, so its status is the script dying;
+`shell-report.py --bar` over a directory with no rows prints so and exits
+1. `check-tier-test.sh` runs `--bar` over a fixture with a row (0) and one
+without (1), and the gate's command with the matrix step failing (non-zero;
+`GL_MAC_SHELL` and `GL_SHELL_MATRIX` stand in for the scripts). On
+18e274f `--bar` over no rows exited 0. The first version kept the steps'
+status in a variable named `status`, which is zsh's read-only `$?`:
+`device-rows.sh` died at "read-only variable: status" before its first
+row in the second gate run (and the gate failed, as this item wants); the
+variable is `steps_rc` (979a0aa). Nothing ran `device-rows.sh` before
+the gate: a script change's first run was its gate (the lesson below).
+
+**12. `tools.F6`: the small items**, each its own commit.
+- The `sudo` line (d612458): `CommandLineTool.shellQuoted` quotes the
+  directory, the CLI and the link (`'\''` for a quote). Test
+  `theSudoLineQuotesItsPaths` runs the line through `sh` with `sudo` a
+  printer under `Joni's Apps/` and a `no such bin` directory; on 18e274f
+  `/bin/sh: syntax error: unexpected end of file`. The line is never run.
+- Two launches (ace0819): `CheckoutInstaller.install` looks for the marker
+  again after its copy (a complete folder is `.present`, never moved
+  aside), takes a final rename that loses to a complete copy as that copy,
+  and gives each attempt its own partial folder. Test
+  `concurrentInstallsLeaveOneCompleteCheckout` (eight at once, ten
+  rounds, under a temporary directory, never the real Application
+  Support); on 18e274f 19 issues (failed installs, no marker left).
+- The `kajo` target (85174f8) builds with `.strictMemorySafety()`. A clean
+  build of the target flagged three sites in `Sources/kajo/main.swift`: two
+  `String(format:)` calls (C varargs), now formatted without them
+  (`oneDecimal`, a rounded Int), and `fflush(stdout)` (C's global
+  `stdout`), marked `unsafe`, the target's one unsafe construct.
+- `new-check.sh` (f3efbef): `symbols()` counts KajoVM's symbols last and
+  the Release checks require some, so their zeros mean absent, not
+  stripped (macos-release `KajoVM=5761`, ios-release `5743`).
+- `dist.sh` (0325f7c): each slice and module's compile line must hold
+  `-O`, `-whole-module-optimization` and `-strict-memory-safety` and none
+  of `-Onone`, `-enable-testing` or `-g`, and a missing line fails. Run by
+  `dist.sh checkout` in `just new-check`: all three slices passed (macOS
+  34 s, iOS 33 s, simulator 33 s). No signed `dist` was run.
+- `Host.current().localizedName`: traced with the launch trace in five
+  Debug launches of a generated Sample on the mini (`kajo-launch-report
+  kajo-frames=1`): `pairing-screen` to `device-name` took 0.4 to 0.5 ms
+  (614.3 to 614.7, 249.9 to 250.4, 227.8 to 228.3, 247.0 to 247.5, 257.8
+  to 258.2 ms after the process started), after the first frame. Not
+  moved: it does not wait here. (On a network whose name lookups hang it
+  could, as `hostName` did on iOS; `SCDynamicStoreCopyComputerName` reads
+  the name with no lookup and is the change to make if a trace ever shows
+  a wait.)
+
+**13. `primitives.F8`: the client's reader** (0b4e4cb). `ProtocolClient`
+reads lines up to `lineLimit` (64 MiB, the image's client's and the
+server's bound; an `init` argument), discards the rest of a longer line,
+counts it, and a request waiting answers an error instead of waiting out
+its timeout (the long line may have been its reply). Its descriptor is
+closed by whichever of the reader and `close()` ends second, once
+(`descriptorCloses`), never after a bounded wait while the reader may
+still read it; `write` refuses after `close`. Tests: `aLineThatPassesThe
+ClientsLimitIsAnAnswer` (64 MiB + 4 KiB with no newline: answered in
+0.37 s; on 18e274f it waited its 120 s), `theClientsDescriptorIsClosed
+OnceByWhoeverEndsLast` (a `close` during a 1.5 s event callback returns at
+once, the descriptor is not closed under the callback, then closed once;
+the counter is the fix's, not runnable there).
+
+### The reports' notes
+
+**14. The token store** (0f1f172). `PairingTokenStore.renew` throws
+`StoreError` unless the token was written whole, synced, closed and
+renamed into place (the temporary is removed on any failure);
+`loadReporting` (and `load`) keep a token only from a regular file with no
+mode bit beyond 0600, replace any other (a wider mode, a link in its
+place: open question 2) with a new token, and serve an in-memory token for
+the launch when none can be written, the problem on the console without
+the token (`serving token_kept=0 problem=...`). New token whose `renew`
+fails keeps the old token and says why on the pairing screen and the
+console. Test `theTokenStoreKeepsOnlyWhatItWroteAndRefusesAWideMode`
+(every comparison a Bool, no token printed: a directory made read-only
+refuses the renew and the old token stands; mode 0644 replaced and
+written 0600; a link replaced by a regular file, its target untouched).
+On 18e274f (its renew assertion adapted to the non-throwing renew): 5
+issues.
+
+**15. The reply's timestamp** (c79361a). `ClientHost.run` takes the time
+as the line arrives and stamps its events with it, before
+`ProjectWriter.apply`'s writes; a write's failure is still timed when it
+happened. Test `aReplysLineIsTimedWhenItWasRead` (a reply whose file
+write is refused: its line's time is not after the failure's); on
+18e274f "Expectation failed: line.timeNs <= failure.timeNs".
+
+**16. `ShellBridge.post` against a re-registration** (5b5ef62). The path
+exists. `post` read the event Semaphore under the bridge's lock, let it
+go, and pushed an external signal naming the Semaphore with no root of
+its own (`handle: nil`). Meanwhile primitive 153 could register a new
+Semaphore and then free the old one's pending root (`unregisterPending`
+after `register` returns); the old Semaphore, now held by nothing, could
+be swept by a collection before a worker drained the signal, and its
+entry taken by a new Semaphore; `drainExternal` checks only that the
+entry is a used Semaphore, so it signalled the new one: an excess signal,
+which on a Mutex's Semaphore lets two Processes in. (The new registration
+owes its own signal for the queued event, so the stale one is pure
+excess.) Closed: `post`, `putBack`, `postRequest` and `putBackRequest`
+take a pending root for the Semaphore under the bridge's lock, where it is
+still rooted by the registration (the old root is freed only after
+`register` took that lock), and the signal carries the handle the drain
+releases (`VMRef.rootPending`); a full table signals as before. Test
+`aQueuedShellSignalRootsItsSemaphoreUntilItIsDrained` (one worker driven
+by turns: a posted event's signal adds one pending root until a turn
+drains it); on 18e274f "the queued signal holds no root".
+
+**17. Recorded, not built.** A spoofed Bonjour name receives the token
+(plain TCP now, PSK-TLS later, the owner's decision of 9d); ten wrong
+tokens a minute pause the listener (by design).
+
+### Part 1's "not done"
+
+**18. Tests owed** (b96a1a0). `ProtocolServer.injectAcceptFailures(n)`
+makes the accept loop's next n `accept` calls fail with EMFILE without
+calling it: `theAcceptLoopWaitsOutInjectedFailures` (three counted,
+waited out, the next connection served).
+`ClientConnection.lateWriteCount` counts write blocks that run after its
+descriptor is closed: `noClientWriteRunsAfterItsConnectionIsReleased`
+(eight senders while `release` comes, 20 rounds, 0, and a send after it
+refused). `anEventTheImageCannotAllocateIsNotLost` (primitive 154's
+put-back on its own: the take fails as a full heap's, the next answers the
+event); it passes on 18e274f, part 1 having made the fix.
+
+**19. A loaded waiter's wait length** (d6ed7f7). `installSavedProcesses`
+gives a Process saved while waiting the length of the instruction that
+ends at its saved pc when it is a send of no argument (its top frame's
+method decoded with `verifyHeapMethod`, which the loader already ran on
+it against the depth at that pc), as `waitSemaphore` records it for a
+live one; so its debug stop rewinds to the `wait` and proceeding waits
+again. The length is found at load from the instruction itself; no image
+format change. Test `aLoadedWaiterKnowsTheLengthOfItsWaitSend` (the three
+waiters of `shapesImage`, each after a three-byte `send wait 0`, then
+released); it reads the record through a new accessor and cannot run on
+18e274f, where no loaded record had a length.
+
+**20. The weak pass in a release build** (6a2a900).
+`theWeakPassIsMeasuredPerSlot` takes its slot counts from
+`KAJO_WEAK_SLOTS`; `swift test -c release -Xswiftc -enable-testing`, three
+runs on the mini:
+
+| slots | weak pass ms | ns a slot | final pause ms |
+|--:|--:|--:|--:|
+| 2^20 | 0.794 to 0.804 | 0.757 to 0.767 | 0.814 to 0.834 |
+| 2^24 - 1 | 12.264 to 12.293 | 0.731 to 0.733 | 12.285 to 12.317 |
+
+Against part 1's debug 11.6 ms for 2^20 (11.1 ns a slot), a release build
+is 15 times faster; the bound part 1 stated becomes about 12.3 ms for the
+largest WeakArray, a frame and a half at 120 Hz, and under a millisecond
+for 2^20 slots.
+
+### The bar
+
+- **Tests failing before.** Every new test was run on 18e274f in a
+  worktree (`failing-before.txt` of the hand-back). Failing there: item 1
+  (both kernel tests end the test run in a stack overflow; the VMError and
+  terminate protocol tests waited their 120 s), 2 (the kernel test), 3
+  (both), 4, 5 (the kernel test: "index 516 out of bounds"), 6, 9, 10 (the
+  fixtures "nothing owed: docs only", the rename "tier: swift"), 11
+  (`--bar` over no rows exited 0), 12 (the `sudo` line, the concurrent
+  installs), 13 (the long line waited 120 s), 14, 15, 16. Passing there,
+  honestly: item 8's test (documentation, by design), the 20 000-send
+  protocol chain (under the old stack limit; the kernel test at 120 000
+  fails), 18's put-back test (part 1's fix). Not runnable there, being the
+  fix's own instrumentation or needing the probe: the three agreement tests
+  (the kernel tests stand for them), 13's descriptor counter, 18's
+  injection and late-write counter, 19's accessor, the changed reshape
+  mutation test (its fifth part), and the matrix gate's command (on
+  18e274f it would build and run the real matrix; the `--bar` case stands
+  for it).
+- **The two compilers** agree on every method of the image (`CompilerTest>>
+  testEveryMethodCompilesAsTheBootstrapDid` in the kernel tests, 248 of 248
+  headless and on the iPhone), on the corpus (154 methods, none
+  disagreeing after the assembler's header rule) and under the kernel fuzz
+  mode's 600 s (above); every disagreement found is fixed (three inputs,
+  two causes, listed under item 7, and the corpus's one).
+- **`interpret`** is identical instruction for instruction: the two
+  aligned `-enable-testing` release builds of the A/B (18e274f and
+  c84e171), 1819 lines each, differ after normalizing addresses to the
+  function's start only in the jump table's page and low bits (`adrp x26,
+  472/471/470` and `add x26, x26, #0xa4e` against `479/477` and
+  `#0x1ee`, four places; `interpret.diff`). `just arc-check` passes on
+  c84e171 ("OK: no retain or release on the checked paths; the dispatch
+  loop is one jump table").
+- **The aligned A/B** against 18e274f (`scripts/ab.sh`, 5 interleaved runs,
+  checksums the same everywhere): 1 worker 0.997 to 1.011, 8 workers
+  0.957 to 1.029 with overlapping ranges (the usual 8-worker spread),
+  cycle ratios 0.988 to 1.013, instruction ratios 0.999 to 1.001.
+
+| kernel | 1 worker | 8 workers |
+|---|--:|--:|
+| alloc | 1.004 | 1.016 |
+| arith | 0.997 | 0.979 |
+| fib | 1.003 | 1.026 |
+| ivars | 0.999 | 0.957 |
+| sends | 1.000 | 1.029 |
+| st-closures | 1.004 | 0.957 |
+| st-ivars | 1.001 | 1.015 |
+| st-sends | 1.011 | 1.016 |
+| storeheavy | 1.001 | 0.961 |
+
+  `st-sends` at 1 worker (1.011, ranges 1388 to 1407 against 1396 to
+  1409, instructions 1.000) runs a Smalltalk kernel built from the changed
+  kernel; the dispatch is the same.
+- **`ExtremeIntegerTests`** gained primitive 171 (a SmallInteger past the
+  last scalar and the four extremes answer 0); the make primitive takes a
+  CompiledCode, not an integer: its integer fields at -2^62, 2^62 - 1 and
+  -1, each refused, are in `CompilerTest>>testEncodingLimitsAreCompileErrors`.
+- **The round trip** (`scripts/canonical-tonel.sh --check`) was clean
+  before every kernel or tools commit (each rewritten by the script first,
+  then checked) and on c84e171.
+- **`scripts/check-tier-test.sh`**: 44 checks, ok (it was 36 before part
+  1's tests and this part's eight). The perf report's fixture test
+  (`PerfReportTests`) passes in `swift test`.
+- **Before the gates**: a full debug `swift test` (419 + 153 tests: one
+  failure, item 16's first test, whose count a background worker's drain
+  could beat in the full suite; rewritten to count on a VM no worker
+  drains, f8d06ac, failing against 18e274f's bridge), the kernel tests
+  248 of 248 (126 s headless, the 120 000-send chain about 24 s of it),
+  the tools' tests touched, and every new test once under
+  `swift test --sanitize=thread` with twelve busy loops: 0 reports, one
+  failure of a new test, `theClientsDescriptorIsClosedOnceByWhoeverEndsLast`
+  (the target's event reached the client before its callback was set; the
+  target now sends it after the client's first line, c84e171, and the
+  test passed loaded under the sanitizer). The kernel tests on the iPhone
+  13 Pro (`scripts/device.sh tests`): 248 of 248 in 6.9 s, thermal nominal.
+- **`just check 18e274f`** on the final code (06e74a6): every gate passed,
+  below.
+
+### `just check 18e274f`
+
+The third run, on 06e74a6 (the final code: everything after it is this
+doc), the core tier, every gate, 15 458 s, swift.org 6.4.2:
+
+    2026-11-11 03:36:22 06e74a6 check-tier core: 63 files from 18e274f...HEAD (18e274f...06e74a6) and the working tree
+    2026-11-11 03:36:43 06e74a6 end clean-build rc=0 21s
+    2026-11-11 03:47:01 06e74a6 end swift-test rc=0 618s
+    2026-11-11 03:59:31 06e74a6 end swift-test-load rc=0 750s
+    2026-11-11 05:06:51 06e74a6 end tsan rc=0 4040s
+    2026-11-11 06:29:31 06e74a6 end tsan-load rc=0 4960s
+    2026-11-11 06:29:46 06e74a6 end ios-check rc=0 15s
+    2026-11-11 06:29:51 06e74a6 end arc-check rc=0 5s
+    2026-11-11 06:31:01 06e74a6 end golden rc=0 70s
+    2026-11-11 06:32:00 06e74a6 end test-release rc=0 59s
+    2026-11-11 06:32:21 06e74a6 end model-check rc=0 21s
+    2026-11-11 06:33:32 06e74a6 end soak rc=0 71s
+    2026-11-11 06:43:35 06e74a6 end fuzz-kasm rc=0 603s
+    2026-11-11 06:53:38 06e74a6 end fuzz-snapshot rc=0 603s
+    2026-11-11 07:03:41 06e74a6 end fuzz-syntax rc=0 603s
+    2026-11-11 07:13:44 06e74a6 end fuzz-protocol rc=0 603s
+    2026-11-11 07:15:43 06e74a6 end apps rc=0 119s
+    2026-11-11 07:17:30 06e74a6 end kernel-test rc=0 107s
+    2026-11-11 07:21:37 06e74a6 end new-check rc=0 247s
+    2026-11-11 07:26:59 06e74a6 end ab rc=0 322s
+    2026-11-11 07:39:57 06e74a6 end matrix-mac rc=0 778s
+    2026-11-11 07:54:00 06e74a6 end matrix-iphone rc=0 843s
+    2026-11-11 07:54:00 06e74a6 check-tier done core failed=0 15458s
+
+`swift-test`, `swift-test-load`, `tsan` and `tsan-load` each ran 419 + 153
+tests, ThreadSanitizer reporting nothing; the kernel tests 248 of 248; the
+fuzzers "libFuzzer build: ok" at 2.22, 3.14, 0.87 and 1.81 million runs
+(kasm, snapshot, syntax, protocol); the gate's A/B 0.996 to 1.008 at 1
+worker and 0.954 to 1.059 at 8 (instruction ratios 0.999 to 1.002,
+checksums the same); the Mac matrix's bar: 156 rows, 0 launches failed,
+0 checksums wrong, the warm-up 0 of 1200, the ring under `young=stw` 164,
+189 and 220 frames behind 8 to 10 soft-limit fallbacks whose compacting
+full collections took 201 to 212 ms, the hog with the budget off 1192 to
+1193 by design, every other row 0; the iPhone's (5 workers; 117 launches
+at thermal nominal, 109 fair, 45 serious): 0 fallbacks, the ring under
+`young=stw` 1 and 2 frames behind scavenges of 14.0 and 16.1 ms, the hog by
+design, every other row 0.
+
+Two runs before it stopped on this part's own faults, each fixed and the
+run started again:
+- The first, on 534ec98, failed `tsan`: `noClientWriteRunsAfterIts
+  ConnectionIsReleased`'s eight senders on `DispatchQueue.global()` did
+  not run within 60 s in four rounds under the full sanitized suite (the
+  queue's threads were taken; AGENTS.md's "a wait for a report that runs
+  on a global queue"); they are Threads now (ea58e5c). Stopped after
+  `tsan`.
+- The second, on ea58e5c, failed `tsan-load` and `matrix-iphone`.
+  `matrix-iphone`: item 11's `status` variable, read-only in zsh (979a0aa,
+  above). `tsan-load`: part 1's `connectionsWithoutASessionAreBounded`, its
+  session's 4000-send `evaluate` past eval's 300 s under the sanitizer and
+  twelve busy loops (the whole test took 247 and 268 s unloaded under the
+  sanitizer in the two runs). Traced: compiling those 4000 sends in the
+  debug kernel took 3.3 s against 3.1 s on 18e274f, item 1's code
+  generation asking `inlinable:` per send again; with the analysis's mark
+  3.15 s (6f72cbb); and the test waits 1800 s under the sanitizer for that
+  one reply, the assertion unchanged (06e74a6). Every other gate of that
+  run passed (`swift-test`, `swift-test-load`, `tsan`, the fuzzers, `apps`,
+  `kernel-test`, `new-check`, `ab`, `matrix-mac`).
+
+The A/B and `interpret` diff of the bar above were made on c84e171 (the
+code of ea58e5c and 06e74a6 but for two test files and the kernel
+compiler's chain walk, which `interpret` does not see); the gate's A/B on
+06e74a6 agrees. The kernel fuzz mode's 600 s ran on c84e171 (47 082
+runs) and again on 06e74a6 (45 163 runs, no disagreement).
+
+
+### Deviations
+
+- Item 2's test of both compilers and items 5 to 7 rest on a comparison
+  probe in KajoVM (`Loader/KernelCompilerProbe.swift`, with `Image`'s
+  `allocateBytes` made internal and a `classNames` accessor): a VM-side
+  addition the brief did not name, test and fuzz support only (no
+  primitive, no path a program reaches).
+- Item 6's corpus found a bug in the bootstrap's assembler (257 temps, a
+  256-argument block), fixed in `Assembler.swift` (`Loader/`, core): the
+  heap verifier was the reference there, not the bootstrap.
+- Item 7's runs found the bootstrap accepting a comment that is not UTF-8;
+  `parseMethod` now validates the whole source.
+- Item 4's VM change is a fifth part of the redefine specification (the
+  names, which the VM does not hold); it is required whenever shapes or
+  pools change, so every raw specification in the tests gained it.
+- Item 12's installer fix also gives each attempt its own partial folder
+  (the tests' concurrent attempts share a process identifier).
+- Item 16's path existed, so the four signal sites of `ShellBridge` (`post`,
+  `putBack`, `postRequest`, `putBackRequest`) root their Semaphore, with
+  `VMRef.rootPending` added in `Processes/External.swift`.
+- Item 18 added a test injection (`ProtocolServer.injectAcceptFailures`)
+  and a counter (`ClientConnection.lateWriteCount`) outside the core.
+- Item 19 added a test accessor `VM.waitSendLength(of:)`.
+- `localizedName` was traced and not moved (0.4 to 0.5 ms after the first
+  frame); the brief allowed either.
+- A script change's first run was its gate: `device-rows.sh` was not run
+  after item 11's change and died in the gate on zsh's read-only
+  `status`. A changed gate script is run once on its own before the gate
+  run (a lesson for AGENTS.md, the main session's to write).
+
+### Not done
+
+- The kernel fuzz mode compiles in one class (`MakeFuzzSample`, ivars a
+  and b) on the instance side; class-side methods of a Tonel input and
+  class variables are not compared.
+- A String that is not UTF-8 handed to the kernel's compiler by a program
+  (not by any path the system has) still overflows its stack; the probe
+  does not feed it one.
+- The reaper answers a request ended by a VMError within about 100 ms
+  but cannot say which VMError (the host's log has it).
+- `printOf:`'s cycle guard is its stream's `print:`; a `printOn:` that
+  writes an element's `printString` (a fresh, unbounded stream) instead of
+  `print:`ing it bypasses the guard and the limit for that element.
+- The weak pass is measured, not bounded (part 1's open question 4
+  stands).
+- The iPad rows.
+
+### Open questions (decisions only)
+
+1. `kernel.F7`: identifiers follow the bootstrap's rule (Unicode
+   alphabetic, the host's tables, through primitive 171), as recommended.
+2. Note 14: a token file with a mode wider than 0600 (or a link in its
+   place) is replaced by a new token, as recommended (pairing is
+   repeated once).
+3. `kernel.F17`: the loop body's uncaptured temps are documented, not
+   nilled, as recommended.
+4. New: should the reaper answer a VMError-ended request with the
+   VMError's kind (a primitive that reads the host's error record by
+   Process id)? Recommended: not now; the host's log has it and the reply
+   already ends the wait.
+
