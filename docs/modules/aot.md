@@ -745,7 +745,11 @@ As test switches: `AOTOptions.brokenNoSendCount` (the drift detector sees
 fewer sends: `aSendNotCountedIsSeenByTheDriftDetector`) and
 `AOTOptions.brokenNoFlushAtPoll` (an accumulator left in a C local across
 a poll; preempted at every poll the Process resumes from the stale slot and
-answers wrong: `anOperandLeftInALocalAcrossAPollIsLost`). By hand: fp kept
+answers wrong: `anOperandLeftInALocalAcrossAPollIsLost`; the first gate
+run's `swift-test-load` found this test's own fault: its slot could hold a
+dead word from an earlier frame, which a debug build's assertion trapped on
+under load (`ObjectMemory.classIndex(of:)`, SIGTRAP); the accumulator now
+starts as a send's answer, so the stale slot is an old SmallInteger). By hand: fp kept
 across a slow path that grew the stack (the activation's overflow branch
 edited to go on with the old pointers into the freed segment): `kajo:
 error: mustBeBoolean (receiver SmallInteger)` on `down: 20000`. Found as a

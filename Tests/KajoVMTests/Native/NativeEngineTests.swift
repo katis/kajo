@@ -165,10 +165,19 @@ func moduleGenerated(from src: String, options: AOTOptions = AOTOptions(), edit:
 /// An accumulator held in an operand slot across backward jumps whose
 /// polls preempt the Process: the slot must be in the frame at every poll
 /// (rule 6: operands are flushed before every call into the VM), or the
-/// resumed Process reads a stale one.
+/// resumed Process reads a stale one. The accumulator starts as the answer
+/// of a send, so the slot holds a SmallInteger from the first (the broken
+/// variant then reads an old accumulator, a wrong answer, never garbage:
+/// garbage trapped in a debug build's assertion under load).
 let operandAcrossPolls = """
+method UndefinedObject id: temps=0
+  push_temp 0
+  return_top
+end
 method UndefinedObject acc: temps=1
+  push_nil
   push_int 0
+  send id: 1
   push_int 0
   store_temp 1
 loop:
