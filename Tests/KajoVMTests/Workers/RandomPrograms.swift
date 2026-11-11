@@ -685,7 +685,10 @@ let randomNative = NativeTally()
 func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
     if let only = ProcessInfo.processInfo.environment["KAJO_RANDOM_ONLY"], only != config.rawValue { return }
     var failed: [UInt64] = []
-    let n = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "") ?? randomSeedCount(config)
+    // Each seed's image is generated and compiled: the soak's thousand
+    // seeds stay the interpreter's, the native engine runs at most a hundred
+    // per configuration (KAJO_NATIVE_SEEDS overrides).
+    let n = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "") ?? min(randomSeedCount(config), 100)
     _ = randomNative.take(config)
     for s in 0..<UInt64(n) {
         let p = randomProgram(randomSeedBase &+ s)
