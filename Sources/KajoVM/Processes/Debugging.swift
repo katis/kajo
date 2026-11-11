@@ -121,15 +121,24 @@ func debuggingPrimitive(_ n: Int, _ m: Machine, _ c: PrimitiveCall) -> Oop {
         // carries another marker (then the polls below it decide).
         let base = unsafe m.state.pointee.stackBase
         let cw = unsafe base[f + Frame.context]
-        if cw == Frame.emptyContext {
+        // AOT 1: a native marker only says where a native caller resumes;
+        // the step marker takes its place (the stepped Process runs
+        // interpreted, rule 11).
+        if cw == Frame.emptyContext || cw & 1 != 0 && untagged(cw) >= nativeMarkerBase {
             unsafe base[f + Frame.context] = tagged(Int(FrameMarker.step))
-        } else if cw & Oop.objectTagMask == 0, m.om.load(Oop(raw: cw), ContextLayout.marker) == Oop(smallInteger: 0) {
+        } else if cw & Oop.objectTagMask == 0, isEmptyOrNativeMarker(m.om.load(Oop(raw: cw), ContextLayout.marker)) {
             unsafe checkedStore(m.state, Oop(raw: cw), ContextLayout.marker, Oop(smallInteger: FrameMarker.step))
         }
         return c.receiver
     default:
         return .none
     }
+}
+
+/// A Context's marker field that a step marker may replace: none, or a
+/// native one (AOT 1).
+func isEmptyOrNativeMarker(_ mk: Oop) -> Bool {
+    mk == Oop(smallInteger: 0) || mk.isSmallInteger && mk.smallIntegerValue >= Int64(nativeMarkerBase)
 }
 
 /// Primitive 155's work: ask `p` to run the interrupt `kind` when next

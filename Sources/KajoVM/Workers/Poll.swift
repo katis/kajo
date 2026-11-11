@@ -92,6 +92,9 @@ func pollSlow(_ s: StatePointer, rewind: Int) -> Bool {
         unsafe vm.count(.preemptions)
         return true
     }
+    // AOT 1: a budget check in the interpreter is where it leaves for
+    // native code (rule 8; NativeInterface.swift).
+    if unsafe w.pointee.native.table != nil && interpreterLeavesForNative(s, rewind: rewind) { return true }
     return false
 }
 

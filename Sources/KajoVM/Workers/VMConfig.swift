@@ -2,6 +2,9 @@ import Darwin
 
 /// What a VM is built with. Everything here is fixed once the VM exists.
 struct VMConfig: Sendable {
+    /// AOT 1: the compiled module to bind at start (docs/modules/aot.md);
+    /// nil runs every method in the interpreter.
+    var native: NativeModule? = nil
     /// Background workers (OS threads at user-initiated QoS). The main
     /// worker (index 0) belongs to the shell and runs only in `runMain`.
     var backgroundWorkers = 1

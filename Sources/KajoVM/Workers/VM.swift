@@ -68,6 +68,18 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             unsafe workers[i] = Worker.make(image: image, vm: state, index: i, isMain: i == 0, flag: flag,
                                             pollEvery: config.pollEvery, seed: seed &+ UInt64(i) &* 0x9E37_79B9)
         }
+        // AOT 1: bind the native module before anything runs or allocates
+        // (the image is as loaded: nothing young).
+        if let module = config.native {
+            let (b, report) = unsafe bindNative(image, module)
+            nativeReport = report
+            if let b = unsafe b {
+                let p = UnsafeMutablePointer<NativeBinding>.allocate(capacity: 1)
+                unsafe p.initialize(to: b)
+                unsafe state.pointee.native = p
+                for i in 0..<workerCount { unsafe attachNative(workers[i], p) }
+            }
+        }
         unsafe NurseryShared.install(state)
         unsafe MarkingShared.install(state)
         unsafe RelocationShared.install(state)
@@ -81,6 +93,16 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             resumedProcesses = ps
             resumedSaver = saver == image.nilObject ? nil : saver
         }
+    }
+
+    /// AOT 1: what binding the native module did (nil: none was given).
+    private(set) var nativeReport: NativeBindReport? = nil
+
+    /// AOT 1: the native engine's counters, summed over the workers.
+    var nativeCounters: NativeCounters {
+        var c = NativeCounters()
+        for i in unsafe 0..<state.pointee.workerCount { unsafe c.add(state.worker(i).pointee.native.counters) }
+        return c
     }
 
     /// Module 8c: the Processes this VM resumed from its image (rooted for
@@ -164,6 +186,11 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             let n = unsafe UnsafeMutablePointer<ExternalNode>(bitPattern: node).unsafelyUnwrapped
             node = unsafe n.pointee.next
             unsafe n.deallocate()
+        }
+        if let b = unsafe s.native {
+            unsafe unbindNative(image, b.pointee)
+            unsafe b.deinitialize(count: 1)
+            unsafe b.deallocate()
         }
         unsafe YoungShared.uninstall(state)
         unsafe RelocationShared.uninstall(state)

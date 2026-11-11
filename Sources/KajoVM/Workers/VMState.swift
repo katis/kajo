@@ -87,6 +87,9 @@ import Synchronization
     let saveHold: UnsafeMutablePointer<Atomic<Bool>>
     let slowPolls: UnsafeMutablePointer<Atomic<Int>>
     let savedImages: SavedImages
+    /// AOT 1: the bound native module (Native/NativeBinding.swift), nil
+    /// when none is.
+    var native: UnsafeMutablePointer<NativeBinding>? = nil
 }
 
 /// Read by other threads: atomics only, one line per worker.

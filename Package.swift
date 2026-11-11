@@ -77,11 +77,19 @@ let package = Package(
             dependencies: ["KajoVM"],
             swiftSettings: [.strictMemorySafety()]
         ),
+        // AOT 1: the native engine's generator (`kajo aot`): an image's
+        // methods to C. Only the `kajo` tool and the tests link it; no app
+        // carries it (docs/modules/aot.md).
+        .target(
+            name: "KajoAOT",
+            dependencies: ["KajoVM"],
+            swiftSettings: [.strictMemorySafety()]
+        ),
         // Headless command line: boot an image, run tests, serve the
         // development protocol. No UI here.
         .executableTarget(
             name: "kajo",
-            dependencies: ["KajoVM", "KajoCompiler", "KajoDev", "KajoGenerator"],
+            dependencies: ["KajoVM", "KajoCompiler", "KajoDev", "KajoGenerator", "KajoAOT"],
             swiftSettings: [.strictMemorySafety()]
         ),
         // libFuzzer targets for the kasm and snapshot loaders (`just fuzz`).
@@ -110,7 +118,7 @@ let package = Package(
         ),
         .testTarget(
             name: "KajoVMTests",
-            dependencies: ["KajoVM"],
+            dependencies: ["KajoVM", "KajoAOT"],
             exclude: ["Fixtures"]
         ),
         .testTarget(

@@ -20,6 +20,8 @@
 #     (`serviceRounds`, the round opener, the waits), the collector's copy
 #     loop (`Collector.evacuate`, `copyBody`, the grey drain, the holder
 #     scan, the handed buffers, the entry sweep), the resume scan;
+#     AOT 1's driver, the interface's wrappers and their continuation, and
+#     the interpreter's two engine switches;
 #  2. the dispatch loop `interpret` is one jump table: one indirect branch
 #     and one jump-table relocation;
 #  3. module 6's post-store check is inline in `interpret`'s store_ivar:
@@ -67,6 +69,7 @@ wanted=(
   Numbers 'Machine.integerArith(_:_:_:)|Machine.floatArith(_:_:_:)|Machine.boxFloat(_:)'
   Strings 'stringPrimitive(_:_:_:)|Machine.intern(_:)'
   StackGrowth 'growStack(_:needed:)'
+  NativeInterface 'drive(_:_:)|nativeContinue(_:_:_:_:)|nativePollSend(_:_:_:_:_:_:)|nativePollJump(_:_:_:_:_:)|nativeLookup(_:_:_:)|nativeDNU(_:_:_:_:_:_:_:)|nativeInvoke(_:_:_:_:_:_:_:)|nativeSpecial(_:_:_:_:_:_:)|nativeExec(_:_:_:_:_:)|nativeReturn(_:_:_:_:_:_:)|nativeFail(_:_:_:_:_:_:_:)|nativeOverflow(_:_:_:_:_:_:_:)|interpreterLeavesForNative(_:rewind:)|interpreterReturnsToNative(_:_:)'
 )
 fail=0
 found=0

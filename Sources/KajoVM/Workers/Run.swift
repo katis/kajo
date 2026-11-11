@@ -56,7 +56,8 @@ func runSlice(_ vm: VMPointer, _ w: WorkerPointer, _ p: Oop) {
             start = unsafe restore(s)
         }
     }
-    unsafe interpret(s, start)
+    // AOT 1: the driver (`interpret` itself with no native module bound).
+    unsafe drive(s, start)
     switch unsafe s.pointee.exit {
     case .suspended:
         if unsafe w.pointee.leave == .terminated {

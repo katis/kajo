@@ -508,6 +508,10 @@ extension ObjectMemory: @unchecked Sendable {}
     var collectorContext: AllocContext?
     /// Root registry slots; `Oop.none` marks a removed slot.
     var roots = RawArray<UInt64>()
+    /// AOT 1: the bound native module's method-to-native table (16 bytes
+    /// per entry), nil when none is bound; `becomeForward` clears the line
+    /// of every method it frees (NativeBinding.swift).
+    var nativeTable: UnsafeMutableRawPointer? = nil
     var freeRootSlots = RawArray<Int32>()
     /// Class index -> class oop. Index 0 is never a class.
     var classTable = RawArray<UInt64>(repeating: 0, count: 1)

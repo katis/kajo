@@ -94,6 +94,8 @@ public enum Headless {
         /// `kajo run`, `kajo test` and the image build have no shell and
         /// always answer false.
         public var stopsForDebugger = false
+        /// AOT 1: the compiled module to bind (`kajo run --native`).
+        public var native: NativeModule? = nil
 
         public init() {}
     }
@@ -251,6 +253,11 @@ public enum Headless {
             let ts = (Int64(st.atNs) + offsetNs) / 1000
             events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"\(st.kind)\",\"pauseUs\":\(st.pauseNs / 1000),\"ttspUs\":\(st.timeToSafepointNs / 1000),\"slowestWorker\":\(st.slowest)\(st.words > 0 ? ",\"words\":\(st.words)" : "")}".utf8))
         }
+        // AOT 1: the native engine's summary, when a module was given.
+        let nr = nativeRunReport(vm)
+        if !nr.isEmpty {
+            events(Array(("{\"v\":1,\"kind\":\"native\"," + nr.map { "\"\($0.0)\":\"\($0.1)\"" }.joined(separator: ",") + "}").utf8))
+        }
         let c = image.om.counters
         let ts = clock_gettime_nsec_np(CLOCK_REALTIME) / 1000
         events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations)}".utf8))
@@ -295,6 +302,7 @@ public enum Headless {
         vc.young.stress = YoungStress(parsing: options.youngStress)
         vc.young.verify = options.verify
         vc.sourcesDirectory = options.sourcesDirectory
+        vc.native = options.native
         guard options.logCapacity >= 1 else { return .failure(.unsupported("log capacity: at least 1")) }
         vc.logCapacity = options.logCapacity
 
@@ -400,6 +408,7 @@ public enum Headless {
         report += markingReport(vm, stops: stops)
         report += relocationReport(vm)
         report += youngReport(vm, ms: ms)
+        report += nativeRunReport(vm)
         if let main { report += main.report() }
         if !samples.isEmpty {
             report.append(("oldSamples", samples.map { unsafe String(format: "%.0f:%.1f", $0.ms, $0.mb) }.joined(separator: ",")))
@@ -415,6 +424,25 @@ public enum Headless {
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
                               "stopperQoSRaises"].contains($0.name) },
         report: report)
+    }
+}
+
+extension Headless {
+    /// AOT 1: the native engine's run-line fields (none without a module):
+    /// the bind's counts, the generator's, the switches and native sends.
+    static func nativeRunReport(_ vm: VM) -> [(String, String)] {
+        guard let r = vm.nativeReport, let module = vm.config.native else { return [] }
+        var out: [(String, String)] = [
+            ("nativeRefused", r.refused.map { $0.replacingOccurrences(of: " ", with: "_") } ?? "-"),
+            ("nativeMethods", "\(r.methods)"), ("nativeBound", "\(r.bound)"), ("nativeGroups", "\(r.groupsUsed)"),
+            ("nativeUnboundNoMatch", "\(r.unboundNoMatch)"), ("nativeUnboundUnreadable", "\(r.unboundUnreadable)"),
+            ("nativeGenerated", "\(module.methodsGenerated)"), ("nativeDeclined", "\(module.methodsDeclined)"),
+            ("nativeBindMs", unsafe String(format: "%.3f", Double(r.bindNs) / 1e6)),
+        ]
+        let c = vm.nativeCounters
+        out += c.named.map { ($0.name, "\($0.value)") }
+        out.append(("vmSends", "\(vm.interpreterCounters.sends &- c.nativeSends)"))
+        return out
     }
 }
 

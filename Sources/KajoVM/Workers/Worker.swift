@@ -67,6 +67,9 @@ enum LeaveReason: UInt8, Sendable {
     /// Perturbation generator state (xorshift).
     var rng: UInt64
     var thread: pthread_t? = nil
+    /// AOT 1: the native engine's state (Native/NativeState.swift), last so
+    /// no offset the interpreter reads moves.
+    var native = unsafe NativeWorkerState()
 
     static let bytes = unsafe (MemoryLayout<Worker>.size + 127) & ~127
 }

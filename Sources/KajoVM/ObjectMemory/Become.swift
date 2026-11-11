@@ -100,6 +100,8 @@ extension ObjectMemory {
 
         var runs = RunBuilder(chunk: UInt64(config.entryChunk))
         for f in from {
+            // AOT 1: a freed method's native binding goes with its entry.
+            unbindNative(f)
             setHeaderWord(f.raw, 0)
             runs.add(f.raw, self)
             oldMap.remove(f.entryIndex)

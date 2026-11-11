@@ -226,6 +226,13 @@ private func saveInStop(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext
     guard chunks <= Header.maxSlots, let list = array(chunks) else { return nil }
     om.store(state, SavedScheduler.processes, list)
     let trueObj = image.trueObject
+    // The slots the image sees differently, set now and put back after the
+    // snapshot (below).
+    var restore: [(Oop, Int, Oop)] = []
+    func patch(_ o: Oop, _ i: Int, _ v: Oop) {
+        restore.append((o, i, om.load(o, i)))
+        om.store(o, i, v)
+    }
     for c in 0..<chunks {
         let pairs = min(SavedScheduler.pairsPerChunk, live.count - c * SavedScheduler.pairsPerChunk)
         guard let lc = array(2 * pairs) else { return nil }
@@ -235,6 +242,26 @@ private func saveInStop(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext
             // The world is stopped and no Process runs: the stack is still.
             let base = unsafe records(vm, lp.record).pointee.base.unsafelyUnwrapped
             let n = lp.top + 1
+            // AOT 1 (open question 1): native return markers name this
+            // binary's resume table and are never saved. A context word
+            // holding one is saved empty, a Context's marker field 0; the
+            // resumed Process finds its native code again at its first
+            // poll or return.
+            var stripped = Set<Int>()
+            var h = lp.isSaver ? regs.hdr : intSlot(om, lp.process, ProcessLayout.hdr)
+            while h > 0 && h + Frame.context < n {
+                let cw = unsafe base[h + Frame.context]
+                if cw & 1 != 0 && untagged(cw) >= nativeMarkerBase {
+                    stripped.insert(h + Frame.context)
+                } else if cw & Oop.objectTagMask == 0, cw != 0, om.classIndex(of: Oop(raw: cw)) == WellKnown.context {
+                    let mk = om.load(Oop(raw: cw), ContextLayout.marker)
+                    if mk.isSmallInteger && mk.smallIntegerValue >= Int64(nativeMarkerBase) {
+                        patch(Oop(raw: cw), ContextLayout.marker, Oop(smallInteger: 0))
+                    }
+                }
+                guard let c = unsafe callerHeader(base, h) else { break }
+                h = c
+            }
             let stackChunks = (n + SavedScheduler.chunkWords - 1) / SavedScheduler.chunkWords
             guard stackChunks <= Header.maxSlots, let stack = array(stackChunks) else { return nil }
             om.store(lc, 2 * k, lp.process)
@@ -244,7 +271,9 @@ private func saveInStop(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext
                 let count = min(SavedScheduler.chunkWords, n - from)
                 guard let ch = array(count) else { return nil }
                 om.store(stack, j, ch)
-                for i in 0..<count { om.store(ch, i, Oop(raw: unsafe base[from + i])) }
+                for i in 0..<count {
+                    om.store(ch, i, stripped.contains(from + i) ? Oop(raw: Frame.emptyContext) : Oop(raw: unsafe base[from + i]))
+                }
             }
             if lp.isSaver, case .primitive = form {
                 // The primitive's answer in the image: true.
@@ -254,14 +283,8 @@ private func saveInStop(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext
         }
     }
 
-    // The slots the image sees differently, set now and put back after the
-    // snapshot: every saved Process's record is -1; the saver is ready, its
+    // Every saved Process's record is -1; the saver is ready, its
     // registers the resume point, at the back of its ready queue.
-    var restore: [(Oop, Int, Oop)] = []
-    func patch(_ o: Oop, _ i: Int, _ v: Oop) {
-        restore.append((o, i, om.load(o, i)))
-        om.store(o, i, v)
-    }
     for lp in live { patch(lp.process, ProcessLayout.record, Oop(smallInteger: -1)) }
     if me != .none, let lp = live.first(where: { $0.isSaver }) {
         let pc: Int

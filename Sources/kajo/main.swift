@@ -2,6 +2,7 @@ import Foundation
 import KajoCompiler
 import KajoDev
 import KajoGenerator
+import KajoAOT
 import KajoVM
 
 let usage = """
@@ -20,6 +21,8 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
        kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS]
+       kajo aot <file.kasm>...|<image.img> -o <dir>
+       kajo run ... --native <module.dylib>
        kajo version
 \(clientUsage)
 
@@ -60,6 +63,11 @@ a release image (Release) with the checkout's prebuilt kajo, and the Xcode
 project when xcodegen is found. --kajo names a Kajo distribution checkout
 (Prebuilt/ with the Release frameworks and kajo; the Kajo app copies its
 own to Application Support, scripts/dist.sh makes one).
+
+aot (AOT 1): reads an image (or the kasm files `run` would load) and writes
+the native engine's C for every method to <dir>/kajo_native.c; compile it
+with clang into a dylib and pass it to `run --native` (or `test --native`).
+A method whose bytecodes changed since runs interpreted.
 
 seal: loads an image (every loader check), marks it a release image and
 saves it to <out.img>. Nothing clears the mark.
@@ -129,6 +137,7 @@ case "run":
         case "--sources": options.sourcesDirectory = value()
         case "--protocol": protocolSocket = value()
         case "--name": serviceName = value()
+        case "--native": options.native = loadNative(value())
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: paths.append(args[i])
         }
@@ -255,6 +264,8 @@ case "new":
         }
     case .failure(let r): fail("kajo new: \(r)", 1)
     }
+case "aot":
+    runAOT(args)
 case "seal":
     guard args.count == 2 else { fail(usage) }
     guard let data = FileManager.default.contents(atPath: args[0]) else { fail("cannot read \(args[0])") }
@@ -272,6 +283,69 @@ case "eval", "compile", "browse", "debug", "request", "mcp":
     exit(runClientCommand(command, args))
 default:
     fail(usage)
+}
+
+/// AOT 1: `--native <dylib>`.
+func loadNative(_ path: String) -> NativeModule {
+    switch NativeModule.load(dylib: path) {
+    case .success(let m): return m
+    case .failure(let e): fail("kajo: \(e)")
+    }
+}
+
+/// AOT 1: `kajo aot <inputs> -o <dir>`.
+func runAOT(_ args: [String]) {
+    var out: String? = nil
+    var paths: [String] = []
+    var options = AOTOptions()
+    var i = 0
+    while i < args.count {
+        if args[i] == "-o" {
+            i += 1
+            guard i < args.count else { fail(usage) }
+            out = args[i]
+        } else if args[i] == "--return-marker" {
+            options.returnByLookup = false
+        } else if args[i].hasPrefix("-") {
+            fail("unknown option \(args[i])\n\(usage)")
+        } else {
+            paths.append(args[i])
+        }
+        i += 1
+    }
+    guard let dir = out, !paths.isEmpty else { fail(usage) }
+    var files: [(path: String, text: String)] = []
+    var imageBytes: [UInt8]? = nil
+    for p in paths {
+        guard let data = FileManager.default.contents(atPath: p) else { fail("cannot read \(p)") }
+        if Headless.isImage([UInt8](data)) {
+            guard paths.count == 1 else { fail("an image is generated from alone") }
+            imageBytes = [UInt8](data)
+            break
+        }
+        guard let text = String(data: data, encoding: .utf8) else { fail("cannot read \(p)") }
+        files.append((p, text))
+    }
+    let t0 = Date()
+    let image: Image
+    switch Headless.imageForNative(files: files, image: imageBytes) {
+    case .success(let im): image = im
+    case .failure(let f): fail("kajo aot: \(f)", 1)
+    }
+    defer { image.close() }
+    let infos = image.nativeMethodInfos()
+    let t1 = Date()
+    let o = AOTGenerator.generate(infos, nilOop: image.nilOop, trueOop: image.trueOop, falseOop: image.falseOop, options: options)
+    let t2 = Date()
+    do {
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+    } catch {
+        fail("kajo aot: cannot create \(dir)", 1)
+    }
+    let path = (dir as NSString).appendingPathComponent("kajo_native.c")
+    guard FileManager.default.createFile(atPath: path, contents: Data(o.source.utf8)) else { fail("kajo aot: cannot write \(path)", 1) }
+    for d in o.declined { FileHandle.standardError.write("declined: \(d.name): \(d.reason)\n".data(using: .utf8)!) }
+    print("\(path): methods=\(o.methods) groups=\(o.groups) declined=\(o.declined.count) resumePoints=\(o.resumePoints) bytes=\(o.source.utf8.count) readMs=\(Int(t1.timeIntervalSince(t0) * 1000)) generateMs=\(Int(t2.timeIntervalSince(t1) * 1000))")
 }
 
 /// `kajo run <image> --protocol <socket>`: serve until SIGINT or SIGTERM.

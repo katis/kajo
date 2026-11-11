@@ -26,6 +26,7 @@ func runTests(_ args: [String]) -> Never {
         case "--gc": options.gc = value()
         case "--young": options.young = value()
         case "--sources": options.sourcesDirectory = value()
+        case "--native": options.native = loadNative(value())
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: imagePath = args[i]
         }
@@ -49,6 +50,10 @@ func runTests(_ args: [String]) -> Never {
     let events = collector.events
     let report = TestReport(events)
     FileHandle.standardError.write(report.summary.data(using: .utf8)!)
+    // AOT 1: the native engine's counts (bound, interpreted, declined, switches).
+    for e in events where e.starts(with: Array("{\"v\":1,\"kind\":\"native\"".utf8)) {
+        FileHandle.standardError.write(Data(Array("native: ".utf8) + e + [10]))
+    }
     if Headless.isReleaseImage(bytes) == true { FileHandle.standardError.write("kajo test: a release image\n".data(using: .utf8)!) }
     let failed = report.failed, errored = report.errored
     if let junit {

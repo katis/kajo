@@ -18,7 +18,8 @@
 # The tiers, highest first; a diff owes the highest tier any of its files
 # asks for:
 #   core       Sources/KajoVM/{ObjectMemory,Interpreter,Loader,Workers,Processes,
-#              Nursery,Marking,Relocation,YoungCollection,ObjectModel}/
+#              Nursery,Marking,Relocation,YoungCollection,ObjectModel,Native}/,
+#              Sources/KajoAOT/ (AOT 1: the native engine and its generator)
 #   swift      anything that is in no other tier (Swift outside the core,
 #              Package.swift, Tests/, scripts/, justfile, apps/ but its
 #              Smalltalk, models/, experiments/ code ...)
@@ -43,7 +44,8 @@ done
 # classify <path>: the tier one file asks for.
 classify() {
   case $1 in
-    Sources/KajoVM/(ObjectMemory|Interpreter|Loader|Workers|Processes|Nursery|Marking|Relocation|YoungCollection|ObjectModel)/*) print core ;;
+    Sources/KajoVM/(ObjectMemory|Interpreter|Loader|Workers|Processes|Nursery|Marking|Relocation|YoungCollection|ObjectModel|Native)/*) print core ;;
+    Sources/KajoAOT/*) print core ;;
     kernel/*|tools/*|apps/Shared/smalltalk/*) print smalltalk ;;
     # Tests' Markdown files are fixtures read byte for byte (the perf
     # report's, the app project's): before *.md (the review fixes, part 2).

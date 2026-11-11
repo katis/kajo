@@ -68,7 +68,7 @@ import Synchronization
         let host = unsafe Regs(pc: leave, sp: stack.base + 1 + argc, fp: stack.base, hdr: stack.base, code: leave,
                                lits: UnsafePointer(stack.base))
         let first = unsafe send(state, image.om, host, sel.raw, argc, 0, poll: false, count: false)
-        unsafe interpret(state, first)
+        unsafe drive(state, first)
         switch unsafe state.pointee.exit {
         case .returned:
             return .success(unsafe state.pointee.regs.result)

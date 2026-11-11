@@ -192,6 +192,9 @@ func returnSlow(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutab
     unsafe hdr[Frame.context] = Frame.emptyContext
     let r = unsafe plainReturn(s, om, regsAt(s, pc, sp, fp, hdr), v)
     if unsafe marker == 0 || s.pointee.exit != .running { return r }
+    // AOT 1: a native caller marked the frame; its resume point continues
+    // it (the interpreter leaves for the driver; NativeInterface.swift).
+    if marker >= Int64(nativeMarkerBase) { return unsafe interpreterReturnsToNative(s, r) }
     if marker == FrameMarker.step { return unsafe stepAfterReturn(s, r, returning: hdr - base) }
     if marker == FrameMarker.discard {
         var out = r

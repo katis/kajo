@@ -62,6 +62,8 @@ for how in committed staged; do
 done
 rm -rf $scratch
 expect core - Sources/KajoVM/Interpreter/Interpreter.swift
+expect core - Sources/KajoVM/Native/NativeInterface.swift
+expect core - Sources/KajoAOT/Generator.swift docs/modules/aot.md
 expect core - Sources/KajoVM/Loader/Image.swift Sources/KajoDev/Client.swift kernel/Object.class.st
 for d in ObjectMemory Interpreter Loader Workers Processes Nursery Marking Relocation YoungCollection ObjectModel; do
   expect core - Sources/KajoVM/$d/X.swift
