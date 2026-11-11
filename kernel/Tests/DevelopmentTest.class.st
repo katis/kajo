@@ -317,3 +317,15 @@ DevelopmentTest >> testTerminateRunsTheUnwindBlocksOfTheActiveProcess [
 	done wait.
 	self assert: log asArray = #(#body #curtailed #ensure)
 ]
+
+{ #category : #tests }
+DevelopmentTest >> testTheClientTransportNamesNoDirectory [
+	"The project directory (2026-11-11, docs/modules/project-directory.md): primitive 164's connect takes the target, the client and the package, never a directory; the host answers which directory it holds for a target (projectOf:), nil for one it does not know, and nil for everything without a host."
+	self assert: (ClientTransport class includesSelector: #connect:client:package:).
+	self deny: (ClientTransport class includesSelector: #connect:client:package:project:).
+	self assert: (ClientTransport projectOf: 'kajo-no-such-target') isNil.
+	ClientTransport hasHost ifFalse: [
+		self assert: (ClientTransport projectOf: 'local') isNil.
+		self assert: (ClientTransport chooseProject: 'local') isNil.
+		self assert: (ClientTransport connect: '/tmp/kajo-none.sock' client: 'developer' package: nil) isNil]
+]

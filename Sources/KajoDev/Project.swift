@@ -96,3 +96,96 @@ public struct ProjectWriter: Sendable {
         return done
     }
 }
+
+/// Why a directory is not a target's project directory (the project
+/// directory, 2026-11-11: `ClientHost.setProject`), as a host shows it.
+public struct ProjectRefusal: Error, Sendable, Equatable, CustomStringConvertible {
+    public let description: String
+    public init(_ d: String) { description = d }
+}
+
+/// The Kajo app's remembered project directories (the project directory,
+/// part 3, docs/modules/project-directory.md): one line per target name,
+/// `name<TAB>directory`, in `<support>/project-directories` (Application
+/// Support's Kajo folder, `KAJO_SUPPORT_DIR` in tests); `#` starts a
+/// comment line. A line that is not a target name (1 to 64 bytes, no
+/// control character) and an absolute path with no control character is
+/// ignored, and no such line is ever written, so neither part can hold a
+/// tab or a line break. Read when the host starts (`ClientHost
+/// .useProjectMemory`), written when the developer chooses. The scripted
+/// modes have none.
+public struct ProjectMemory: Sendable, Equatable {
+    public let path: String
+
+    public init(path: String) { self.path = path }
+
+    /// The file in a support directory.
+    public init(supportDirectory: String) { path = supportDirectory + "/project-directories" }
+
+    public struct Entry: Sendable, Equatable {
+        public let name: String
+        public let directory: String
+    }
+
+    /// One entry's line (without its line break), or nil when it cannot be
+    /// one: a name `ClientHost.isTargetName` refuses, or a directory that is
+    /// not absolute or holds a control character.
+    public static func line(_ name: String, _ directory: String) -> String? {
+        guard ClientHost.isTargetName(name), directory.hasPrefix("/"), directory.utf8.count <= 1024,
+              !directory.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else { return nil }
+        return name + "\t" + directory
+    }
+
+    /// The entries of a file's text: malformed lines ignored, the last of
+    /// a name's lines standing.
+    public static func parse(_ text: String) -> [Entry] {
+        var out: [Entry] = []
+        for raw in text.split(separator: "\n", omittingEmptySubsequences: true) {
+            if raw.hasPrefix("#") { continue }
+            let f = raw.split(separator: "\t", omittingEmptySubsequences: false).map(String.init)
+            guard f.count == 2, line(f[0], f[1]) != nil else { continue }
+            out.removeAll { $0.name == f[0] }
+            out.append(Entry(name: f[0], directory: f[1]))
+        }
+        return out
+    }
+
+    /// What the file holds (nothing when there is none, it is not UTF-8 or
+    /// it is past 1 MiB).
+    public func load() -> [Entry] {
+        guard let d = FileManager.default.contents(atPath: path), d.count < 1 << 20,
+              let text = String(data: d, encoding: .utf8) else { return [] }
+        return ProjectMemory.parse(text)
+    }
+
+    /// `name`'s directory from now on. False when it cannot be a line or
+    /// the file cannot be written.
+    @discardableResult
+    public func remember(_ name: String, _ directory: String) -> Bool {
+        guard ProjectMemory.line(name, directory) != nil else { return false }
+        var entries = load().filter { $0.name != name }
+        entries.append(Entry(name: name, directory: directory))
+        return write(entries)
+    }
+
+    /// The names' entries gone.
+    @discardableResult
+    public func forget(_ names: [String]) -> Bool {
+        write(load().filter { !names.contains($0.name) })
+    }
+
+    func write(_ entries: [Entry]) -> Bool {
+        var text = "# Kajo: each target's project directory (name, a tab, the directory)\n"
+        for e in entries {
+            guard let l = ProjectMemory.line(e.name, e.directory) else { continue }
+            text += l + "\n"
+        }
+        do {
+            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            try Data(text.utf8).write(to: URL(fileURLWithPath: path), options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
+}

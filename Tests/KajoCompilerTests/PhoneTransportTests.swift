@@ -199,7 +199,7 @@ final class TestClock: Sendable {
         defer { unlink(file) }
         FileManager.default.createFile(atPath: file, contents: Data("# a phone\n\(name)\tbonjour:\(name)\t\(t.target.server.token)\n".utf8))
         #expect(host.readTargetsFile(file) == 1)
-        let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(name), .string("developer"), .nil, .nil]))?.int)
+        let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(name), .string("developer"), .nil]))?.int)
         let end2 = ShellVM.now() + 60_000_000_000
         while ShellVM.now() < end2 && !events.withLock({ $0.contains { ($0.kind == .line || $0.kind == .lost) && $0.target == Int(conn) } }) { usleep(2000) }
         let reply = events.withLock { $0.first { ($0.kind == .line || $0.kind == .lost) && $0.target == Int(conn) } }?.value.string ?? ""
@@ -262,7 +262,9 @@ final class TestClock: Sendable {
         #expect(try t.probe("openRemote:", [.string("phone")]) == .bool(true))
         #expect(t.until("remoteReady"))
         // A connect never takes a token from the image: primitive 164's
-        // connect has four arguments, none of them a token.
+        // connect has three arguments (the project directory, 2026-11-11),
+        // none of them a token; any other count is refused.
+        #expect(t.host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string("phone"), .string("developer"), .nil, .string(token)])) == nil)
         #expect(t.host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string("phone"), .string("developer"), .nil, .string(token), .nil])) == nil)
     }
 

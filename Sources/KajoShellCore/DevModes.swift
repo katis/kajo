@@ -25,12 +25,17 @@ func devSocketPath(_ options: LaunchOptions) -> String {
 /// serving the protocol, and its tools opened on it: Kajo develops Kajo.
 /// With `project=`, the files of every change the tools make to the local
 /// target are written there (`just tools` passes the repository's
-/// `tools/`). Runs until the app quits.
+/// `tools/`): the host sets it in its client transport before the tools
+/// open, and the image never names a directory (the project directory,
+/// docs/modules/project-directory.md). Runs until the app quits.
 @MainActor public final class DevMode {
     let options: LaunchOptions
     let platform: ShellPlatform
     var runtime: ShellRuntime?
     var server: ProtocolServer?
+    /// The Kajo app's remembered project directories (the product mode
+    /// sets it before `start`); the scripted modes remember nothing.
+    var projectMemory: ProjectMemory?
 
     let pairing: PairingPresenter?
 
@@ -62,9 +67,10 @@ func devSocketPath(_ options: LaunchOptions) -> String {
                 return
             }
             server = s
-            var args: [ShellValue] = [.string(s.path)]
-            args.append(options["project"].map { .string($0) } ?? .nil)
-            guard let p = rt.vm.spawn("openLocal:project:", receiver: "DevTools", arguments: args, main: true, priority: 2) else {
+            if let h = rt.clientHost {
+                for l in setHostProjects(h, target: "local", directory: options["project"], memory: projectMemory) { Output.shared.emit(l) }
+            }
+            guard let p = rt.vm.spawn("openLocal:", receiver: "DevTools", arguments: [.string(s.path)], main: true, priority: 2) else {
                 platform.showStatus("dev: the image has no DevTools (build it with --with tools)")
                 return
             }
@@ -77,6 +83,22 @@ func devSocketPath(_ options: LaunchOptions) -> String {
             platform.showStatus("dev: \(error)")
         }
     }
+}
+
+/// The project directory (docs/modules/project-directory.md, part 2): a
+/// host's launch argument for `target` (`project=`) and, in the product
+/// mode, the remembered directories, set in its client transport through
+/// the one setter; the lines say what was set or refused, for the console.
+public func setHostProjects(_ host: ClientHost, target: String, directory: String?, memory: ProjectMemory?) -> [String] {
+    var lines: [String] = []
+    if let directory {
+        switch host.setProject(directory, for: target) {
+        case .success(let d): lines.append("project target=\(target) dir=\(d)")
+        case .failure(let why): lines.append("project=refused target=\(target) why=\(why.description.replacingOccurrences(of: " ", with: "_"))")
+        }
+    }
+    if let memory { lines += host.useProjectMemory(memory) }
+    return lines
 }
 
 /// Transcript lines to the results (the console) as they come.
@@ -106,7 +128,8 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
 /// [package=Kernel]` runs the session against another target (the phone)
 /// instead of the image's own socket: the client transport reads the
 /// targets file (the token stays in it) and browses Bonjour; the image
-/// does not serve. The session's dropped link is the shell's: the bench's
+/// does not serve. `project=` is the target's project directory, set in
+/// the host's transport (the project directory, 2026-11-11). The session's dropped link is the shell's: the bench's
 /// transcript line `devsession: drop` closes every client socket as a
 /// link that died would.
 @MainActor public final class DevSessionMode {
@@ -180,6 +203,11 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
             runtime.clientHost?.readTargetsFile(options.string("targets", NSHomeDirectory() + "/.kajo/targets"))
             runtime.clientHost?.startBrowsing()
         }
+        // The project directory: `project=` is the session's target's,
+        // set in the host's transport; the bench names none.
+        if let h = runtime.clientHost {
+            for l in setHostProjects(h, target: target ?? "local", directory: options["project"], memory: nil) { Output.shared.emit(l) }
+        }
         runtime.onTurn = { [unowned self] t, _ in
             self.turns += 1
             if t.preempted { self.preempted += 1 }
@@ -226,18 +254,18 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
             args = [.string(server?.path ?? "")]
         }
         if let target {
-            selector = "startRemote:package:project:"
-            args = [.string(target), .string(options.string("package", "Kernel")), options["project"].map { .string($0) } ?? .nil]
+            selector = "startRemote:package:"
+            args = [.string(target), .string(options.string("package", "Kernel"))]
             // Module 11a: `session=app`: the tools against a running app,
             // one method of its class changed (its source read from the
             // file `source=`) and `probe=` evaluated until it answers
             // `expect=`.
             if options["session"] == "app" {
                 let source = options["source"].flatMap { try? String(contentsOfFile: $0, encoding: .utf8) } ?? ""
-                selector = "startApp:package:class:selector:source:probe:expect:project:"
+                selector = "startApp:package:class:selector:source:probe:expect:"
                 args = [.string(target), .string(options.string("package", "Sample")), .string(options.string("appclass", "SampleApp")),
                         .string(options.string("selector", "pressed")), .string(source), .string(options.string("probe", "")),
-                        .string(options.string("expect", "")), options["project"].map { .string($0) } ?? .nil]
+                        .string(options.string("expect", ""))]
             }
         }
         guard let p = runtime.vm.spawn(selector, receiver: "DevSessionBench", arguments: args, main: true, priority: 2) else {

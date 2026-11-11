@@ -1,4 +1,4 @@
-"The developer UI's entry (module 9c, docs/modules/developer-ui.md): the connected targets (DevClients by name), the open tool windows, the transcript of every target, the Tools menu in the menu bar. openLocal:project: is what the macOS shell runs in a development image: it connects to the image's own protocol socket (the local target: Kajo develops Kajo), opens the transcript, the target picker and a browser, and from then on a process.stopped event of any target opens a debugger on that Process (or brings its window back), a process.resumed one tells it."
+"The developer UI's entry (module 9c, docs/modules/developer-ui.md): the connected targets (DevClients by name), the open tool windows, the transcript of every target, the Tools menu in the menu bar. openLocal: is what the macOS shell runs in a development image: it connects to the image's own protocol socket (the local target: Kajo develops Kajo), opens the transcript, the target picker and a browser, and from then on a process.stopped event of any target opens a debugger on that Process (or brings its window back), a process.resumed one tells it. The project directory (2026-11-11): the tools keep no directory; the host holds each target's and writes the files of accepted changes there."
 Class {
 	#name : #DevTools,
 	#superclass : #Object,
@@ -6,7 +6,6 @@ Class {
 		'clients',
 		'windows',
 		'transcript',
-		'project',
 		'menu',
 		'debuggers',
 		'targetsWatched',
@@ -28,18 +27,11 @@ DevTools class >> clients [
 ]
 
 { #category : #clients }
-DevTools class >> connect: aPath name: aName [
-	"A client of a target, opening its session as the developer in package Tools when it is the local target (with the token the host holds); its stops open debuggers, its transcript joins the transcript's."
-	^ self connect: aPath name: aName project: (aName = 'local' ifTrue: [project] ifFalse: [nil])
-]
-
-{ #category : #clients }
-DevTools class >> connect: aTarget name: aName project: aDirectoryOrNil [
-	"A client of aTarget (a socket path, an address, or a target's name: module 9d's phone), the changes it makes written into aDirectoryOrNil."
+DevTools class >> connect: aTarget name: aName [
+	"A client of aTarget (a socket path, an address, or a target's name: module 9d's phone), opening its session as the developer in package Tools when it is the local target (with the token the host holds); its stops open debuggers, its transcript joins the transcript's. The files of its changes go to the project directory the host holds for the target."
 	| c |
 	(self clientNamed: aName) ifNotNil: [:old | old isOpen ifTrue: [^ old]].
-	c := DevClient connect: aTarget name: aName client: 'developer' package: (aName = 'local' ifTrue: ['Tools'] ifFalse: [nil])
-		project: aDirectoryOrNil.
+	c := DevClient connect: aTarget name: aName client: 'developer' package: (aName = 'local' ifTrue: ['Tools'] ifFalse: [nil]).
 	c isNil ifTrue: [^ nil].
 	self register: c.
 	^ c
@@ -425,10 +417,9 @@ DevTools class >> menuItem: anId [
 ]
 
 { #category : #opening }
-DevTools class >> openLocal: aSocketPath project: aDirectoryOrNil [
+DevTools class >> openLocal: aSocketPath [
 	"The shell's development mode: connect to this image's own protocol socket and open the tools. Answers the local client."
 	| c |
-	project := aDirectoryOrNil.
 	UIEventLoop start.
 	c := self connect: aSocketPath name: 'local'.
 	c isNil ifTrue: [^ nil].
@@ -440,12 +431,11 @@ DevTools class >> openLocal: aSocketPath project: aDirectoryOrNil [
 ]
 
 { #category : #opening }
-DevTools class >> openTarget: aTarget name: aName project: aDirectoryOrNil [
-	"Module 9d: the tools on another target (the phone, by its name or address), the changes they make written into aDirectoryOrNil. Answers the client."
+DevTools class >> openTarget: aTarget name: aName [
+	"Module 9d: the tools on another target (the phone, by its name or address), the changes they make written into the project directory the host holds for it. Answers the client."
 	| c |
-	project := aDirectoryOrNil.
 	UIEventLoop start.
-	c := self connect: aTarget name: aName project: aDirectoryOrNil.
+	c := self connect: aTarget name: aName.
 	c isNil ifTrue: [^ nil].
 	self installMenu.
 	self openTranscript.

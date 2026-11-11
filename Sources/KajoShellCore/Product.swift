@@ -1,4 +1,5 @@
 import Foundation
+import KajoDev
 import KajoGenerator
 
 // Module 11b (docs/modules/distribution.md, part 1): the Kajo app, the macOS
@@ -49,6 +50,20 @@ public struct ProductPaths: Sendable, Equatable {
 
     /// `<support>/<version>`: the checkout generated projects pin.
     public var installedCheckout: String { supportRoot + "/" + version }
+
+    /// The local target's project directory after `install` (the project
+    /// directory, part 2): the copied checkout's `tools/`, which the tools'
+    /// changes are written back to; none when nothing was copied.
+    public func toolsProject(after install: CheckoutInstall) -> String? {
+        switch install {
+        case .copied, .present: installedCheckout + "/tools"
+        case .noCheckout, .failed: nil
+        }
+    }
+
+    /// The developer's choices of a target's project directory, remembered
+    /// per target name across launches (`<support>/project-directories`).
+    public var projectMemory: ProjectMemory { ProjectMemory(supportDirectory: supportRoot) }
 
     public init(version: String, bundle: String, environment: [String: String] = [:], home: String = NSHomeDirectory()) {
         self.version = version
@@ -319,10 +334,13 @@ import KajoAppDevelopment
         var o = LaunchOptions([])
         o.values = options.values
         o.values["mode"] = "dev"
-        if o.values["project"] == nil, installTag != "none", installTag != "failed" {
-            o.values["project"] = paths.installedCheckout + "/tools"
+        // The local target's directory goes to the host's transport through
+        // the one setter (DevMode), the remembered ones with it.
+        if o.values["project"] == nil, let tools = paths.toolsProject(after: install) {
+            o.values["project"] = tools
         }
         let d = DevMode(o, platform: host, pairing: pairing)
+        d.projectMemory = paths.projectMemory
         dev = d
         d.start()
         if let rt = d.runtime, let p = rt.vm.spawn("showLine:", receiver: "Transcript", arguments: [.string(line)]) {

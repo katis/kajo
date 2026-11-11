@@ -1,4 +1,4 @@
-"Module 9c's scripted developer session (docs/modules/developer-ui.md, Measurements), run by the macOS shell's mode=devsession in a development image: the tools open on the image's own socket, the browser is populated (the class tree pushed whole and on demand, a package's selectors in a table pushed whole and on demand), classes and methods are selected, a method compiled, a test class run, an error raised that opens a debugger, two steps, and a fix that restarts the frame. Each step waits for what the tools show (polled by timer events, never a wait in the UI) and is timed; at the end a transcript line 'devsession: done <json>' carries the steps and the client's request round trips by kind. startTyping: opens a method in a browser and asks the shell to type into it ('devsession: type <handle>'). Module 9d: startRemote:package:project: runs the session against another target (the phone, DevSessionTarget in its image) and both forms end with two more steps: a missing method defined from the debugger and the send retried (its file lands in the project), and a dropped link (the shell closes the client's sockets on 'devsession: drop') with a Process stopped in the target, after which the client reconnects, the requests pending at the loss are answered, the stopped Process is still there and its debugger shows its frames again."
+"Module 9c's scripted developer session (docs/modules/developer-ui.md, Measurements), run by the macOS shell's mode=devsession in a development image: the tools open on the image's own socket, the browser is populated (the class tree pushed whole and on demand, a package's selectors in a table pushed whole and on demand), classes and methods are selected, a method compiled, a test class run, an error raised that opens a debugger, two steps, and a fix that restarts the frame. Each step waits for what the tools show (polled by timer events, never a wait in the UI) and is timed; at the end a transcript line 'devsession: done <json>' carries the steps and the client's request round trips by kind. startTyping: opens a method in a browser and asks the shell to type into it ('devsession: type <handle>'). Module 9d: startRemote:package: runs the session against another target (the phone, DevSessionTarget in its image) and both forms end with two more steps: a missing method defined from the debugger and the send retried (its file lands in the project), and a dropped link (the shell closes the client's sockets on 'devsession: drop') with a Process stopped in the target, after which the client reconnects, the requests pending at the loss are answered, the stopped Process is still there and its debugger shows its frames again."
 Class {
 	#name : #DevSessionBench,
 	#superclass : #Object,
@@ -98,32 +98,32 @@ DevSessionBench class >> start: aSocketPath package: aPackage [
 	failure := nil.
 	package := aPackage.
 	targetClass := 'DevSessionBench'.
-	DevTools openLocal: aSocketPath project: nil.
+	DevTools openLocal: aSocketPath.
 	client := DevTools local.
 	^ self run: OrderedCollection new
 ]
 
 { #category : #session }
-DevSessionBench class >> startRemote: aTarget package: aPackage project: aDirectoryOrNil [
-	"Module 9d: the same session against aTarget (a target's name or address: the phone), its changes written into aDirectoryOrNil. DevSessionTarget's failingStep is put back first and its undefinedStep removed, so one target serves several sessions."
+DevSessionBench class >> startRemote: aTarget package: aPackage [
+	"Module 9d: the same session against aTarget (a target's name or address: the phone), its changes written into the project directory the shell holds for it (its project= argument, the project directory of 2026-11-11). DevSessionTarget's failingStep is put back first and its undefinedStep removed, so one target serves several sessions."
 	steps := OrderedCollection new.
 	failure := nil.
 	package := aPackage.
 	targetClass := 'DevSessionTarget'.
-	client := DevTools openTarget: aTarget name: 'remote' project: aDirectoryOrNil.
+	client := DevTools openTarget: aTarget name: 'remote'.
 	client isNil ifTrue: [Transcript show: 'devsession: done {"failure":"no transport"}'; cr; flush. ^ false].
 	^ self run: (OrderedCollection new add: [self reset]; yourself)
 ]
 
 { #category : #session }
-DevSessionBench class >> startApp: aTarget package: aPackage class: aClassName selector: aSelector source: aSource probe: aProbe expect: aString project: aDirectoryOrNil [
-	"Module 11a: the tools against a running app (a generated app's development build, by its Bonjour name or address): open the browser on the app's class, show the class side's aSelector, accept aSource for it, and evaluate aProbe in a workspace until it answers aString: the change is live in the running app. Its file is written into aDirectoryOrNil."
+DevSessionBench class >> startApp: aTarget package: aPackage class: aClassName selector: aSelector source: aSource probe: aProbe expect: aString [
+	"Module 11a: the tools against a running app (a generated app's development build, by its Bonjour name or address): open the browser on the app's class, show the class side's aSelector, accept aSource for it, and evaluate aProbe in a workspace until it answers aString: the change is live in the running app. Its file is written into the project directory the shell holds for aTarget."
 	| w |
 	steps := OrderedCollection new.
 	failure := nil.
 	package := aPackage.
 	targetClass := aClassName.
-	client := DevTools openTarget: aTarget name: 'app' project: aDirectoryOrNil.
+	client := DevTools openTarget: aTarget name: 'app'.
 	client isNil ifTrue: [Transcript show: 'devsession: done {"failure":"no transport"}'; cr; flush. ^ false].
 	browser := (DevTools windowsOf: BrowserWindow) first model.
 	w := WorkspaceModel new client: client; yourself.
@@ -421,7 +421,7 @@ DevSessionBench class >> startInstances: aSocketPath [
 	"The discoverability follow-up's measurement: the tools on this image, the bar's instance checks, then a Workspace evaluating String allInstances: 100000 ten times by its Do it, each a step whose frames the shell counts. The doit answers the Array's size: an Array's printString is the whole Array printed (the protocol cuts it at 4000 bytes after), and every element's printString is a new String the next walk finds, so printing it doubled the work at every evaluation."
 	steps := OrderedCollection new.
 	failure := nil.
-	DevTools openLocal: aSocketPath project: nil.
+	DevTools openLocal: aSocketPath.
 	client := DevTools local.
 	browser := (DevTools windowsOf: BrowserWindow) first model.
 	queue := OrderedCollection new.
@@ -468,7 +468,7 @@ DevSessionBench class >> startPointers: aSocketPath [
 	"The pointersTo: follow-up's measurement: the tools on this image, the bar's pointer checks, a Workspace evaluating (DevTools windows first pointersTo: 100000) size ten times (a window is held by a few objects) and then, in the same window so that no window opens in the step, nil pointerCount once (the walk's worst case), each evaluation by its Do it, each a step whose frames the shell counts."
 	steps := OrderedCollection new.
 	failure := nil.
-	DevTools openLocal: aSocketPath project: nil.
+	DevTools openLocal: aSocketPath.
 	client := DevTools local.
 	browser := (DevTools windowsOf: BrowserWindow) first model.
 	queue := OrderedCollection new.
@@ -490,7 +490,7 @@ DevSessionBench class >> startTyping: aSocketPath [
 	"Open a method in a browser, put the insertion point at its end and ask the shell to type into it."
 	steps := OrderedCollection new.
 	failure := nil.
-	DevTools openLocal: aSocketPath project: nil.
+	DevTools openLocal: aSocketPath.
 	client := DevTools local.
 	browser := (DevTools windowsOf: BrowserWindow) first model.
 	self when: [client isOpen] then: [

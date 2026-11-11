@@ -107,8 +107,9 @@ ToolsProbe class >> note: anObject [
 ]
 
 { #category : #probing }
-ToolsProbe class >> open: aSocketPath project: aDirectory [
-	^ (DevTools openLocal: aSocketPath project: aDirectory) notNil
+ToolsProbe class >> open: aSocketPath [
+	"The tools on the local target; the test sets its project directory in the host first (the image names none)."
+	^ (DevTools openLocal: aSocketPath) notNil
 ]
 
 { #category : #probing }
@@ -155,7 +156,7 @@ ToolsProbe class >> compiledThroughTheBrowser [
 { #category : #remote }
 ToolsProbe class >> openRemote: anAddress [
 	"Module 9d: the tools on another target, by its address (the host holds its token)."
-	^ (DevTools openTarget: anAddress name: 'remote' project: nil) notNil
+	^ (DevTools openTarget: anAddress name: 'remote') notNil
 ]
 
 { #category : #remote }

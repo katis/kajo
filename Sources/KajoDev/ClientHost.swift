@@ -11,10 +11,18 @@ import KajoVM
 //   targets                         the known targets, one "name<TAB>path<TAB>token?" line each
 //                                   (token? is 1 when the host holds one; the token itself never
 //                                   enters the image)
-//   connect  target client package project
-//                                   a new connection (its handle at once); the connect and the
+//   connect  target client package  a new connection (its handle at once); the connect and the
 //                                   session.open (with the token the host holds for the target)
-//                                   happen on a thread of its own
+//                                   happen on a thread of its own; the connection writes the
+//                                   files of its replies into the project directory the host
+//                                   holds for the target, or none (the project directory, 2026-11-11:
+//                                   the image never names a directory, and a fourth argument is
+//                                   refused)
+//   project  target                 the project directory the host holds for the target, or nil
+//   chooseProject target            the host asks the developer for the target's project directory
+//                                   in a panel of its own (`setDirectoryPrompt`; nil without one)
+//                                   and keeps it; answers whether it holds one now, and posts a
+//                                   `targets` event once the developer chose one
 //   pairing  target                 (module 9d) the host asks the developer for the target's token
 //                                   in a secure field of its own and keeps it; answers whether it
 //                                   holds one now, and posts a `targets` event once answered
@@ -29,9 +37,11 @@ import KajoVM
 // never a trap. A line arrives as one String up to 16 MiB - 1 bytes
 // (large bytes, part 3: measured cheaper for the image than 9c's pieces of
 // 16 KiB, which module 10 had kept); a longer one in pieces of that size
-// (`linePart` events, then the `line` with the last). When the connection was opened with a project directory,
-// the `files` of every reply are written there (9b's `ProjectWriter`: file
-// names only). The end of a connection is a `lost` event.
+// (`linePart` events, then the `line` with the last). When the host held a
+// project directory for the target at connect time (`setProject`: host code
+// only, never a String of the image's), the `files` of every reply are
+// written there (9b's `ProjectWriter`: file names only). The end of a
+// connection is a `lost` event.
 //
 // Module 9d (docs/modules/phone-transport.md): a target is a name or an
 // address (a socket path, `tcp://host:port`, `bonjour:<name>`), resolved
@@ -71,6 +81,12 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     private var closedAll = false  // under lock
     private var typedTokens: [String: String] = [:]  // under lock: address -> a token typed into the host's secure field
     private var prompt: (@Sendable (String, @escaping @Sendable (String?) -> Void) -> Void)?  // under lock
+    /// The project directory: each target's directory, by its address as
+    /// `resolve` makes it (`TargetAddress.description`), set by host code
+    /// only (`setProject`, `chooseProject`'s panel, `useProjectMemory`).
+    private var projects: [String: String] = [:]  // under lock
+    private var directoryPrompt: (@Sendable (String, String?, @escaping @Sendable (String?) -> String?) -> Void)?  // under lock
+    private var memory: ProjectMemory?  // under lock
 
     /// Module 9d: how the host asks for a target's token (the shell's
     /// secure text field; a test's fake): the prompt's text and where the
@@ -228,6 +244,107 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         return (a, token(a.description))
     }
 
+    /// The project directory (2026-11-11, docs/modules/project-directory.md):
+    /// the key a target's directory is held under, the address `connect`
+    /// resolves the name to, so a name, its address and the local socket's
+    /// path name one entry. nil when the target does not resolve.
+    func projectKey(_ named: String) -> String? { resolve(named)?.address.description }
+
+    /// Host code only: `target`'s project directory from now on (a
+    /// connection takes it when it connects). Refused, with why, unless
+    /// `directory` is an absolute path of an existing directory (a link to
+    /// one is followed) with no control character, and unless the target
+    /// resolves. Answers the directory held.
+    @discardableResult
+    public func setProject(_ directory: String, for target: String) -> Result<String, ProjectRefusal> {
+        guard let key = projectKey(target) else { return .failure(ProjectRefusal("no target \(target)")) }
+        return setProject(directory, key: key)
+    }
+
+    func setProject(_ directory: String, key: String) -> Result<String, ProjectRefusal> {
+        switch ClientHost.checkProjectDirectory(directory) {
+        case .failure(let why): return .failure(why)
+        case .success(let dir):
+            lock.lock()
+            projects[key] = dir
+            lock.unlock()
+            return .success(dir)
+        }
+    }
+
+    /// The project directory the host holds for `target`, or nil.
+    public func project(for target: String) -> String? {
+        guard let key = projectKey(target) else { return nil }
+        return project(key: key)
+    }
+
+    func project(key: String) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return projects[key]
+    }
+
+    /// Whether `path` may be a project directory: absolute, no control
+    /// character, at most 1024 bytes, no `.` or `..` component, an
+    /// existing directory (a link to one followed). Answers it without a
+    /// trailing slash.
+    public static func checkProjectDirectory(_ path: String) -> Result<String, ProjectRefusal> {
+        guard path.hasPrefix("/") else { return .failure(ProjectRefusal("not an absolute path: \(path)")) }
+        guard path.utf8.count <= 1024, !path.unicodeScalars.contains(where: { $0.value < 32 || $0.value == 127 }) else {
+            return .failure(ProjectRefusal("a path with a control character or longer than 1024 bytes"))
+        }
+        let parts = path.split(separator: "/")
+        guard !parts.contains(where: { $0 == "." || $0 == ".." }) else { return .failure(ProjectRefusal("a path with . or ..: \(path)")) }
+        let dir = "/" + parts.joined(separator: "/")
+        // A link is followed to what it names (resource values alone do not).
+        let isDir = (try? URL(fileURLWithPath: dir).resolvingSymlinksInPath().resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory
+        guard let isDir else { return .failure(ProjectRefusal("no such directory: \(dir)")) }
+        guard isDir else { return .failure(ProjectRefusal("not a directory: \(dir)")) }
+        return .success(dir)
+    }
+
+    /// How the host asks the developer for a target's project directory
+    /// (the shell's panel; a test's fake): the prompt's text, the directory
+    /// held now, and where the choice goes (nil: cancelled), which answers
+    /// nil when the directory was taken, or what the panel shows (why it
+    /// was refused; that it was taken but not remembered). Never the
+    /// image's. A host without one answers `chooseProject` nil.
+    public func setDirectoryPrompt(_ p: @escaping @Sendable (String, String?, @escaping @Sendable (String?) -> String?) -> Void) {
+        lock.lock()
+        directoryPrompt = p
+        lock.unlock()
+    }
+
+    /// The product mode: the directories remembered per target name, set
+    /// now (a remembered directory that no longer exists is dropped from
+    /// the file, never created), and every later choice remembered. A name
+    /// that does not resolve yet is held under its Bonjour address (a phone
+    /// the browser has not seen yet), the only form a later name can take.
+    /// Answers a line per entry, for the console.
+    @discardableResult
+    public func useProjectMemory(_ m: ProjectMemory) -> [String] {
+        var notes: [String] = []
+        var vanished: [String] = []
+        for e in m.load() {
+            let key = projectKey(e.name) ?? (TargetAddress.isServiceName(e.name) ? TargetAddress.bonjour(e.name).description : nil)
+            guard let key else {
+                notes.append("project=remembered_unresolved target=\(e.name)")
+                continue
+            }
+            switch setProject(e.directory, key: key) {
+            case .success(let d): notes.append("project=remembered target=\(e.name) dir=\(d)")
+            case .failure(let why):
+                vanished.append(e.name)
+                notes.append("project=dropped target=\(e.name) why=\(why.description.replacingOccurrences(of: " ", with: "_"))")
+            }
+        }
+        if !vanished.isEmpty { m.forget(vanished) }
+        lock.lock()
+        memory = m
+        lock.unlock()
+        return notes
+    }
+
     /// The callback for `ShellCallbacks.client`.
     public var callback: @Sendable (ViewCall) -> ShellValue? { { [self] call in handle(call) } }
 
@@ -235,6 +352,7 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         let a = call.arguments
         switch call.op {
         case "targets":
+            guard a.isEmpty else { return nil }
             // Names and addresses are checked where they enter (no tab, no
             // line break): the image splits these lines on tabs.
             let all = listedTargets
@@ -244,9 +362,11 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
             let lines = all.map { "\($0.name)\t\($0.path)\t\($0.token == nil && typed[$0.path] == nil ? 0 : 1)" }
             return .string(lines.joined(separator: "\n"))
         case "connect":
-            guard a.count == 4, let named = a[0].string, let client = a[1].string,
+            // Three arguments: the image names no directory (the project
+            // directory, 2026-11-11); a fourth is refused, never ignored.
+            guard a.count == 3, let named = a[0].string, let client = a[1].string, a[2] == .nil || a[2].string != nil,
                   let (address, token) = resolve(named) else { return nil }
-            let package = a[2].string, project = a[3].string
+            let package = a[2].string
             lock.lock()
             if closedAll {
                 lock.unlock()
@@ -254,7 +374,9 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
             }
             let id = next
             next += 1
-            let c = ClientConnection(id: id, address: address, project: project)
+            // The directory is the host's, taken now: a later setProject
+            // changes the next connection, never this one.
+            let c = ClientConnection(id: id, address: address, project: projects[address.description])
             connections[id] = c
             lock.unlock()
             let t = Thread { [self] in run(c, client: client, package: package, token: token) }
@@ -276,10 +398,35 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
                 self.post(ShellEvent(kind: .targets, value: .string(named), timeNs: ShellVM.now()))
             }
             return .bool(held != nil)
+        case "project":
+            guard a.count == 1, let named = a[0].string, let dir = project(for: named) else { return nil }
+            return .string(dir)
+        case "chooseProject":
+            guard a.count == 1, let named = a[0].string, let key = projectKey(named) else { return nil }
+            lock.lock()
+            let p = directoryPrompt
+            lock.unlock()
+            guard let p else { return nil }
+            p("Choose the project directory of \(named): the tools write the files of its accepted changes there.", project(key: key)) { [weak self] chosen in
+                guard let self, let chosen else { return nil }
+                switch self.setProject(chosen, key: key) {
+                case .failure(let why):
+                    return why.description
+                case .success(let dir):
+                    self.lock.lock()
+                    let m = self.memory
+                    self.lock.unlock()
+                    let kept = m?.remember(named, dir) ?? true
+                    self.post(ShellEvent(kind: .targets, value: .string(named), timeNs: ShellVM.now()))
+                    return kept ? nil : "\(dir) is \(named)'s project directory now, but it could not be remembered in \(m?.path ?? "")"
+                }
+            }
+            return .bool(project(key: key) != nil)
         case "send":
             guard a.count == 1, let line = a[0].string, !line.utf8.contains(10), let c = connection(call.handle) else { return nil }
             return .bool(c.send(Array(line.utf8)))
         case "close":
+            guard a.isEmpty else { return nil }
             guard let c = connection(call.handle) else { return .bool(false) }
             c.close()
             return .bool(true)

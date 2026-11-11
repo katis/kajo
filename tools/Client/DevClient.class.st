@@ -1,4 +1,4 @@
-"The development protocol's client in Smalltalk (module 9c, docs/modules/developer-ui.md): one connection to a target through the shell's transport (ClientTransport, primitive 164). Requests are messages, one per request of protocol.describe (the requests category; DevClient class>>requests maps each kind to its method and DevClientTest checks the map against DevProtocol describe), each taking the request's arguments and a block that gets the result; errors go to the error block given or to the client's error action. Replies come back as #line events on the UI's event loop, matched by id; the other lines are events (transcript, test.*, run.*, process.stopped, process.resumed) dispatched to whichever window registered for their kind (on:do:). A request that gets no reply within its timeout fails with an error (a timer event, never a wait in the UI). Module 9d: a connection that ends while its session was open (a dropped link: the phone left the network, the socket died) is the event 'connection.lost', and the client reconnects (timer events with backoff: 1, 2, 4, 8 s, up to a minute, until close): 'connection.reconnecting', then a new session as the same client in the same package and 'connection.open'; the requests pending at the loss are sent again, but for those that may not be (DevClient class>>notRetried: running them twice is not running them once), which fail as before. A refused session or close ends it for good. Each reply's round trip is kept for the measurements, a retried one's from its first send."
+"The development protocol's client in Smalltalk (module 9c, docs/modules/developer-ui.md): one connection to a target through the shell's transport (ClientTransport, primitive 164). Requests are messages, one per request of protocol.describe (the requests category; DevClient class>>requests maps each kind to its method and DevClientTest checks the map against DevProtocol describe), each taking the request's arguments and a block that gets the result; errors go to the error block given or to the client's error action. Replies come back as #line events on the UI's event loop, matched by id; the other lines are events (transcript, test.*, run.*, process.stopped, process.resumed) dispatched to whichever window registered for their kind (on:do:). A request that gets no reply within its timeout fails with an error (a timer event, never a wait in the UI). Module 9d: a connection that ends while its session was open (a dropped link: the phone left the network, the socket died) is the event 'connection.lost', and the client reconnects (timer events with backoff: 1, 2, 4, 8 s, up to a minute, until close): 'connection.reconnecting', then a new session as the same client in the same package and 'connection.open'; the requests pending at the loss are sent again, but for those that may not be (DevClient class>>notRetried: running them twice is not running them once), which fail as before. A refused session or close ends it for good. Each reply's round trip is kept for the measurements, a retried one's from its first send. The project directory (2026-11-11, docs/modules/project-directory.md): the client keeps no directory and names none; the host writes the files of its replies into the directory it holds for the target, and project asks the host which one that is."
 Class {
 	#name : #DevClient,
 	#superclass : #Object,
@@ -18,7 +18,6 @@ Class {
 		'parts',
 		'clientName',
 		'package',
-		'project',
 		'closing',
 		'reconnects',
 		'backoffMs',
@@ -95,6 +94,12 @@ DevClient >> pendingCount [
 ]
 
 { #category : #accessing }
+DevClient >> project [
+	"The project directory the host holds for this client's target (where the files of its accepted changes are written), or nil: asked of the host, never kept here."
+	^ ClientTransport projectOf: path
+]
+
+{ #category : #accessing }
 DevClient >> reconnects [
 	"How many times a new session was asked for after a dropped link."
 	^ reconnects
@@ -159,11 +164,10 @@ DevClient >> initialize [
 ]
 
 { #category : #initialization }
-DevClient >> setClient: aClient package: aPackageOrNil project: aDirectoryOrNil [
+DevClient >> setClient: aClient package: aPackageOrNil [
 	"Who the session is, what it opens again after a dropped link."
 	clientName := aClient.
-	package := aPackageOrNil.
-	project := aDirectoryOrNil
+	package := aPackageOrNil
 ]
 
 { #category : #initialization }
@@ -479,6 +483,12 @@ DevClient >> close [
 ]
 
 { #category : #sending }
+DevClient >> connectArguments [
+	"What a connection to this client's target names (primitive 164's connect, three arguments): the target, the client, the package; never a directory, which is the host's."
+	^ {path. clientName. package}
+]
+
+{ #category : #sending }
 DevClient >> lineFor: aKind id: anId args: aJsonObject [
 	| o |
 	o := JsonObject new.
@@ -489,7 +499,9 @@ DevClient >> lineFor: aKind id: anId args: aJsonObject [
 { #category : #sending }
 DevClient >> openConnection [
 	"A new connection to the same target (tests give their own): its handle, or nil."
-	^ ClientTransport connect: path client: clientName package: package project: project
+	| a |
+	a := self connectArguments.
+	^ ClientTransport connect: a first client: (a at: 2) package: (a at: 3)
 ]
 
 { #category : #sending }
@@ -530,14 +542,14 @@ DevClient class >> at: aConnection [
 ]
 
 { #category : #connections }
-DevClient class >> connect: aPath name: aName client: aClient package: aPackageOrNil project: aDirectoryOrNil [
-	"A client of the target at aPath (its socket, address or name), opening its session as aClient with the token the host holds (the image never holds one); changes go to aPackageOrNil and their files into aDirectoryOrNil. The client is #connecting until its session is open (the event connection.open). nil when the image has no transport host."
+DevClient class >> connect: aPath name: aName client: aClient package: aPackageOrNil [
+	"A client of the target at aPath (its socket, address or name), opening its session as aClient with the token the host holds (the image never holds one); changes go to aPackageOrNil and their files into the project directory the host holds for the target (the image names none). The client is #connecting until its session is open (the event connection.open). nil when the image has no transport host."
 	| h c |
 	self install.
-	h := ClientTransport connect: aPath client: aClient package: aPackageOrNil project: aDirectoryOrNil.
+	h := ClientTransport connect: aPath client: aClient package: aPackageOrNil.
 	h isNil ifTrue: [^ nil].
 	c := self new setName: aName path: aPath connection: h.
-	c setClient: aClient package: aPackageOrNil project: aDirectoryOrNil.
+	c setClient: aClient package: aPackageOrNil.
 	connections at: h put: c.
 	^ c
 ]

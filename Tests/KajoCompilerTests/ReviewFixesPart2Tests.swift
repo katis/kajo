@@ -360,7 +360,9 @@ final class HoldingTarget: @unchecked Sendable {
     let reply = #"{"v":1,"kind":"reply","id":"x","ok":true,"result":{"files":[{"path":"../Outside.class.st","text":"x"}]}}"#
     let listener = try FakeTarget(path: path, lines: [reply])
     defer { listener.stop() }
-    let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path), .string("developer"), .nil, .string(project)]))?.int)
+    // The project directory (2026-11-11): the host's, never the image's.
+    _ = try host.setProject(project, for: "t").get()
+    let conn = try #require(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string(path), .string("developer"), .nil]))?.int)
     let end = ShellVM.now() + 30_000_000_000
     while ShellVM.now() < end && !events.withLock({ $0.contains { $0.kind == .lost } }) { usleep(2000) }
     let lines = events.withLock { $0 }.filter { $0.kind == .line && $0.target == Int(conn) }

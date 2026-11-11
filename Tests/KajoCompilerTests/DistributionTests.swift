@@ -6,7 +6,10 @@
 // under KAJO_SUPPORT_DIR and KAJO_CLI_LINK_DIR.
 
 import Foundation
+import Synchronization
 import Testing
+import KajoDev
+import KajoVM
 @testable import KajoGenerator
 @testable import KajoShellCore
 
@@ -72,6 +75,47 @@ import Testing
         #expect(aside.count == 1)
         #expect(fm.fileExists(atPath: root + "/" + aside[0] + "/half"))
         #expect(!(try fm.contentsOfDirectory(atPath: root)).contains { $0.contains(".partial-") })
+    }
+
+    /// The project directory (docs/modules/project-directory.md, part 2):
+    /// the product mode still writes a tools change into the copied
+    /// checkout's `tools/`, now through the host's setter for the local
+    /// target (no directory passes through the image), and the directories
+    /// the developer chose are read from the support folder at start. A
+    /// fake local target answers a change's file; under KAJO_SUPPORT_DIR.
+    @Test func theProductModeWritesAToolsChangeIntoTheCopiedCheckout() throws {
+        let d = scratchDirectory("product-project")
+        defer { try? fm.removeItem(atPath: d) }
+        let from = d + "/bundle/Kajo-0.3", root = d + "/support"
+        try fakeCheckout(from)
+        let paths = ProductPaths(version: "0.3", bundle: d + "/bundle", environment: ["KAJO_SUPPORT_DIR": root])
+        let install = CheckoutInstaller.install(from: from, to: paths.installedCheckout)
+        let tools = try #require(paths.toolsProject(after: install))
+        #expect(tools == root + "/0.3/tools")
+        #expect(paths.toolsProject(after: .noCheckout) == nil && paths.toolsProject(after: .failed("x")) == nil)
+        #expect(paths.projectMemory.path == root + "/project-directories")
+        // A remembered choice for another target, from an earlier launch.
+        let app = d + "/Sample/src"
+        try fm.createDirectory(atPath: app, withIntermediateDirectories: true)
+        #expect(paths.projectMemory.remember("app", app))
+        let host = ClientHost()
+        let lost = Mutex(false)
+        host.setSink { e in if e.kind == .lost { lost.withLock { $0 = true } } }
+        let socket = socketNames.next()
+        host.addTarget(ClientHost.Target(name: "local", path: socket, token: "t"))
+        host.addTarget(ClientHost.Target(name: "app", path: "tcp://127.0.0.1:9", token: nil))
+        let lines = setHostProjects(host, target: "local", directory: tools, memory: paths.projectMemory)
+        #expect(lines.contains("project target=local dir=\(tools)"), "\(lines)")
+        #expect(host.project(for: "local") == tools)
+        #expect(host.project(for: "app") == app)
+        let reply = #"{"v":1,"kind":"reply","id":"x","ok":true,"result":{"files":[{"path":"Models/Edited.class.st","text":"edited"}]}}"#
+        let listener = try FakeTarget(path: socket, lines: [reply])
+        defer { listener.stop() }
+        #expect(host.callback(ViewCall(op: "connect", handle: 0, arguments: [.string("local"), .string("developer"), .string("Tools")])) != nil)
+        let end = ShellVM.now() + 60_000_000_000
+        while ShellVM.now() < end && !lost.withLock({ $0 }) { usleep(2000) }
+        #expect((try? String(contentsOfFile: tools + "/Models/Edited.class.st", encoding: .utf8)) == "edited")
+        host.closeAll()
     }
 
     @Test func theCommandLineToolIsLinkedOnlyWhereItMayBe() throws {

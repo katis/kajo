@@ -1,4 +1,4 @@
-"The protocol client in Smalltalk (module 9c): every request of protocol.describe has its message, replies are matched by id and their round trips kept, errors reach the error block or the error action, events reach the listeners of their kind, a malformed line is a client.error event, and the connection's end fails what is pending. Module 9d: a dropped link reconnects with a growing wait and sends again what may be sent again; a refused session and close end it for good."
+"The protocol client in Smalltalk (module 9c): every request of protocol.describe has its message, replies are matched by id and their round trips kept, errors reach the error block or the error action, events reach the listeners of their kind, a malformed line is a client.error event, and the connection's end fails what is pending. Module 9d: a dropped link reconnects with a growing wait and sends again what may be sent again; a refused session and close end it for good. The project directory: a connection names no directory."
 Class {
 	#name : #DevClientTest,
 	#superclass : #TestCase
@@ -72,6 +72,23 @@ DevClientTest >> testALineIsReadAndAMalformedOneIsAnEvent [
 	c receiveLine: '[1,2]'.
 	self assert: seen equals: 12.
 	self assert: errors size equals: 2
+]
+
+{ #category : #tests }
+DevClientTest >> testAReconnectNamesTheTargetClientAndPackageButNoDirectory [
+	"The project directory (2026-11-11): a connection, the first and every reconnect's, names the target, the client and the package, three arguments of primitive 164's connect, and never a directory (the host holds each target's); no DevClient, DevTools or ClientTransport method takes one."
+	| c |
+	c := FakeDevClient on: [:k :a | nil].
+	c setName: 'phone' path: 'bonjour:phone' connection: 1.
+	c setClient: 'developer' package: 'Sample'.
+	self assert: c connectArguments equals: {'bonjour:phone'. 'developer'. 'Sample'}.
+	self assert: (ClientTransport class includesSelector: #connect:client:package:).
+	self deny: (ClientTransport class includesSelector: #connect:client:package:project:).
+	self deny: (DevClient includesSelector: #setClient:package:project:).
+	self deny: (DevClient class includesSelector: #connect:name:client:package:project:).
+	self deny: (DevTools class includesSelector: #openLocal:project:).
+	self deny: (DevTools class includesSelector: #openTarget:name:project:).
+	self deny: (DevTools class includesSelector: #connect:name:project:)
 ]
 
 { #category : #tests }
