@@ -48,6 +48,9 @@ gl_spec() {
     ios-check)       spec_cmd="just ios-check"; spec_check=clean ;;
     arc-check)       spec_cmd="just arc-check" ;;
     golden)          spec_cmd="just golden" ;;
+    native-golden)   spec_cmd="just native-golden" ;;
+    native-kernel-test) spec_cmd="just native-kernel-test" ;;
+    native-cc)       spec_cmd="just native-cc" ;;
     test-release)    spec_cmd="just test-release" ;;
     model-check)     spec_cmd="just model-check" ;;
     soak)            spec_cmd="just soak" ;;

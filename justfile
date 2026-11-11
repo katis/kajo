@@ -46,6 +46,18 @@ arc-check:
 fuzz TARGET SECONDS="60":
     scripts/fuzz.sh {{TARGET}} {{SECONDS}}
 
+# AOT 1: the golden kernels under the native engine (checksums, send counts equal to the interpreter's)
+native-golden:
+    scripts/native-check.sh golden
+
+# AOT 1: the kernel and tools tests with their images bound (every method, none declined)
+native-kernel-test:
+    scripts/native-check.sh kernel-test
+
+# AOT 1: the kernel image's generated C at -O2 for macOS and iOS arm64, 0 warnings under -Wall -Wextra
+native-cc:
+    scripts/native-check.sh cc
+
 # The fixture kernels through `kajo run` against their published single-worker checksums
 golden:
     scripts/golden.sh

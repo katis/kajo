@@ -127,7 +127,7 @@ case $tier in
     for z in $fuzzers; do gates+=(fuzz-$z); done
     (( models )) && gates+=(model-check) ;;
   core)
-    gates=(clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden test-release model-check soak
+    gates=(clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak
            fuzz-kasm fuzz-snapshot fuzz-syntax fuzz-protocol apps kernel-test new-check ab matrix-mac matrix-iphone) ;;
 esac
 [[ $tier == swift ]] && print "fuzzers: ${fuzzers:-none}"
