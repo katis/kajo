@@ -501,7 +501,16 @@ the fuzzer "libFuzzer build: ok" and 360 541 runs):
   the devsession's.
 - The local scripted session missed 58 frames of 273 (window opening and
   the session's steps), and the remote one 57 and 44; nothing in this
-  module touches the frame path, and no baseline at classes=0 was run.
+  module touches the frame path. The main session ran the baseline at
+  the hand-back: the Mac shell built at 64db65e (in a worktree) and at
+  4a73211, `mode=devsession classes=0 project=<tmp>`, five launches a
+  side, interleaved, nothing else running. The starting commit missed
+  44, 48, 46, 43 and 44 frames of 255 to 266 (longest turn 13.7 to
+  15.7 ms); the head 46, 45, 43, 57 and 45 of 261 to 268 (14.3 to
+  16.7 ms); no session failed, and both sides wrote the session's two
+  extension files into their project directory. The misses sit in the
+  window-opening steps on both sides, so the 58 is the starting
+  commit's own range with one high launch, not this module's.
 
 ### Not done
 
@@ -520,3 +529,6 @@ the fuzzer "libFuzzer build: ok" and 360 541 runs):
 2. Remembering: per target name across launches in the product mode, as
    recommended; the scripted modes remember nothing.
 3. A four-argument `connect`: refused (nil), as recommended.
+
+Answered by the owner on 2026-11-11: yes, yes and refused, all three as
+recommended and as built.

@@ -1575,5 +1575,5 @@ runs) and again on 06e74a6 (45 163 runs, no disagreement).
 4. New: should the reaper answer a VMError-ended request with the
    VMError's kind (a primitive that reads the host's error record by
    Process id)? Recommended: not now; the host's log has it and the reply
-   already ends the wait.
+   already ends the wait. Answered by the owner on 2026-11-11: not now.
 
