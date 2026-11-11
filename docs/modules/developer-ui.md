@@ -94,6 +94,8 @@ sockets. `KajoDev.ClientHost` implements it in the macOS shell
 | `close` | (handle) | |
 | `timer` | ms, token | a `timer` event with that target after ms |
 
+Since the project directory (2026-11-11, docs/modules/project-directory.md): `connect` takes target, client, package (three arguments; a fourth is refused), the host holds each target's project directory, and the ops `project` and `chooseProject` answer it and ask the developer for it.
+
 What a connection receives is trusted for nothing: every line goes
 through 9b's bounded JSON reader (`ClientHost.check`: 64 MiB, depth 64, a
 million elements) and the image gets the canonical text of the object it
@@ -713,6 +715,7 @@ collections are Smalltalk.
   tree may want the on-demand form or a request per package.
 - **Files**: the phone's replies carry `files`; the Mac's client transport
   writes them into the project directory given at connect, unchanged.
+  (Since 2026-11-11 the directory is the host's for the target, never given at connect: docs/modules/project-directory.md.)
 - **Nothing of the developer UI runs on the phone**: the iOS shell needs
   only 9a's wrappers for the app; the second round's AppKit kinds stay on
   the Mac.

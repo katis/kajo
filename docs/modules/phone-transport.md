@@ -222,6 +222,7 @@ implementation behind both.
   `connect` has no token argument any more: target, client, package,
   project). Resolution, connect and `session.open` run on
   the connection's own thread as in 9c; the image waits by callback.
+  (Since the project directory, 2026-11-11: three arguments, target, client, package; the host holds each target's project directory, and `project` and `chooseProject` are ops of their own: docs/modules/project-directory.md.)
 - **Pairing (`pairing`, the owner's decision of 2026-11-05: no token
   passes through the image, not even a typed one).** The target picker's
   Pair button sends `ClientTransport pair: <target>`; the host asks for

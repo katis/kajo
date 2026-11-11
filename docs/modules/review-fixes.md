@@ -837,6 +837,7 @@ wrote none of it); now the save is refused while any record has one
 1. `primitives.F7`: the host decides the client's project directory (the
    tools ask the host by a `project` op), a later follow-up; nothing built.
    Answered by the owner on 2026-11-10, as recommended.
+   Built on 2026-11-11 in docs/modules/project-directory.md.
 2. `primitives.F2`'s limits: 8 unpaired connections, 4 KiB and 5 s before
    the session opens, as named; the phone's pairing flow sends one
    `session.open` line of about 100 bytes within a second, well inside

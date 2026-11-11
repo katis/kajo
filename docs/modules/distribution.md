@@ -194,6 +194,8 @@ Tools menu joins it; after the first frame the checkout copy, then 9c's
 checkout's `tools/` (so the tools write their changes there, the fourth
 question), then one Transcript line saying what the copy did.
 
+Since the project directory (2026-11-11, docs/modules/project-directory.md) the write-back to the copied `tools/` is set in the host's client transport for the local target (`ProductPaths.toolsProject`, through `DevMode`), never passed into the image, and the directories the developer chooses for other targets are remembered in `<support>/project-directories`.
+
 - **The checkout copy** (`CheckoutInstaller`): `Contents/Resources/Kajo-<v>`
   to `<support>/<v>` once per version, into `<v>.partial-<pid>` and renamed,
   with a marker file written last; a folder without the marker is moved
