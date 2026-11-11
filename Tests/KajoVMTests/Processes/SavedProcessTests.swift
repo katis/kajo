@@ -22,7 +22,7 @@ final class Resumed {
     let vm: VM
 
     init(_ bytes: [UInt8], background: Int, heapBlocks: Int = 2048, start: Bool = true, stress: StressFlags = [], verify: Bool = true,
-         configure: (inout VMConfig) -> Void = { _ in }) throws {
+         configure: (inout VMConfig) -> Void = { _ in }, native: Bool = false) throws {
         var vc = VMConfig()
         vc.backgroundWorkers = background
         vc.verifyStops = true
@@ -37,6 +37,8 @@ final class Resumed {
         c.onVerifyFailure = .record
         c.stress = stress
         image = try Image.load(image: bytes, config: c)
+        // AOT 1: resumed under the native engine (cross-engine resumes).
+        if native { vc.native = try NativeTest.module(for: image) }
         vm = VM(image: image, config: vc)
         if start { vm.start() }
     }

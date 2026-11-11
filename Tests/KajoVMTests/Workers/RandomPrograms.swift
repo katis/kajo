@@ -356,7 +356,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     /// allocation, a stop at every poll) would spend their time zeroing.
     var longBytes: Bool { [.oneWorker, .eightWorkers, .cycleEveryScavenge, .localCollection].contains(self) }
 
-    func runtime(_ p: RandomProgram) throws -> Runtime {
+    func runtime(_ p: RandomProgram, native: Bool = false) throws -> Runtime {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
                       .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
                       .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll,
@@ -435,7 +435,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    _ = img.om.allocate(img.context, classIndex: WellKnown.array, slots: 62,
                                                        fill: img.nilObject, extraRoots: [])
                                }
-                           })
+                           }, native: native)
     }
 }
 
@@ -524,8 +524,8 @@ let randomScavenges = ScavengeTally()
 /// Run one program under one configuration: its answer, or nil after
 /// recording why not.
 @discardableResult
-func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
-    let rt = try config.runtime(p)
+func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false) throws -> Int64? {
+    let rt = try config.runtime(p, native: native)
     let root = rt.spawn("root")
     if config == .offloadCollection {
         // The shell's part: main turns until everything has terminated.
@@ -546,6 +546,14 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig) throws -> Int64? {
     }
     let v = rt.vm.result(of: root)
     if let e = rt.vm.error(of: root) { Issue.record("seed \(p.seed) \(config): \(e)") }
+    if native {
+        // AOT 1: the native engine bound every method and ran them.
+        let r = rt.vm.nativeReport
+        #expect(r?.refused == nil && r?.bound == r?.methods && (r?.bound ?? 0) > 0, "seed \(p.seed) \(config): \(String(describing: r))")
+        let n = rt.vm.nativeCounters
+        #expect(n.entries > 0 && n.nativeSends > 0, "seed \(p.seed) \(config): \(n)")
+        randomNative.add(config, n)
+    }
     // Module 10: a verifier's report names its seed (an answer can be right
     // while a verifier saw a missed object).
     if rt.image.om.counters.verifierFailures > 0 {
@@ -659,6 +667,41 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     #expect(failed.isEmpty, "failing seeds: \(failed)")
 }
 
+/// AOT 1: the native engine's counters summed over a configuration's seeds.
+final class NativeTally: @unchecked Sendable {
+    private let lock = NSLock()
+    private var c: [String: NativeCounters] = [:]
+    func add(_ k: RandomConfig, _ x: NativeCounters) { lock.lock(); c[k.rawValue, default: NativeCounters()].add(x); lock.unlock() }
+    func take(_ k: RandomConfig) -> NativeCounters { lock.lock(); defer { c[k.rawValue] = nil; lock.unlock() }; return c[k.rawValue] ?? NativeCounters() }
+}
+let randomNative = NativeTally()
+
+/// AOT 1 (docs/modules/aot.md, Tests): the same programs under the native
+/// engine in every configuration, each image's methods generated, compiled
+/// and bound: every answer is the model's, and the engine ran (sends made
+/// natively, and in the configurations that preempt, stop or step, the
+/// engine switches).
+@Test(arguments: RandomConfig.allCases)
+func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
+    if let only = ProcessInfo.processInfo.environment["KAJO_RANDOM_ONLY"], only != config.rawValue { return }
+    var failed: [UInt64] = []
+    let n = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "") ?? randomSeedCount(config)
+    _ = randomNative.take(config)
+    for s in 0..<UInt64(n) {
+        let p = randomProgram(randomSeedBase &+ s)
+        let v = try runRandom(p, config, native: true)
+        if v != p.expected {
+            failed.append(p.seed)
+            Issue.record("seed \(p.seed) \(config) native: answered \(String(describing: v)), the model \(p.expected)")
+            if failed.count > 3 { break }
+        }
+    }
+    let c = randomNative.take(config)
+    print("random programs \(config) native: \(n) seeds from \(randomSeedBase), failing \(failed), \(c.named.map { "\($0.name)=\($0.value)" }.joined(separator: " "))")
+    #expect(c.nativeSends > 0 && c.nativeReturns > 0)
+    #expect(failed.isEmpty, "failing seeds: \(failed)")
+}
+
 /// The generator is deterministic.
 @Test func randomProgramsAreDeterministic() {
     #expect(randomProgram(42).source == randomProgram(42).source)
@@ -713,13 +756,14 @@ func snapshotPoll(_ p: RandomProgram, _ mode: SnapshotMode) -> Int {
 /// One program in snapshot mode: the saving run's answer, the resumed
 /// run's (nil when the poll came after the program's end, so nothing was
 /// saved).
-func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode) throws -> (saved: Int64?, resumed: Int64?, didSave: Bool) {
+func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode, saveNative: Bool = false,
+                       resumeNative: Bool = false) throws -> (saved: Int64?, resumed: Int64?, didSave: Bool) {
     let n = snapshotPoll(p, mode)
     let rt = try Runtime(p.source + longBytesSource(long: false) + snapshotSrc, background: mode.workers.save, heapBlocks: 256, stress: mode.stress,
                          verify: mode.verify, configure: { c in
                              mode.configure(&c, p.seed)
                              c.snapshotAtPoll = n
-                         })
+                         }, native: saveNative)
     let root = rt.spawn("root")
     guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
         Issue.record("seed \(p.seed) \(mode): the saving run did not finish")
@@ -736,7 +780,7 @@ func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode) throws -> (save
     let saved = a.isSmallInteger ? a.smallIntegerValue : nil
     guard let bytes = images.first else { return (saved, nil, false) }
     let r = try Resumed(bytes, background: mode.workers.resume, heapBlocks: 256, stress: mode.stress,
-                        verify: mode.verify, configure: { c in mode.configure(&c, p.seed &+ 1) })
+                        verify: mode.verify, configure: { c in mode.configure(&c, p.seed &+ 1) }, native: resumeNative)
     guard r.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
         Issue.record("seed \(p.seed) \(mode): the resumed run did not finish")
         r.vm.terminateAll()
@@ -775,6 +819,29 @@ func randomProgramsResumeFromASnapshot(_ mode: SnapshotMode) throws {
         }
     }
     print("random programs resumed \(mode): \(count) seeds from \(randomSeedBase), \(saves) saved, failing \(failed), \(Double(now() - t0) / 1e9) s")
+    #expect(saves * 2 > count, "only \(saves) of \(count) seeds saved")
+    #expect(failed.isEmpty, "failing seeds: \(failed)")
+}
+
+/// AOT 1: saved mid-run under one engine and resumed under the other, both
+/// ways (the saved stacks carry no native marker; the loader's rules hold).
+@Test(arguments: SnapshotMode.allCases, [true, false])
+func randomProgramsResumeAcrossEngines(_ mode: SnapshotMode, _ savedNatively: Bool) throws {
+    let count = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "")
+        ?? (underThreadSanitizer ? ([.stopEveryPoll, .collectEveryAllocation].contains(mode) ? 2 : 6) : 40)
+    var failed: [UInt64] = []
+    var saves = 0
+    for s in 0..<UInt64(count) {
+        let p = randomProgram(randomSeedBase &+ s)
+        let (a, b, didSave) = try runRandomSnapshot(p, mode, saveNative: savedNatively, resumeNative: !savedNatively)
+        if didSave { saves += 1 }
+        if a != p.expected || (didSave && b != p.expected) {
+            failed.append(p.seed)
+            Issue.record("seed \(p.seed) \(mode) saved \(savedNatively ? "natively" : "interpreted"): saved run \(String(describing: a)), resumed \(String(describing: b)), the model \(p.expected)")
+            if failed.count > 3 { break }
+        }
+    }
+    print("random programs resumed across engines \(mode) saved \(savedNatively ? "natively" : "interpreted"): \(count) seeds, \(saves) saved, failing \(failed)")
     #expect(saves * 2 > count, "only \(saves) of \(count) seeds saved")
     #expect(failed.isEmpty, "failing seeds: \(failed)")
 }

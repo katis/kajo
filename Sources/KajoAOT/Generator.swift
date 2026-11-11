@@ -29,7 +29,11 @@ import KajoVM
 // trampoline the driver calls.
 
 package struct AOTOutput: Sendable {
+    /// The whole module as one C file (the tests compile it).
     package var source: String
+    /// The same as a header, one file per chunk of groups and the tables
+    /// (`kajo aot` writes these; each compiles apart).
+    package var files: [(name: String, text: String)] = []
     package var methods: Int
     package var groups: Int
     /// Methods the generator declined, with the reason (none in the bar).
@@ -45,6 +49,8 @@ package struct AOTOptions: Sendable {
     /// pc; the default, part 1's measurement), or by a marker the native
     /// caller writes in the callee's context word (`--return-marker`).
     package var returnByLookup = true
+    /// Groups per C file.
+    package var groupsPerFile = 150
     package init() {}
 }
 
@@ -73,12 +79,27 @@ package enum AOTGenerator {
             nextResume += p.resumePCs.count
             plans.append(p)
         }
-        out.line("static const KResume kajo_resume[\(max(nextResume, 1))];")
+        out.line("extern KHIDDEN const KResume kajo_resume[];")
         for p in plans { out.declare(p) }
-        for p in plans { out.method(p) }
+        let header = out.text
+        // The methods in files of `perFile` groups each (compiled apart, in
+        // parallel), then the tables and the descriptor.
+        var chunks: [String] = []
+        var k = 0
+        while k < plans.count {
+            out.text = ""
+            for p in plans[k..<min(k + options.groupsPerFile, plans.count)] { out.method(p) }
+            chunks.append(out.text)
+            k += options.groupsPerFile
+        }
+        out.text = ""
         out.tables(plans, resumeCount: nextResume, generated: infos.count - declined.count, declined: declined.count)
-        return AOTOutput(source: out.text, methods: infos.count - declined.count, groups: plans.count, declined: declined,
-                         resumePoints: nextResume)
+        let tables = out.text
+        var files = [("kajo_native.h", "#ifndef KAJO_NATIVE_H\n#define KAJO_NATIVE_H\n" + header + "#endif\n")]
+        for (i, c) in chunks.enumerated() { files.append(("kajo_native_\(i).c", "#include \"kajo_native.h\"\n" + c)) }
+        files.append(("kajo_native_tables.c", "#include \"kajo_native.h\"\n" + tables))
+        return AOTOutput(source: header + chunks.joined() + tables, files: files, methods: infos.count - declined.count,
+                         groups: plans.count, declined: declined, resumePoints: nextResume)
     }
 
     /// The reasons the generator declines a method (open question 3: none
@@ -187,6 +208,8 @@ struct Emitter {
         line("#include <stdint.h>")
         line("typedef uint64_t u64; typedef int64_t i64; typedef uint32_t u32; typedef int32_t i32; typedef int16_t i16;")
         line("#define KPN __attribute__((preserve_none))")
+        line("#define KHIDDEN __attribute__((visibility(\"hidden\")))")
+        line("#define KFN KHIDDEN KPN void")
         line("typedef struct KS KS;")
         line("typedef KPN void KF(KS *, u64 *, u64 *, u64, u64, u64, u64);")
         line("#define KCONT ((KF *)1)")
@@ -235,6 +258,7 @@ struct Emitter {
           KF *(*ret)(KS *, u64, u64 *, u64 *, u64 *, u64);
           KF *(*fail)(KS *, u64, u64 *, u64 *, u64 *, u64, u64);
           KF *(*overflow)(KS *, u64, u64 *, u64 *, u64 *, u64, u64);
+          KF *(*send_slow)(KS *, u64, u64 *, u64 *, u64 *, u64, u64, u64);
         } KVT;
         #define VT(s) AT(s, W_VT, const KVT *)
         typedef struct { KF *fn; u32 pc; u32 depth; } KResume;
@@ -255,16 +279,16 @@ struct Emitter {
 
     mutating func declare(_ p: MethodPlan) {
         let k = p.index
-        if p.hasActivation { line("static KPN void A\(k)(KS *, u64 *, u64 *, u64, u64, u64, u64);") }
-        for h in p.hot { line("static KPN void R\(k)_\(h)(KS *, u64 *, u64 *, u64, u64, u64, u64);") }
-        line("static KPN void C\(k)(KS *, u64 *, u64 *, u64, u64, u64, u64);")
+        if p.hasActivation { line("KFN kn_A\(k)(KS *, u64 *, u64 *, u64, u64, u64, u64);") }
+        for h in p.hot { line("KFN kn_R\(k)_\(h)(KS *, u64 *, u64 *, u64, u64, u64, u64);") }
+        line("KFN kn_C\(k)(KS *, u64 *, u64 *, u64, u64, u64, u64);")
     }
 
     mutating func method(_ p: MethodPlan) {
         line("/* \(p.info.name.replacingOccurrences(of: "*/", with: "* /")) */")
         if p.hasActivation { activation(p) }
-        for h in p.hot { function(p, name: "R\(p.index)_\(h)", entries: [h], hot: true) }
-        function(p, name: "C\(p.index)", entries: p.info.instructions.filter { $0.depth >= 0 }.map(\.offset), hot: false)
+        for h in p.hot { function(p, name: "kn_R\(p.index)_\(h)", entries: [h], hot: true) }
+        function(p, name: "kn_C\(p.index)", entries: p.info.instructions.filter { $0.depth >= 0 }.map(\.offset), hot: false)
     }
 
     /// `A<k>`: the frame (rule 1), the marker, the entry. Parameters: fp the
@@ -273,7 +297,7 @@ struct Emitter {
     /// resume index.
     mutating func activation(_ p: MethodPlan) {
         let m = p.info, k = p.index
-        line("static KPN void A\(k)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
+        line("KFN kn_A\(k)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
         if m.primitive != 0 {
             line("  KF *f_ = VT(s)->invoke(s, c >> 8, fp + \(m.argc), (u64 *)a, hdr, b, \(m.argc)ULL | (c & 255) << 8);")
             line("  if (f_ == KCONT) { const KResume *e_ = &kajo_resume[d]; __attribute__((musttail)) return e_->fn(s, (u64 *)a, hdr, fp[0], e_->pc, 0, 0); }")
@@ -292,7 +316,7 @@ struct Emitter {
         line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
         if options.returnByLookup { line("  (void)d;") }
         line("  h[0] = b; h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = \(options.returnByLookup ? "EMPTY_CONTEXT" : "TAG(MARKER_BASE + d)");")
-        line("  __attribute__((musttail)) return R\(k)_0(s, fp, h, 0, 0, 0, 0);")
+        line("  __attribute__((musttail)) return kn_R\(k)_0(s, fp, h, 0, 0, 0, 0);")
         line("}")
     }
 
@@ -328,7 +352,7 @@ struct Emitter {
         var body = FunctionBody(plan: p, region: pcs)
         body.options = options
         for i in m.instructions where pcs.contains(i.offset) { body.instruction(i) }
-        line("static KPN void \(name)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
+        line("KFN \(name)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
         line("  (void)s; (void)fp; (void)hdr; (void)a; (void)b; (void)c; (void)d;")
         if m.maxStack > 0 {
             line("  u64 " + (0..<m.maxStack).map { "x\($0) __attribute__((unused)) = 0" }.joined(separator: ", ") + ";")
@@ -372,12 +396,12 @@ struct Emitter {
             line("static const i32 RX\(p.index)[\(rx.count)] = {\(rx.map(String.init).joined(separator: ","))};")
             line("static const i16 DP\(p.index)[\(dp.count)] = {\(dp.map(String.init).joined(separator: ","))};")
         }
-        line("static const KResume kajo_resume[\(max(resumeCount, 1))] = {")
+        line("KHIDDEN const KResume kajo_resume[\(max(resumeCount, 1))] = {")
         if resumeCount == 0 { line("  {0, 0, 0}") }
         for p in plans {
             for pc in p.resumePCs {
                 let d = p.info.instructions[p.at[pc]!].depth
-                let fn = p.hot.contains(pc) ? "R\(p.index)_\(pc)" : "C\(p.index)"
+                let fn = p.hot.contains(pc) ? "kn_R\(p.index)_\(pc)" : "kn_C\(p.index)"
                 line("  {\(fn), \(pc), \(d)},")
             }
         }
@@ -385,8 +409,8 @@ struct Emitter {
         line("static const KGroup kajo_groups[\(max(plans.count, 1))] = {")
         if plans.isEmpty { line("  {0, 0, 0, 0, 0, 0, 0}") }
         for p in plans {
-            let act = p.hasActivation ? "A\(p.index)" : "0"
-            line("  {0x\(hex(p.info.hash.0))ULL, 0x\(hex(p.info.hash.1))ULL, \(act), C\(p.index), RX\(p.index), DP\(p.index), \(p.info.codeLength)},")
+            let act = p.hasActivation ? "kn_A\(p.index)" : "0"
+            line("  {0x\(hex(p.info.hash.0))ULL, 0x\(hex(p.info.hash.1))ULL, \(act), kn_C\(p.index), RX\(p.index), DP\(p.index), \(p.info.codeLength)},")
         }
         line("};")
         line("static void kajo_enter(KS *s, KF *fn, u64 *fp, u64 *hdr, u64 v, u64 pc) { fn(s, fp, hdr, v, pc, 0, 0); }")
@@ -453,9 +477,9 @@ struct FunctionBody {
             targets.insert(pc)
             emit("goto L\(pc);")
         } else if plan.hot.contains(pc) {
-            emit("\(flush(d)) __attribute__((musttail)) return R\(plan.index)_\(pc)(s, fp, hdr, \(d > 0 ? "x\(d - 1)" : "0"), \(pc), 0, 0);")
+            emit("\(flush(d)) __attribute__((musttail)) return kn_R\(plan.index)_\(pc)(s, fp, hdr, \(d > 0 ? "x\(d - 1)" : "0"), \(pc), 0, 0);")
         } else {
-            emit("\(flush(d)) __attribute__((musttail)) return C\(plan.index)(s, fp, hdr, 0, \(pc), 0, 0);")
+            emit("\(flush(d)) __attribute__((musttail)) return kn_C\(plan.index)(s, fp, hdr, 0, \(pc), 0, 0);")
         }
     }
 
@@ -573,13 +597,7 @@ struct FunctionBody {
         let argc = i.b, sel = lit(i.a)
         let rcvAt = 5 + d - 1 - argc
         let dAfter = d - argc
-        let hotAfter = plan.hot.contains(next)
         let ri = plan.resumeIndex(next)
-        // Where native code goes on when the VM answered the send in place.
-        let cont = hotAfter ? "R\(plan.index)_\(next)(s, fp, hdr, hdr[\(rcvAt)], \(next), 0, 0)" : "C\(plan.index)(s, fp, hdr, 0, \(next), 0, 0)"
-        func sendGo(_ call: String) -> String {
-            "{ KF *f_ = \(call); if (f_ == KCONT) { __attribute__((musttail)) return \(cont); } if (!f_) return; KOUT(f_); }"
-        }
         emit(flush(d))
         emit("if (UNLIKELY(k_due(s))) { KF *f_ = VT(s)->poll_send(s, \(next), \(sp(d)), fp, hdr, \(i.length)); if (f_ != KCONT) { if (!f_) return; KOUT(f_); } }")
         emit("AT(s, W_SENDS, u64)++;")
@@ -587,9 +605,12 @@ struct FunctionBody {
         emit("  const char *e_ = AT(s, W_CACHE, const char *) + ((((\(sel) >> 4) ^ cls_) & (CACHE_ENTRIES - 1)) * CACHE_STRIDE);")
         emit("  u64 m_;")
         emit("  if (LIKELY(*(const u64 *)(e_ + CACHE_CLS) == cls_ && *(const u64 *)(e_ + CACHE_SEL) == \(sel))) m_ = *(const u64 *)(e_ + CACHE_METHOD);")
-        emit("  else { m_ = VT(s)->lookup(s, cls_, \(sel)); if (UNLIKELY(!m_)) \(sendGo("VT(s)->dnu(s, \(next), \(sp(d)), fp, hdr, \(sel), \(argc | i.length << 8))")) }")
+        emit("  else m_ = VT(s)->lookup(s, cls_, \(sel));")
+        // No method (0: the table's line 0 is empty), an unbound method or
+        // a primitive: the VM's own send from here (doesNotUnderstand:,
+        // invoke).
         emit("  KF *act_ = *(KF *const *)(AT(s, W_NTAB, const char *) + m_);")
-        emit("  if (UNLIKELY(!act_)) \(sendGo("VT(s)->invoke(s, \(next), \(sp(d)), fp, hdr, m_, \(argc | i.length << 8))"))")
+        emit("  if (UNLIKELY(!act_)) { KF *f_ = VT(s)->send_slow(s, \(next), \(sp(d)), fp, hdr, \(sel), \(argc | i.length << 8), m_); if (!f_) return; KOUT(f_); }")
         emit("  AT(s, W_NSENDS, u64)++;")
         emit("  __attribute__((musttail)) return act_(s, rp_, hdr, (u64)fp, m_, \(next << 8 | i.length), \(ri ?? 0)); }")
         _ = dAfter

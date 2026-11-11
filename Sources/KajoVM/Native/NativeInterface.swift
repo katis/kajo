@@ -192,6 +192,30 @@ func nativeInvoke(_ w: UnsafeMutableRawPointer, _ pc: UInt64, _ sp: NP, _ fp: NP
     return unsafe nativeContinue(s, r, h0, pc)
 }
 
+/// A native send that found no line in the lookup cache, or a method with
+/// no native code or a primitive (`method` 0 when nothing understands it): the
+/// VM's own send from the instruction that ended at `pc` (the count and
+/// the poll done): the lookup, `doesNotUnderstand:`, the invoke. Never
+/// answers `nativeCont`: the continuation at `pc` is the resume function
+/// after the send.
+func nativeSendSlow(_ w: UnsafeMutableRawPointer, _ pc: UInt64, _ sp: NP, _ fp: NP, _ hdr: NP, _ sel: UInt64,
+                    _ argcLen: UInt64, _ method: UInt64) -> NativeAnswer {
+    let s = unsafe nState(w)
+    let h0 = unsafe hdr - s.pointee.stackBase
+    let argc = Int(argcLen & 0xFF), length = Int(argcLen >> 8)
+    let code = unsafe nCode(s, hdr) + Int(pc)
+    var m = method
+    if m == 0 {
+        let om = unsafe s.pointee.om
+        m = unsafe lookupMiss(s, classIndexOf(om, (sp - argc).pointee), sel)
+        if m == 0 {
+            return unsafe nativeContinue(s, doesNotUnderstand(s, code, sp, fp, hdr, sel, argc, length), h0, UInt64.max)
+        }
+    }
+    let r = unsafe invoke(s, s.pointee.om, regsAt(s, code, sp, fp, hdr), m, argc, length)
+    return unsafe nativeContinue(s, r, h0, UInt64.max)
+}
+
 /// A special send whose inline fast path did not apply (`pc` after it).
 func nativeSpecial(_ w: UnsafeMutableRawPointer, _ pc: UInt64, _ sp: NP, _ fp: NP, _ hdr: NP, _ special: UInt64) -> NativeAnswer {
     let s = unsafe nState(w)
@@ -288,6 +312,7 @@ func makeNativeInterface() -> UnsafeMutablePointer<UnsafeRawPointer?> {
     typealias Fn5 = @convention(c) (UnsafeMutableRawPointer, UInt64, NP, NP, NP) -> NativeAnswer
     typealias Fn7 = @convention(c) (UnsafeMutableRawPointer, UInt64, NP, NP, NP, UInt64, UInt64) -> NativeAnswer
     typealias Lookup = @convention(c) (UnsafeMutableRawPointer, UInt64, UInt64) -> UInt64
+    typealias Fn8 = @convention(c) (UnsafeMutableRawPointer, UInt64, NP, NP, NP, UInt64, UInt64, UInt64) -> NativeAnswer
     let t = UnsafeMutablePointer<UnsafeRawPointer?>.allocate(capacity: 16)
     unsafe t.initialize(repeating: nil, count: 16)
     unsafe t[0] = unsafeBitCast(nativePollSend as Fn6, to: UnsafeRawPointer.self)
@@ -300,6 +325,7 @@ func makeNativeInterface() -> UnsafeMutablePointer<UnsafeRawPointer?> {
     unsafe t[7] = unsafeBitCast(nativeReturn as Fn6, to: UnsafeRawPointer.self)
     unsafe t[8] = unsafeBitCast(nativeFail as Fn7, to: UnsafeRawPointer.self)
     unsafe t[9] = unsafeBitCast(nativeOverflow as Fn7, to: UnsafeRawPointer.self)
+    unsafe t[10] = unsafeBitCast(nativeSendSlow as Fn8, to: UnsafeRawPointer.self)
     return unsafe t
 }
 

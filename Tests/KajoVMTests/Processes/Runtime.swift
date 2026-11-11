@@ -15,7 +15,7 @@ final class Runtime {
          sliceMs: Double = 5,
          pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true, pinsForGood: Bool = true,
          configure: (inout VMConfig) -> Void = { _ in }, switches: TestSwitches = TestSwitches(),
-         before: (Image) -> Void = { _ in }, after: (Image) -> Void = { _ in }) throws {
+         before: (Image) -> Void = { _ in }, after: (Image) -> Void = { _ in }, native: Bool = false) throws {
         var vc = VMConfig()
         vc.backgroundWorkers = background
         vc.sliceNs = UInt64(sliceMs * 1e6)
@@ -37,6 +37,8 @@ final class Runtime {
         try image.load(["prelude", "lib", "processes", "nursery"].map { (file: "\($0).kasm", text: kernel($0)) }
                        + [(file: "test.kasm", text: src)])
         after(image)
+        // AOT 1: the native engine over this very image (its oops folded).
+        if native { vc.native = try NativeTest.module(for: image) }
         vm = VM(image: image, config: vc)
         if start { vm.start() }
     }

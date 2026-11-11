@@ -65,8 +65,9 @@ project when xcodegen is found. --kajo names a Kajo distribution checkout
 own to Application Support, scripts/dist.sh makes one).
 
 aot (AOT 1): reads an image (or the kasm files `run` would load) and writes
-the native engine's C for every method to <dir>/kajo_native.c; compile it
-with clang into a dylib and pass it to `run --native` (or `test --native`).
+the native engine's C for every method to <dir> (kajo_native.h and the
+kajo_native_*.c files); compile them with clang into a dylib and pass it to
+`run --native` (or `test --native`).
 A method whose bytecodes changed since runs interpreted.
 
 seal: loads an image (every loader check), marks it a release image and
@@ -342,8 +343,11 @@ func runAOT(_ args: [String]) {
     } catch {
         fail("kajo aot: cannot create \(dir)", 1)
     }
-    let path = (dir as NSString).appendingPathComponent("kajo_native.c")
-    guard FileManager.default.createFile(atPath: path, contents: Data(o.source.utf8)) else { fail("kajo aot: cannot write \(path)", 1) }
+    for f in o.files {
+        let path = (dir as NSString).appendingPathComponent(f.name)
+        guard FileManager.default.createFile(atPath: path, contents: Data(f.text.utf8)) else { fail("kajo aot: cannot write \(path)", 1) }
+    }
+    let path = "\(dir): \(o.files.count) files"
     for d in o.declined { FileHandle.standardError.write("declined: \(d.name): \(d.reason)\n".data(using: .utf8)!) }
     print("\(path): methods=\(o.methods) groups=\(o.groups) declined=\(o.declined.count) resumePoints=\(o.resumePoints) bytes=\(o.source.utf8.count) readMs=\(Int(t1.timeIntervalSince(t0) * 1000)) generateMs=\(Int(t2.timeIntervalSince(t1) * 1000))")
 }
