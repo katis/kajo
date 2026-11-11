@@ -323,3 +323,41 @@ final class RecordingHost: @unchecked Sendable {
         #expect(memory.load().isEmpty)
     }
 }
+
+/// From the image: in a development image with the real client transport
+/// (what `mode=dev` wires), the picker's Project… reaches the host's panel
+/// (a fake), the picker then lists the directory the host holds, a browser's
+/// accepted method lands there, and the image's own connect naming a
+/// directory is refused.
+@Suite(.serialized) struct ProjectDirectoryToolsTests {
+    @Test func theToolsChooseThroughTheHostAndTheirChangesLandThere() throws {
+        let t = try LocalTools()
+        defer { t.close() }
+        let project = try temporaryDirectory("project-tools")
+        let elsewhere = try temporaryDirectory("project-tools-elsewhere")
+        defer {
+            try? FileManager.default.removeItem(at: project)
+            try? FileManager.default.removeItem(at: elsewhere)
+        }
+        #expect(try t.probe("projectOf:", [.string("local")]) == .nil)
+        let asked = Mutex<[String]>([])
+        let dir = project.path
+        t.host.setDirectoryPrompt { prompt, _, done in
+            asked.withLock { $0.append(prompt) }
+            _ = done(dir)
+        }
+        let status = try t.probe("chooseProject:", [.string("local")])?.string ?? ""
+        #expect(status.contains("choose its project directory"), "\(status)")
+        #expect(asked.withLock { $0.count } == 1)
+        #expect(try t.probe("projectOf:", [.string("local")]) == .string(dir))
+        #expect(try t.probe("pickerShows:for:", [.string(dir), .string("local")]) == .bool(true))
+        // The image names a directory itself: refused, nothing written there.
+        #expect(try t.probe("connect:naming:", [.string(t.path), .string(elsewhere.path)]) == .bool(true))
+        #expect(try t.probe("open:", [.string(t.path)]) == .bool(true))
+        #expect(t.until("ready"))
+        #expect(try t.probe("compileThroughTheBrowser") == .bool(true))
+        #expect(t.until("compiledThroughTheBrowser"))
+        #expect((try? String(contentsOfFile: dir + "/ToolsProbe.extension.st", encoding: .utf8))?.contains("probeAnswer") == true)
+        #expect(projectListing(elsewhere.path).isEmpty)
+    }
+}

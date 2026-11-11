@@ -276,3 +276,33 @@ ToolsProbe class >> removeTagProbe [
 ToolsProbe class >> tagProbeRemoved [
 	^ (Smalltalk includesKey: #ToolsTagProbe) not and: [self browser model status beginsWith: 'removed']
 ]
+
+{ #category : #project }
+ToolsProbe class >> projectOf: aTarget [
+	"The project directory: what the host answers for aTarget (a String or nil)."
+	^ ClientTransport projectOf: aTarget
+]
+
+{ #category : #project }
+ToolsProbe class >> chooseProject: aTarget [
+	"The project directory: the picker's Project… on aTarget (the host's panel asks)."
+	| m |
+	m := TargetPickerModel new.
+	m chooseProject: aTarget.
+	^ m status
+]
+
+{ #category : #project }
+ToolsProbe class >> pickerShows: aDirectory for: aTarget [
+	"The target picker lists aTarget with aDirectory as its project directory."
+	| m |
+	m := TargetPickerModel new.
+	m refresh.
+	^ m rows anySatisfy: [:r | r first = aTarget and: [(r at: 4) = aDirectory]]
+]
+
+{ #category : #project }
+ToolsProbe class >> connect: aPath naming: aDirectory [
+	"Primitive 164's connect with a fourth argument, a directory the image names: the host refuses it (nil)."
+	^ (ClientTransport primCall: 'connect' handle: nil with: {aPath. 'developer'. nil. aDirectory}) isNil
+]

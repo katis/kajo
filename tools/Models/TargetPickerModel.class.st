@@ -1,4 +1,4 @@
-"The target picker's model (module 9c): the targets the shell knows (its own transport, the local target; those of ~/.kajo/targets; since module 9d the phones Bonjour finds, listed again when the host's targets change) and those entered by hand, which are connected, and connect and disconnect. Each target's state follows its client: connecting, open, reconnecting (a dropped link, module 9d), lost. Tokens stay in the shell: a target is connected by its name or address with the token the shell holds; a token is never typed into the image: pair: asks the shell to take it in a secure field of its own."
+"The target picker's model (module 9c): the targets the shell knows (its own transport, the local target; those of ~/.kajo/targets; since module 9d the phones Bonjour finds, listed again when the host's targets change) and those entered by hand, which are connected, and connect and disconnect. Each target's state follows its client: connecting, open, reconnecting (a dropped link, module 9d), lost. Tokens stay in the shell: a target is connected by its name or address with the token the shell holds; a token is never typed into the image: pair: asks the shell to take it in a secure field of its own. The project directory (2026-11-11, docs/modules/project-directory.md): each target's row shows the directory the shell holds for it (where the files of accepted changes go), and chooseProject: asks the shell to ask the developer for one in a panel of its own; the image never names a directory."
 Class {
 	#name : #TargetPickerModel,
 	#superclass : #ToolModel,
@@ -7,9 +7,17 @@ Class {
 		'connectAction',
 		'targetsSource',
 		'clientLookup',
-		'pairAction'
+		'pairAction',
+		'projectSource',
+		'chooseProjectAction'
 	]
 }
+
+{ #category : #accessing }
+TargetPickerModel >> chooseProjectAction: aBlock [
+	"aBlock asks the host to ask the developer for a target's project directory (ClientTransport chooseProject: by default; tests give their own)."
+	chooseProjectAction := aBlock
+]
 
 { #category : #accessing }
 TargetPickerModel >> clientLookup: aBlock [
@@ -30,9 +38,23 @@ TargetPickerModel >> pairAction: aBlock [
 ]
 
 { #category : #accessing }
+TargetPickerModel >> projectOf: aName [
+	"The project directory the host holds for aName, or '' when none."
+	| d |
+	d := projectSource isNil ifTrue: [ClientTransport projectOf: aName] ifFalse: [projectSource value: aName].
+	^ d ifNil: ['']
+]
+
+{ #category : #accessing }
+TargetPickerModel >> projectSource: aBlock [
+	"aBlock answers the project directory the host holds for a target's name, or nil (ClientTransport projectOf: by default; tests give their own)."
+	projectSource := aBlock
+]
+
+{ #category : #accessing }
 TargetPickerModel >> rows [
-	"{name. address. state} of each target (a target the host holds no token for says so: pair it)."
-	^ (self targets collect: [:t | {t first. t at: 2. (self stateOf: t first) , ((t at: 3) == true ifTrue: [''] ifFalse: [', no token'])}]) asArray
+	"{name. address. state. project directory} of each target (a target the host holds no token for says so: pair it; one it holds no directory for shows none: choose it with Project…)."
+	^ (self targets collect: [:t | {t first. t at: 2. (self stateOf: t first) , ((t at: 3) == true ifTrue: [''] ifFalse: [', no token']). self projectOf: t first}]) asArray
 ]
 
 { #category : #accessing }
@@ -60,6 +82,15 @@ TargetPickerModel >> add: anAddress name: aName [
 	targets := self targets , {{aName. anAddress. false}}.
 	self changed: #targets.
 	self connect: aName
+]
+
+{ #category : #targets }
+TargetPickerModel >> chooseProject: aName [
+	"The host asks the developer for aName's project directory in a panel of its own and keeps it: no directory passes through this image. The targets are listed again when the developer has chosen (a #targets event)."
+	| held |
+	held := chooseProjectAction isNil ifTrue: [ClientTransport chooseProject: aName] ifFalse: [chooseProjectAction value: aName].
+	held isNil ifTrue: [^ self status: 'no project panel: this image runs without a shell that has one'].
+	self status: aName , ': choose its project directory in the panel the shell shows'
 ]
 
 { #category : #targets }

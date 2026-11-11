@@ -1,4 +1,4 @@
-"The target picker's window (module 9c): the known targets and their connection state, connect and disconnect the selected one, pair the selected one (module 9d: the shell takes its token in a secure field of its own, never this image), add a target by its address, and a status bar with the last connection change."
+"The target picker's window (module 9c): the known targets and their connection state, connect and disconnect the selected one, pair the selected one (module 9d: the shell takes its token in a secure field of its own, never this image), choose the selected one's project directory (the project directory, 2026-11-11: the shell asks in a panel of its own, the list shows each target's), add a target by its address, and a status bar with the last connection change."
 Class {
 	#name : #TargetPickerWindow,
 	#superclass : #ToolWindow,
@@ -19,7 +19,8 @@ TargetPickerWindow >> command: anId [
 	anId = 4 ifTrue: [
 		path := (pathView text ifNil: ['']) trimmed.
 		path isEmpty ifFalse: [model add: path name: path]].
-	anId = 5 ifTrue: [name isNil ifFalse: [model pair: name]]
+	anId = 5 ifTrue: [name isNil ifFalse: [model pair: name]].
+	anId = 6 ifTrue: [name isNil ifFalse: [model chooseProject: name]]
 ]
 
 { #category : #building }
@@ -27,20 +28,20 @@ TargetPickerWindow >> build [
 	| toolbar |
 	self makeWindow: 'Targets'.
 	toolbar := Toolbar new.
-	toolbar addItem: 1 title: 'Connect'; addItem: 2 title: 'Disconnect'; addItem: 3 title: 'Refresh'; addItem: 4 title: 'Add'; addItem: 5 title: 'Pair'.
+	toolbar addItem: 1 title: 'Connect'; addItem: 2 title: 'Disconnect'; addItem: 3 title: 'Refresh'; addItem: 4 title: 'Add'; addItem: 5 title: 'Pair'; addItem: 6 title: 'Project…'.
 	window toolbar: toolbar.
 	toolbar action: [:id | self command: id].
-	targetsTable := self table: #('Target' 'Socket' 'State') at: {0. 0. 560. 150}.
+	targetsTable := self table: #('Target' 'Socket' 'State' 'Project') at: {0. 0. 760. 150}.
 	targetsTable autoresize: 'width height'.
 	targetsTable onDoubleClick: [:row | self command: 1].
-	pathView := self textAt: {4. 156. 552. 24} editable: true.
+	pathView := self textAt: {4. 156. 752. 24} editable: true.
 	pathView autoresize: 'width top'.
 	self addStatusLine
 ]
 
 { #category : #building }
 TargetPickerWindow >> defaultFrame [
-	^ {980. 420. 560. 210}
+	^ {780. 420. 760. 210}
 ]
 
 { #category : #updating }

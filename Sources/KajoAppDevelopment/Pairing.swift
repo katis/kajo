@@ -207,4 +207,31 @@ import UIKit
         done(answer == .alertFirstButtonReturn ? field.stringValue : nil)
     }
 }
+
+/// The project directory (docs/modules/project-directory.md, part 3): a
+/// target's project directory, chosen in an open panel of the host's own
+/// (directories only); the choice goes to the client transport's setter,
+/// never through the image. `done` answers what to show afterwards (why
+/// the choice was refused), or nil.
+extension PairingScreen: DirectoryPresenter {
+    public func askDirectory(_ prompt: String, current: String?, _ done: @escaping (String?) -> String?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.message = prompt
+        panel.prompt = "Choose"
+        if let current { panel.directoryURL = URL(fileURLWithPath: current, isDirectory: true) }
+        guard panel.runModal() == .OK, let url = panel.url else {
+            _ = done(nil)
+            return
+        }
+        guard let note = done(url.path) else { return }
+        let alert = NSAlert()
+        alert.messageText = "Project directory"
+        alert.informativeText = note
+        alert.runModal()
+    }
+}
 #endif

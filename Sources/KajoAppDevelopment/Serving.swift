@@ -40,6 +40,15 @@ public struct PairingInfo: Sendable {
     func askSecret(_ prompt: String, _ done: @escaping (String?) -> Void)
 }
 
+/// The project directory (docs/modules/project-directory.md, part 3): where
+/// a host asks the developer for a target's project directory (AppKit's
+/// open panel; UIKit has none, so `chooseProject` answers nil there). The
+/// prompt's text, the directory held now, and where the choice goes, which
+/// answers what to show afterwards or nil.
+@MainActor public protocol DirectoryPresenter: AnyObject {
+    func askDirectory(_ prompt: String, current: String?, _ done: @escaping (String?) -> String?)
+}
+
 /// The pairing token kept for an install: stable across launches, in the
 /// app's own directory (Application Support) with mode 0600, made again by
 /// the "new token" button. Never logged, never in a result line.
@@ -157,6 +166,27 @@ extension ShellRuntime {
         let shell = vm
         host.setSink { e in shell.post(e) }
         host.setSecretPrompt(ShellRuntime.secretPrompt(PresenterBox(secrets)))
+        // The project directory, part 3: a presenter with a panel asks for
+        // a target's directory; without one `chooseProject` answers nil.
+        if let d = secrets as? DirectoryPresenter {
+            host.setDirectoryPrompt(ShellRuntime.directoryPrompt(DirectoryBox(d)))
+        }
+    }
+
+    /// The panel, built outside main-actor context: the platform asks on
+    /// the main thread, after the turn that asked has ended.
+    nonisolated static func directoryPrompt(_ box: DirectoryBox) -> @Sendable (String, String?, @escaping @Sendable (String?) -> String?) -> Void {
+        { prompt, current, done in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let p = box.presenter else {
+                        _ = done(nil)
+                        return
+                    }
+                    p.askDirectory(prompt, current: current) { done($0) }
+                }
+            }
+        }
     }
 
     /// The secure field, built outside main-actor context: the platform asks
@@ -329,6 +359,11 @@ final class PairingBox: @unchecked Sendable {
 final class PresenterBox: @unchecked Sendable {
     weak var presenter: PairingPresenter?
     init(_ p: PairingPresenter?) { presenter = p }
+}
+
+final class DirectoryBox: @unchecked Sendable {
+    weak var presenter: DirectoryPresenter?
+    init(_ p: DirectoryPresenter?) { presenter = p }
 }
 
 final class StatusBox: @unchecked Sendable {
