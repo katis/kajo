@@ -33,7 +33,9 @@ func shellNativeModule(for imagePath: String) -> NativeModule? {
         return nil
     }
     switch NativeModule.load(dylib: path) {
-    case .success(let m): return m
+    case .success(let m):
+        print("native=loaded \((path as NSString).lastPathComponent)")
+        return m
     case .failure(let e):
         print("native=refused \(e)")
         return nil

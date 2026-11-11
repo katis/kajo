@@ -96,7 +96,7 @@ let package = Package(
         // Built plainly they replay a corpus and mutate it.
         .executableTarget(
             name: "fuzz-kasm",
-            dependencies: ["KajoVM"],
+            dependencies: ["KajoVM", "KajoAOT"],
             swiftSettings: [.strictMemorySafety()]
         ),
         .executableTarget(

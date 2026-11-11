@@ -21,7 +21,12 @@ public enum FuzzEntry {
 
     /// Load the bytes as one kasm file into a fresh image.
     @discardableResult
-    public static func kasm(_ data: [UInt8]) -> Bool {
+    public static func kasm(_ data: [UInt8]) -> Bool { kasm(data, then: { _ in }) }
+
+    /// AOT 1 (open question 2): the same, then `then` on the loaded image
+    /// (the kasm target runs the generator over it under KAJO_FUZZ_AOT=1).
+    @discardableResult
+    package static func kasm(_ data: [UInt8], then: (Image) -> Void) -> Bool {
         guard let image = try? Image(memory: ObjectMemory(config())) else { return false }
         defer { image.destroy() }
         do {
@@ -32,6 +37,7 @@ public enum FuzzEntry {
         image.om.retireAllContexts()
         let issues = image.om.verifyHeap() + image.om.verifyFreeLists()
         precondition(issues.isEmpty, "a loaded kasm file left a bad heap: \(issues)")
+        then(image)
         return true
     }
 
