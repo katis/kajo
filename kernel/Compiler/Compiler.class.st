@@ -177,6 +177,18 @@ Compiler >> chainOf: aMessageNode [
 ]
 
 { #category : #analysis }
+Compiler >> chainOfAnalysed: aMessageNode [
+	"chainOf: once the analysis has run (code generation): a send that is inlined was marked so by the analysis (only a chain's start can be one), so the flag ends the chain where inlinable: did, without asking it again for every send of a long chain."
+	| sends x |
+	sends := OrderedCollection with: aMessageNode.
+	x := aMessageNode receiver.
+	[x class == MessageNode and: [x isSuper not and: [x isInlined not]]] whileTrue: [
+		sends addFirst: x.
+		x := x receiver].
+	^ Array with: x with: sends
+]
+
+{ #category : #analysis }
 Compiler >> declare: aName kind: aKind in: aScope line: n [
 	| v |
 	aKind == #hidden ifFalse: [
@@ -394,7 +406,7 @@ Compiler >> gen: aNode in: r on: e value: wantValue [
 				e add: {#source. aNode sourceStart. aNode sourceEnd}.
 				e add: {#send. #sendSuper. aNode selector. aNode arguments size}]
 			ifFalse: [
-				b := self chainOf: aNode.
+				b := self chainOfAnalysed: aNode.
 				self gen: b first in: r on: e value: true.
 				(b at: 2) do: [:t |
 					t arguments do: [:x | self gen: x in: r on: e value: true].
