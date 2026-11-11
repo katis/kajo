@@ -307,6 +307,13 @@ func runAOT(_ args: [String]) {
             out = args[i]
         } else if args[i] == "--return-marker" {
             options.returnByLookup = false
+        } else if args[i].hasPrefix("--no-") {
+            // Part 3's steps, each switchable for its measurement.
+            switch args[i] {
+            case "--no-inline-stores": options.inlineStores = false
+            case "--no-inline-closures": options.inlineClosures = false
+            default: fail("unknown option \(args[i])\n\(usage)")
+            }
         } else if args[i].hasPrefix("-") {
             fail("unknown option \(args[i])\n\(usage)")
         } else {

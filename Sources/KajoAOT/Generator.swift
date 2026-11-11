@@ -55,6 +55,12 @@ package struct AOTOptions: Sendable {
     /// not bump `counters.sends`; a backward jump's poll with the operands
     /// left in C locals.
     package var brokenNoSendCount = false
+    /// Part 3, step 1: `store_ivar` and the temp-vector slots inline.
+    package var inlineStores = true
+    /// Part 3, step 2: a closure's `value`, `value:`, `value:value:`
+    /// activated natively (a block group's activation), and the pc after
+    /// each a hot resume function.
+    package var inlineClosures = true
     package var brokenNoFlushAtPoll = false
     package init() {}
 }
@@ -80,7 +86,7 @@ package enum AOTGenerator {
         var plans: [MethodPlan] = []
         var nextResume = 0
         for (k, g) in sorted.enumerated() {
-            let p = MethodPlan(index: k, info: g.info, firstResume: nextResume)
+            let p = MethodPlan(index: k, info: g.info, firstResume: nextResume, options: options)
             nextResume += p.resumePCs.count
             plans.append(p)
         }
@@ -152,7 +158,7 @@ struct MethodPlan {
     let resumePCs: [Int]
     let firstResume: Int
 
-    init(index: Int, info: NativeMethodInfo, firstResume: Int) {
+    init(index: Int, info: NativeMethodInfo, firstResume: Int, options: AOTOptions = AOTOptions()) {
         self.index = index
         self.info = info
         self.firstResume = firstResume
@@ -172,6 +178,7 @@ struct MethodPlan {
                 resume.insert(next)
             }
             if Self.activates(i), at[next] != nil { resume.insert(next) }
+            if options.inlineClosures && (i.op == .value || i.op == .value1 || i.op == .value2), at[next] != nil { hot.insert(next) }
             if i.op.isJump {
                 let t = next + i.a
                 if i.a < 0 && at[t] != nil {
@@ -198,7 +205,7 @@ struct MethodPlan {
         return firstResume + i
     }
 
-    var hasActivation: Bool { !info.isBlock }
+    var hasActivation: Bool { true }
 }
 
 extension Opcode {
@@ -282,8 +289,35 @@ struct Emitter {
           KF *(*fail)(KS *, u64, u64 *, u64 *, u64 *, u64, u64);
           KF *(*overflow)(KS *, u64, u64 *, u64 *, u64 *, u64, u64);
           KF *(*send_slow)(KS *, u64, u64 *, u64 *, u64 *, u64, u64, u64);
+          void (*store_barriers)(KS *, u64, u64, u64, u64);
+          void (*store_conflict)(KS *, u64, u64, u64, u64);
+          void (*remember)(KS *, u64, u64, u64);
         } KVT;
         #define VT(s) AT(s, W_VT, const KVT *)
+        static inline int k_canstore(KS *s, u64 o, u64 n) {
+          if (o & OOP_TAG_MASK) return 0;
+          u64 h = k_header(s, o);
+          return (h & HDR_BYTES_BIT) == 0 && (h & HDR_READONLY_BIT) == 0 && n < ((h & HDR_COUNT_MASK) >> HDR_COUNT_SHIFT);
+        }
+        /* storeWithBarrier restated (rule 9; Nursery/Barrier.swift): with the
+           flag line's barrier word set, the VM's store through the barriers.
+           Else module 6's post-store check: the state word relaxed, the slot
+           stored seq_cst at the body that word names, the word reloaded
+           seq_cst; a change or the RELOCATING bit is the VM's conflict path,
+           which stores again. Then the young barrier: a reference whose
+           header is young in another nursery than the holder's. */
+        static inline void k_store(KS *s, u64 o, u64 i, u64 v, u64 site) {
+          if (__atomic_load_n(AT(s, W_FLAG, u32 *) + 2, __ATOMIC_RELAXED) != 0) { VT(s)->store_barriers(s, o, i, v, site); return; }
+          u64 *sw = (u64 *)(AT(s, W_TABLE, char *) + o);
+          u64 e1 = __atomic_load_n(sw, __ATOMIC_RELAXED);
+          __atomic_store_n((u64 *)(AT(s, W_HEAP, char *) + e1 + 8 + i * 8), v, __ATOMIC_SEQ_CST);
+          u64 e2 = __atomic_load_n(sw, __ATOMIC_SEQ_CST);
+          if (UNLIKELY(e2 != e1 || (e1 & ENTRY_RELOCATING_BIT) != 0)) { VT(s)->store_conflict(s, o, i, v, site); return; }
+          if ((v & 1) == 0 && (v & OOP_TAG_MASK) == 0) {
+            u64 hv = k_header(s, v);
+            if ((hv & HDR_YOUNG_BIT) && ((k_header(s, o) ^ hv) & HDR_YOUNG_NURSERY_MASK)) VT(s)->remember(s, o, hv, site);
+          }
+        }
         typedef struct { KF *fn; u32 pc; u32 depth; } KResume;
         typedef struct { u64 h0, h1; KF *activate; KF *cold; const i32 *rx; const i16 *depth; u64 codeLen; } KGroup;
         typedef struct {
@@ -320,6 +354,10 @@ struct Emitter {
     /// resume index.
     mutating func activation(_ p: MethodPlan) {
         let m = p.info, k = p.index
+        if m.isBlock {
+            blockActivation(p)
+            return
+        }
         line("KFN kn_A\(k)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
         if m.primitive != 0 {
             line("  KF *f_ = VT(s)->invoke(s, c >> 8, fp + \(m.argc), (u64 *)a, hdr, b, \(m.argc)ULL | (c & 255) << 8);")
@@ -339,6 +377,35 @@ struct Emitter {
         line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
         if options.returnByLookup { line("  (void)d;") }
         line("  h[0] = b; h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = \(options.returnByLookup ? "EMPTY_CONTEXT" : "TAG(MARKER_BASE + d)");")
+        line("  __attribute__((musttail)) return kn_R\(k)_0(s, fp, h, 0, 0, 0, 0);")
+        line("}")
+    }
+
+    /// `A<k>` of a block group: a closure's `value` site tail-calls it with
+    /// fp the closure's slot, hdr the caller's header, a the caller's fp, b
+    /// the closure, c the pc after the site << 8 | its argument count, d
+    /// the caller's resume index. The frame as `activateClosure` makes it
+    /// (the receiver, the arguments, the copied values, nil temps, the
+    /// closure word, the header); a count that is not the block's, or no
+    /// room, is the VM's own special send.
+    mutating func blockActivation(_ p: MethodPlan) {
+        let m = p.info, k = p.index
+        line("KFN kn_A\(k)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
+        line("  if (UNLIKELY((c & 255) != \(m.argc) || fp + \(m.argc + m.temps + 5 + m.maxStack + 1) >= AT(s, W_STACKEND, u64 *))) {")
+        line("    KF *f_ = VT(s)->special(s, c >> 8, fp + (c & 255), (u64 *)a, hdr, (u64)(\(Opcode.value.rawValue - Opcode.add.rawValue) + (c & 255)) << 8 | (c & 255));")
+        line("    if (f_ == KCONT) { const KResume *e_ = &kajo_resume[d]; __attribute__((musttail)) return e_->fn(s, (u64 *)a, hdr, fp[0], e_->pc, 0, 0); }")
+        line("    if (!f_) return;")
+        line("    KOUT(f_);")
+        line("  }")
+        line("  (void)d;")
+        line("  fp[0] = k_slot(s, b, CLOSURE_RECEIVER);")
+        for i in 0..<m.copied { line("  fp[\(1 + m.argc + i)] = k_slot(s, b, CLOSURE_SIZE + \(i));") }
+        if m.temps - 1 > m.copied { for i in m.copied..<(m.temps - 1) { line("  fp[\(1 + m.argc + i)] = NILV;") } }
+        line("  fp[\(m.argc + m.temps)] = b;")
+        line("  u64 *h = fp + \(1 + m.argc + m.temps);")
+        line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
+        line("  h[0] = k_slot(s, b, CLOSURE_METHOD); h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = EMPTY_CONTEXT;")
+        line("  AT(s, W_CLOSURE_ACTIVATIONS, u64)++;")
         line("  __attribute__((musttail)) return kn_R\(k)_0(s, fp, h, 0, 0, 0, 0);")
         line("}")
     }
@@ -575,8 +642,27 @@ struct FunctionBody {
             emit("  if ((a_ & OOP_TAG_MASK) == 0 && (i_ & 1)) { u64 h_ = k_header(s, a_); u64 k_ = (u64)((i64)i_ >> 1) - 1;")
             emit("    if ((h_ & HDR_CLASS_MASK) == CLS_ARRAY && k_ < ((h_ & HDR_COUNT_MASK) >> HDR_COUNT_SHIFT)) { \(top(2)) = k_slot(s, a_, k_); done_ = 1; } }")
             emit("  if (!done_) { \(special(i.op, d, next: next)) } }")
+        case .value where options.inlineClosures, .value1 where options.inlineClosures, .value2 where options.inlineClosures:
+            // Part 3, step 2: the closure's block activation, natively.
+            let n = i.op.specialArgc
+            let ri = plan.resumeIndex(next) ?? 0
+            emit("{ u64 c_ = x\(d - 1 - n);")
+            emit("  if ((c_ & OOP_TAG_MASK) == 0 && (k_header(s, c_) & HDR_CLASS_MASK) == CLS_BLOCKCLOSURE) {")
+            emit("    KF *b_ = *(KF *const *)(AT(s, W_NTAB, const char *) + k_slot(s, c_, CLOSURE_METHOD));")
+            emit("    if (LIKELY(b_ != 0)) { \(flush(d)) __attribute__((musttail)) return b_(s, hdr + \(5 + d - 1 - n), hdr, (u64)fp, c_, \(next << 8 | n), \(ri)); } }")
+            emit("  \(special(i.op, d, next: next)) }")
         case .div, .intDiv, .mod, .atPut, .size, .value, .value1, .value2:
             emit(special(i.op, d, next: next))
+        case .storeIvar where !i.extended && options.inlineStores:
+            // Part 3: the store inline (k_store); a refusal (read-only, no
+            // such slot) is the VM's own instruction.
+            emit("{ u64 o_ = fp[0]; if (LIKELY(k_canstore(s, o_, \(i.a)))) k_store(s, o_, \(i.a), \(top()), SITE_STORE_IVAR);")
+            emit("  else { \(flush(d)) KGO(VT(s)->exec(s, \(i.offset), \(sp(d)), fp, hdr)); \(reload(d - 1)) } }")
+        case .storeTempVectorSlot where !i.extended && options.inlineStores:
+            emit("{ u64 o_ = fp[\(1 + i.b)]; if (LIKELY(k_canstore(s, o_, \(i.a)))) k_store(s, o_, \(i.a), \(top()), SITE_STORE_TEMP_VECTOR);")
+            emit("  else { \(flush(d)) KGO(VT(s)->exec(s, \(i.offset), \(sp(d)), fp, hdr)); \(reload(d - 1)) } }")
+        case .pushTempVectorSlot where !i.extended && options.inlineStores:
+            emit("{ u64 o_ = fp[\(1 + i.b)]; if (UNLIKELY(!k_hasslot(s, o_, \(i.a)))) { \(flush(d)) KGO(VT(s)->fail(s, \(next), \(sp(d)), fp, hdr, \(i.length), o_)); return; } x\(d) = k_slot(s, o_, \(i.a)); }")
         default:
             viaVM(i, d, after: after)
         }

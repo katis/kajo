@@ -307,6 +307,23 @@ func nativeOverflow(_ w: UnsafeMutableRawPointer, _ pc: UInt64, _ sp: NP, _ fp: 
     return unsafe nativeContinue(s, r, h0, pc)
 }
 
+/// AOT 1, part 3: the out-of-line halves of the generated code's inline
+/// store (which restates `storeWithBarrier` beside it): the store through
+/// the barriers while the flag word is set, the post-store check's
+/// conflict (which stores again), the young barrier's remember. No frame
+/// changes; nothing native code holds is affected.
+func nativeStoreBarriers(_ w: UnsafeMutableRawPointer, _ o: UInt64, _ i: UInt64, _ v: UInt64, _ site: UInt64) {
+    unsafe storeWithBarriers(nState(w), o, Int(i), v, UInt8(truncatingIfNeeded: site))
+}
+
+func nativeStoreConflict(_ w: UnsafeMutableRawPointer, _ o: UInt64, _ i: UInt64, _ v: UInt64, _ site: UInt64) {
+    unsafe storeConflict(nState(w), o, Int(i), v, UInt8(truncatingIfNeeded: site))
+}
+
+func nativeRemember(_ w: UnsafeMutableRawPointer, _ o: UInt64, _ hv: UInt64, _ site: UInt64) {
+    unsafe rememberSlow(nState(w), Oop(raw: o), hv, UInt8(truncatingIfNeeded: site))
+}
+
 /// The interface table the generated code calls through, in the order its
 /// prelude declares (`KVT`).
 func makeNativeInterface() -> UnsafeMutablePointer<UnsafeRawPointer?> {
@@ -328,6 +345,11 @@ func makeNativeInterface() -> UnsafeMutablePointer<UnsafeRawPointer?> {
     unsafe t[8] = unsafeBitCast(nativeFail as Fn7, to: UnsafeRawPointer.self)
     unsafe t[9] = unsafeBitCast(nativeOverflow as Fn7, to: UnsafeRawPointer.self)
     unsafe t[10] = unsafeBitCast(nativeSendSlow as Fn8, to: UnsafeRawPointer.self)
+    typealias Store = @convention(c) (UnsafeMutableRawPointer, UInt64, UInt64, UInt64, UInt64) -> Void
+    typealias Remember = @convention(c) (UnsafeMutableRawPointer, UInt64, UInt64, UInt64) -> Void
+    unsafe t[11] = unsafeBitCast(nativeStoreBarriers as Store, to: UnsafeRawPointer.self)
+    unsafe t[12] = unsafeBitCast(nativeStoreConflict as Store, to: UnsafeRawPointer.self)
+    unsafe t[13] = unsafeBitCast(nativeRemember as Remember, to: UnsafeRawPointer.self)
     return unsafe t
 }
 
