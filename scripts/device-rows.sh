@@ -54,8 +54,8 @@ cat $out/build.txt
 (( prompt )) && exit 3
 (( rc )) && { print "device-rows: build failed rc=$rc"; exit 1 }
 # Every step's status counts (the review fixes, part 2, item 11).
-status=0
-if [[ -n $parts ]]; then $root/scripts/shell-matrix.sh device $out "$parts" || status=1; else $root/scripts/shell-matrix.sh device $out || status=1; fi
-$root/scripts/shell-report.py $out > $out/report.md || status=1
-$root/scripts/shell-report.py --bar $out || status=1
-exit $status
+steps_rc=0
+if [[ -n $parts ]]; then $root/scripts/shell-matrix.sh device $out "$parts" || steps_rc=1; else $root/scripts/shell-matrix.sh device $out || steps_rc=1; fi
+$root/scripts/shell-report.py $out > $out/report.md || steps_rc=1
+$root/scripts/shell-report.py --bar $out || steps_rc=1
+exit $steps_rc
