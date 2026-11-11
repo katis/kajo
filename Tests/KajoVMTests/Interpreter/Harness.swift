@@ -1,3 +1,5 @@
+import Foundation
+import Testing
 @testable import KajoVM
 
 /// An image with kasm loaded, an interpreter and one stack. Destroyed by
@@ -17,6 +19,12 @@ struct Harness {
         try image.load(base.map { (file: "\($0).kasm", text: kernel($0)) } + [(file: "test.kasm", text: src)])
         interpreter = Interpreter(image: image)
         stack = Stack(words: stackWords)
+        // AOT 1: KAJO_NATIVE_HARNESS=1 runs every harness test under the
+        // native engine (the generated C of this very image).
+        if nativeHarness {
+            let r = interpreter.bind(native: try NativeTest.module(for: image))
+            if r.refused != nil || r.bound != r.methods { Issue.record("native harness: \(r)") }
+        }
     }
 
     /// Send `selector` to nil with SmallInteger arguments.
@@ -51,3 +59,6 @@ enum HarnessError: Error { case notAnInteger(Oop) }
 func runOf(_ body: String, temps: Int = 0) -> String {
     "\nmethod UndefinedObject run:of: temps=\(temps)\n\(body)\nend\n"
 }
+
+/// AOT 1: every harness test under the native engine.
+let nativeHarness = ProcessInfo.processInfo.environment["KAJO_NATIVE_HARNESS"] != nil

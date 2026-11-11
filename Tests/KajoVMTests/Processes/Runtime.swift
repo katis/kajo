@@ -1,3 +1,4 @@
+import Foundation
 import Darwin
 import Synchronization
 import Testing
@@ -15,7 +16,8 @@ final class Runtime {
          sliceMs: Double = 5,
          pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true, pinsForGood: Bool = true,
          configure: (inout VMConfig) -> Void = { _ in }, switches: TestSwitches = TestSwitches(),
-         before: (Image) -> Void = { _ in }, after: (Image) -> Void = { _ in }, native: Bool = false) throws {
+         before: (Image) -> Void = { _ in }, after: (Image) -> Void = { _ in }, native: Bool = nativeRuntimes,
+         module: NativeModule? = nil) throws {
         var vc = VMConfig()
         vc.backgroundWorkers = background
         vc.sliceNs = UInt64(sliceMs * 1e6)
@@ -38,7 +40,7 @@ final class Runtime {
                        + [(file: "test.kasm", text: src)])
         after(image)
         // AOT 1: the native engine over this very image (its oops folded).
-        if native { vc.native = try NativeTest.module(for: image) }
+        if let module { vc.native = module } else if native { vc.native = try NativeTest.module(for: image) }
         vm = VM(image: image, config: vc)
         if start { vm.start() }
     }
@@ -169,3 +171,7 @@ final class TestThread: @unchecked Sendable {
     }
     func join() { pthread_join(tid!, nil) }
 }
+
+/// AOT 1: KAJO_NATIVE_RUNTIME=1 runs every Runtime test under the native
+/// engine (each test image's own generated C).
+let nativeRuntimes = ProcessInfo.processInfo.environment["KAJO_NATIVE_RUNTIME"] != nil

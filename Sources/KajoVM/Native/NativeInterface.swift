@@ -95,12 +95,14 @@ func nativeContinue(_ s: StatePointer, _ r: Regs, _ h0: Int, _ expected: UInt64)
         return nil
     }
     guard let (fn, pc) = unsafe nativeResume(s, r) else {
+        // An interpreted frame the slow path activated above this one: its
+        // return in the interpreter leaves for the driver.
+        unsafe markCaller(s, r, h0)
         unsafe save(s, r.pc, r.sp, r.fp, r.hdr)
         unsafe w.pointee.native.counters.toInterpreterUnbound &+= 1
         return nil
     }
     if unsafe r.hdr - base == h0 && UInt64(r.pc - r.code) == expected { return unsafe nativeCont }
-    unsafe markCaller(s, r, h0)
     unsafe w.pointee.native.out = NativeOut(fp: r.fp, hdr: r.hdr, v: r.sp.pointee, pc: pc)
     unsafe w.pointee.native.counters.resumes &+= 1
     return unsafe fn

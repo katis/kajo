@@ -134,7 +134,10 @@ import Testing
 
 /// The loader never produces an unknown opcode; a corrupted method body is
 /// still an error value, not a crash.
-@Test func anUnknownOpcodeIsAnError() throws {
+// AOT 1: not under KAJO_NATIVE_HARNESS: the test rewrites a bound
+// method's bytecodes from the host after the binding (methods are
+// read-only and pinned to every program; a binding is by content at bind).
+@Test(.disabled(if: nativeHarness)) func anUnknownOpcodeIsAnError() throws {
     let h = try Harness(runOf(" push_int 1\n return_top"), base: [])
     defer { h.destroy() }
     let m = try #require(h.image.lookup(WellKnown.undefinedObject, h.image.symbol("run:of:")!))

@@ -19,7 +19,31 @@ import Synchronization
         loadsSeen = image.loads
     }
 
+    /// AOT 1: the native module bound to this interpreter, if any.
+    private var native: UnsafeMutablePointer<NativeBinding>? = nil
+
+    /// AOT 1: bind a native module to the image's methods for this
+    /// interpreter (the tests run module 2's suites through it).
+    @discardableResult
+    func bind(native module: NativeModule) -> NativeBindReport {
+        let (b, report) = unsafe bindNative(image, module)
+        if let b = unsafe b {
+            let p = UnsafeMutablePointer<NativeBinding>.allocate(capacity: 1)
+            unsafe p.initialize(to: b)
+            unsafe native = unsafe p
+            unsafe attachNative(workerOf(state), p)
+        }
+        return report
+    }
+
+    var nativeCounters: NativeCounters { unsafe workerOf(state).pointee.native.counters }
+
     func destroy() {
+        if let b = unsafe native {
+            unsafe unbindNative(image, b.pointee)
+            unsafe b.deinitialize(count: 1)
+            unsafe b.deallocate()
+        }
         let flag = unsafe state.pointee.safepointFlag
         unsafe Worker.destroy(workerOf(state))
         unsafe freeFlagLine(flag)

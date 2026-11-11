@@ -51,6 +51,11 @@ package struct AOTOptions: Sendable {
     package var returnByLookup = true
     /// Groups per C file.
     package var groupsPerFile = 150
+    /// Broken variants (tests only, docs/modules/aot.md): a send that does
+    /// not bump `counters.sends`; a backward jump's poll with the operands
+    /// left in C locals.
+    package var brokenNoSendCount = false
+    package var brokenNoFlushAtPoll = false
     package init() {}
 }
 
@@ -100,6 +105,24 @@ package enum AOTGenerator {
         files.append(("kajo_native_tables.c", "#include \"kajo_native.h\"\n" + tables))
         return AOTOutput(source: header + chunks.joined() + tables, files: files, methods: infos.count - declined.count,
                          groups: plans.count, declined: declined, resumePoints: nextResume)
+    }
+
+    /// How the generator emits an opcode (plain opcodes; a fused one is
+    /// read as its parts): inline with a slow path into the VM, a special
+    /// send's slow path, or the VM's own out-of-line code (`exec`). nil
+    /// would be a gap; the test `theGeneratorHasNoGap` checks every one.
+    package static func emitter(for op: Opcode) -> String? {
+        switch op {
+        case .pushTemp, .pushLiteral, .pushSelf, .pushIvar, .storeTemp, .pop, .dup, .pushNil, .pushTrue, .pushFalse,
+             .pushInt, .send, .returnTop, .returnSelf, .blockReturn, .jump, .jumpIfTrue, .jumpIfFalse, .add, .sub, .mul,
+             .lt, .gt, .le, .ge, .eq, .ne, .identical, .notIdentical, .isNil, .notNil, .at:
+            return "inline"
+        case .div, .intDiv, .mod, .atPut, .size, .value, .value1, .value2: return "special"
+        case .storeIvar, .classOf, .sendSuper, .pushClosure, .pushNewArray, .pushTempVectorSlot, .storeTempVectorSlot,
+             .pushThisContext, .nonlocalReturn, .ext:
+            return "vm"
+        default: return nil
+        }
     }
 
     /// The reasons the generator declines a method (open question 3: none
@@ -497,7 +520,8 @@ struct FunctionBody {
     }
 
     mutating func poll(target: Int, _ d: Int) {
-        emit("if (UNLIKELY(k_due(s))) { \(flush(d)) KGO(VT(s)->poll_jump(s, \(target), \(sp(d)), fp, hdr)); \(reload(d)) }")
+        let f = options.brokenNoFlushAtPoll ? "" : flush(d)
+        emit("if (UNLIKELY(k_due(s))) { \(f) KGO(VT(s)->poll_jump(s, \(target), \(sp(d)), fp, hdr)); \(reload(d)) }")
     }
 
     mutating func instruction(_ i: NativeInstruction) {
@@ -600,7 +624,7 @@ struct FunctionBody {
         let ri = plan.resumeIndex(next)
         emit(flush(d))
         emit("if (UNLIKELY(k_due(s))) { KF *f_ = VT(s)->poll_send(s, \(next), \(sp(d)), fp, hdr, \(i.length)); if (f_ != KCONT) { if (!f_) return; KOUT(f_); } }")
-        emit("AT(s, W_SENDS, u64)++;")
+        if !options.brokenNoSendCount { emit("AT(s, W_SENDS, u64)++;") }
         emit("{ u64 *rp_ = hdr + \(rcvAt); u64 cls_ = k_classof(s, *rp_);")
         emit("  const char *e_ = AT(s, W_CACHE, const char *) + ((((\(sel) >> 4) ^ cls_) & (CACHE_ENTRIES - 1)) * CACHE_STRIDE);")
         emit("  u64 m_;")
