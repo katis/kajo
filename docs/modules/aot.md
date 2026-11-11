@@ -729,7 +729,10 @@ where it has one:
   extended literal index, 200 operands deep, `doesNotUnderstand:` at the top
   slot), `theStackGrowsUnderNativeFrames`, `aSteppedProcessRunsInterpreted`.
 - `randomProgramsAgreeWithTheirModelNatively` (every `RandomConfig`, the
-  seed count of the interpreted test) and `randomProgramsResumeAcrossEngines`
+  interpreted test's seed count up to 100: each seed's image is generated
+  and compiled, and the soak's thousand stayed the interpreter's after the
+  second gate run's soak did not finish in its bound; the soak alone with
+  the cap: 509 s) and `randomProgramsResumeAcrossEngines`
   (every `SnapshotMode`, saved natively and resumed interpreted and the
   other way, 40 seeds each).
 - The suite's switches `KAJO_NATIVE_HARNESS=1` and `KAJO_NATIVE_RUNTIME=1`
