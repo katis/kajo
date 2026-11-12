@@ -46,6 +46,9 @@ public enum Headless {
         /// Allocation stalls, part 5 (a test switch): the marker's
         /// concurrent work this many times slower (1: off).
         public var markerSlowdown = 1
+        /// Allocation stalls, part 4: relocation in a cycle a stall waits
+        /// on (0 as always, 1 to-space from the reserve, 2 none).
+        public var stallRelocation = 1
         /// Allocation stalls: background workers never stall (`noStalls`;
         /// the A/B and the before rows).
         public var stalls = true
@@ -299,6 +302,7 @@ public enum Headless {
         }
         vc.marking.testSwitches.noEntryRateRule = !options.entryRateRule
         vc.marking.testSwitches.markerSlowdown = Swift.max(1, options.markerSlowdown)
+        vc.marking.testSwitches.stallRelocation = options.stallRelocation
         vc.marking.testSwitches.noStalls = !options.stalls
         guard options.relocation == "on" || options.relocation == "off" else { return .failure(.unsupported("--reloc: on or off")) }
         vc.relocation.enabled = options.relocation == "on"
@@ -725,15 +729,15 @@ func stopsByKind(_ stops: [StopRecord]) -> String {
 /// Allocation stalls: the stalls (docs/modules/allocation-stalls.md):
 /// how many, their total, p50, p99 and longest time over the records kept,
 /// by resource (promotion, entries, old) and outcome (justified: followed
-/// by a fallback), per worker (`stallsByWorker`: count/ms per worker from
-/// 1), the cycles stalls started, the marker's QoS overrides.
+/// by a fallback), per background worker (`stallsByWorker`: count/ms for
+/// workers 1 to n), the cycles stalls started, the marker's QoS overrides.
 func stallReport(_ vm: VM) -> [(String, String)] {
     guard let s = vm.stallLog else { return [] }
     func ms(_ ns: UInt64) -> String { unsafe String(format: "%.3f", Double(ns) / 1e6) }
     let ns = s.records.records.map(\.ns).sorted()
     func pct(_ q: Double) -> String { ns.isEmpty ? "-" : ms(ns[Swift.min(ns.count - 1, Int(Double(ns.count) * q))]) }
     let all = s.all
-    let per = (1..<s.byWorkerCount.count).map { "\(s.byWorkerCount[$0])/\(unsafe String(format: "%.1f", Double(s.byWorkerNs[$0]) / 1e6))" }
+    let per = (1..<Swift.max(1, s.byWorkerCount.count - 1)).map { "\(s.byWorkerCount[$0])/\(unsafe String(format: "%.1f", Double(s.byWorkerNs[$0]) / 1e6))" }
     return [
         ("stalls", "\(all.count)"), ("stallMs", ms(all.ns)), ("stallP50ms", pct(0.5)), ("stallP99ms", pct(0.99)),
         ("stallMaxMs", ms(all.maxNs)), ("stallsJustified", "\(all.justified)"),
@@ -799,7 +803,10 @@ func fallbackSummary(_ rs: [FallbackRecord]) -> String {
         let phase = ["idle", "marking", "sweeping", "swept"][Int(r.phase.rawValue)]
         let trig = r.trigger.map { ["floor", "entries", "predictor", "forced", "entryRate", "stall"][Int($0.rawValue)] } ?? "-"
         let who = ["main", "stall", "inStop", "noMarker", "background"][Int(r.requester.rawValue)]
-        return [cause, who, "\(r.worker)", "\(r.justifyingCycle)", unsafe String(format: "%.1f", Double(r.stalledNs) / 1e6),
+        let live = r.justifyingMarkedBytes == 0 ? "-"
+            : pc(Double(r.justifyingMarkedBytes), Double(r.blocksInUse) * Double(BlockHeap.blockBytes))
+        let by = ["-", "cycle\(r.justifyingCycle)", "full", "nostart", "start"][Int(r.justifiedBy.rawValue)]
+        return [cause, who, "\(r.worker)", by, unsafe String(format: "%.1f", Double(r.stalledNs) / 1e6), live,
                 phase, trig, unsafe String(format: "%.1f", Double(r.sinceCycleStartNs) / 1e6),
                 unsafe String(format: "%.1f", Double(r.sinceLastApplyNs) / 1e6), "\(r.cyclesStarted)",
                 unsafe String(format: "%.0f", r.sweptFraction * 100), pc(Double(r.highWater), Double(r.entryCapacity)),
@@ -831,6 +838,7 @@ func relocationReport(_ vm: VM) -> [(String, String)] {
     let selecting = totals.selecting
     return [
         ("reloc", "on"), ("relocPlanned", "\(c.cyclesPlanned)"), ("relocCycles", "\(c.cyclesSelected)"),
+        ("relocReserveCycles", "\(c.reserveToSpaceCycles)"), ("relocSkippedForStalls", "\(c.skippedForStalls)"),
         ("relocCandidates", "\(c.candidates)"), ("relocSelected", "\(c.blocksSelected)"), ("relocCapped", "\(c.capped)"),
         ("relocToMoveMB", f(Double(c.bytesToMove) / 1e6)), ("relocExpectedMB", f(Double(c.expectedReclaimBytes) / 1e6)),
         ("relocMovedObjects", "\(c.objectsMoved)"), ("relocMovedMB", f(Double(c.bytesMoved) / 1e6)),

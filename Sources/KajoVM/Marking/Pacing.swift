@@ -98,12 +98,12 @@ func cycleRecordAtEnd(_ vm: VMPointer, _ mk: MarkingPointer, _ r: inout CycleRec
 /// falls back, and its fallback is justified until `stallFallbackDone`).
 /// Nothing else ends it, a clock least of all. A run due full collection
 /// (the reserve's or a failed verifier's) is run here as a poll would.
-/// nil: this worker does not stall (the main worker, a VM with no marker
-/// thread, no pending-root slot for `held`, the test switch `noStalls`).
+/// nil: this worker does not stall (the main worker, the host worker, a VM
+/// with no marker thread, no pending-root slot for `held`, the test switch
+/// `noStalls`).
 func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallResource, held: Oop = .none,
                        available: () -> Bool) -> StallOutcome? {
-    guard unsafe w.pointee.index != 0 && w.pointee.index < vm.pointee.workerCount, unsafe stallsEnabled(vm),
-          let mk = unsafe vm.pointee.marking else { return nil }
+    guard unsafe isBackgroundWorker(vm, w), unsafe stallsEnabled(vm), let mk = unsafe vm.pointee.marking else { return nil }
     let h = held == .none ? -1 : unsafe registerPending(vm, held)
     if held != .none && h < 0 { return nil }
     defer { if h >= 0 { unsafe unregisterPending(vm, h) } }
@@ -114,6 +114,7 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
     let c0 = unsafe mk.cycleNow
     let applies0 = unsafe log.pointee.counters.applies
+    let fulls0 = unsafe vm.pointee.om.gc.pointee.counters.collections
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)
     unsafe mk.pointee.stalls.pointee.stalledNow += 1
@@ -124,6 +125,7 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
     var started = 0
     var applies: UInt64 = 0
     var sweepStopCycle = UInt64.max
+    var why = StallJustification.none
     while true {
         unsafe pthread_mutex_lock(vm.pointee.safepointLock)
         let g = unsafe sp.pointee.progress
@@ -132,10 +134,17 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
         let last = unsafe log.pointee.lastAppliedCycle
         let justified = sw.stallJustifiedByRunningCycle ? last >= c0 && last > 0 : last > c0
         applies = unsafe log.pointee.counters.applies &- applies0
+        // A full collection ran meanwhile (another's fallback, a requested
+        // one, an old-space operation): it abandoned any cycle the stall
+        // waited for and left nothing more to collect; with the resource
+        // still missing the heap is full, and module 4's out-of-memory
+        // rule follows (justified, naming no cycle).
+        let fulled = unsafe vm.pointee.om.gc.pointee.counters.collections != fulls0
         unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
         if available() { break }
-        if justified {
+        if justified || fulled {
             outcome = .justified
+            why = justified ? .cycle : .fullCollection
             break
         }
         if unsafe fullCollectionDue(vm) {
@@ -163,6 +172,7 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
             if unsafe vm.pointee.young == nil, let n = unsafe vm.pointee.nursery,
                unsafe n.pointee.om.blocksCommitted + youngGenerationBlocks(n) > n.pointee.om.hardLimitBlocks {
                 outcome = .justified
+                why = .noCycleCanStart
                 break
             }
             started += 1
@@ -183,7 +193,11 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
     unsafe st.pointee.note(StallRecord(worker: w.pointee.index, resource: resource, outcome: outcome, ns: dt,
                                        applies: applies, startedCycles: started))
     unsafe st.pointee.cyclesStarted &+= UInt64(started)
-    if outcome == .justified { unsafe st.pointee.justified[w.pointee.index] = true }
+    if outcome == .justified {
+        unsafe st.pointee.justified[w.pointee.index] = true
+        unsafe st.pointee.beganAt[w.pointee.index] = why == .cycle ? c0 : .max
+        unsafe st.pointee.justifiedBy[w.pointee.index] = why
+    }
     unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
     return outcome
 }
@@ -234,7 +248,29 @@ private func startCycleForStall(_ vm: VMPointer, _ w: WorkerPointer, _ mk: Marki
 private func setStallJustified(_ vm: VMPointer, _ mk: MarkingPointer, _ w: WorkerPointer, _ on: Bool) {
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)
     unsafe mk.pointee.stalls.pointee.justified[w.pointee.index] = on
+    if on {
+        unsafe mk.pointee.stalls.pointee.beganAt[w.pointee.index] = .max
+        unsafe mk.pointee.stalls.pointee.justifiedBy[w.pointee.index] = .cycleStart
+    }
     unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+}
+
+/// Allocation stalls, part 4: a stalled worker waits on the current cycle:
+/// one stalls now, or a stall began since its initial mark (world stopped).
+func cycleWaitedOn(_ vm: VMPointer, _ mk: MarkingPointer) -> Bool {
+    let since = unsafe mk.pointee.log.pointee.currentRecord?.waitsAtStart ?? 0
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
+    let s = unsafe mk.pointee.stalls.pointee
+    return s.stalledNow > 0 || s.all.count > since
+}
+
+/// A background worker: not the main worker (0), not the host worker (the
+/// last, entered by whatever thread calls into the VM, the shells' main
+/// thread among them), not the marker or the young collector.
+func isBackgroundWorker(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
+    let i = unsafe w.pointee.index
+    return unsafe i != 0 && i < vm.pointee.workerCount - 1
 }
 
 /// Background workers stall in this VM: a marker thread to wait for (or
@@ -247,9 +283,10 @@ func stallsEnabled(_ vm: VMPointer) -> Bool {
 }
 
 /// Who a full collection about to run is for, from the worker that asks
-/// (nil: an operation in a stop, the host, the marker).
+/// (nil, the host worker, the marker or the young collector: an operation
+/// in a stop or the host's, `inStop`).
 func fallbackRequester(_ vm: VMPointer, _ w: WorkerPointer?) -> FallbackRequester {
-    guard let w = unsafe w, unsafe w.pointee.index < vm.pointee.workerCount else { return .inStop }
+    guard let w = unsafe w, unsafe w.pointee.index < vm.pointee.workerCount - 1 else { return .inStop }
     if unsafe w.pointee.index == 0 { return .main }
     guard unsafe stallsEnabled(vm), let mk = unsafe vm.pointee.marking else { return .noMarker }
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)

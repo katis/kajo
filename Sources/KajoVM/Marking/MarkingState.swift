@@ -447,6 +447,11 @@ struct FallbackRecord: Sendable {
     var worker = -1
     var justifyingCycle: UInt64 = 0
     var stalledNs: UInt64 = 0
+    /// The justifying cycle's marked (live) bytes: against the blocks in
+    /// use they tell a full heap from a fragmented one.
+    var justifyingMarkedBytes: UInt64 = 0
+    /// What justified it (a requester `stall`).
+    var justifiedBy = StallJustification.none
 }
 
 /// Allocation stalls: who a fallback is for. Every value but `background`
@@ -476,6 +481,23 @@ enum StallResource: UInt8, Sendable {
     /// Room under the soft limit, or a run of blocks, for an old (large)
     /// allocation.
     case old
+}
+
+/// Allocation stalls: what justified a stall's fallback.
+enum StallJustification: UInt8, Sendable {
+    case none
+    /// A cycle begun after the stall began completed and was applied.
+    case cycle
+    /// A full collection ran meanwhile (another's fallback or request, an
+    /// old-space operation): it abandoned the cycle and collected all there
+    /// was; the resource is still missing (a full heap).
+    case fullCollection
+    /// The stop-the-world young mode: no cycle could start, its scavenge
+    /// having no room for one young generation below the hard limit.
+    case noCycleCanStart
+    /// The stop-the-world young mode: the scavenge that starts a cycle for
+    /// the stall kept objects (the reserve's fallback).
+    case cycleStart
 }
 
 /// Allocation stalls: how a stall ended.
@@ -519,6 +541,13 @@ struct StallLog {
     var byWorkerNs: [UInt64]
     /// Each worker's last stall's time (the fallback record's).
     var lastNs: [UInt64]
+    /// The cycle each worker's justified stall began in (its `cycleNow`
+    /// then; `.max`: a justification that names no cycle, a cycle-start
+    /// scavenge's or one with no cycle able to start). A fallback for that
+    /// worker is justified only by a cycle numbered above it.
+    var beganAt: [UInt64]
+    /// What justified each worker's stall (`StallJustification`).
+    var justifiedBy: [StallJustification]
     /// A background worker whose stall was justified, until its
     /// allocation ends: its fallbacks are justified.
     var justified: [Bool]
@@ -531,6 +560,8 @@ struct StallLog {
         byWorkerCount = Array(repeating: 0, count: workers)
         byWorkerNs = Array(repeating: 0, count: workers)
         lastNs = Array(repeating: 0, count: workers)
+        beganAt = Array(repeating: 0, count: workers)
+        justifiedBy = Array(repeating: .none, count: workers)
         justified = Array(repeating: false, count: workers)
     }
 

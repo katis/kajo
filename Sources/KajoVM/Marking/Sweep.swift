@@ -407,16 +407,29 @@ func noteFullCollection(_ vm: VMPointer, _ cause: FullCause, requester: Fallback
     guard let mk = unsafe vm.pointee.marking, cause != .other else { return }
     let log = unsafe mk.pointee.log
     var r = unsafe record ?? fallbackRecord(vm, cause)!
-    r.requester = requester
+    var requester = requester
     r.worker = worker
     if requester == .stall {
-        r.justifyingCycle = unsafe log.pointee.lastAppliedCycle
+        // The justification's own check: a cycle numbered above the one the
+        // stall began in completed and was applied (the broken variant
+        // `stallJustifiedByRunningCycle` lets the running one count, and
+        // lands here as unjustified).
+        let last = unsafe log.pointee.lastAppliedCycle
+        r.justifyingCycle = last
         unsafe pthread_mutex_lock(mk.pointee.waitsLock)
         if unsafe worker >= 0 && worker < mk.pointee.stalls.pointee.lastNs.count {
             r.stalledNs = unsafe mk.pointee.stalls.pointee.lastNs[worker]
+            let began = unsafe mk.pointee.stalls.pointee.beganAt[worker]
+            r.justifiedBy = unsafe mk.pointee.stalls.pointee.justifiedBy[worker]
+            if began != .max && !(last > began) { requester = .background }
+            if began == .max { r.justifyingCycle = 0 }
         }
         unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+        if r.justifyingCycle > 0, let c = unsafe log.pointee.records.records.last(where: { $0.number == r.justifyingCycle }) {
+            r.justifyingMarkedBytes = c.markedBytes
+        }
     }
+    r.requester = requester
     unsafe log.pointee.counters.fallbacks &+= 1
     switch r.phase {
     case .idle: unsafe log.pointee.counters.fallbacksIdle &+= 1

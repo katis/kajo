@@ -24,7 +24,7 @@ func collectOwnNursery(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, h
     // collector, and a stall a cycle justified is followed by a full
     // collection, after which the promise may take the reserve as the main
     // worker's does (module 4's out-of-memory rule then applies).
-    let stalls = unsafe k != 0 && stallsEnabled(vm)
+    let stalls = unsafe isBackgroundWorker(vm, w) && stallsEnabled(vm)
     var justified = false
     defer { if justified { unsafe stallFallbackDone(vm, w) } }
     while true {

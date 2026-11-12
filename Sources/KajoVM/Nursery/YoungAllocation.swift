@@ -231,8 +231,14 @@ func fullCollection(_ vm: VMPointer, _ stop: StopContext) {
     // begins with may itself cross the soft limit and request another;
     // the ring's records showed that request run 300 to 400 ms later as a
     // second fallback with old space at 15 percent of the limit. A request
-    // that this collection answered is withdrawn.
-    if let n = unsafe n, !om.isOverSoftLimit { unsafe n.pointee.fullRequested.pointee.store(false, ordering: .relaxed) }
+    // that this collection answered is withdrawn. Allocation stalls: also
+    // when old space stays past the limit. A promote-all that kept objects
+    // (old space full of live data) requested the collection again, and
+    // every poll of every worker ran it, forever: the full-heap test's
+    // program never ended in 120 s on the starting commit in either young
+    // mode. The next scavenge that keeps objects asks again, and the
+    // allocation's out-of-memory rule counts those.
+    if let n = unsafe n { unsafe n.pointee.fullRequested.pointee.store(false, ordering: .relaxed) }
 }
 
 /// The sweep stop, part 4: with concurrent marking, a mark-sweep that
