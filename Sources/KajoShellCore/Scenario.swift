@@ -162,6 +162,7 @@ import KajoVM
         // (part 5's slowed marker).
         o.stalls = options.string("stalls", "on") != "off"
         o.markerSlowdown = options.int("markerslow", 1)
+        o.stallRelocation = ["plain": 0, "reserve": 1, "skip": 2][options.string("stallreloc", "reserve")] ?? 1
         // The development answers: a scenario that serves (debugstop=1,
         // protocol=, mode=serve) is a host a debugger can come to; every
         // other scenario reports and ends an unhandled error.

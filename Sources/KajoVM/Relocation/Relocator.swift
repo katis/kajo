@@ -61,7 +61,25 @@ func relocationAtFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64)
     let config = unsafe r.pointee.config
     let everyLive = config.stress.contains(.relocateEveryLiveBlock)
     let limit = UInt64(config.threshold * Double(blockBytes))
-    let free = Swift.max(0, om.softLimitBlocks - inUse)
+    // Allocation stalls, part 4 (docs/modules/allocation-stalls.md): a
+    // cycle a stalled worker waits on runs with old space at its soft
+    // limit, where the cap below (a fraction of the free blocks under the
+    // limit) leaves relocation almost nothing to move, and on the ring
+    // relocation is what frees blocks. `stallRelocation`: 1 its to-space
+    // may come from the reserve above the limit (the collector's own) and
+    // the cap counts those blocks; 2 such a cycle does not relocate.
+    let mode = unsafe mk.pointee.config.testSwitches.stallRelocation
+    let waited = unsafe mode != 0 && cycleWaitedOn(vm, mk)
+    if waited && mode == 2 {
+        unsafe st.pointee.toSpaceFromReserve = false
+        unsafe st.pointee.counters.skippedForStalls &+= 1
+        return
+    }
+    let fromReserve = waited && mode == 1
+    unsafe st.pointee.toSpaceFromReserve = fromReserve
+    if fromReserve { unsafe st.pointee.counters.reserveToSpaceCycles &+= 1 }
+    let free = fromReserve ? Swift.max(0, om.hardLimitBlocks - om.blocksCommitted)
+        : Swift.max(0, om.softLimitBlocks - inUse)
     let capBytes = UInt64(config.cap * Double(free)) &* blockBytes
     let stamp = UInt32(truncatingIfNeeded: cycle)
     var rec = RelocationCycleRecord()
@@ -343,7 +361,7 @@ func relocateOne(_ vm: VMPointer, _ r: RelocationPointer, _ mw: WorkerPointer, _
 func toSpace(_ r: RelocationPointer, _ bytes: UInt64) -> UInt64? {
     let ctx = unsafe r.pointee.state.pointee.context
     if unsafe ctx.state.pointee.top &+ bytes > ctx.state.pointee.end {
-        if unsafe !r.pointee.om.refillBlock(ctx, bytes: bytes) { return nil }
+        if unsafe !r.pointee.om.refillBlock(ctx, bytes: bytes, reserve: r.pointee.state.pointee.toSpaceFromReserve) { return nil }
     }
     return unsafe ctx.state.pointee.top
 }

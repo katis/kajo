@@ -42,6 +42,10 @@ struct RelocationCycleRecord: Sendable {
 
 /// Counters of every cycle so far.
 struct RelocationCounters: Sendable {
+    /// Allocation stalls, part 4: cycles a stall waited on whose to-space
+    /// could come from the reserve, and those that did not relocate.
+    var reserveToSpaceCycles: UInt64 = 0
+    var skippedForStalls: UInt64 = 0
     var cyclesPlanned: UInt64 = 0
     var cyclesSelected: UInt64 = 0
     var candidates: UInt64 = 0
@@ -131,6 +135,10 @@ struct RelocationCounters: Sendable {
     /// Density at the last final mark: marked bytes over in-use bytes.
     var lastDensity = 0.0
     var haveDensity = false
+    /// Allocation stalls, part 4: this cycle's to-space may take blocks
+    /// above the soft limit (the reserve), the cycle being one a stalled
+    /// worker waits on; and the passes selected that way.
+    var toSpaceFromReserve = false
 }
 
 /// The VM's relocation state.

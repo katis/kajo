@@ -157,4 +157,12 @@ struct MarkingTestSwitches: Sendable {
     /// and sweeping this many times over (1: off); it stands for a mutator
     /// that many times faster. Counted (`markerSlowdownRepeats`).
     var markerSlowdown = 1
+    /// Allocation stalls, part 4's candidates for a cycle a stalled worker
+    /// waits on: 0 relocation as always; 1 (kept, the default) its to-space
+    /// may come from the reserve (the cap counts the blocks up to the hard
+    /// limit): the slowed ring's throughput 3.5 to 4.2 times at 4 and 2 at
+    /// 16 times slower; 2 (discarded) no relocation in that cycle: 5 to 7
+    /// justified fallbacks a launch on the stop-the-world ring
+    /// (docs/modules/allocation-stalls.md, "Part 4").
+    var stallRelocation = 1
 }
