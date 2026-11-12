@@ -630,3 +630,5 @@ by the rule for waits on something that must come it waits 120 s now
    a launch after against 31 to 33, each a cycle started and not
    finished. A number to accept, or a target (which would need a faster
    marker or a slower mutator, not a trigger)?
+
+- Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): `waitForSweep` and `sweepWaitMs` are gone (the stall for old space: one bounded sweep stop per cycle, then an untimed wait); `sweepWaits*` left the run line for `stallsOld`, `stallOldMs`; the main worker's and a justified stall's stop finish the sweep whole.

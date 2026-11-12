@@ -312,3 +312,285 @@ said to pass there.
 3. A background Process that stalls while holding a Mutex the main thread
    waits on makes the main thread wait for the stall. Recommended: accept
    and document; it replaces a stop of the same length for everyone.
+
+## As built (2026-11-12)
+
+Starting commit efc546d. Commits, in order: 41dc7a0 (part 1, the
+instrumentation), 7b5f181 (part 2, the stall for promotion), 0f95e2c
+(part 3, one wait), c56b255 (part 5's switch), 7de6598 (part 4's kept
+candidate; it builds only with the next commit, which carries
+`cycleWaitedOn` and the options), 1d42a59 (the host worker exempt, a full
+collection ends a stall, the justification records, the full-heap
+livelock), b74ea73 (the tests), 53860b7 (`shell-report.py`,
+`check-tier-test.sh`), 5115a82 (a stall needs a running marker), and the
+docs. Raw rows, records and runs are in the hand-back's output directory
+(`baseline/`, `cheat/`, `steps/`, `slowed/`, `mac-matrix/`, `device/`,
+`comparison/`, `ab/`, `check/`).
+
+### Part 1: what the records showed
+
+Each cycle's record (`CycleRecord`, `Marking/Pacing.swift`'s
+`cycleRecordAtStart` and `cycleRecordAtEnd`; `cycleRecs` on the run line,
+`gc_cycleRecs` in the shells' rows) now carries old space in blocks at the
+snapshot and at the end, the bytes promoted while the cycle ran (every
+nursery and the main worker's alone: `promotedMainBytes` in module 4's
+participant stats by the claimed header's nursery, and in module 7's log
+under the safepoint mutex), the blocks the sweep and the relocation freed,
+the marker's CPU, wall and parked time by phase (marking, relocation,
+sweeping; `markerPoll` times each park), the relocation pass's wall and
+CPU time, and the stalls and fallbacks during it. The run line gains
+`youngAllocMain` and `promotedMainMB`.
+
+The Mac's ring at 7 workers on the instrumented starting code (41dc7a0),
+three launches per young mode and engine, interleaved (`baseline/`):
+
+| ring, 10 s | fallbacks | cycles done / abandoned | cycle ms | promoted while it ran MB | marked MB | marked + 2 x promoted MB | cycles over the soft limit (629 MB) | marking CPU / wall / parked ms |
+|---|---|---|---|---|---|---|---|---|
+| `young=stw` interpreted | 9, 9, 11 | 34/7, 36/7, 20/11 | 218 to 247 | 256 to 260 | 84 to 87 | 599 to 606 | 14 of 34, 19 of 36, 7 of 20 | 72-74 / 158-193 / 84-113 |
+| `young=stw` native | 17, 16, 17 | 22/16, 28/13, 20/16 | 200 to 211 | 283 to 291 | 85 to 86 | 652 to 667 | 20 of 22, 25 of 28, 18 of 20 | 65-68 / 153-166 / 89-96 |
+| `young=local`, `offload` interpreted | 0 | 86 to 87 / 0 | 116 to 120 | 168 to 174 | 82 to 83 | 417 to 431 | 0 | 78-80 / 82-84 / 0 |
+| `young=local`, `offload` native | 0 | 76 to 91 / 0 | 120 to 144 | 199 to 226 | 82 to 84 | 481 to 533 | 0, 1 or 3 | 80-91 / 83-106 / 0 |
+
+The inequality held as the brief wrote it: under the oracle the marker is
+parked in the scavenges for more than half its marking wall time, the
+cycle takes 200 to 250 ms, the promotion while it runs is 256 to 291 MB,
+and live + 2 x promotion passes the soft limit in most cycles (in all but
+2 to 3 per launch natively). The shipping modes sat at 417 to 533 MB of
+629. Right too: the main worker's promotion is negligible (0.1 to 0.3 MB a
+cycle; `main MB/cycle` in `notes.md`).
+
+What the brief did not have: **relocation, not the sweep, frees the ring's
+blocks.** The sweep freed 142 to 431 blocks a cycle and the relocation
+3509 to 9834 (`notes.md`, "Blocks freed per completed cycle"): a
+mark-sweep frees whole blocks only and the ring keeps one node in twenty
+scattered through old space. That decided part 4.
+
+**The cheating build** (`cheat/cheat.patch`, not committed): a background
+worker that would cross the soft limit (module 7: the blocks in use, those
+promised and its Y; module 4: half the reserve) sleeps 100 µs at a time,
+parking for stops and servicing rounds, while a cycle runs. Same rows,
+three launches each (`cheat/`): `young=stw` 0 fallbacks in all six
+launches (interpreted 4, 6, 3 frames missed; native 3, 5, 3; against 189 to
+309 and 328 to 350), the shipping modes unchanged (0 stalls). Its cost:
+background young allocations (a proxy of ring iterations, three young
+allocations an iteration) 89.1 to 90.5 million against 80.5 to 103.2
+interpreted and 83.1 to 84.1 against 98.9 to 105.3 natively. The
+checkpoint passed: the rule gives the guarantee on the Mac's oracle row,
+and nothing in the records said it could not.
+
+### The rule as built
+
+**The stall** (`Marking/Pacing.swift`, `stallForCollector`). A background
+worker (any but the main worker, 0, and the host worker, the last: the
+host worker is entered by whatever thread calls into the VM, the shells'
+main thread among them) that needs a resource it cannot have without
+crossing a limit, outside every stop, its registers flushed, no lock held,
+no young collection open, the object it holds (if any) a pending root:
+
+1. raises the marker: the policy's flag (`wantUserInitiated`) and a QoS
+   override of the marker thread to user-initiated from the stalling
+   thread for as long as it waits (`pthread_override_qos_class_start_np`
+   on the thread named by the Mach port the marker stores itself;
+   `markerOverrides`, one per stall);
+2. loops: asks `available()` (outside the safepoint mutex: it may take
+   the pools' lock; for an old allocation and the entries it is the
+   allocation or the stash's refill itself); ends `justified` when a
+   cycle numbered above the one current when the stall began has been
+   applied (`MarkingLog.lastAppliedCycle`, written in the apply's stop),
+   or when a full collection ran meanwhile; runs a requested full
+   collection as a poll would; for entries and old space, takes the
+   bounded sweep stop once per cycle while a sweep is pending (it hands
+   swept entries over and is not a fallback); starts a cycle when none
+   runs (trigger `stall`); otherwise waits, untimed, in `waitServicing`
+   for `SafepointState.progress` to change or the phase to become idle.
+   The deadline of the worker's slice moves by the stall's time.
+
+**The promise rule** (the brief's starting position, confirmed by part 2's
+rows): module 7's collection of a background worker is promised room only
+below the soft limit, the blocks in use and every promise counted
+(`ObjectMemory.reservePromotion(blocks:belowSoftLimit:)`, `canPromise`);
+the main worker's keeps module 7's rule (the reserve up to the hard
+limit). Under `young=stw` a background worker's scavenge is gated: it
+stalls while the blocks committed and one young generation of every
+nursery (`youngGenerationBlocks`, the reserve's own unit, a half of it)
+pass the soft limit; another worker's scavenge that empties its eden
+ends the stall too. Crossing the soft limit no longer requests a full
+collection where stalls are on; where they are off (no marker thread,
+`--gc stw`, the switch `noStalls`) it still does, now recorded as cause
+`softLimit`.
+
+**The fallback**: a stall that ends `justified` leads to one full
+collection in a stop of its own (`justifiedFullCollection`), unless the
+resource is there in that stop (several workers' stalls end at the same
+apply and the first one's collection serves the others:
+`fallbacksAvoided`); after it the allocation is module 4's out-of-memory
+rule as before, and its fallbacks stay justified until the allocation
+ends. Under `young=stw` a cycle starts with a scavenge (nothing may be
+young at the snapshot but survivors, which are roots), whose promotion
+takes the reserve once per cycle started; when the reserve cannot hold one
+young generation no cycle can start and the stall is justified at once
+(`nostart`).
+
+**Measured** (part 2, `steps/p2`, three launches each): the Mac's ring
+under `young=stw` 0 fallbacks in all six launches, 1 to 8 frames missed
+(scavenge stops of 11 to 14 ms), 228 to 264 stalls a launch (p50 12.0 to
+16.8 ms interpreted, 36.8 to 38.0 natively; longest 23.6 and 50.6 ms), and
+104 to 108 million background young allocations against the starting
+code's 80.5 to 105.3: no throughput lost against the fallbacks it
+replaced, 15 to 25 percent more than the cheating build. The shipping
+modes: 0 stalls, unchanged.
+
+### The wait and its transitions
+
+`stallForCollector` waits in `waitServicing` under the safepoint mutex,
+with the condition `progress unchanged and the phase not idle`. What it
+holds while it waits: the safepoint mutex only inside `pthread_cond_wait`;
+one pending-root slot; nothing else (no pool lock, no young collection, no
+pin, no hazard slot, no body pointer: its epoch word is quiescent through
+`waitServicing`'s `epochQuiesce` and its wake stores 0 first). The
+transitions that end the wait, each signalled under the safepoint mutex:
+
+| transition | where it signals |
+|---|---|
+| a sweep's apply, whole (`applyInStop`) or partial (`publishSwept`) | in a stop; every stop's release bumps `progress` and broadcasts the safepoint condition (`stopWorld`) |
+| a cycle's end (apply) and its abandonment (`abortCycle`) | in a stop; both also set the phase idle, the wait's second condition |
+| a full collection by anyone, a scavenge by anyone (`young=stw`: it empties the waiter's eden) | in a stop |
+| an initial mark, a final mark, a sweep stop, an instances stop, a save's stop | in a stop |
+| blocks freed outside a stop (module 6's epoch frees, `tryFreePending` with `atPause` false) | `tryFreePending` bumps `progress` and broadcasts under the mutex |
+| a stop request (the waiter must park) | `stopWorld` broadcasts the condition after `requested` is set; `waitServicing` parks |
+| module 7's rounds owed | `runRound` broadcasts; `waitServicing` services |
+| shutdown | `VM.shutdown` joins the workers before the marker and the young collector, which keep running cycles until then; a stall ends by their progress |
+
+The broken variants run by hand (`broken-variants.txt`): without the park
+a stop waits for the stalled workers forever (three workers in the stall's
+wait, the stopper in `stopWorld`); without the progress bump at a stop's
+release the wait still ends, by the phase becoming idle at the apply (the
+second wake path) and by the epoch frees; without both, every background
+worker stalls with the marker idle (no cycle to mark, nobody starts one):
+a hang in 40 s.
+
+### Liveness
+
+- **Stops**: the stall waits in `waitServicing`, which parks for a
+  requested stop (`requested && inside && stopper != me`), and every stop
+  request broadcasts the condition. Its own stops (a cycle's start, the
+  sweep stop, the justified full collection, a requested full collection)
+  are requested from outside every stop with nothing held.
+- **The wait for open young collections before a stop request**: a
+  stalled worker has no collection open (module 7's stall happens before
+  `openYoungCollection` succeeds; the refused open opens nothing).
+- **Handshake rounds**: serviced in `waitServicing` (`owedLocked`).
+- **Epoch words**: quiescent while it waits, 0 then the global epoch at
+  the wake (`waitServicing`).
+- **Owed young-root scans**: a stalled worker's nursery is scanned by the
+  marker, by a stop or by its own next collection, as for any idle owner;
+  the stall opens no collection, so no scan is owed by it.
+- **The sweep's apply stop**: the marker requests it; the stalled worker
+  parks for it. The sweep stop a stall takes is bounded (`sweepStopWords`).
+- **The relocation pass**: polls between objects; a stalled worker never
+  holds an object the relocator waits for (no hazard slot, no pin).
+- **The save's hold**: a stalled worker is in a slow path, not at a resume
+  point, with a Process on it; the saver waits (`otherRunnersInside`) for
+  it to leave at a poll, which it reaches when the stall ends. The stall
+  ends by the collector's progress, and the collector never waits for the
+  saver: the saver holds the scheduler and waits outside any stop, so the
+  marker's stops and the young collector run. Tested
+  (`aSaveWaitsForAStallAndItsImageLoads`).
+- **Interrupts and terminate**: delivered at the Process's first poll
+  after the stall (tested: `aStalledProcessIsTerminated`,
+  `aStalledProcessTakesAnInterrupt`); a stall is bounded by two cycles.
+- **The slice budget**: the stalled worker's deadline moves by the stall's
+  time; the main worker and the turn-overrun bound never stall.
+- **Shutdown**: above.
+- **No collector to wait for**: stalls need the marker thread running
+  (its Mach port stored, `stallsEnabled`); a VM driven slice by slice from
+  a test thread and never started has none and does not stall (found by
+  the full suite: `ExtremeIntegerTests`' extreme `basicNew:` waited there
+  forever before 5115a82). An old allocation larger than the soft limit
+  itself never stalls.
+
+### How a cycle starts when workers stall
+
+Module 7 (`local`, `offload`): the stalling worker runs the initial-mark
+pause itself (`initialMarkPause`, trigger `stall`), no scavenge. Module 4
+(`young=stw`): the stalling worker's stop scavenges and starts the cycle
+at the scavenge's end (`startCycleInStop`, trigger `stall`); its promotion
+takes the reserve (the collector's own), once per cycle started, and
+should it find no block the full collection that follows is the stall's,
+justified (`start`). When the reserve cannot hold one young generation no
+cycle can start and the stall is justified (`nostart`). In the shells'
+rows the trigger counts `byStall` 1 to 14 a launch where the stalls
+started cycles; the floor and the predictor started the rest.
+
+### Every site, after
+
+| site | before | now |
+|---|---|---|
+| `Nursery/Scavenge.swift`, end of a scavenge | old space past the soft limit set `fullRequested` | only with stalls off (no marker thread, `noStalls`, `--gc stw`), cause `softLimit` |
+| `Nursery/Scavenge.swift`, kept objects | set `fullRequested` | sets it with `fullRequestInfo` (cause `reserve`, requester, worker) first |
+| `YoungCollection/Owner.swift`, `afterYoungCollection` | over the soft limit set `fullRequested` | only with stalls off |
+| `Marking/FinalMark.swift`, failed verifier | set `fullRequested` (then counted as a soft-limit fallback) | cause `verifier`, requester `inStop` |
+| `fullCollection` | withdrew the request only below the soft limit | always withdraws the request its own promote-all made (a full heap's workers otherwise ran full collections at every poll forever; 120 s timeouts on efc546d in both young modes, `failing-before.txt`) |
+| `youngPause`, `runDueFullCollection` | noted `.softLimit` | `noteRequestedFullCollection`: the request's cause and requester |
+| `fullCollectionDue` readers (`Poll.swift`, `Safepoint.swift`'s flag, `afterScavenge`, `afterYoungCollection`, `initialMarkPause`, `startCycleInStop`) | unchanged | unchanged: a request now means a reserve fallback or a failed verifier only, so pressure no longer suppresses the trigger |
+| the soft limit (`isOverSoftLimit`, `softLimitBlocks`) | above, plus `leavesNoHeadroom`, the relocator's cap, `wantsRaise`, `decideTrigger` | unchanged but the relocator's cap in a waited-on cycle (part 4) |
+| `promotionReserved` | `reservePromotion`, `releasePromotion` | also `canPromise`, `blocksCommitted` (read under the pools' lock) |
+| `waitForMarkingCycle`, `waitForSweep`, `allocationWaitMs`, `sweepWaitMs`, `AllocationWaits` | the large-bytes and sweep-stop waits | removed: the stall for entries and for old space |
+| `allocWaits*`, `sweepWaits*` on the run line | counted the two waits | removed; `stalls*` by resource replace them; no script or test read the old names (`FallbackPolicyTests` read `allocationWaits` and were rewritten) |
+
+### Every consumer of old space
+
+| consumer | now |
+|---|---|
+| promotion, module 7, a background worker | promise below the soft limit, else stalls |
+| promotion, module 7, the main worker | the reserve, as before |
+| promotion, module 4 scavenge requested by a background worker | gated (blocks committed + a young generation <= soft limit), else stalls |
+| promotion, module 4 scavenge by the main worker or the host, and every scavenge's promotion of other nurseries | the reserve, as before (the oracle's nature: a scavenge promotes every nursery) |
+| an old or large allocation, background worker | stalls (its retry the allocation), then the stop |
+| an old or large allocation, main worker or host | the stop as before (the sweep finished whole, else module 1's collection) |
+| entries, background worker | stalls (the sweep stop's hand-over once per cycle), then the stop |
+| relocation's to-space | under the soft limit; in a cycle a stall waits on, up to the hard limit (part 4) |
+| compaction, class definition and reshape, become, primitives 167 and 169's answers, symbols, the image build | in a stop, as before: an allocation inside a stop never stalls |
+
+### Fallbacks, records, counters
+
+A fallback's record (`FallbackRecord`, `fallbackLog`) now begins
+`cause/requester/worker/justification/stalled ms/live percent`: cause
+`reserve`, `entries`, `old`, `promotion`, `verifier`, `soft` (stalls off)
+or `other` (stress, not counted); requester `main`, `stall`, `inStop`
+(an operation in a stop, the host, the marker), `noMarker` (stalls off) or
+`background` (none of these); the justification `cycleN`, `full`,
+`nostart` or `start`; the justifying cycle's marked bytes over the blocks
+in use (a full heap reads 90 percent and more, the fragmented ring 52 to
+65). `unjustifiedFallbacks` counts the requester `background`, also when
+a stall's justifying cycle is not numbered above the cycle it began in;
+in a checked build it is a verifier failure (`VM.counters[.unjustifiedFallbacks]`).
+Counters on the run line (and as `gc_*` in the shells' rows): `stalls`,
+`stallMs`, `stallP50ms`, `stallP99ms`, `stallMaxMs`, `stallsJustified`,
+`stallsPromotion`, `stallPromotionMs`, `stallsEntries`, `stallEntriesMs`,
+`stallsOld`, `stallOldMs`, `stallsByWorker` (count/ms for workers 1 to n),
+`stallCyclesStarted`, `markerOverrides`, `stallLogDropped`, `byStall`,
+`fallbacksReserve`, `fallbacksSoftLimit`, `fallbacksPromotion`,
+`fallbacksByMain`, `fallbacksByStall`, `fallbacksInStop`,
+`fallbacksNoMarker`, `unjustifiedFallbacks`, `fallbacksAvoided`,
+`markerSlowdown`, `markerSlowSpins`, `markerSlowSpinMs`,
+`relocReserveCycles`, `relocSkippedForStalls`, `cycleRecs`,
+`youngAllocMain`, `promotedMainMB`. `scripts/shell-report.py --bar`
+gains the unjustified fallbacks and the stalls with the longest, and a
+note naming any row with an unjustified fallback; its scenario tables a
+stalls column.
+
+### The models
+
+No model is changed. A stalled worker is a participant waiting in
+`waitServicing` with no collection open, its epoch word quiescent and
+woken with the zero: the young-collection model's opener waiting for a
+wanted stop is that state already (`docs/models/young-collection.md`,
+the opener's wait and its wake), and the model has no notion of why it
+waits. The relocation model is unchanged by part 4 (which block a
+to-space comes from is not in its entry state machine). The save's hold
+(`docs/models/save-hold.md`): a stalled worker is a W whose instruction
+has not ended; the model's saver waits for `otherRunnersInside`, which
+counts it, so the save never runs mid-stall, and the stall's end does not
+depend on the saver (the marker's stops proceed during the hold). The
+argument is tested, not model checked.

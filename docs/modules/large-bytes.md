@@ -788,3 +788,5 @@ scripts/mac-shell.sh run out.txt mode=scenario scenario=photo seconds=10   # the
 DEVICE=<udid> scripts/device.sh run out.txt mode=scenario scenario=storm workers=7 seconds=10 events=1000
 KAJO_WRITE_FUZZ_SEEDS=1 swift test --filter 'mutatedImages'                # the snapshot fuzzer's seeds
 ```
+
+- Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): `waitForMarkingCycle` and `allocationWaitMs` are gone: the young allocation with an empty table and the old allocation without room stall for the collector, untimed; `allocWaits*` left the run line for `stallsEntries` and `stallsOld`.

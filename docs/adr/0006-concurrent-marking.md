@@ -276,3 +276,21 @@ commit). After, with young offload: 0 frames missed in 80 storm launches
 at 5 and 7 workers on both devices, the main thread's stopped time no
 worse than the large-bytes follow-up's final block
 (docs/modules/final-mark.md).
+
+## Built (allocation stalls) (2026-11-12)
+
+When old space or the entry table runs out, a background worker no longer
+falls back: it stalls, outside every stop, until the cycle's progress
+makes the resource available, raising the marker (the policy's flag and a
+QoS override from its own thread) and starting a cycle if none runs; a
+full collection follows only when a cycle begun after the stall began has
+completed, been applied and left the resource missing (a full or
+fragmented heap, which the record tells apart), and any other background
+fallback counts as `unjustifiedFallbacks`, a verifier failure in checked
+builds. The large-bytes follow-up's bounded waits (`waitForMarkingCycle`,
+`waitForSweep`) are this stall now, untimed. In a cycle a stall waits on,
+relocation's to-space may take the reserve (on the ring relocation frees 95
+percent of what a cycle frees). The main worker and the host never stall.
+Measured in docs/modules/allocation-stalls.md: the Mac's oracle ring row at 0
+fallbacks in both engines, the marker 4 and 16 times slower with no
+fallback.

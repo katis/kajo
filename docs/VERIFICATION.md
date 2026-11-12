@@ -86,6 +86,10 @@ by a test going red on its own.
    a provisioning failure to count and report, never to hide. In checked
    builds an invariant violation stops the VM with a report; in release
    builds it is recorded and the collector falls back to stop-the-world.
+   Since the allocation stalls (docs/modules/allocation-stalls.md) a
+   background worker's fallback must be justified by a completed cycle (or
+   a full heap) and any other counts as `unjustifiedFallbacks`, a verifier
+   failure in checked builds; the stalls themselves are telemetry.
 
 9. **Device runs.** Nothing has run on an iPhone yet. The double mapping,
    collector thread QoS on asymmetric cores, memory under jetsam and the

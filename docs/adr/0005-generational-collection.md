@@ -123,3 +123,17 @@ the experiments'):
   livelocked a stop-at-every-poll program (a slice's first budget check
   no longer preempts), and the main worker copies in the scavenges it is
   parked in (ADR 0008 takes it off the pause).
+
+## Built (allocation stalls) (2026-11-12)
+
+A scavenge that leaves old space past its soft limit no longer requests a
+full collection where a marker thread runs (docs/modules/allocation-stalls.md):
+a background worker's stop-the-world scavenge waits (stalls) while the
+blocks committed and one young generation of every nursery would pass the
+soft limit, the main worker's and the host's promote into the reserve as
+before, and a promotion that finds no block still requests the full
+collection (cause `reserve`, with who asked). With no collector to wait
+for (`--gc stw`, no marker thread) the soft-limit request stays. A full
+collection withdraws the request its own promote-all made even when old
+space stays past the limit (a full heap otherwise ran full collections at
+every poll forever).

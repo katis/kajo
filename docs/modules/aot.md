@@ -996,3 +996,5 @@ diff; the clean build's 0 warnings are the `clean-build` gate's.
   start to the image opened 32.9 to 34.2 ms interpreted and 38.5 to 41.1
   native (the module's `dlopen` and the bind: about 6 ms), first frame
   1.21 to 1.31 s either way.
+
+- Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): the oracle row's soft-limit fallbacks are gone in both engines (background workers stall below the soft limit); the measured rows are in that module's As built.

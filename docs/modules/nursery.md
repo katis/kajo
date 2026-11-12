@@ -864,3 +864,5 @@ no ARC; its only calls are the two slow paths). `rememberSlow` is 61
 instructions; `evacuate` 209 (its calls: `promotionRefill`, `memcpy`, the
 arrays' growth); `participateInScavenge` 1170 (the copy and drain loops
 inlined).
+
+- Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): past the soft limit a scavenge no longer requests a full collection where a marker thread runs; a background worker's scavenge is gated below the soft limit by one young generation and stalls otherwise; a full collection withdraws its own promote-all's request.

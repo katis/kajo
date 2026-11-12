@@ -919,3 +919,5 @@ for kernel in ivars fib alloc; do files=($K/prelude.kasm $K/lib.kasm $K/$kernel.
 # storm.sh: per old space 64 and 256, N 1 and 2, five runs of
 #   $M5 run prelude lib alloc --workers 8 --heap $heap --age $N --slice-ms 0 --gc stw|cm
 ```
+
+- Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): a background allocation that finds no room or no entry while a cycle runs stalls for the collector, untimed, instead of the bounded wait (`allocationWaitMs`, gone) and the fallback; crossing the soft limit no longer requests a full collection where a marker thread runs.

@@ -433,3 +433,14 @@ flip had cost a frame); the model checks it (`mainOpensWhileWanted`). In
 young local mode the main worker's own collections still cost frames on
 the iPhone at 7 workers (6 to 21 ms behind background acknowledgements);
 offload, the shells' default, missed none.
+
+## Built (allocation stalls) (2026-11-12)
+
+A background owner's collection is promised promotion room below the soft
+limit only (`reservePromotion(blocks:belowSoftLimit:)`); refused, the
+owner stalls for the concurrent collector in `waitServicing` (servicing
+rounds, parking for stops, quiescent for epochs) instead of stopping the
+world for module 4's scavenge, and `afterYoungCollection` no longer
+requests a full collection past the soft limit where a marker thread runs.
+The main worker's collections keep the reserve. With the marker stalling
+nobody, the shipping modes' rows are unchanged (docs/modules/allocation-stalls.md).

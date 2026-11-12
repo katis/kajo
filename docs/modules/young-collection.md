@@ -926,3 +926,5 @@ The scripts (one line per run with `key=value` pairs from `kajo run`):
 # barrier.sh <m6> <m7> <out> [runs]: for run, kernel ivars storeheavy arith fib sends, workers 1 and 8:
 #   m6; m7; m7 --stress barrieron   (kajo run prelude lib <kernel> --workers W --slice-ms 0)
 ```
+
+- Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): `openYoungCollection(belowSoftLimit:)` promises a background owner room below the soft limit only and the owner stalls when refused; `afterYoungCollection` requests no full collection past the soft limit where a marker thread runs.
