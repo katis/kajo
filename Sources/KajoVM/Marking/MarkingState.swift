@@ -113,6 +113,11 @@ enum CycleTrigger: UInt8, Sendable {
     var relocWallNs: UInt64 = 0
     var relocCpuNs: UInt64 = 0
     var inRelocation = false
+    /// Part 5's slowed marker: the thread CPU time at the last poll, and
+    /// the polls that spun and their spun CPU time.
+    var slowLastCpuNs: UInt64 = 0
+    var slowSpins: UInt64 = 0
+    var slowSpinNs: UInt64 = 0
     var qos: UInt32 = 0
     var escalations: UInt64 = 0
     var lowerings: UInt64 = 0
@@ -276,6 +281,9 @@ struct MarkingCounters: Sendable {
     var verifierRuns: UInt64 = 0
     var missed: UInt64 = 0
     var floatingBytes: UInt64 = 0
+    /// Part 5's slowed marker: polls that spun and the CPU they spun.
+    var markerSlowSpins: UInt64 = 0
+    var markerSlowSpinNs: UInt64 = 0
     var qosEscalations: UInt64 = 0
     var qosLowerings: UInt64 = 0
     /// Returns from the marker's untimed wait, and the waits.

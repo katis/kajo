@@ -126,12 +126,17 @@ extension VM {
                 c.barrierSlowCalls &+= unsafe b.slowCalls
                 c.weakKeepAlive &+= unsafe b.keepAlive
             }
+            c.markerSlowSpins = unsafe mk.pointee.marker.pointee.slowSpins
+            c.markerSlowSpinNs = unsafe mk.pointee.marker.pointee.slowSpinNs
             c.qosEscalations = unsafe mk.pointee.marker.pointee.escalations
             c.qosLowerings = unsafe mk.pointee.marker.pointee.lowerings
             c.markerWaits = unsafe mk.pointee.markerWaits.pointee.load(ordering: .relaxed)
             return c
         }
     }
+
+    /// Allocation stalls, part 5: the slowed marker's factor (1: off).
+    var markerSlowdown: Int { unsafe state.pointee.marking?.pointee.config.testSwitches.markerSlowdown ?? 1 }
 
     /// Allocation stalls: every stall so far (a copy, under the waits lock).
     var stallLog: StallLog? {

@@ -204,8 +204,36 @@ func markerPoll(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64, phase: Mar
             unsafe m.pointee.parkSweepNs &+= dt
         }
     }
+    if unsafe mk.pointee.config.testSwitches.markerSlowdown > 1 { unsafe markerSlowdownSpin(vm, mk) }
     unsafe applyWantedQoS(mk)
     return unsafe mk.cycleNow == cycle && mk.phaseNow == phase && !mk.pointee.stopping.pointee.load(ordering: .relaxed)
+}
+
+/// Allocation stalls, part 5 (`markerSlowdown` N > 1, a test switch): at
+/// each poll the marker spins N - 1 times the thread CPU time it spent
+/// since the previous poll (parked time excluded), parking for stops while
+/// it spins, so its concurrent work (tracing, relocation, sweeping) takes N
+/// times its CPU: a mutator N times faster. Counted (`slowSpins`).
+@inline(never)
+func markerSlowdownSpin(_ vm: VMPointer, _ mk: MarkingPointer) {
+    let m = unsafe mk.pointee.marker
+    let mw = unsafe mk.pointee.markerWorker
+    let now = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+    let last = unsafe m.pointee.slowLastCpuNs
+    let work = last == 0 || now < last ? 0 : now &- last
+    let target = work &* UInt64(unsafe mk.pointee.config.testSwitches.markerSlowdown &- 1)
+    if target > 0 {
+        let end = now &+ target
+        var x: UInt64 = now
+        while clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) < end {
+            for _ in 0..<256 { x = x &* 6364136223846793005 &+ 1442695040888963407 }
+            if unsafe vm.pointee.flag.pointee.load(ordering: .relaxed) & 1 != 0 { unsafe park(vm, mw) }
+        }
+        unsafe m.pointee.slowSpins &+= 1
+        unsafe m.pointee.slowSpinNs &+= target
+        if x == 1 { unsafe m.pointee.slowSpins &+= 0 }
+    }
+    unsafe m.pointee.slowLastCpuNs = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
 }
 
 /// Trace up to `limit` objects of the current cycle, inside the VM as the

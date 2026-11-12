@@ -43,6 +43,12 @@ public enum Headless {
         /// large-bytes follow-up's stop) and the entry-rate rule (part 3).
         public var sweepStopWords: Int? = nil
         public var entryRateRule = true
+        /// Allocation stalls, part 5 (a test switch): the marker's
+        /// concurrent work this many times slower (1: off).
+        public var markerSlowdown = 1
+        /// Allocation stalls: background workers never stall (`noStalls`;
+        /// the A/B and the before rows).
+        public var stalls = true
         /// Module 6: concurrent relocation (`on`, `off`), its stress flags
         /// (`everyblock`, `everycycle`), the sparse-block threshold and the
         /// to-space cap (fractions).
@@ -292,6 +298,8 @@ public enum Headless {
             if w < 0 { vc.marking.testSwitches.sweepStopUnbounded = true } else { vc.marking.sweepStopWords = w }
         }
         vc.marking.testSwitches.noEntryRateRule = !options.entryRateRule
+        vc.marking.testSwitches.markerSlowdown = Swift.max(1, options.markerSlowdown)
+        vc.marking.testSwitches.noStalls = !options.stalls
         guard options.relocation == "on" || options.relocation == "off" else { return .failure(.unsupported("--reloc: on or off")) }
         vc.relocation.enabled = options.relocation == "on"
         vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
@@ -615,6 +623,8 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
         ("cycleRecs", cycleRecordSummary(log)),
         ("byStall", "\(c.cyclesByStall)"),
+        ("markerSlowdown", "\(vm.markerSlowdown)"), ("markerSlowSpins", "\(c.markerSlowSpins)"),
+        ("markerSlowSpinMs", ms(c.markerSlowSpinNs)),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
     ] + stallReport(vm) + finalMarkReport(stops: stops, log: log) + [
         ("finalGiveUps", "\(c.finalGiveUps)"), ("finalOverruns", "\(c.finalOverruns)"),
