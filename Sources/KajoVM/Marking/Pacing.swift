@@ -217,8 +217,12 @@ func stallFallbackDone(_ vm: VMPointer, _ w: WorkerPointer) {
 private func overrideMarkerQoS(_ mk: MarkingPointer) -> pthread_override_t? {
     // The marker thread from its Mach port (an atomic it stores itself as
     // it starts; the pthread_t is the host's, written without a lock).
-    let port = unsafe mk.pointee.machThread.pointee.load(ordering: .relaxed)
-    guard port != 0, let t = pthread_from_mach_thread_np(port) else { return nil }
+    // The toolchains differ on whether `pthread_from_mach_thread_np` is an
+    // unsafe construct (Xcode's and the iOS SDK say yes, swift.org 6.4.2's
+    // macOS overlay no): the port's load in the same expression makes the
+    // `unsafe` necessary in both.
+    guard unsafe mk.pointee.machThread.pointee.load(ordering: .relaxed) != 0,
+          let t = unsafe pthread_from_mach_thread_np(mk.pointee.machThread.pointee.load(ordering: .relaxed)) else { return nil }
     let o = unsafe pthread_override_qos_class_start_np(t, QOS_CLASS_USER_INITIATED, 0)
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)
     unsafe mk.pointee.stalls.pointee.markerOverrides &+= 1
