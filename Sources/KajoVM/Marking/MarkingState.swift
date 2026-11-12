@@ -317,8 +317,6 @@ struct MarkingCounters: Sendable {
     /// full collection; the time of both kinds.
     var sweepsFinishedForEntries: UInt64 = 0
     var sweepsFinishedForOld: UInt64 = 0
-    /// Large bytes, part 2: `AllocationWaits`, copied in on read.
-    var allocationWaits = AllocationWaits()
     var sweepsFinishedForEntriesNs: UInt64 = 0
     /// The final mark on the devices: final marks that gave up at the work
     /// bound (or found a young-root scan owed) and released the world with
@@ -334,7 +332,7 @@ struct MarkingCounters: Sendable {
     /// any bound (the old behaviour: the test switch, the main worker's old
     /// allocation, a background worker whose wait for the sweep ran out).
     /// Relocation passes the bounded stop cut off, and old allocations that
-    /// waited for a sweep outside the stop are in `AllocationWaits`.
+    /// stalled for the collector are in `StallLog` (allocation stalls).
     var sweepStops: UInt64 = 0
     var sweepStopsWhole: UInt64 = 0
     var sweepStopsPartial: UInt64 = 0
@@ -401,21 +399,6 @@ struct SweepStopRecord: Sendable {
     var applyNs: UInt64 = 0
     var entriesHanded: UInt64 = 0
     var relocationCutOff = false
-}
-
-/// Large bytes, part 2: old allocations that found no room while a cycle
-/// marked and waited for its final mark: how many, their time, the
-/// longest, and those that gave up at the bound.
-struct AllocationWaits: Sendable {
-    var count: UInt64 = 0
-    var ns: UInt64 = 0
-    var maxNs: UInt64 = 0
-    var timeouts: UInt64 = 0
-    /// The sweep stop: old allocations that waited for a sweep to end
-    /// (`waitForSweep`), their time, and those that ran out.
-    var sweepCount: UInt64 = 0
-    var sweepNs: UInt64 = 0
-    var sweepTimeouts: UInt64 = 0
 }
 
 /// Large bytes, part 2: the circumstances of one fallback, taken in its
@@ -692,10 +675,9 @@ struct MarkingLog {
     let cycle: UnsafeMutablePointer<Atomic<UInt64>>
     let wantUserInitiated: UnsafeMutablePointer<Atomic<Bool>>
     let markerWaits: UnsafeMutablePointer<Atomic<UInt64>>
-    /// Large bytes, part 2: old allocations that waited for a marking
-    /// cycle (`waitForMarkingCycle`), under their own lock.
-    let waits: UnsafeMutablePointer<AllocationWaits>
-    /// Allocation stalls: every stall, under the same lock.
+    /// Allocation stalls: every stall (docs/modules/allocation-stalls.md),
+    /// under its own lock beside it (the large-bytes follow-up's bounded
+    /// waits, which it replaces, kept their tally under the same lock).
     let stalls: UnsafeMutablePointer<StallLog>
     let waitsLock: UnsafeMutablePointer<pthread_mutex_t>
     /// Large bytes: the marker thread's QoS as it last set it, for readers

@@ -7,8 +7,9 @@ import Synchronization
 // freed into pending runs (free in the table, owned by the pending list),
 // marks of the live ones cleared, the snapshot map cleared word by word.
 // Nothing reaches allocators until a pause applies it: the runs are
-// published and blocks with no live body freed. Allocation never waits for
-// a sweep; promotion uses module 4's reserve.
+// published and blocks with no live body freed. A background allocation
+// that needs them stalls for the collector (docs/modules/allocation-
+// stalls.md); the main worker's promotion uses module 4's reserve.
 
 /// Sweep the current cycle's snapshot from the cursor to the end, polling
 /// between chunks of 64 words (4096 entries) unless `inPause`. Answers true
@@ -197,45 +198,6 @@ func markingBeforeOldSpaceOperation(_ vm: VMPointer) {
     }
 }
 
-/// Large bytes, part 2: an allocation found no room (old space, or the
-/// entry table) while a cycle is marking, so the cycle is behind: the
-/// policy raises the marker and this worker waits for the final mark, at
-/// most `MarkingConfig.allocationWaitMs`, polling for stops and module 7's
-/// rounds as a primitive's long loop does (registers saved), never in a
-/// stop; `holding`, an object only the allocation holds, is a pending root
-/// meanwhile. The main worker does not wait (a frame is shorter than the
-/// wait). Answers true when the cycle has left marking (the caller tries
-/// again; a stop then finishes the sweep).
-func waitForMarkingCycle(_ vm: VMPointer, _ w: WorkerPointer, holding: Oop = .none) -> Bool {
-    guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .marking, unsafe w.pointee.index != 0 else { return false }
-    let bound = UInt64(unsafe mk.pointee.config.allocationWaitMs) &* 1_000_000
-    if bound == 0 { return false }
-    let h = holding == .none ? -1 : unsafe registerPending(vm, holding)
-    if holding != .none && h < 0 { return false }  // the pending table is full: no wait
-    defer { if h >= 0 { unsafe unregisterPending(vm, h) } }
-    unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed)
-    let cycle = unsafe mk.cycleNow
-    let t0 = nanoseconds()
-    let s = unsafe w.pointer(to: \Worker.interp)!
-    var done = false
-    while true {
-        let a = unsafe s.pointee.safepointFlag.pointee.load(ordering: .relaxed)
-        if a & 1 != 0 { unsafe park(vm, w) }
-        if a > 1 { unsafe serviceRounds(vm, w) }
-        if unsafe mk.phaseNow != .marking || mk.cycleNow != cycle { done = true; break }
-        if nanoseconds() &- t0 >= bound { break }
-        usleep(100)
-    }
-    let dt = nanoseconds() &- t0
-    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
-    unsafe mk.pointee.waits.pointee.count &+= 1
-    unsafe mk.pointee.waits.pointee.ns &+= dt
-    if unsafe dt > mk.pointee.waits.pointee.maxNs { unsafe mk.pointee.waits.pointee.maxNs = dt }
-    if !done { unsafe mk.pointee.waits.pointee.timeouts &+= 1 }
-    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
-    return done
-}
-
 /// Large bytes, part 2, bounded by the sweep stop (docs/modules/
 /// sweep-stop.md; world stopped, in a stop of kind `sweep`): the entry
 /// table is empty, or an old allocation found no room, while a cycle
@@ -246,10 +208,10 @@ func waitForMarkingCycle(_ vm: VMPointer, _ w: WorkerPointer, holding: Oop = .no
 /// is handed to the allocators and the rest is left to the marker: a
 /// partial apply (`publishSwept`, whose one-owner argument is in the
 /// module doc). Blocks are freed only by the whole apply, so an old
-/// allocation that the hand-over does not serve waits for the sweep
-/// outside the stop (a background worker, `waitForSweep`); with
-/// `bounded` false (the main worker's old allocation, a wait that ran
-/// out, the test switch `sweepStopUnbounded`) the sweep is finished here
+/// allocation that the hand-over does not serve stalls for the collector
+/// outside the stop (a background worker, `stallForCollector`); with
+/// `bounded` false (the main worker's old allocation, a justified stall's,
+/// the test switch `sweepStopUnbounded`) the sweep is finished here
 /// whatever its length, as before. Answers `.none` when no sweep was
 /// pending (the caller falls back) or under `noSweepForEntries`.
 func finishSweepInStop(_ vm: VMPointer, for cause: FullCause, bounded: Bool = true) -> SweepStopOutcome {
@@ -404,43 +366,6 @@ private func applyAheadOfCursor(_ mk: MarkingPointer) {
         }
         w &+= 1
     }
-}
-
-/// The sweep stop: an old allocation (a background worker) that a bounded
-/// sweep stop's hand-over did not serve waits, outside every stop, for the
-/// sweep to end (phase swept or the cycle over), at most
-/// `MarkingConfig.sweepWaitMs`, parking for stops and servicing module 7's
-/// rounds as `waitForMarkingCycle` does, the marker raised meanwhile;
-/// `holding` is a pending root. Answers true when the sweep ended.
-func waitForSweep(_ vm: VMPointer, _ w: WorkerPointer, holding: Oop = .none) -> Bool {
-    guard let mk = unsafe vm.pointee.marking, unsafe mk.phaseNow == .sweeping, unsafe w.pointee.index != 0 else { return false }
-    let bound = UInt64(unsafe mk.pointee.config.sweepWaitMs) &* 1_000_000
-    if bound == 0 { return false }
-    let h = holding == .none ? -1 : unsafe registerPending(vm, holding)
-    if holding != .none && h < 0 { return false }
-    defer { if h >= 0 { unsafe unregisterPending(vm, h) } }
-    unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed)
-    let cycle = unsafe mk.cycleNow
-    let t0 = nanoseconds()
-    let s = unsafe w.pointer(to: \Worker.interp)!
-    var done = false
-    while true {
-        let a = unsafe s.pointee.safepointFlag.pointee.load(ordering: .relaxed)
-        if a & 1 != 0 { unsafe park(vm, w) }
-        if a > 1 { unsafe serviceRounds(vm, w) }
-        if unsafe mk.phaseNow != .sweeping || mk.cycleNow != cycle { done = true; break }
-        if nanoseconds() &- t0 >= bound { break }
-        usleep(100)
-    }
-    let dt = nanoseconds() &- t0
-    // The counters are the stopper's (world stopped) everywhere else; this
-    // wait runs between stops, so it keeps its tally under the waits lock.
-    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
-    unsafe mk.pointee.waits.pointee.sweepCount &+= 1
-    unsafe mk.pointee.waits.pointee.sweepNs &+= dt
-    if !done { unsafe mk.pointee.waits.pointee.sweepTimeouts &+= 1 }
-    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
-    return done
 }
 
 /// Why module 4 ran a full collection.

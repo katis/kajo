@@ -40,7 +40,6 @@ extension MarkingShared {
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
             log: lined(MarkingLog(logCapacity: vm.pointee.config.logCapacity)), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
             wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
-            waits: lined(AllocationWaits()),
             stalls: lined(StallLog(workers: count, capacity: vm.pointee.config.logCapacity)), waitsLock: makeMutex(), qosNow: lined(Atomic<UInt32>(0)),
             stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag), rootScans: rootScans, rootScanRanges: ranges,
@@ -71,7 +70,6 @@ extension MarkingShared {
         unsafe unlined(s.cycle)
         unsafe unlined(s.wantUserInitiated)
         unsafe unlined(s.markerWaits)
-        unsafe unlined(s.waits)
         unsafe unlined(s.stalls)
         unsafe unlined(s.qosNow)
         unsafe freeMutex(s.waitsLock)
@@ -131,9 +129,6 @@ extension VM {
             c.qosEscalations = unsafe mk.pointee.marker.pointee.escalations
             c.qosLowerings = unsafe mk.pointee.marker.pointee.lowerings
             c.markerWaits = unsafe mk.pointee.markerWaits.pointee.load(ordering: .relaxed)
-            unsafe pthread_mutex_lock(mk.pointee.waitsLock)
-            c.allocationWaits = unsafe mk.pointee.waits.pointee
-            unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
             return c
         }
     }

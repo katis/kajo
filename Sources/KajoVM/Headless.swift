@@ -602,8 +602,6 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("sweepStopsPartial", "\(c.sweepStopsPartial)"), ("sweepStopsUnbounded", "\(c.sweepStopsUnbounded)"),
         ("sweepStopP50ms", pct(sweepStops, 0.5)), ("sweepStopMaxMs", sweepStops.max().map(ms) ?? "-"),
         ("sweepStopRelocCutOffs", "\(c.sweepStopRelocCutOffs)"),
-        ("sweepWaits", "\(c.allocationWaits.sweepCount)"), ("sweepWaitMs", ms(c.allocationWaits.sweepNs)),
-        ("sweepWaitTimeouts", "\(c.allocationWaits.sweepTimeouts)"),
         ("byEntryRate", "\(c.cyclesByEntryRate)"), ("entryRateRaises", "\(vm.counters[.entryRateRaises])"),
         ("sweepStopLog", sweepStopSummary(vm.sweepStopLog)),
         // Part 3's two rates, over the cycles the log kept: entries consumed
@@ -614,8 +612,6 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("sweepRateP50Ms", pctD(done.filter { $0.sweepNs > 0 }.map { Double($0.snapshotEntries) / (Double($0.sweepNs) / 1e9) }, 0.5)),
         ("sweepRateMinMs", done.filter { $0.sweepNs > 0 }.map { Double($0.snapshotEntries) / (Double($0.sweepNs) / 1e9) }.min().map { f($0 / 1e6) } ?? "-"),
         ("oldEntriesAtTriggerP50", pctD(log.map { Double($0.oldEntriesAtStart) * 1e6 / Double(Swift.max(1, vm.inspect { $0.entryCapacity })) }, 0.5)),
-        ("allocWaits", "\(c.allocationWaits.count)"), ("allocWaitMs", ms(c.allocationWaits.ns)),
-        ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
         ("cycleRecs", cycleRecordSummary(log)),
         ("byStall", "\(c.cyclesByStall)"),

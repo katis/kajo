@@ -83,7 +83,6 @@ extension Machine {
         // them: out of memory, a failure the program sees.
         var collected = false
         var noRoom = 0
-        var waitedForCycle = false
         var justified = false
         defer { if justified { unsafe stallFallbackDone(vm, w) } }
         while true {
@@ -116,12 +115,27 @@ extension Machine {
                 unsafe state.pointee.counters.collectionsTriggered &+= 1
                 continue
             }
-            // Large bytes, part 2: the table is empty while a cycle marks:
-            // wait (bounded) for its final mark, as an old allocation does;
-            // the stop below then finishes the sweep. Once per allocation.
-            if tableFull && !waitedForCycle {
-                waitedForCycle = true
-                if unsafe waitForMarkingCycle(vm, w, holding: extra) { continue }
+            // Allocation stalls: the table is empty: a background worker
+            // stalls for the collector (its sweep stop hands over swept
+            // entries; an apply publishes the rest), the retry the stash's
+            // refill; a stall a cycle justified leads to the stop below
+            // (the sweep finished there, else module 1's full collection).
+            // The broken variant `stallIgnoresEntries` answers at once.
+            if tableFull && !justified {
+                let ignore = unsafe vm.pointee.marking?.pointee.config.testSwitches.stallIgnoresEntries ?? false
+                let outcome = unsafe stallForCollector(vm, w, .entries, held: extra) {
+                    if ignore { return true }
+                    if unsafe om.refillStash(stash, atLeast: 1024) {
+                        unsafe a.pointee.stashRefills &+= 1
+                        return true
+                    }
+                    return false
+                }
+                if outcome == .available {
+                    if ignore { justified = true }  // the broken variant: straight to the fallback
+                    continue
+                }
+                if outcome == .justified { justified = true }
             }
             // Allocation stalls (the stop-the-world young mode): a background
             // worker whose scavenge could promote past the soft limit (every

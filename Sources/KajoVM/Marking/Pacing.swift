@@ -31,12 +31,11 @@ private func relocationBlocksFreed(_ vm: VMPointer) -> UInt64 {
     return c.freedByEpoch &+ c.freedAtPause
 }
 
-/// Allocations that waited for the collector so far (under the waits lock).
+/// Stalls so far (under the waits lock).
 private func waitsSoFar(_ mk: MarkingPointer) -> UInt64 {
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)
     defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
-    let w = unsafe mk.pointee.waits.pointee
-    return w.count &+ w.sweepCount
+    return unsafe mk.pointee.stalls.pointee.all.count
 }
 
 /// A new cycle's record at its initial mark (world stopped).
@@ -103,9 +102,8 @@ func cycleRecordAtEnd(_ vm: VMPointer, _ mk: MarkingPointer, _ r: inout CycleRec
 /// thread, no pending-root slot for `held`, the test switch `noStalls`).
 func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallResource, held: Oop = .none,
                        available: () -> Bool) -> StallOutcome? {
-    guard unsafe w.pointee.index != 0 && w.pointee.index < vm.pointee.workerCount,
-          let mk = unsafe vm.pointee.marking, unsafe mk.pointee.config.markerThread,
-          unsafe !mk.pointee.config.testSwitches.noStalls else { return nil }
+    guard unsafe w.pointee.index != 0 && w.pointee.index < vm.pointee.workerCount, unsafe stallsEnabled(vm),
+          let mk = unsafe vm.pointee.marking else { return nil }
     let h = held == .none ? -1 : unsafe registerPending(vm, held)
     if held != .none && h < 0 { return nil }
     defer { if h >= 0 { unsafe unregisterPending(vm, h) } }
@@ -125,6 +123,7 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
     var outcome = StallOutcome.available
     var started = 0
     var applies: UInt64 = 0
+    var sweepStopCycle = UInt64.max
     while true {
         unsafe pthread_mutex_lock(vm.pointee.safepointLock)
         let g = unsafe sp.pointee.progress
@@ -141,6 +140,18 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
         }
         if unsafe fullCollectionDue(vm) {
             unsafe runDueFullCollection(vm, w)
+            continue
+        }
+        // Entries and an old allocation: a sweep that has freed entries
+        // not yet handed over is handed over in the bounded sweep stop (not
+        // a fallback; docs/modules/sweep-stop.md), once per cycle; blocks
+        // come only with the whole apply, which the marker asks for.
+        let phase = unsafe mk.phaseNow
+        if resource != .promotion && (phase == .sweeping || phase == .swept), unsafe sweepStopCycle != mk.cycleNow {
+            sweepStopCycle = unsafe mk.cycleNow
+            unsafe stopWorld(vm, w, retry: true, keeping: held == .none ? [] : [held]) { _ in
+                _ = unsafe finishSweepInStop(vm, for: resource == .entries ? .entries : .oldAllocation)
+            }
             continue
         }
         if unsafe mk.phaseNow == .idle {
@@ -226,11 +237,13 @@ private func setStallJustified(_ vm: VMPointer, _ mk: MarkingPointer, _ w: Worke
     unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
 }
 
-/// Background workers stall in this VM: a marker thread to wait for, and
-/// the test switch `noStalls` off.
+/// Background workers stall in this VM: a marker thread to wait for (or
+/// the tests' switch `stallsWithoutMarker`, where the test thread is the
+/// marker), and the test switch `noStalls` off.
 func stallsEnabled(_ vm: VMPointer) -> Bool {
     guard let mk = unsafe vm.pointee.marking else { return false }
-    return unsafe mk.pointee.config.markerThread && !mk.pointee.config.testSwitches.noStalls
+    let c = unsafe mk.pointee.config
+    return (c.markerThread || c.testSwitches.stallsWithoutMarker) && !c.testSwitches.noStalls
 }
 
 /// Who a full collection about to run is for, from the worker that asks
@@ -238,8 +251,7 @@ func stallsEnabled(_ vm: VMPointer) -> Bool {
 func fallbackRequester(_ vm: VMPointer, _ w: WorkerPointer?) -> FallbackRequester {
     guard let w = unsafe w, unsafe w.pointee.index < vm.pointee.workerCount else { return .inStop }
     if unsafe w.pointee.index == 0 { return .main }
-    guard let mk = unsafe vm.pointee.marking, unsafe mk.pointee.config.markerThread,
-          unsafe !mk.pointee.config.testSwitches.noStalls else { return .noMarker }
+    guard unsafe stallsEnabled(vm), let mk = unsafe vm.pointee.marking else { return .noMarker }
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)
     defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
     return unsafe mk.pointee.stalls.pointee.justified[w.pointee.index] ? .stall : .background

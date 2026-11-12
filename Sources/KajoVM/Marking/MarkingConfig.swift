@@ -24,10 +24,6 @@ struct MarkingConfig: Sendable {
     /// The marker runs at utility QoS and is raised to user-initiated while
     /// old-space headroom (free fraction of the soft limit) is below this.
     var escalateBelow = 0.25
-    /// Large bytes, part 2: an old allocation that finds no room while a
-    /// cycle marks waits this long at most for its final mark (a
-    /// background worker; the main worker never waits). 0: no wait.
-    var allocationWaitMs = 100
     /// The final mark on the devices (docs/modules/final-mark.md): the
     /// units of tracing work (an object traced, a large object's chunk as
     /// `MarkChunk.weight`, an SATB entry taken) a final mark may do inside
@@ -53,10 +49,6 @@ struct MarkingConfig: Sendable {
     /// Part 1's records found 3.2 to 12 million pending in every
     /// stop (793 to 3003 runs of 4096) in every stop.
     var sweepStopEnoughEntries = 1 << 16
-    /// An old allocation (a background worker) that a bounded sweep stop
-    /// could not serve waits this long at most, outside the stop, for the
-    /// sweep to end; past it the next stop finishes the sweep whole.
-    var sweepWaitMs = 100
     /// The marker thread. Off: nothing marks unless a test drives it
     /// (`VM.markStep`, `finalMark`, `sweep`): the manual mode of the tests.
     var markerThread = true
@@ -150,6 +142,9 @@ struct MarkingTestSwitches: Sendable {
     /// Allocation stalls: no background worker stalls (the fallbacks of
     /// before; the A/B and the failing-before runs).
     var noStalls = false
+    /// Tests that drive marking by hand (the test thread is the marker):
+    /// background workers stall though there is no marker thread.
+    var stallsWithoutMarker = false
     /// A broken variant (tests only): the cycle already running when a
     /// stall began justifies its fallback; the fallback must count as
     /// unjustified or fail the verifier.

@@ -94,11 +94,11 @@ private func policyWantsRaise(entriesRule: Bool) throws -> (Bool, MarkingCounter
 /// (decided only at the initial mark, when the table was nearly empty),
 /// it never does.
 private func raisedDuringTheCycle(rule: Bool) throws -> (Bool, Bool, MarkingCounters) {
-    // No allocation wait: the waiting allocation raises the marker too,
-    // and this test is about the policy's own decision.
+    // No stall: a stalling allocation raises the marker too, and this
+    // test is about the policy's own decision.
     let rt = try entriesRuntime(entries: 80_000, nurseryKB: 128) {
         $0.testSwitches.qosOnBlocksOnly = !rule
-        $0.allocationWaitMs = 0
+        $0.testSwitches.noStalls = true
     }
     rt.vm.startCycle()
     let atStart = rt.vm.markerWantsRaise
@@ -167,20 +167,21 @@ private func oldRoomWhileSweeping(rule: Bool) throws -> (MarkingCounters, UInt64
     #expect(b.fallbacksOldAllocation >= 1 && b.fallbacksSweeping >= 1 && bfulls >= 1, "\(b)")
 }
 
-/// An old allocation that finds no room while a cycle marks waits for its
-/// final mark (bounded) with the marker raised, then its stop finishes the
-/// sweep: no full collection. The test thread is the marker: it marks once
-/// the policy has been asked to raise it (the waiting allocation asks), on
-/// a VM whose worker runs the churn. With no wait (`allocationWaitMs` 0)
+/// An old allocation that finds no room while a cycle marks stalls for the
+/// collector (allocation stalls; until then a bounded wait for its final
+/// mark) with the marker raised, then its sweep stop finishes the sweep: no
+/// full collection. The test thread is the marker (`stallsWithoutMarker`):
+/// it marks once the policy has been asked to raise it (the stalling
+/// allocation asks), on a VM whose worker runs the churn. With no stall
 /// the allocation falls back while marking.
-private func waitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UInt64) {
+private func waitForTheCycle(stall: Bool) throws -> (MarkingCounters, UInt64, StallLog?) {
     let rt = try Runtime(largeSrc, background: 1, heapBlocks: 512, start: false, configure: { c in
         c.nursery.bytes = 1 << 20
         c.marking.enabled = true
         c.marking.markerThread = false
         c.marking.floor = 2
         c.marking.safetyFactor = 0
-        c.marking.allocationWaitMs = waitMs
+        c.marking.testSwitches.stallsWithoutMarker = stall
     })
     let soft = rt.image.om.softLimitBlocks
     let before = rt.vm.inspect { $0.blocksInUse }
@@ -190,7 +191,7 @@ private func waitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UInt64) {
     #expect(rt.phase == .marking && !rt.vm.markerWantsRaise)
     rt.start()
     let p = rt.spawn("churnLarge:", [int(Int64(n + 4))])
-    if waitMs > 0 {
+    if stall {
         // The allocation is waiting once it asked for the marker.
         #expect(eventually(underThreadSanitizer ? 600 : 60) { rt.vm.markerWantsRaise })
     } else {
@@ -205,27 +206,29 @@ private func waitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UInt64) {
     rt.vm.release(p)
     let c = rt.marking
     let fulls = rt.image.om.counters.collections
+    let stalls = rt.vm.stallLog
     rt.noFailures()
     rt.stop()
-    return (c, fulls)
+    return (c, fulls, stalls)
 }
 
 @Test func anOldAllocationWithoutRoomWhileMarkingWaitsForTheCycle() throws {
-    let (c, fulls) = try waitForTheCycle(waitMs: 60_000)
-    #expect(c.allocationWaits.count >= 1 && c.allocationWaits.timeouts == 0, "\(c.allocationWaits)")
+    let (c, fulls, s) = try waitForTheCycle(stall: true)
+    #expect((s?.old.count ?? 0) >= 1 && (s?.old.justified ?? 1) == 0, "\(String(describing: s?.old))")
     #expect(c.sweepsFinishedForOld >= 1, "\(c)")
     #expect(c.fallbacks == 0 && fulls == 0, "fallbacks \(c.fallbacks), full collections \(fulls)")
-    let (b, bfulls) = try waitForTheCycle(waitMs: 0)
-    #expect(b.allocationWaits.count == 0)
+    let (b, bfulls, bs) = try waitForTheCycle(stall: false)
+    #expect((bs?.all.count ?? 0) == 0)
     #expect(b.fallbacksOldAllocation >= 1 && b.fallbacksMarking >= 1 && bfulls >= 1, "\(b)")
 }
 
 /// The same for the entry table: the storm's last fallback on the iPhone
 /// at 7 workers came while the first cycle was still marking. The young
-/// allocation that finds the table empty waits for the final mark, then
-/// its stop finishes the sweep. With no wait it falls back while marking.
-private func entriesWaitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UInt64) {
-    let rt = try entriesRuntime(entries: 40_000) { $0.allocationWaitMs = waitMs }
+/// allocation that finds the table empty stalls for the collector, then
+/// its sweep stop finishes the sweep. With no stall it falls back while
+/// marking.
+private func entriesWaitForTheCycle(stall: Bool) throws -> (MarkingCounters, UInt64, StallLog?) {
+    let rt = try entriesRuntime(entries: 40_000) { $0.testSwitches.stallsWithoutMarker = stall }
     #expect(rt.runInt("churnLists:", 10) == 10 * 2000 * 2001 / 2)
     rt.scavenge()
     rt.vm.setGlobal(8, rt.image.nilObject)
@@ -233,7 +236,7 @@ private func entriesWaitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UIn
     #expect(rt.phase == .marking && !rt.vm.markerWantsRaise)
     rt.start()
     let p = rt.spawn("churnLists:", [int(25)])
-    if waitMs > 0 {
+    if stall {
         #expect(eventually(underThreadSanitizer ? 600 : 60) { rt.vm.markerWantsRaise })
     } else {
         #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
@@ -247,17 +250,18 @@ private func entriesWaitForTheCycle(waitMs: Int) throws -> (MarkingCounters, UIn
     rt.vm.release(p)
     let c = rt.marking
     let fulls = rt.vm.nurseryCounters.fullCollectionsRun
+    let stalls = rt.vm.stallLog
     rt.noFailures()
     rt.stop()
-    return (c, fulls)
+    return (c, fulls, stalls)
 }
 
 @Test func anEmptyEntryTableWhileMarkingWaitsForTheCycle() throws {
-    let (c, fulls) = try entriesWaitForTheCycle(waitMs: 60_000)
-    #expect(c.allocationWaits.count >= 1 && c.allocationWaits.timeouts == 0, "\(c.allocationWaits)")
+    let (c, fulls, s) = try entriesWaitForTheCycle(stall: true)
+    #expect((s?.entries.count ?? 0) >= 1 && (s?.entries.justified ?? 1) == 0, "\(String(describing: s?.entries))")
     #expect(c.sweepsFinishedForEntries >= 1, "\(c)")
     #expect(c.fallbacks == 0 && fulls == 0, "fallbacks \(c.fallbacks), full collections \(fulls)")
-    let (b, bfulls) = try entriesWaitForTheCycle(waitMs: 0)
-    #expect(b.allocationWaits.count == 0)
+    let (b, bfulls, bs) = try entriesWaitForTheCycle(stall: false)
+    #expect((bs?.all.count ?? 0) == 0)
     #expect(b.fallbacksEntries >= 1 && b.fallbacksMarking >= 1 && bfulls >= 1, "\(b)")
 }

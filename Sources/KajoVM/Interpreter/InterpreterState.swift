@@ -268,29 +268,28 @@ struct CacheEntry {
             // park for it and try again before stopping it ourselves.
             let w = unsafe workerOf(state)
             let keep = extra == .none ? [nilObject] : [nilObject, extra]
-            var waited = false
-            // The sweep stop: a bounded stop's hand-over did not serve this
-            // allocation (blocks come only with the whole apply): wait for
-            // the sweep outside the stop, once; the main worker and a wait
-            // that ran out finish the sweep whole in the stop.
-            var waitSweep = false, waitedSweep = false
+            // Allocation stalls: a background worker that finds no room
+            // stalls for the collector (docs/modules/allocation-stalls.md),
+            // its retry being the allocation itself; a stall a cycle
+            // justified leads to the stop below, once, and its fallback is
+            // justified until the allocation ends. The main worker never
+            // stalls; its stop finishes a pending sweep whole.
+            var justified = false
+            defer { if justified { unsafe stallFallbackDone(vm, w) } }
             while true {
-                if waitSweep {
-                    waitSweep = false
-                    waitedSweep = true
-                    _ = unsafe waitForSweep(vm, w, holding: extra)
-                }
                 if unsafe !state.pointee.collectAtEveryAllocation {
                     let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
                                               deferZero: deferZero)
                     if o != .none { return o }
-                    // Large bytes, part 2: no room while a cycle marks: wait
-                    // (bounded, parking for stops) for its final mark with
-                    // the marker raised; the stop below then finishes its
-                    // sweep. Once per allocation.
-                    if !waited {
-                        waited = true
-                        if unsafe waitForMarkingCycle(vm, w, holding: extra) { continue }
+                    if !justified {
+                        var got = Oop.none
+                        let outcome = unsafe stallForCollector(vm, w, .old, held: extra) {
+                            got = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
+                                                    deferZero: deferZero)
+                            return got != .none
+                        }
+                        if outcome == .available { return got }
+                        if outcome == .justified { justified = true }
                     }
                 }
                 var result: Oop? = nil
@@ -304,17 +303,14 @@ struct CacheEntry {
                     // Large bytes, part 2: a cycle that has marked holds
                     // the dead runs until its apply; finishing its sweep
                     // here frees them, before module 1's full collection.
-                    let bounded = unsafe w.pointee.index != 0 && !waitedSweep
-                    let swept = unsafe finishSweepInStop(vm, for: .oldAllocation, bounded: bounded)
+                    // The main worker's stop, a justified stall's, a VM with
+                    // no stalls: a pending sweep is finished whole here.
+                    let swept = unsafe finishSweepInStop(vm, for: .oldAllocation, bounded: false)
                     if swept != .none {
                         let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
                                                   deferZero: deferZero)
                         if o != .none {
                             result = o
-                            return
-                        }
-                        if swept == .partial {
-                            waitSweep = true
                             return
                         }
                     }
@@ -327,7 +323,6 @@ struct CacheEntry {
                 }
                 if !stopped { continue }
                 unsafe state.pointee.counters.collectionsTriggered &+= pauseCount() &- before
-                if waitSweep { continue }
                 guard let o = result else {
                     if !softFailure { fail(.outOfMemory) }
                     return .none
