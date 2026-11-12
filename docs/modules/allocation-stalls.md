@@ -561,8 +561,9 @@ or `other` (stress, not counted); requester `main`, `stall`, `inStop`
 (an operation in a stop, the host, the marker), `noMarker` (stalls off) or
 `background` (none of these); the justification `cycleN`, `full`,
 `nostart` or `start`; the justifying cycle's marked bytes over the blocks
-in use (a full heap reads 90 percent and more, the fragmented ring 52 to
-65). `unjustifiedFallbacks` counts the requester `background`, also when
+in use (the fragmented ring with relocation off reads 52 to 65 percent;
+a full heap's stalls end by a full collection or with no cycle able to
+start and name no cycle, `full` and `nostart`). `unjustifiedFallbacks` counts the requester `background`, also when
 a stall's justifying cycle is not numbered above the cycle it began in;
 in a checked build it is a verifier failure (`VM.counters[.unjustifiedFallbacks]`).
 Counters on the run line (and as `gc_*` in the shells' rows): `stalls`,
@@ -594,3 +595,117 @@ has not ended; the model's saver waits for `otherRunnersInside`, which
 counts it, so the save never runs mid-stall, and the stall's end does not
 depend on the saver (the marker's stops proceed during the hold). The
 argument is tested, not model checked.
+
+### Part 3: one wait
+
+`waitForMarkingCycle` and `waitForSweep` are gone with their 100 ms bounds
+and `usleep(100)` polls; nothing measured asked for a bound (the bound
+protected nothing the stall's justification rule does not: a stall ends at
+the latest two cycles after it began, or at a full collection). An empty
+stash and table (`allocateYoungSlow`) and an old or large allocation
+without room (`allocateOld`) take the same stall, their `available()` the
+stash's refill and the allocation itself; the bounded sweep stop that
+hands swept entries over stays, taken by the stall once per cycle while a
+sweep is pending. The main worker's and a justified stall's stop finishes
+a pending sweep whole, as the main worker's did. `allocWaits` and
+`sweepWaits` left the run line (`stallsEntries`, `stallsOld` and their
+times replace them); `FallbackPolicyTests`' two large-bytes tests now
+stall with the test thread as the marker (`stallsWithoutMarker`) and their
+no-stall halves use the default (no marker thread, no stall).
+
+### Part 4: what the records asked for
+
+Each candidate measured on its own in the shell's ring rows, two
+interleaved launches per row and engine (`steps/`):
+
+| candidate | rows | result | kept |
+|---|---|---|---|
+| a waited-on cycle's relocation to-space from the reserve, the cap counting blocks up to the hard limit (`stallRelocation` 1) | `young=offload` ring with the marker 4 and 16 times slower; `young=stw` ring | background young allocations at 4: 60.9 to 66.2 million to 234.3 to 256.8 (3.5 to 4.2 times), stall time 69 to 73 s to 41 to 49 s a launch; at 16: 23.9 to 25.4 to 51.5 to 51.8 (2.0 to 2.2); `young=stw` 316 to 329 either way; 0 fallbacks and 0 frames missed in every slowed row either way | yes, the default (`steps/reloc-reserve.md`) |
+| no relocation in a waited-on cycle (`stallRelocation` 2) | `young=stw` ring | 5 to 7 justified fallbacks a launch (full collections of 231 to 244 ms), 141 to 185 frames missed, 181 to 198 million against 316 to 329 | no (`steps/reloc-skip.md`) |
+| start cycles earlier when stalls occur | the same rows' cycle records | in every stalling row the completed cycles' durations add up to 10.7 to 11.5 s in a 10.55 s window: cycles already run back to back; a stall with no cycle running starts one at once (trigger `stall`) | nothing more built (`steps/trigger-earlier.md`) |
+| more marker raise for a waited-on cycle | the same rows | the marker ran at user-initiated in all but 1 to 3 cycles a launch (`gc_markerQoS`), a QoS override per stall (`markerOverrides`) | nothing more built (`steps/marker-raise.md`) |
+
+Why the reserve: the slowed ring's records (`steps/p3`, the 4-times rows)
+showed cycles starting and ending at the soft limit (618 to 626 MB at
+both ends) and freeing only what relocation freed (705 to 2755 blocks a
+cycle), while relocation's cap is a fraction of the free blocks under the
+soft limit, about none there. The relocator evacuates sparse blocks, so a
+pass frees more than it takes; its to-space is the collector's, and the
+reserve is the main worker's and the collector's own. No tuning constant
+was added.
+
+### Part 5: the slowed marker
+
+`MarkingTestSwitches.markerSlowdown` N (`kajo run --marker-slowdown N`,
+the shells' `markerslow=N`): at every `markerPoll` the marker spins N - 1
+times the thread CPU it spent since the previous poll, parking for stops
+while it spins, so its concurrent work (tracing, the relocation pass, the
+sweep) takes N times its CPU; the stops' work is not slowed. Counted:
+`markerSlowSpins`, `markerSlowSpinMs`. Tests: `aSlowedMarkerPacesTheMutator`
+(4 and 16, `young=stw` and `offload`: the oracle's checksum, 0 fallbacks,
+the spins taken; the stalls printed: at 4 the debug build's mutator does
+not always outrun the marker, at 16 it stalls 16 to 22 times), and the
+random programs' `slowedMarker` configuration (16 times slower, 8 blocks
+past what the programs keep, tiny nurseries, four workers: stalls above 0
+over the seeds in both engines, 0 unjustified fallbacks, 100 seeds each,
+also with twelve busy loops).
+
+### Tests
+
+Each run on the starting commit where it can be (`failing-before.txt`):
+none of the new tests compiles there (they use the module's options,
+switches and counters); the load each runs is run there with efc546d's
+own kajo instead, where it can be expressed.
+
+- `aRingLikeLoadStallsInsteadOfFallingBack` (`young=stw`, `local`,
+  `offload`; fragment.kasm, 2 workers, 400 000 iterations, a 16 MiB heap,
+  the marker 16 times slower): the checksum with room to spare, 0
+  fallbacks, stalls above 0. On efc546d the same kernel at 4 workers on 32
+  and 36 MiB counts 2 to 17 fallbacks a run, every one `soft`.
+- `aSlowedMarkerPacesTheMutator` (4 and 16 times, `stw` and `offload`):
+  above. Cannot run on efc546d (no switch).
+- `aFullHeapFallsBackJustifiedThenRunsOutOfMemory` (every allocation kept,
+  2 workers, 12 MiB): out of memory, `fallbacksByStall` at least 1, 0
+  unjustified, every stall's record naming its justification (in these
+  runs `full` and `nostart`: the full collections the out-of-memory rule
+  runs abandon the cycles). On efc546d the same program on 24 MiB never
+  ended in 120 s in either young mode (full collections at every poll).
+- `fragmentationIsToldFromAFullHeap` (relocation off and on, 16 MiB, 16
+  times slower): off, justified fallbacks whose records read 52 to 65
+  percent of the blocks in use live (a fragmented heap); on, 0 fallbacks.
+  On efc546d relocation off counts 12 `soft` fallbacks with no live
+  fraction in the record.
+- `theMainWorkerNeverStallsAndItsFallbacksNameIt`: a main-affine ring
+  driven by the test thread's turns; no stall, every fallback the main
+  worker's, none by a stall or unjustified. Cannot run on efc546d.
+- `aStalledProcessIsTerminated`, `aStalledProcessTakesAnInterrupt`,
+  `aSaveWaitsForAStallAndItsImageLoads` (two rings on 16 MiB, the marker
+  16 times slower, 4 under ThreadSanitizer; each waits until a stall is in
+  progress): termination completes, the interrupts run, the save
+  completes and its image loads. Cannot run on efc546d.
+- `aVMIdleAfterStallsWakesNoThread`: after a run with stalls and the
+  collector idle, 1 s with no more than 5 wakeups of the marker, the
+  workers and the young collector, then a run completes. Cannot run on
+  efc546d.
+- `theRunningCycleDoesNotJustifyAFallback`,
+  `anEntryStallGateThatIgnoresTheTableFallsBackUnjustified`: the broken
+  variants as test switches (below). Cannot run on efc546d.
+- `FallbackPolicyTests`' rewritten waits: above. Their earlier form passes
+  on efc546d.
+- The random programs' `slowedMarker`, both engines.
+
+### Broken variants
+
+As test switches: `stallJustifiedByRunningCycle` lets the cycle already
+running when a stall began justify its fallback; `noteFullCollection`'s
+own check (the justifying cycle numbered above the stall's first) counts
+it unjustified (`unjustifiedFallbacks` at least 1; 0 without the switch).
+`stallIgnoresEntries` makes the entry stall's gate answer at once; the
+allocation falls back with no justifying cycle: unjustified, and in the
+checked build the verifier counts it (`VM.counters[.unjustifiedFallbacks]`
+at least 1). By hand (`broken-variants.txt`, patches beside it): no park in
+the stall hangs (a stop waits forever for the stalled workers); no
+progress bump at a stop's release does not hang, because the wait also
+ends when the phase becomes idle (the apply's and the abandon's second
+wake path) and the epoch frees bump the progress; with both removed every
+background worker stalls and the marker idles: a hang.
