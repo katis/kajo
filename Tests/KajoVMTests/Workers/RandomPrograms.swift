@@ -332,6 +332,12 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     /// (every other configuration runs them fused), eight workers: the
     /// plain bytecodes keep their own runs against the same model.
     case plainBytecodes
+    /// Allocation stalls (docs/modules/allocation-stalls.md, part 5): a
+    /// heap a few blocks past what the programs keep, tiny nurseries, the
+    /// marker thread 16 times slower (`markerSlowdown`), four workers: the
+    /// background workers stall for the collector; the stalls over the
+    /// configuration's seeds must be above 0 and no fallback unjustified.
+    case slowedMarker
 
     var testDescription: String { rawValue }
 
@@ -340,7 +346,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         case .oneWorker, .tinyNurseries: 1
         case .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock: 4
         case .localCollection, .offloadCollection, .roundEveryPoll: 4
-        case .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn: 4
+        case .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn, .slowedMarker: 4
         default: 8
         }
     }
@@ -360,7 +366,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
                       .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
                       .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll,
-                      .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn].contains(self)
+                      .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn, .slowedMarker].contains(self)
         let source = (self == .offloadCollection ? mainTasks(p.source) : p.source) + longBytesSource(long: longBytes)
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
@@ -368,7 +374,9 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         var switches = TestSwitches()
         switches.noFusion = self == .plainBytecodes
         let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
-        return try Runtime(source, background: workers, heapBlocks: exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2 : longBytes ? 4096 : 256,
+        let heapBlocks = exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2
+            : self == .slowedMarker ? slowedHeapBlocks + 2 * p.tasks : longBytes ? 4096 : 256
+        return try Runtime(source, background: workers, heapBlocks: heapBlocks,
                            reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
                            configure: { c in
                                // Programs allocate tens of KiB: 512 KiB
@@ -415,6 +423,10 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    c.marking.enabled = false
                                    c.young.mode = self == .exhaustedReserve ? .stw : .local
                                    c.young.verify = true
+                               case .slowedMarker:
+                                   c.nursery.bytes = 24 << 10
+                                   c.nursery.survivorBytes = 2 << 10
+                                   c.marking.testSwitches.markerSlowdown = 16
                                case .youngBarrierAlwaysOn:
                                    c.nursery.bytes = 24 << 10
                                    c.nursery.survivorBytes = 2 << 10
@@ -495,6 +507,10 @@ func longBytesSource(long: Bool) -> String {
 /// one seed in 1000 find none with two per task only); their garbage still
 /// does not fit.
 let exhaustedHeapBlocks = Int(ProcessInfo.processInfo.environment["KAJO_EXHAUSTED_BLOCKS"] ?? "") ?? 3
+
+/// The slowed-marker configuration's heap: what the programs keep and a
+/// little garbage, so old space reaches its soft limit and workers stall.
+let slowedHeapBlocks = Int(ProcessInfo.processInfo.environment["KAJO_SLOWED_BLOCKS"] ?? "") ?? 8
 
 /// Even tasks forked with main affinity (`offloadCollection`): the main
 /// worker's nursery is the offloaded one.
@@ -611,6 +627,11 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
     case .stwScavenge: #expect(!rt.vm.hasYoungCollection)
     case .exhaustedReserve, .exhaustedReserveLocal:
         randomScavenges.add(config, rt.vm.nurseryCounters.exhaustedScavenges)
+    case .slowedMarker:
+        // Stalls started (asserted over the configuration's seeds, not per
+        // seed: a small program may not stall), none unjustified.
+        randomScavenges.add(config, rt.vm.stallLog?.all.count ?? 0)
+        #expect(rt.vm.markingCounters.unjustifiedFallbacks == 0 && rt.vm.markingCounters.missed == 0, "seed \(p.seed)")
     case .youngBarrierAlwaysOn:
         // Every store took the young slow path, cycles or not.
         let calls = (0..<(config.workers + 2)).reduce(UInt64(0)) { $0 &+ rt.vm.youngWorkerCounters($1).deletionBarrierCalls }
@@ -659,7 +680,7 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
     if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
         .localCollection, .offloadCollection, .roundEveryPoll, .exhaustedReserve, .exhaustedReserveLocal,
-        .youngBarrierAlwaysOn].contains(config) {
+        .youngBarrierAlwaysOn, .slowedMarker].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
         // cycle, or moves an object), the configuration must.
         #expect(randomScavenges.take(config) > 0)
@@ -690,6 +711,7 @@ func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
     // per configuration (KAJO_NATIVE_SEEDS overrides).
     let n = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "") ?? min(randomSeedCount(config), 100)
     _ = randomNative.take(config)
+    _ = randomScavenges.take(config)
     for s in 0..<UInt64(n) {
         let p = randomProgram(randomSeedBase &+ s)
         let v = try runRandom(p, config, native: true)
@@ -700,6 +722,8 @@ func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
         }
     }
     let c = randomNative.take(config)
+    // Allocation stalls: the slowed marker's stalls over the seeds, natively too.
+    if config == .slowedMarker { #expect(randomScavenges.take(config) > 0) }
     print("random programs \(config) native: \(n) seeds from \(randomSeedBase), failing \(failed), \(c.named.map { "\($0.name)=\($0.value)" }.joined(separator: " "))")
     #expect(c.nativeSends > 0 && c.nativeReturns > 0)
     #expect(failed.isEmpty, "failing seeds: \(failed)")
