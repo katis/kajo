@@ -281,7 +281,12 @@ struct CacheEntry {
                     let o = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,
                                               deferZero: deferZero)
                     if o != .none { return o }
-                    if !justified {
+                    // A body past the soft limit itself can never be had by
+                    // waiting: no stall (the stop below fails it, softly for
+                    // a large object's primitive).
+                    let blocks = (Int(ObjectMemory.bodyBytes(count: count, isBytes: bytes)) + BlockHeap.blockBytes - 1)
+                        / BlockHeap.blockBytes
+                    if !justified && blocks < om.softLimitBlocks {
                         var got = Oop.none
                         let outcome = unsafe stallForCollector(vm, w, .old, held: extra) {
                             got = om.tryAllocateAny(ctx, classIndex: cls, count: count, isBytes: bytes, fill: nilObject,

@@ -215,7 +215,10 @@ func stallFallbackDone(_ vm: VMPointer, _ w: WorkerPointer) {
 /// as long as it waits (a QoS override; the marker's own policy still
 /// applies when it ends). nil without a marker thread.
 private func overrideMarkerQoS(_ mk: MarkingPointer) -> pthread_override_t? {
-    guard let t = unsafe mk.pointee.thread.pointee.thread else { return nil }
+    // The marker thread from its Mach port (an atomic it stores itself as
+    // it starts; the pthread_t is the host's, written without a lock).
+    let port = unsafe mk.pointee.machThread.pointee.load(ordering: .relaxed)
+    guard port != 0, let t = pthread_from_mach_thread_np(port) else { return nil }
     let o = unsafe pthread_override_qos_class_start_np(t, QOS_CLASS_USER_INITIATED, 0)
     unsafe pthread_mutex_lock(mk.pointee.waitsLock)
     unsafe mk.pointee.stalls.pointee.markerOverrides &+= 1
@@ -273,13 +276,16 @@ func isBackgroundWorker(_ vm: VMPointer, _ w: WorkerPointer) -> Bool {
     return unsafe i != 0 && i < vm.pointee.workerCount - 1
 }
 
-/// Background workers stall in this VM: a marker thread to wait for (or
-/// the tests' switch `stallsWithoutMarker`, where the test thread is the
-/// marker), and the test switch `noStalls` off.
+/// Background workers stall in this VM: a running marker thread to wait
+/// for (or the tests' switch `stallsWithoutMarker`, where the test thread
+/// is the marker), and the test switch `noStalls` off.
 func stallsEnabled(_ vm: VMPointer) -> Bool {
     guard let mk = unsafe vm.pointee.marking else { return false }
     let c = unsafe mk.pointee.config
-    return (c.markerThread || c.testSwitches.stallsWithoutMarker) && !c.testSwitches.noStalls
+    // The marker thread must be running (a VM driven slice by slice from
+    // the test thread, never started, has none: nothing would end a stall).
+    let marker = unsafe c.markerThread && mk.pointee.machThread.pointee.load(ordering: .relaxed) != 0
+    return (marker || c.testSwitches.stallsWithoutMarker) && !c.testSwitches.noStalls
 }
 
 /// Who a full collection about to run is for, from the worker that asks
