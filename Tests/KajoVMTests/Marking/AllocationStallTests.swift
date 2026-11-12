@@ -69,7 +69,7 @@ private func headless(_ files: [(path: String, text: String)], young: String, wo
 /// The ring-like load's answer with room to spare (no stall, no fallback).
 /// Two workers, 400 000 iterations: 8 MiB of ring nodes live, 51 MB
 /// promoted, on a 16 MiB heap.
-private let ringIters = 400_000
+private let ringIters = underThreadSanitizer ? 150_000 : 400_000
 private let ringReference: Int64? = {
     try? headless(ringFiles(ringIters), young: "offload", heapMiB: 256, native: false).checksum
 }()
@@ -172,7 +172,7 @@ func aSlowedMarkerPacesTheMutator(_ factor: Int, _ young: String) throws {
     #expect(off.n("fallbacks") >= 1, "relocation off did not fall back: \(off.summary)")
 }
 
-private let mainChurnSource = kernel("fragment") + itersSource(400_000) + """
+private let mainChurnSource = kernel("fragment") + itersSource(underThreadSanitizer ? 100_000 : 400_000) + """
 method UndefinedObject mainChurn temps=0
   push_nil
   push_int 0
@@ -239,7 +239,9 @@ private func stallingRuntime() throws -> (Runtime, [Oop]) {
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
         c.marking.markerThread = true
-        c.marking.testSwitches.markerSlowdown = 16
+        // Under ThreadSanitizer the cycles a stall waits for are slow
+        // enough at 4 (16 took the stall past the tests' bounds with load).
+        c.marking.testSwitches.markerSlowdown = underThreadSanitizer ? 4 : 16
     })
     return (rt, [rt.spawn("ringLong"), rt.spawn("ringLong")])
 }
@@ -303,7 +305,7 @@ private func waitStalled(_ rt: Runtime) -> Bool {
 /// idle (every wait in the stall is untimed), and work after the idle
 /// period completes.
 @Test func aVMIdleAfterStallsWakesNoThread() throws {
-    let src = kernel("fragment") + itersSource(300_000) + """
+    let src = kernel("fragment") + itersSource(underThreadSanitizer ? 100_000 : 300_000) + """
     method UndefinedObject ringShort: temps=0
       push_nil
       push_temp 0
@@ -312,7 +314,9 @@ private func waitStalled(_ rt: Runtime) -> Bool {
       return_top
     end
     """
-    let rt = try Runtime(src, background: 2, heapBlocks: 512, configure: { c in
+    // Under ThreadSanitizer a third of the iterations on a heap a quarter
+    // smaller: old space still reaches its limit.
+    let rt = try Runtime(src, background: 2, heapBlocks: underThreadSanitizer ? 384 : 512, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
         c.marking.markerThread = true
@@ -365,7 +369,7 @@ end
 /// the checked build's verifier on an unjustified fallback is the entry
 /// gate's test below.
 private func fullHeapUnjustified(broken: Bool) throws -> (UInt64, UInt64) {
-    let rt = try Runtime(fullSource, background: 2, heapBlocks: 320, verify: false, configure: { c in
+    let rt = try Runtime(fullSource, background: 2, heapBlocks: underThreadSanitizer ? 160 : 320, verify: false, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
         c.marking.markerThread = true
@@ -391,7 +395,7 @@ private func fullHeapUnjustified(broken: Bool) throws -> (UInt64, UInt64) {
 /// with the broken variant the stall's gate ignores the table and the
 /// allocation falls back with no justifying cycle: unjustified.
 private func entriesGate(broken: Bool) throws -> (MarkingCounters, StallLog?, UInt64) {
-    let src = kernel("fragment") + itersSource(400_000) + """
+    let src = kernel("fragment") + itersSource(underThreadSanitizer ? 150_000 : 400_000) + """
     method UndefinedObject ringShort: temps=0
       push_nil
       push_temp 0
@@ -400,11 +404,13 @@ private func entriesGate(broken: Bool) throws -> (MarkingCounters, StallLog?, UI
       return_top
     end
     """
-    let rt = try Runtime(src, background: 2, heapBlocks: 4096, entries: 160_000, configure: { c in
+    // Under ThreadSanitizer fewer iterations and a table of 100 000: it
+    // still runs out (two rings keep about 70 000 entries).
+    let rt = try Runtime(src, background: 2, heapBlocks: 4096, entries: underThreadSanitizer ? 100_000 : 160_000, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
         c.marking.markerThread = true
-        c.marking.testSwitches.markerSlowdown = 4
+        c.marking.testSwitches.markerSlowdown = underThreadSanitizer ? 16 : 4
         c.marking.testSwitches.stallIgnoresEntries = broken
     })
     let ps = (0..<2).map { rt.spawn("ringShort:", [int(Int64($0))]) }
