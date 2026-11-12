@@ -404,17 +404,28 @@ private func entriesGate(broken: Bool) throws -> (MarkingCounters, StallLog?, UI
       return_top
     end
     """
-    // Under ThreadSanitizer fewer iterations and a table of 100 000: it
-    // still runs out (two rings keep about 70 000 entries).
-    let rt = try Runtime(src, background: 2, heapBlocks: 4096, entries: underThreadSanitizer ? 100_000 : 160_000, configure: { c in
+    // A table of 100 000 (two rings keep about 70 000 entries) and the
+    // marker 16 times slower: it runs out in every run (at 160 000 and 4
+    // times slower some runs never ran out); fewer iterations under
+    // ThreadSanitizer.
+    let rt = try Runtime(src, background: 2, heapBlocks: 4096, entries: 100_000, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
         c.marking.markerThread = true
-        c.marking.testSwitches.markerSlowdown = underThreadSanitizer ? 16 : 4
+        c.marking.testSwitches.markerSlowdown = 16
         c.marking.testSwitches.stallIgnoresEntries = broken
     })
     let ps = (0..<2).map { rt.spawn("ringShort:", [int(Int64($0))]) }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 900 : 300))
+    // What must have happened, not the run's end (the sanitized suite
+    // with twelve busy loops ran this past 900 s): an entry stall, or with
+    // the broken variant an unjustified fallback; then the rings end.
+    let seen = eventually(underThreadSanitizer ? 1800 : 300) {
+        rt.vm.liveProcessCount == 0
+            || (broken ? rt.vm.counters[.unjustifiedFallbacks] > 0 : (rt.vm.stallLog?.entries.count ?? 0) > 0)
+    }
+    #expect(seen)
+    for p in ps { rt.vm.terminate(p) }
+    #expect(rt.waitAllTerminated(underThreadSanitizer ? 1800 : 300))
     let c = rt.marking, s = rt.vm.stallLog, v = rt.vm.counters[.unjustifiedFallbacks]
     for p in ps { rt.vm.release(p) }
     rt.stop(verifyHeap: false)
