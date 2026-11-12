@@ -709,3 +709,64 @@ progress bump at a stop's release does not hang, because the wait also
 ends when the phase becomes idle (the apply's and the abandon's second
 wake path) and the epoch frees bump the progress; with both removed every
 background worker stalls and the marker idles: a hang.
+
+### The bar on the Mac
+
+The starting commit's shell (efc546d, `dd-base`) and the module's
+(6b8895d, `dd-final`), both built with `KAJO_SHELL_AOT=1`, launched back
+to back per row, the order alternating per run, five runs, 7 workers, both
+engines (`mac-matrix/`, `summary.md` and each side's `bar.txt` from
+`shell-report.py --bar`; 240 rows, 0 launches failed; the warm-up of each
+side 0 frames missed). Ranges over the five launches:
+
+| row | engine | frames missed before / after | fallbacks before / after | stalls after (longest ms) | main stopped for others ms/10 s before / after | background young allocations M before / after | longest stop ms after |
+|---|---|---|---|---|---|---|---|
+| ring `young=stw` | interpreted | 148–208 / 1–6 | 6–9 / 0 | 228–257 (20.3–24.6) | 1220.6–1572.4 / 990.0–1040.9 | 307.7–312.8 / 316.3–317.8 | scavenge 11.30–12.52 |
+| ring `young=stw` | native | 326–346 / 1–5 | 16–17 / 0 | 245–261 (43.2–46.4) | 1173.1–1549.6 / 453.6–606.9 | 308.3–312.5 / 327.0–329.7 | scavenge 10.53–11.90 |
+| ring `local`, `offload` | both | 0 / 0 | 0 / 0 | 0 | 48.3–96.0 / 51.8–97.7 (each row's ranges overlap) | 471.4–550.0 / 468.9–549.6 | finalMark 0.59–0.91 |
+| storm `stw`, `local`, `offload` | interpreted | 0 / 0 | 0 / 0 | 0 | ranges overlap | ranges overlap | scavenge 3.93–4.77 (stw) |
+| storm `local` | native | 0 / 0 | 0 / 0 | 6–95 (4.5–6.9) | 49.8–58.3 / 52.0–60.7 | 1226.1–1264.1 / 1229.7–1296.5 | sweep 0.74–0.93 |
+| storm `offload` | native | 0 / 0 | 0 / 0 | 57–137 (4.5–5.9) | 54.8–57.2 / 53.9–63.5 | 1180.0–1313.3 / 1191.4–1221.2 | sweep 0.78–0.85 |
+| storm `stw` | native | 0 / 0 | 0 / 0 | 0 | 242.2–358.0 / 248.7–329.6 | 1330.3–1409.9 / 1321.3–1417.1 | scavenge 4.02–4.95 |
+| share, all three | both | 0 / 0 | 0 / 0 | 0 | ranges overlap | ranges overlap | |
+| large `offload` | both | 0 / 0 | 0 / 0 | 0 | 61.2–63.3 / 59.0–67.2, 33.1–36.7 / 33.3–37.1 | | finalMark 0.41–0.47 |
+| photo `offload` | both | 0 / 0 | 0 / 0 | 0 | 1.3–2.4 / 1.6–2.4, 0.9–1.4 / 0.7–1.2 | | apply, finalMark 0.08–0.12 |
+| idle | both | 0 / 0 | 0 / 0 | 0 | 0 | | |
+
+The oracle row: 0 unjustified and 0 soft-limit fallbacks in all ten
+launches (0 fallbacks of any kind), and every frame still missed (1 to 6 a
+launch) is behind a stop-the-world scavenge of 10.5 to 12.5 ms that
+overlapped a frame's deadline: the oracle's known cost. Throughput (ring
+iterations, as background young allocations) is up: 316 to 318 million
+against 308 to 313 interpreted, 327 to 330 against 308 to 313 natively,
+and the main thread's stopped time is down (990 to 1041 ms per 10 s against
+1221 to 1572, natively 454 to 607 against 1173 to 1550: no 200 ms
+compacting collections). The shipping modes: 0 frames and 0 fallbacks in
+every row as before, the main thread's stopped time and the throughput
+within the before ranges. The rows that stall: the native storm under
+`local` and `offload` (6 to 137 entry stalls a launch, the longest 4.5 to
+6.9 ms): the native mutator empties the entry table while a cycle sweeps;
+each stall's sweep stop (0.74 to 0.93 ms, the longest stop of the row)
+hands the swept entries over, as the sweep stop did before for the
+allocations that reached it; no frame is missed and the main thread's
+stopped time stays within 52.0 to 63.5 ms against 49.8 to 58.3.
+
+**The slowed marker** (`slowed/`, the module's shell, `young=offload` ring,
+five launches each, both engines): at 4 times slower 0 frames missed and 0
+fallbacks in all ten launches, 736 to 947 stalls interpreted and 2964 to
+3317 natively a launch (p50 1.4 to 2.0 ms, p99 353 to 369 ms, longest 366
+to 424 ms), background young allocations 252.5 to 260.1 million
+interpreted and 247.9 to 249.9 natively (against 469 to 549 unslowed); at
+16 times slower 0 frames and 0 fallbacks in all ten, 1710 to 1828 stalls
+(p50 17.4 to 20.2 ms, longest 1649 to 1720 ms), 51.6 to 52.7 million.
+
+**`collections` and binarytrees at 8 workers** (`comparison/`, aligned
+`-enable-testing` release builds of efc546d and 6b8895d, five runs
+interleaved): binarytrees (kasm) 1748 ms median [1740–1757] against 1765
+[1749–1818], binarytrees (Smalltalk) 1780 [1763–1796] against 1802
+[1782–1862], `collections` 32202 [31987–32366] against 32086
+[31870–32105] (0.4 percent slower at the median, the ranges overlapping;
+its time is the Symbol-interning stops, `other:65524` in both, AOT 1's
+finding, unchanged); checksums equal; 0 fallbacks; binarytrees stalled 0
+to 5 times a run (longest 1.1 ms, one 0.75 ms sweep stop); stop tables
+beside each other in `comparison/summary.md`.
