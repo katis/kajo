@@ -190,7 +190,20 @@ enum MarkOutcome {
 func markerPoll(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64, phase: MarkingPhase) -> Bool {
     let mw = unsafe mk.pointee.markerWorker
     // Bit 0 only: module 7's rounds (bits 1..) are not the marker's.
-    if unsafe vm.pointee.flag.pointee.load(ordering: .relaxed) & 1 != 0 { unsafe park(vm, mw) }
+    if unsafe vm.pointee.flag.pointee.load(ordering: .relaxed) & 1 != 0 {
+        let t0 = nanoseconds()
+        unsafe park(vm, mw)
+        // Allocation stalls, part 1: the marker's parked time by phase.
+        let dt = nanoseconds() &- t0
+        let m = unsafe mk.pointee.marker
+        if phase == .marking {
+            unsafe m.pointee.parkMarkNs &+= dt
+        } else if unsafe m.pointee.inRelocation {
+            unsafe m.pointee.parkRelocNs &+= dt
+        } else {
+            unsafe m.pointee.parkSweepNs &+= dt
+        }
+    }
     unsafe applyWantedQoS(mk)
     return unsafe mk.cycleNow == cycle && mk.phaseNow == phase && !mk.pointee.stopping.pointee.load(ordering: .relaxed)
 }
@@ -325,7 +338,12 @@ func markerLoop(_ vm: VMPointer, _ mk: MarkingPointer) {
             // Module 6: relocate before sweeping (the sweep then sees the
             // new offsets, and evacuated blocks hold no live body).
             if let r = unsafe vm.pointee.relocation, unsafe !r.pointee.config.testSwitches.manualRelocation {
+                let t0 = nanoseconds(), c0 = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
+                unsafe m.pointee.inRelocation = true
                 _ = unsafe relocatePass(vm, mk, cycle: mk.cycleNow)
+                unsafe m.pointee.inRelocation = false
+                unsafe m.pointee.relocWallNs &+= nanoseconds() &- t0
+                unsafe m.pointee.relocCpuNs &+= clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) &- c0
             }
         }
         if unsafe mk.phaseNow == .sweeping && m.pointee.sweptCycle != mk.cycleNow {

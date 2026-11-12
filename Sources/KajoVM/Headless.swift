@@ -526,7 +526,8 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
         ("reserveExhaustions", "\(vm.image.om.reserveExhaustions)"), ("exhaustedScavenges", "\(c.exhaustedScavenges)"),
         ("keptObjects", "\(c.keptObjects)"), ("keptMB", mb(c.keptBytes)), ("keptAcross", "\(c.keptMovedAcross)"),
         ("reclaimsAroundYoung", "\(c.reclaimsAroundYoung)"),
-        ("copyMBsPerParticipant", rate), ("sweepP50ms", sweepP50), ("ttspP50ms", ttspP50), ("youngAllocations", "\(c.youngAllocations)"),
+        ("copyMBsPerParticipant", rate), ("sweepP50ms", sweepP50), ("ttspP50ms", ttspP50), ("youngAllocations", "\(c.youngAllocations)"), ("youngAllocMain", "\(c.youngAllocationsMain)"),
+        ("promotedMainMB", mb(c.promotedMainBytes)),
         ("largeAllocations", "\(c.largeAllocations)"), ("barrierSlow", "\(c.barrierSlowCalls)"),
         ("remHolders", "\(c.rememberedHolders)"), ("entriesFreed", "\(c.entriesFreed)"),
         ("scavLogDropped", "\(totals.dropped)"),
@@ -611,6 +612,7 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("allocWaits", "\(c.allocationWaits.count)"), ("allocWaitMs", ms(c.allocationWaits.ns)),
         ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
+        ("cycleRecs", cycleRecordSummary(log)),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
     ] + finalMarkReport(stops: stops, log: log) + [
         ("finalGiveUps", "\(c.finalGiveUps)"), ("finalOverruns", "\(c.finalOverruns)"),
@@ -708,6 +710,28 @@ func stopsByKind(_ stops: [StopRecord]) -> String {
 /// stop/entries freed in it (k)/its sweeping ms/its apply or hand-over
 /// ms/entries handed over (k)/relocation cut off (1)/old entries percent
 /// of the table, separated by commas; "-" when none.
+/// Allocation stalls, part 1: one item per cycle the log kept, fields
+/// separated by colons: number, trigger, state (c completed, a abandoned, r
+/// running), old space at the snapshot and at the end (MB), promoted while
+/// it ran (all, the main worker's; MB), marked MB, blocks freed by the
+/// sweep and by the relocation, duration ms, marking CPU / wall / parked
+/// ms, relocation wall / CPU / parked ms, sweep wall / CPU / parked ms, the
+/// marker's QoS at the final mark, allocations that waited, fallbacks.
+func cycleRecordSummary(_ log: [CycleRecord]) -> String {
+    if log.isEmpty { return "-" }
+    func ms(_ ns: UInt64) -> String { unsafe String(format: "%.1f", Double(ns) / 1e6) }
+    func mb(_ b: UInt64) -> String { unsafe String(format: "%.1f", Double(b) / 1e6) }
+    let block = UInt64(BlockHeap.blockBytes)
+    return log.map { r in
+        let state = r.completed ? "c" : r.aborted ? "a" : "r"
+        return ["\(r.number)", "\(r.trigger)", state, mb(UInt64(r.blocksAtStart) &* block), mb(UInt64(r.blocksAtEnd) &* block),
+                mb(r.promotedDuring), mb(r.promotedMainDuring), mb(r.markedBytes), "\(r.blocksFreed)", "\(r.relocBlocksFreed)",
+                ms(r.durationNs), ms(r.markCpuNs), ms(r.markWallNs), ms(r.parkMarkNs), ms(r.relocWallNs), ms(r.relocCpuNs),
+                ms(r.parkRelocNs), ms(r.sweepNs), ms(r.sweepCpuNs), ms(r.parkSweepNs), "\(r.markerQoS)", "\(r.waits)",
+                "\(r.fallbacks)"].joined(separator: ":")
+    }.joined(separator: ",")
+}
+
 func sweepStopSummary(_ rs: [SweepStopRecord]) -> String {
     if rs.isEmpty { return "-" }
     func pc(_ a: Double, _ b: Double) -> String { b > 0 ? unsafe String(format: "%.0f", 100 * a / b) : "-" }

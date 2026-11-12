@@ -121,6 +121,8 @@ import Synchronization
 struct ParticipantStats: Sendable {
     var promotedObjects: UInt64 = 0
     var promotedBytes: UInt64 = 0
+    /// Allocation stalls, part 1: of them, from the main worker's nursery.
+    var promotedMainBytes: UInt64 = 0
     var survivedObjects: UInt64 = 0
     var survivedBytes: UInt64 = 0
     var overflowObjects: UInt64 = 0
@@ -181,6 +183,12 @@ struct NurseryCounters: Sendable {
     var scavenges: UInt64 = 0
     var promoteAllScavenges: UInt64 = 0
     var promotedObjects: UInt64 = 0
+    /// Allocation stalls, part 1: bytes promoted from the main worker's
+    /// nursery (worker 0).
+    var promotedMainBytes: UInt64 = 0
+    /// Allocation stalls, part 1: young allocations by the main worker
+    /// (worker 0) alone, read with `youngAllocations`.
+    var youngAllocationsMain: UInt64 = 0
     var promotedBytes: UInt64 = 0
     var survivedObjects: UInt64 = 0
     var survivedBytes: UInt64 = 0

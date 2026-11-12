@@ -122,6 +122,7 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
         r.applyNs = t1 &- t0
         r.durationNs = unsafe t1 &- log.pointee.startNs
         r.completed = true
+        unsafe cycleRecordAtEnd(vm, mk, &r)
         unsafe log.pointee.complete(r)
     }
     unsafe log.pointee.lastCycleNs = t1 &- log.pointee.startNs
@@ -163,6 +164,7 @@ func abortCycle(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe relocationAtCycleEnd(vm, completed: false)
     if var r = unsafe log.pointee.currentRecord {
         r.aborted = true
+        unsafe cycleRecordAtEnd(vm, mk, &r)
         unsafe log.pointee.currentRecord = r
     }
     unsafe log.pointee.current = -1

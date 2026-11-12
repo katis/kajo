@@ -47,6 +47,7 @@ extension VM {
             for k in unsafe 0..<n.pointee.count {
                 let a = unsafe n.alloc(k).pointee
                 c.youngAllocations &+= unsafe a.youngAllocations &+ UInt64(a.stash.next)
+                if k == 0 { c.youngAllocationsMain = unsafe a.youngAllocations &+ UInt64(a.stash.next) }
                 c.youngAllocatedBytes &+= unsafe a.youngBytes &+ (a.top &- a.edenStart)
                 c.largeAllocations &+= unsafe a.largeAllocations
                 c.barrierSlowCalls &+= unsafe a.barrierSlowCalls

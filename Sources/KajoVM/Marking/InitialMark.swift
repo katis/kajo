@@ -290,6 +290,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
         rec.entryRate = unsafe sampleRate(log.pointee.entrySamples.map { ($0.ns, $0.entries) })
     }
     rec.oldEntriesAtStart = unsafe log.pointee.oldEntries
+    unsafe cycleRecordAtStart(vm, mk, &rec)
     unsafe log.pointee.begin(rec)
     unsafe log.pointee.startNs = t0
     unsafe log.pointee.counters.cycles &+= 1

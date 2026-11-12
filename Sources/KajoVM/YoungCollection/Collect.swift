@@ -236,6 +236,7 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe work.pointee.busy = false
 
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    if k == 0 { unsafe y.pointee.log.pointee.promotedMainBytes &+= st.promotedBytes }
     unsafe vm.pointee.safepoint.pointee.ycActive -= 1
     unsafe y.pointee.done[k].store(true, ordering: .releasing)
     if unsafe h.pointee.offloaded { unsafe y.pointee.log.pointee.collectionsOffloaded &+= 1 }

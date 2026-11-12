@@ -172,6 +172,9 @@ struct YoungLog {
     var records: RecordRing<YoungRecord>
     var rounds: RecordRing<RoundRecord>
     var totals = YoungTotals()
+    /// Allocation stalls, part 1: bytes the main worker's nursery's
+    /// collections promoted (under the safepoint mutex).
+    var promotedMainBytes: UInt64 = 0
     var collectionsLocal: UInt64 = 0
     var collectionsOffloaded: UInt64 = 0
     var fallbacks = [UInt64](repeating: 0, count: YoungFallback.allCases.count)

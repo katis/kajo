@@ -175,6 +175,7 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         rec.maxSweepNs = Swift.max(rec.maxSweepNs, st.sweepNs)
         unsafe log.pointee.counters.promotedObjects &+= st.promotedObjects
         unsafe log.pointee.counters.promotedBytes &+= st.promotedBytes
+        unsafe log.pointee.counters.promotedMainBytes &+= st.promotedMainBytes
         unsafe log.pointee.counters.survivedObjects &+= st.survivedObjects
         unsafe log.pointee.counters.survivedBytes &+= st.survivedBytes
         unsafe log.pointee.counters.overflowObjects &+= st.overflowObjects
@@ -446,6 +447,7 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
         } else {
             unsafe w.stats.promotedBytes &+= size
             unsafe w.stats.promotedObjects &+= 1
+            if h0 & Header.nurseryMask == 0 { unsafe w.stats.promotedMainBytes &+= size }
             if decision == .promoteOverflow {
                 unsafe w.stats.overflowBytes &+= size
                 unsafe w.stats.overflowObjects &+= 1

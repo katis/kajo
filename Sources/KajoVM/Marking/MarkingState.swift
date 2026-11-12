@@ -101,6 +101,15 @@ enum CycleTrigger: UInt8, Sendable {
     /// (taken off the old-entry estimate then, not again at the apply).
     var entriesVisited: UInt64 = 0
     var entriesPublished: UInt64 = 0
+    /// Allocation stalls, part 1: this cycle's time parked in stops by
+    /// phase (marking, the relocation pass, sweeping), and the relocation
+    /// pass's wall and CPU time; `inRelocation` while the pass runs.
+    var parkMarkNs: UInt64 = 0
+    var parkRelocNs: UInt64 = 0
+    var parkSweepNs: UInt64 = 0
+    var relocWallNs: UInt64 = 0
+    var relocCpuNs: UInt64 = 0
+    var inRelocation = false
     var qos: UInt32 = 0
     var escalations: UInt64 = 0
     var lowerings: UInt64 = 0
@@ -193,6 +202,30 @@ struct CycleRecord: Sendable {
     var floatingBytes: UInt64 = 0
     var aborted = false
     var completed = false
+    /// Allocation stalls, part 1 (docs/modules/allocation-stalls.md): old
+    /// space in blocks at the snapshot and when the cycle ended (applied or
+    /// abandoned), the old-entry estimate then; bytes promoted while it ran
+    /// (every nursery, and the main worker's alone); blocks the relocation
+    /// freed; the marker's parked time by phase and its relocation pass;
+    /// allocations that waited (or stalled) while it ran, and fallbacks.
+    var blocksAtStart = 0
+    var blocksAtEnd = 0
+    var oldEntriesAtEnd: UInt64 = 0
+    var promotedAtStart: UInt64 = 0
+    var promotedMainAtStart: UInt64 = 0
+    var promotedDuring: UInt64 = 0
+    var promotedMainDuring: UInt64 = 0
+    var relocFreedAtStart: UInt64 = 0
+    var relocBlocksFreed: UInt64 = 0
+    var parkMarkNs: UInt64 = 0
+    var parkRelocNs: UInt64 = 0
+    var parkSweepNs: UInt64 = 0
+    var relocWallNs: UInt64 = 0
+    var relocCpuNs: UInt64 = 0
+    var waitsAtStart: UInt64 = 0
+    var waits: UInt64 = 0
+    var fallbacksAtStart: UInt64 = 0
+    var fallbacks: UInt64 = 0
 }
 
 /// Counters of every cycle so far.
