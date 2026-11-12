@@ -797,7 +797,51 @@ saver's strip is checked by the loader in every cross-engine resume).
   3335 against 1676 (1.99), `arith` 2467 against 329 (7.50), `storeheavy`
   2838 against 1520 (1.87), `alloc` 5452 against 3585 (1.52). No matrix on
   the iPad.
-- **`just check c93a7b1` on the final code commit, the core tier: below.**
+- **`just check c93a7b1` on the final code commit, the core tier: met**
+  on dcb6075 (the code as of 39acfc0 plus docs), every gate passing in
+  17 957 s:
+
+  ```
+  2026-11-12 01:31:05 dcb6075 check-tier core: 49 files from c93a7b1...HEAD (c93a7b1...dcb6075) and the working tree
+  2026-11-12 01:31:27 dcb6075 end clean-build rc=0 22s
+  2026-11-12 01:48:24 dcb6075 end swift-test rc=0 1017s
+  2026-11-12 02:11:51 dcb6075 end swift-test-load rc=0 1407s
+  2026-11-12 03:20:21 dcb6075 end tsan rc=0 4110s
+  2026-11-12 04:46:05 dcb6075 end tsan-load rc=0 5144s
+  2026-11-12 04:46:21 dcb6075 end ios-check rc=0 16s
+  2026-11-12 04:46:28 dcb6075 end arc-check rc=0 7s
+  2026-11-12 04:47:39 dcb6075 end golden rc=0 71s
+  2026-11-12 04:49:18 dcb6075 end native-golden rc=0 99s
+  2026-11-12 04:50:03 dcb6075 end native-kernel-test rc=0 45s
+  2026-11-12 04:50:33 dcb6075 end native-cc rc=0 30s
+  2026-11-12 05:00:23 dcb6075 end test-release rc=0 590s
+  2026-11-12 05:00:44 dcb6075 end model-check rc=0 21s
+  2026-11-12 05:08:39 dcb6075 end soak rc=0 475s
+  2026-11-12 05:19:26 dcb6075 end fuzz-kasm rc=0 647s
+  2026-11-12 05:29:30 dcb6075 end fuzz-snapshot rc=0 604s
+  2026-11-12 05:39:40 dcb6075 end fuzz-syntax rc=0 610s
+  2026-11-12 05:49:50 dcb6075 end fuzz-protocol rc=0 610s
+  2026-11-12 05:51:57 dcb6075 end apps rc=0 127s
+  2026-11-12 05:53:44 dcb6075 end kernel-test rc=0 107s
+  2026-11-12 05:57:55 dcb6075 end new-check rc=0 251s
+  2026-11-12 06:03:19 dcb6075 end ab rc=0 324s
+  2026-11-12 06:16:18 dcb6075 end matrix-mac rc=0 779s
+  2026-11-12 06:30:22 dcb6075 end matrix-iphone rc=0 844s
+  2026-11-12 06:30:22 dcb6075 check-tier done core failed=0 17957s
+  ```
+
+  433 + 161 Swift tests in every test gate; ThreadSanitizer 0 reports alone
+  and under load; the four fuzzers with "libFuzzer build: ok" at 0.86 to
+  3.53 million runs; the gate's A/B 0.994 to 1.017 at one worker and 0.985
+  to 1.029 at eight with instruction ratios 1.000 (1.006 for `alloc` at
+  eight); the Mac matrix's oracle ring row 170 to 210 frames behind 8 to 10
+  fallbacks and every other row 0 (interpreted, as every gate row is); the
+  iPhone 0 fallbacks and 5 frames in the oracle row. Two earlier runs
+  stopped on this module's own tests: the first's `swift-test-load` on the
+  broken-flush variant's trap (9727dec), the second's soak on the native
+  random programs' thousand seeds per configuration (39acfc0); the arc-check
+  and ab gates ran in 7 and 324 s on builds the earlier runs left (their
+  outputs list every function and the full table).
 - **ADR 0015 (proposed): written**
   (`docs/adr/0015-a-native-engine-beside-the-interpreter.md`).
 
