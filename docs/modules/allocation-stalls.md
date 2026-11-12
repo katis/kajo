@@ -794,16 +794,28 @@ iPhone at serious from its second run, the iPad 23 of 50 launches at
 serious) and missed more frames in two kinds of launch: the oracle ring
 behind scavenges past a frame (the iPhone's 16 and 17 frames behind 17.7
 ms scavenges at serious; the oracle's known cost), and two iPad launches
-behind long times to safepoint: a ring `young=stw` scavenge whose stop
-waited 141.3 ms for the safepoint (no stall in that launch), and a large
-churn initial mark that waited 41.5 ms; the before block had the same
-kind of wait (a large churn initial mark of 452.0 ms, no frame missed),
-the large fill that does not poll (module 10's open item, the sweep-stop
-follow-up's 570 ms). The second pair, the module's shell first and cooler,
+behind long times to safepoint. One is a large churn initial mark that
+waited 41.5 ms; the before block had the same kind of wait in the same
+row (a large churn initial mark of 452.0 ms, no frame missed), and the
+likeliest cause is the large fill that does not poll (module 10's open
+item, the sweep-stop follow-up's 570 ms). The other is a ring
+`young=stw` scavenge whose stop waited 141.3 ms for the safepoint, 17
+frames missed, at thermal nominal with no stall in that launch. The ring
+makes no large object, so the large fill does not explain it, and it is
+not explained: the row does not print the stop's last parker (the
+StopRecord holds it for every stop, `slowest` and `slowestVia`, but the
+shells' rows print it for final marks only, and `gc_scavSlowest` is the
+scavenger with the most copying time, not the one that parked last). It
+was seen once, in the after block only; no
+before launch of that row waited so, and one launch cannot show whether
+it is the module's. The second pair, the module's shell first and cooler,
 missed no more than the starting commit's: the iPhone 0 to 6 and 0 to 2
 against 0 to 9 and 0 to 4, the iPad 0 against 0 to 2, and the iPad's large
 churn 0 frames in all twenty launches. Neither long wait repeated in the
 second pair's 20 iPad launches of those rows.
+
+(The paragraph above was corrected by the main session at the hand-back:
+the first version put the ring's 141.3 ms wait down to the large fill.)
 
 The iPad's large churn, the row the unified wait touches most: before,
 the large-bytes waits and the bounded sweep stops (128 to 587 sweep stops
@@ -865,8 +877,15 @@ against 108.6 to 121.4.
 - An allocation inside a stop never stalls and its collection (module 1's
   policy) is not counted as a fallback, as before.
 - The large fill that does not poll (module 10) still makes long times
-  to safepoint on the iPad (41.5 and 452 ms initial marks, one 141 ms
-  scavenge wait in the oracle row), before and after.
+  to safepoint in the iPad's large churn (initial marks that waited 452
+  ms before and 41.5 ms after).
+- One iPad launch of the oracle ring row, after, waited 141.3 ms for a
+  scavenge's safepoint and missed 17 frames; unexplained (the ring has
+  no large fill), not repeated in 20 more launches, and not excluded as
+  the module's. Every StopRecord holds its last parker and how it came,
+  but the shells' rows print them for final marks only; printing them
+  beside the longest stop of each kind (`stopsByKind`) would have named
+  this one.
 - The marker's QoS override is seen only through `markerOverrides` and
   the records' `markerQoS`; no device energy measurement.
 
