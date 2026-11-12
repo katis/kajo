@@ -784,7 +784,7 @@ saver's strip is checked by the loader in every cross-engine resume).
   s native, thermal serious). The matrix (`device/iphone-interp`,
   `device/iphone-native`, five workers): 0 frames missed and 0 fallbacks in
   every row of both but the hog with the budget off (by design) and the
-  oracle ring row: interpreted 3 frames in all with no fallback, native 109
+  oracle ring row: interpreted 6 frames in all (3, 1 and 2) with no fallback, native 109
   frames with 2 fallbacks behind compacting full collections of 287 and 325
   ms. The matrix's kernels were not run back to back between the engines
   and drifted with the phone's clock (`device/iphone-kernels.md`); run back
@@ -894,7 +894,10 @@ diff; the clean build's 0 warnings are the `clean-build` gate's.
    empty word.
 2. The generator in the kasm fuzz target: **behind a switch** (as
    recommended): `KAJO_FUZZ_AOT=1` makes `fuzz-kasm` generate C for every
-   image an input loads (`FuzzEntry.kasm(_:then:)`).
+   image an input loads (`FuzzEntry.kasm(_:then:)`). The module's own
+   runs recorded none with the switch on; the main session ran
+   `KAJO_FUZZ_AOT=1 scripts/fuzz.sh kasm 300` on 3d8e75c while verifying:
+   "libFuzzer build: ok", 963 008 runs, no crash.
 3. What the generator may decline: **nothing in the kernel and tools
    images** (as recommended): 0 declined in the kernel (3276 methods), the
    development (4053) and the 2000-class (24 118) images. The only reasons
