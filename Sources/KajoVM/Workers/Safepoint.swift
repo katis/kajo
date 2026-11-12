@@ -233,6 +233,7 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe sp.pointee.words = 0
     unsafe sp.pointee.stopCount = i &+ 1
     let epoch = unsafe sp.pointee.epoch
+    unsafe sp.pointee.progress &+= 1
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     unsafe noteEpoch(w, epoch)

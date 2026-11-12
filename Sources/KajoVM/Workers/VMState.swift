@@ -117,6 +117,11 @@ struct WorkerShared: ~Copyable {
     var requested = false
     /// Bumped when a stop releases the world.
     var epoch: UInt64 = 0
+    /// Allocation stalls: the collector's progress, bumped (with a
+    /// broadcast of the safepoint condition) whenever a stop releases the
+    /// world and whenever blocks are freed outside a stop (module 6's
+    /// epoch frees). A stalled worker waits for it to change.
+    var progress: UInt64 = 0
     /// Returns from a park: the stop verifier checks none happens while a
     /// stop's work runs.
     var wakeups: UInt64 = 0
@@ -302,6 +307,9 @@ enum Counter: Int, CaseIterable {
     /// Module 7: stops whose stopper (outside the worker table) was raised
     /// to user-initiated for the stop.
     case stopperQoSRaises
+    /// Allocation stalls: fallbacks no rule justified (a verifier failure
+    /// in checked builds; docs/modules/allocation-stalls.md).
+    case unjustifiedFallbacks
     /// Module 8: Process stacks copied into a segment twice the size.
     case stackGrowths
     /// Module 8b: events emitted by primitive 140.

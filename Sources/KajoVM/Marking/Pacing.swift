@@ -75,3 +75,172 @@ func cycleRecordAtEnd(_ vm: VMPointer, _ mk: MarkingPointer, _ r: inout CycleRec
     r.waits = unsafe waitsSoFar(mk) &- r.waitsAtStart
     r.fallbacks = unsafe mk.pointee.log.pointee.counters.fallbacks &- r.fallbacksAtStart
 }
+
+// MARK: - the stall (part 2)
+
+/// Allocation stalls, the rule (docs/modules/allocation-stalls.md "The
+/// collector's turn"): background worker `w`, outside every stop, its
+/// registers flushed, no lock held, no young collection open, nothing of
+/// the current instruction live but `held` (a pending root while it
+/// stalls), needs `resource` and `available` says it cannot have it
+/// without crossing a limit. The worker raises the marker (the policy's
+/// flag, and an override of the marker thread's QoS from this thread for
+/// as long as it waits: a starved marker cannot raise itself), makes sure
+/// a cycle is running (starting one in a stop of the mode's own kind when
+/// none is), and waits, untimed, on the safepoint condition for the
+/// collector's progress (`SafepointState.progress`, bumped under the
+/// safepoint mutex by every stop's release and by every block freed
+/// outside a stop), parking for stops, servicing module 7's rounds and
+/// quiescent for epochs meanwhile (`waitServicing`). After each change it
+/// asks `available` again (outside the mutex: it may take the pools'
+/// lock). It ends when `available` answers true, or when a cycle whose
+/// snapshot was taken after the stall began has completed and been
+/// applied and the resource is still not there (`justified`: the caller
+/// falls back, and its fallback is justified until `stallFallbackDone`).
+/// Nothing else ends it, a clock least of all. A run due full collection
+/// (the reserve's or a failed verifier's) is run here as a poll would.
+/// nil: this worker does not stall (the main worker, a VM with no marker
+/// thread, no pending-root slot for `held`, the test switch `noStalls`).
+func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallResource, held: Oop = .none,
+                       available: () -> Bool) -> StallOutcome? {
+    guard unsafe w.pointee.index != 0 && w.pointee.index < vm.pointee.workerCount,
+          let mk = unsafe vm.pointee.marking, unsafe mk.pointee.config.markerThread,
+          unsafe !mk.pointee.config.testSwitches.noStalls else { return nil }
+    let h = held == .none ? -1 : unsafe registerPending(vm, held)
+    if held != .none && h < 0 { return nil }
+    defer { if h >= 0 { unsafe unregisterPending(vm, h) } }
+    let sp = unsafe vm.pointee.safepoint
+    let log = unsafe mk.pointee.log
+    let sw = unsafe mk.pointee.config.testSwitches
+    let t0 = nanoseconds()
+    unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    let c0 = unsafe mk.cycleNow
+    let applies0 = unsafe log.pointee.counters.applies
+    unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    unsafe mk.pointee.stalls.pointee.stalledNow += 1
+    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+    unsafe mk.pointee.wantUserInitiated.pointee.store(true, ordering: .relaxed)
+    let override = unsafe overrideMarkerQoS(mk)
+    var outcome = StallOutcome.available
+    var started = 0
+    var applies: UInt64 = 0
+    while true {
+        unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+        let g = unsafe sp.pointee.progress
+        // The broken variant `stallJustifiedByRunningCycle`: the cycle
+        // that was already running when the stall began counts.
+        let last = unsafe log.pointee.lastAppliedCycle
+        let justified = sw.stallJustifiedByRunningCycle ? last >= c0 && last > 0 : last > c0
+        applies = unsafe log.pointee.counters.applies &- applies0
+        unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+        if available() { break }
+        if justified {
+            outcome = .justified
+            break
+        }
+        if unsafe fullCollectionDue(vm) {
+            unsafe runDueFullCollection(vm, w)
+            continue
+        }
+        if unsafe mk.phaseNow == .idle {
+            // The stop-the-world young mode starts a cycle with a scavenge,
+            // whose promotion takes the reserve: with no room for one young
+            // generation there, no cycle can start without a full
+            // collection, which is then justified (no cycle can be waited
+            // for; the record's justifying cycle is 0).
+            if unsafe vm.pointee.young == nil, let n = unsafe vm.pointee.nursery,
+               unsafe n.pointee.om.blocksCommitted + youngGenerationBlocks(n) > n.pointee.om.hardLimitBlocks {
+                outcome = .justified
+                break
+            }
+            started += 1
+            unsafe startCycleForStall(vm, w, mk, held: held)
+            continue
+        }
+        unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+        unsafe waitServicing(vm, w) { unsafe sp.pointee.progress == g && mk.phaseNow != .idle }
+        unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    }
+    if let o = unsafe override { unsafe pthread_override_qos_class_end_np(o) }
+    let dt = nanoseconds() &- t0
+    // Stall time is not the slice's: the deadline moves by it.
+    if unsafe w.pointee.deadline != .max { unsafe w.pointee.deadline &+= nsToTicks(dt) }
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    let st = unsafe mk.pointee.stalls
+    unsafe st.pointee.stalledNow -= 1
+    unsafe st.pointee.note(StallRecord(worker: w.pointee.index, resource: resource, outcome: outcome, ns: dt,
+                                       applies: applies, startedCycles: started))
+    unsafe st.pointee.cyclesStarted &+= UInt64(started)
+    if outcome == .justified { unsafe st.pointee.justified[w.pointee.index] = true }
+    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+    return outcome
+}
+
+/// The justified fallback a stall led to is over (taken or found
+/// unnecessary): later fallbacks of this worker need a stall of their own.
+func stallFallbackDone(_ vm: VMPointer, _ w: WorkerPointer) {
+    guard let mk = unsafe vm.pointee.marking, unsafe w.pointee.index < vm.pointee.workerCount else { return }
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    unsafe mk.pointee.stalls.pointee.justified[w.pointee.index] = false
+    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+}
+
+/// Raise the marker thread to user-initiated from the stalling thread for
+/// as long as it waits (a QoS override; the marker's own policy still
+/// applies when it ends). nil without a marker thread.
+private func overrideMarkerQoS(_ mk: MarkingPointer) -> pthread_override_t? {
+    guard let t = unsafe mk.pointee.thread.pointee.thread else { return nil }
+    let o = unsafe pthread_override_qos_class_start_np(t, QOS_CLASS_USER_INITIATED, 0)
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    unsafe mk.pointee.stalls.pointee.markerOverrides &+= 1
+    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+    return unsafe o
+}
+
+/// No cycle runs and a worker stalls: start one in a stop, the mode's own
+/// way. Module 7: the initial-mark pause (no scavenge). The stop-the-world
+/// young mode: the initial mark rides a scavenge (nothing may be young at
+/// the snapshot but survivors, which are roots), so the stop scavenges
+/// first; its promotion goes to the reserve, once per cycle started, and
+/// it empties the stalled worker's eden too.
+private func startCycleForStall(_ vm: VMPointer, _ w: WorkerPointer, _ mk: MarkingPointer, held: Oop) {
+    let keep = held == .none ? [] : [held]
+    if let y = unsafe vm.pointee.young {
+        unsafe stopWorld(vm, w, retry: true, keeping: keep) { stop in unsafe initialMarkPause(vm, y, mk, stop, trigger: .stall) }
+    } else {
+        // The scavenge is the collector's way to begin a cycle in this
+        // mode: should its promotion find no block (the reserve's fallback),
+        // the full collection that follows is this stall's, justified.
+        unsafe setStallJustified(vm, mk, w, true)
+        unsafe stopWorld(vm, w, retry: true, keeping: keep) { stop in
+            unsafe startCycleInStop(vm, mk, w, stop, scavenge: true, trigger: .stall)
+        }
+        unsafe setStallJustified(vm, mk, w, false)
+    }
+}
+
+private func setStallJustified(_ vm: VMPointer, _ mk: MarkingPointer, _ w: WorkerPointer, _ on: Bool) {
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    unsafe mk.pointee.stalls.pointee.justified[w.pointee.index] = on
+    unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+}
+
+/// Background workers stall in this VM: a marker thread to wait for, and
+/// the test switch `noStalls` off.
+func stallsEnabled(_ vm: VMPointer) -> Bool {
+    guard let mk = unsafe vm.pointee.marking else { return false }
+    return unsafe mk.pointee.config.markerThread && !mk.pointee.config.testSwitches.noStalls
+}
+
+/// Who a full collection about to run is for, from the worker that asks
+/// (nil: an operation in a stop, the host, the marker).
+func fallbackRequester(_ vm: VMPointer, _ w: WorkerPointer?) -> FallbackRequester {
+    guard let w = unsafe w, unsafe w.pointee.index < vm.pointee.workerCount else { return .inStop }
+    if unsafe w.pointee.index == 0 { return .main }
+    guard let mk = unsafe vm.pointee.marking, unsafe mk.pointee.config.markerThread,
+          unsafe !mk.pointee.config.testSwitches.noStalls else { return .noMarker }
+    unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+    defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
+    return unsafe mk.pointee.stalls.pointee.justified[w.pointee.index] ? .stall : .background
+}

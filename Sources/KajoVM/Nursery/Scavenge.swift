@@ -211,6 +211,12 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
     if rec.keptObjects > 0 {
         unsafe placeKept(n, parts: parts)
         unsafe log.pointee.counters.exhaustedScavenges &+= 1
+        // Allocation stalls: who the full collection is for. A promote-all
+        // runs for an operation in a stop; any other scavenge for the worker
+        // that stopped the world (the main worker, or a background worker
+        // whose stall a cycle justified; any other is unjustified).
+        let who = unsafe ph.pointee.promoteAll ? FallbackRequester.inStop : fallbackRequester(vm, w)
+        unsafe n.pointee.fullRequestInfo.pointee.store(encodeFullRequest(.reserve, who, worker: w.pointee.index), ordering: .relaxed)
         if unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
             unsafe log.pointee.counters.fullCollectionsRequested &+= 1
         }
@@ -245,10 +251,20 @@ func scavenge(_ vm: VMPointer, _ w: WorkerPointer, roots: [Oop], promoteAll: Boo
         unsafe verifyAfterScavenge(n, roots: ph.pointee.roots, expected: e, copied: copied)
     }
     let tv = nanoseconds()
-    // Old space past its soft limit: a full collection in its own pause, at
-    // the next poll or instead of the next scavenge (never in this stop).
-    if om.isOverSoftLimit, unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
-        unsafe log.pointee.counters.fullCollectionsRequested &+= 1
+    // Old space past its soft limit: with no collector to wait for (`--gc
+    // stw`, marking driven by hand, the switch `noStalls`) a full collection
+    // in its own pause, at the next poll or instead of the next scavenge
+    // (never in this stop): that collection is the collector. Allocation
+    // stalls: with a marker thread, crossing the soft limit no longer asks
+    // for one (docs/modules/allocation-stalls.md): background workers stall below the limit, the main
+    // worker promotes into the reserve, and a promotion that finds no block
+    // asks above.
+    if unsafe !stallsEnabled(vm) && !n.pointee.fullRequested.pointee.load(ordering: .relaxed), om.isOverSoftLimit {
+        unsafe n.pointee.fullRequestInfo.pointee.store(encodeFullRequest(.softLimit, fallbackRequester(vm, w), worker: w.pointee.index),
+                                                       ordering: .relaxed)
+        if unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
+            unsafe log.pointee.counters.fullCollectionsRequested &+= 1
+        }
     }
     let ce = unsafe n.pointee.copyEnd.pointee.load(ordering: .relaxed)
     rec.prepNs = tp &- t0

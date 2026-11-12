@@ -19,58 +19,96 @@ func collectOwnNursery(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, h
     let a = unsafe y.pointee.nursery.alloc(k)
     unsafe w.pointee.youngHeld = held.raw
     defer { unsafe w.pointee.youngHeld = 0 }
-    if unsafe y.isOffloaded(k) {
-        // The previous collection of this nursery must be over: it frees
-        // the half the owner is about to reuse, after its epoch.
-        if unsafe !y.pointee.done[k].load(ordering: .acquiring) {
-            let tw = nanoseconds()
-            unsafe pthread_mutex_lock(vm.pointee.safepointLock)
-            unsafe waitServicing(vm, w) { unsafe !y.pointee.done[k].load(ordering: .acquiring) }
-            unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
-            let dt = nanoseconds() &- tw
-            unsafe c.pointee.collectorWaits &+= 1
-            unsafe c.pointee.collectorWaitNs &+= dt
-            if unsafe dt > c.pointee.collectorWaitMaxNs { unsafe c.pointee.collectorWaitMaxNs = dt }
+    // Allocation stalls: a background worker's collection is promised room
+    // below the soft limit only; refused, the worker stalls for the
+    // collector, and a stall a cycle justified is followed by a full
+    // collection, after which the promise may take the reserve as the main
+    // worker's does (module 4's out-of-memory rule then applies).
+    let stalls = unsafe k != 0 && stallsEnabled(vm)
+    var justified = false
+    defer { if justified { unsafe stallFallbackDone(vm, w) } }
+    while true {
+        let below = stalls && !justified
+        if unsafe y.isOffloaded(k) {
+            // The previous collection of this nursery must be over: it frees
+            // the half the owner is about to reuse, after its epoch.
+            if unsafe !y.pointee.done[k].load(ordering: .acquiring) {
+                let tw = nanoseconds()
+                unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+                unsafe waitServicing(vm, w) { unsafe !y.pointee.done[k].load(ordering: .acquiring) }
+                unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+                let dt = nanoseconds() &- tw
+                unsafe c.pointee.collectorWaits &+= 1
+                unsafe c.pointee.collectorWaitNs &+= dt
+                if unsafe dt > c.pointee.collectorWaitMaxNs { unsafe c.pointee.collectorWaitMaxNs = dt }
+            }
+            let t0 = nanoseconds()
+            if unsafe !openYoungCollection(vm, y, w, offload: true, belowSoftLimit: below) {
+                if below, unsafe stallForPromotion(vm, y, w, held: held, justified: &justified) { continue }
+                unsafe scavengeForReserve(vm, w, held: held)
+                return
+            }
+            let dt = nanoseconds() &- t0
+            unsafe c.pointee.flips &+= 1
+            unsafe c.pointee.flipNs &+= dt
+            if unsafe dt > c.pointee.flipMaxNs { unsafe c.pointee.flipMaxNs = dt }
+            if unsafe !y.pointee.thread.pointee.started {
+                // No collector thread (a VM driven from the test thread): the
+                // owner runs the offloaded collection itself, its new half
+                // already active.
+                unsafe collectYoung(vm, y, w, k)
+                unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+                unsafe y.pointee.log.pointee.offloadedInline &+= 1
+                unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+                unsafe afterYoungCollection(vm, y, w)
+            }
+            return
         }
         let t0 = nanoseconds()
-        if unsafe !openYoungCollection(vm, y, w, offload: true) {
+        if unsafe !openYoungCollection(vm, y, w, offload: false, belowSoftLimit: below) {
+            if below, unsafe stallForPromotion(vm, y, w, held: held, justified: &justified) { continue }
             unsafe scavengeForReserve(vm, w, held: held)
             return
         }
+        let rec = unsafe collectYoung(vm, y, w, k)
+        // The epoch rule passed inside the collection: the old eden is reused.
+        unsafe a.pointee.top = a.pointee.edenStart
+        unsafe a.pointee.keptEnd = 0
         let dt = nanoseconds() &- t0
-        unsafe c.pointee.flips &+= 1
-        unsafe c.pointee.flipNs &+= dt
-        if unsafe dt > c.pointee.flipMaxNs { unsafe c.pointee.flipMaxNs = dt }
-        if unsafe !y.pointee.thread.pointee.started {
-            // No collector thread (a VM driven from the test thread): the
-            // owner runs the offloaded collection itself, its new half
-            // already active.
-            unsafe collectYoung(vm, y, w, k)
-            unsafe pthread_mutex_lock(vm.pointee.safepointLock)
-            unsafe y.pointee.log.pointee.offloadedInline &+= 1
-            unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
-            unsafe afterYoungCollection(vm, y, w)
+        unsafe c.pointee.ownCollections &+= 1
+        unsafe c.pointee.ownNs &+= dt
+        if unsafe dt > c.pointee.ownMaxNs { unsafe c.pointee.ownMaxNs = dt }
+        let ew = rec.epochWaitNs
+        unsafe c.pointee.edenWaits &+= 1
+        unsafe c.pointee.edenWaitNs &+= ew
+        if unsafe ew > c.pointee.edenWaitMaxNs { unsafe c.pointee.edenWaitMaxNs = ew }
+        unsafe afterYoungCollection(vm, y, w)
+        return
+    }
+}
+
+/// Allocation stalls: background owner `w`'s collection could not be
+/// promised room below the soft limit. Stall until it can; a stall a cycle
+/// justified runs the full collection and sets `justified` (the promise
+/// may then take the reserve). Answers true when the caller should try to
+/// open again, false when it does not stall (no marker thread).
+private func stallForPromotion(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, held: Oop,
+                               justified: inout Bool) -> Bool {
+    let n = unsafe y.pointee.nursery
+    let k = unsafe w.pointee.index
+    let outcome = unsafe stallForCollector(vm, w, .promotion, held: held) {
+        unsafe n.pointee.om.canPromise(blocks: promotionNeedBlocks(n, k), belowSoftLimit: true)
+    }
+    switch outcome {
+    case nil: return false
+    case .available: return true
+    case .justified:
+        justified = true
+        unsafe justifiedFullCollection(vm, w, .promotion, keeping: held == .none ? [] : [held]) {
+            unsafe n.pointee.om.canPromise(blocks: promotionNeedBlocks(n, k), belowSoftLimit: true)
         }
-        return
+        return true
     }
-    let t0 = nanoseconds()
-    if unsafe !openYoungCollection(vm, y, w, offload: false) {
-        unsafe scavengeForReserve(vm, w, held: held)
-        return
-    }
-    let rec = unsafe collectYoung(vm, y, w, k)
-    // The epoch rule passed inside the collection: the old eden is reused.
-    unsafe a.pointee.top = a.pointee.edenStart
-    unsafe a.pointee.keptEnd = 0
-    let dt = nanoseconds() &- t0
-    unsafe c.pointee.ownCollections &+= 1
-    unsafe c.pointee.ownNs &+= dt
-    if unsafe dt > c.pointee.ownMaxNs { unsafe c.pointee.ownMaxNs = dt }
-    let ew = rec.epochWaitNs
-    unsafe c.pointee.edenWaits &+= 1
-    unsafe c.pointee.edenWaitNs &+= ew
-    if unsafe ew > c.pointee.edenWaitMaxNs { unsafe c.pointee.edenWaitMaxNs = ew }
-    unsafe afterYoungCollection(vm, y, w)
 }
 
 /// A young collection could not be opened (the reserve's rule): module 4's
@@ -179,9 +217,19 @@ func stopYoungCollector(_ vm: VMPointer) {
 /// idle, the trigger is decided on this module's promotion samples and an
 /// initial-mark pause requested; the young verifier when due.
 func afterYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer) {
+    // Old space past its soft limit asks for a full collection (module 4's,
+    // at the next poll) only with no collector to wait for (no marker
+    // thread, the switch `noStalls`). Allocation stalls: otherwise no longer (docs/modules/
+    // allocation-stalls.md): background collections are promised room
+    // below the limit and stall otherwise; the main worker's take the
+    // reserve.
     let om = unsafe vm.pointee.om
     let n = unsafe y.pointee.nursery
-    if om.isOverSoftLimit, unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
+    if unsafe !stallsEnabled(vm) && !n.pointee.fullRequested.pointee.load(ordering: .relaxed), om.isOverSoftLimit {
+        unsafe n.pointee.fullRequestInfo.pointee.store(encodeFullRequest(.softLimit, fallbackRequester(vm, c), worker: c.pointee.index),
+                                                       ordering: .relaxed)
+    }
+    if unsafe !stallsEnabled(vm), om.isOverSoftLimit, unsafe !n.pointee.fullRequested.pointee.exchange(true, ordering: .relaxed) {
         unsafe vm.pointee.flag.pointee.bitwiseOr(1, ordering: .releasing)
         unsafe pthread_mutex_lock(vm.pointee.safepointLock)
         unsafe y.pointee.log.pointee.fallbacks[YoungFallback.softLimit.rawValue] &+= 1

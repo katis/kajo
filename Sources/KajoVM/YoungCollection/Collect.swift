@@ -23,7 +23,12 @@ import Synchronization
 /// half and its stash go to the collection, the owner flips to the other
 /// half (its pause is this flip). False, with nothing opened, when the
 /// promotion room the collection may need cannot be promised.
-func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, offload: Bool) -> Bool {
+///
+/// Allocation stalls: `belowSoftLimit` (a background worker that may
+/// stall) promises only below the soft limit (`reservePromotion`); its
+/// refusal is not module 7's reserve fallback but the caller's stall.
+func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer, offload: Bool,
+                         belowSoftLimit: Bool = false) -> Bool {
     let sp = unsafe vm.pointee.safepoint
     let k = unsafe w.pointee.index
     let n = unsafe y.pointee.nursery
@@ -46,11 +51,9 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
     // The reserve's rule: everything in Y may be promoted, in blocks that
     // lose at most a large object's worth each to their tails (bodies past
     // `largeLimit` are allocated old), plus the block being filled.
-    let yBytes = unsafe (a.pointee.top &- a.pointee.edenStart) &+ (v.pointee.survFromTop &- v.pointee.survFromStart)
-    let usable = unsafe UInt64(BlockHeap.blockBytes) &- n.pointee.largeLimit
-    let blocks = Int((yBytes &+ usable &- 1) / usable) &+ 1
-    if unsafe !n.pointee.om.reservePromotion(blocks: blocks) {
-        unsafe y.pointee.log.pointee.fallbacks[YoungFallback.reserve.rawValue] &+= 1
+    let blocks = unsafe promotionNeedBlocks(n, k)
+    if unsafe !n.pointee.om.reservePromotion(blocks: blocks, belowSoftLimit: belowSoftLimit) {
+        if !belowSoftLimit { unsafe y.pointee.log.pointee.fallbacks[YoungFallback.reserve.rawValue] &+= 1 }
         unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
         return false
     }
@@ -98,6 +101,18 @@ func openYoungCollection(_ vm: VMPointer, _ y: YoungPointer, _ w: WorkerPointer,
     }
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
     return true
+}
+
+/// The promotion room a collection of nursery `k` may need: everything in
+/// Y may be promoted, in blocks that lose at most a large object's worth
+/// each to their tails (bodies past `largeLimit` are allocated old), plus
+/// the block being filled. Read by the owner (its own nursery).
+func promotionNeedBlocks(_ n: NurseryPointer, _ k: Int) -> Int {
+    let a = unsafe n.alloc(k)
+    let v = unsafe n.survivors(k)
+    let yBytes = unsafe (a.pointee.top &- a.pointee.edenStart) &+ (v.pointee.survFromTop &- v.pointee.survFromStart)
+    let usable = unsafe UInt64(BlockHeap.blockBytes) &- n.pointee.largeLimit
+    return Int((yBytes &+ usable &- 1) / usable) &+ 1
 }
 
 // MARK: - the collection

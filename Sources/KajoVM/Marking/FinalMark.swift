@@ -229,7 +229,10 @@ func runFinalMark(_ vm: VMPointer, _ mk: MarkingPointer, _ stop: StopContext, cy
         // trusted: nothing is freed, and a full collection falls back.
         unsafe abortCycle(vm, mk)
         unsafe log.pointee.counters.fallbacksVerifier &+= 1
-        if let n = unsafe vm.pointee.nursery { unsafe n.pointee.fullRequested.pointee.store(true, ordering: .relaxed) }
+        if let n = unsafe vm.pointee.nursery {
+            unsafe n.pointee.fullRequestInfo.pointee.store(encodeFullRequest(.verifier, .inStop, worker: -1), ordering: .relaxed)
+            unsafe n.pointee.fullRequested.pointee.store(true, ordering: .relaxed)
+        }
         return
     }
     // Module 6: the relocation set and the frame pins.

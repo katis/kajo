@@ -33,6 +33,9 @@ enum CycleTrigger: UInt8, Sendable {
     /// the table would fill within `safetyFactor` cycles (the last one's
     /// duration).
     case entryRate
+    /// Allocation stalls: a background worker stalled with no cycle
+    /// running and started one (docs/modules/allocation-stalls.md).
+    case stall
 }
 
 /// A worker's SATB buffer, in its own 128-byte lines. Written by its
@@ -286,8 +289,28 @@ struct MarkingCounters: Sendable {
     /// soft limit; an old allocation found no room under the limit or no
     /// run of its length).
     var fallbacksEntries: UInt64 = 0
-    var fallbacksSoftLimit: UInt64 = 0
     var fallbacksOldAllocation: UInt64 = 0
+    /// Allocation stalls (docs/modules/allocation-stalls.md): fallbacks
+    /// for a background worker's promotion after a justified stall, for
+    /// promotion that found no block (the reserve's fallback: objects kept
+    /// in place), and for a failed final-mark verifier; and the fallbacks
+    /// by who asked: the main worker, a background worker whose stall a
+    /// cycle justified, an operation in a stop or the host, a VM with no
+    /// marker thread to wait for, and none of these (`unjustified`: 0 in
+    /// every test and row, a verifier failure in checked builds).
+    var fallbacksPromotion: UInt64 = 0
+    /// Soft-limit crossings that asked for a full collection: only with no
+    /// collector to wait for (no marker thread, `noStalls`).
+    var fallbacksSoftLimit: UInt64 = 0
+    var fallbacksReserve: UInt64 = 0
+    var fallbacksByMain: UInt64 = 0
+    var fallbacksByStall: UInt64 = 0
+    var fallbacksInStop: UInt64 = 0
+    var fallbacksNoMarker: UInt64 = 0
+    var unjustifiedFallbacks: UInt64 = 0
+    /// Justified stalls whose fallback found the resource there in its stop
+    /// (another worker's had run): no full collection.
+    var fallbacksAvoided: UInt64 = 0
     /// Large bytes, part 2: stops in which the young allocation found the
     /// entry table empty, or an old allocation found no room, while a cycle
     /// swept, and the sweep was finished and applied there instead of a
@@ -321,6 +344,8 @@ struct MarkingCounters: Sendable {
     /// `cycles`). Its raises are a VM counter (`entryRateRaises`): they
     /// are decided between stops.
     var cyclesByEntryRate: UInt64 = 0
+    /// Allocation stalls: cycles a stalled worker started (none running).
+    var cyclesByStall: UInt64 = 0
 }
 
 /// What a sweep stop found and did.
@@ -424,6 +449,130 @@ struct FallbackRecord: Sendable {
     var wantUserInitiated = false
     /// An old allocation's failure: 1 the limit, 2 no run of its length.
     var largeFailure: UInt8 = 0
+    /// Allocation stalls: who asked (and the worker, -1 for none), the
+    /// cycle that justified a background worker's fallback (its number;
+    /// 0 none) and how long that worker had stalled.
+    var requester = FallbackRequester.inStop
+    var worker = -1
+    var justifyingCycle: UInt64 = 0
+    var stalledNs: UInt64 = 0
+}
+
+/// Allocation stalls: who a fallback is for. Every value but `background`
+/// is justified (docs/modules/allocation-stalls.md "The fallback stays").
+enum FallbackRequester: UInt8, Sendable {
+    /// The main worker, exempt from stalls (the owner, 2026-11-09).
+    case main
+    /// A background worker whose stall a cycle begun after it justified.
+    case stall
+    /// An operation in a stop, the host, a stress flag, the marker's
+    /// failed verifier.
+    case inStop
+    /// No marker thread to wait for (tests that drive marking by hand).
+    case noMarker
+    /// A background worker with no justifying cycle: the bug the counter
+    /// `unjustifiedFallbacks` exists for.
+    case background
+}
+
+/// Allocation stalls: the resource a background worker stalled for.
+enum StallResource: UInt8, Sendable {
+    /// Blocks for a young collection's promotion (module 7's promise, or
+    /// module 4's scavenge under `young=stw`).
+    case promotion
+    /// Entries: the worker's stash is empty and the table has none.
+    case entries
+    /// Room under the soft limit, or a run of blocks, for an old (large)
+    /// allocation.
+    case old
+}
+
+/// Allocation stalls: how a stall ended.
+enum StallOutcome: UInt8, Sendable {
+    /// The collector's progress made the resource available.
+    case available
+    /// A cycle whose snapshot was taken after the stall began completed and
+    /// was applied, and the resource is still not there: the caller falls
+    /// back (justified).
+    case justified
+}
+
+/// One stall: the worker, the resource, how it ended, its time, the cycles
+/// applied while it waited, and whether it had to start one.
+struct StallRecord: Sendable {
+    var worker = 0
+    var resource = StallResource.promotion
+    var outcome = StallOutcome.available
+    var ns: UInt64 = 0
+    var applies: UInt64 = 0
+    var startedCycles = 0
+}
+
+/// Allocation stalls: one resource's tally.
+struct StallTally: Sendable {
+    var count: UInt64 = 0
+    var ns: UInt64 = 0
+    var maxNs: UInt64 = 0
+    var justified: UInt64 = 0
+}
+
+/// Allocation stalls: every stall so far (under the waits lock): the tally
+/// by resource, per worker, the last records for percentiles, the stalls
+/// in progress, the cycles stalls started, the marker's QoS overrides.
+struct StallLog {
+    var promotion = StallTally()
+    var entries = StallTally()
+    var old = StallTally()
+    var records: RecordRing<StallRecord>
+    var byWorkerCount: [UInt64]
+    var byWorkerNs: [UInt64]
+    /// Each worker's last stall's time (the fallback record's).
+    var lastNs: [UInt64]
+    /// A background worker whose stall was justified, until its
+    /// allocation ends: its fallbacks are justified.
+    var justified: [Bool]
+    var stalledNow = 0
+    var cyclesStarted: UInt64 = 0
+    var markerOverrides: UInt64 = 0
+
+    init(workers: Int, capacity: Int) {
+        records = RecordRing(capacity: capacity)
+        byWorkerCount = Array(repeating: 0, count: workers)
+        byWorkerNs = Array(repeating: 0, count: workers)
+        lastNs = Array(repeating: 0, count: workers)
+        justified = Array(repeating: false, count: workers)
+    }
+
+    var all: StallTally {
+        var t = StallTally()
+        for x in [promotion, entries, old] {
+            t.count &+= x.count
+            t.ns &+= x.ns
+            t.maxNs = Swift.max(t.maxNs, x.maxNs)
+            t.justified &+= x.justified
+        }
+        return t
+    }
+
+    mutating func note(_ r: StallRecord) {
+        func add(_ t: inout StallTally) {
+            t.count &+= 1
+            t.ns &+= r.ns
+            t.maxNs = Swift.max(t.maxNs, r.ns)
+            if r.outcome == .justified { t.justified &+= 1 }
+        }
+        switch r.resource {
+        case .promotion: add(&promotion)
+        case .entries: add(&entries)
+        case .old: add(&old)
+        }
+        if r.worker >= 0 && r.worker < byWorkerCount.count {
+            byWorkerCount[r.worker] &+= 1
+            byWorkerNs[r.worker] &+= r.ns
+            lastNs[r.worker] = r.ns
+        }
+        records.append(r)
+    }
 }
 
 /// What module 5's report sums, averages or takes the maximum of over
@@ -507,6 +656,10 @@ struct MarkingLog {
     var lastOldAllocations: UInt64 = 0
     /// Large bytes, part 2: when the last apply ended (ns, 0: none yet).
     var lastApplyAtNs: UInt64 = 0
+    /// Allocation stalls: the number of the last cycle applied (0: none),
+    /// written in the apply's stop; a stall begun at cycle c is justified
+    /// once this passes c.
+    var lastAppliedCycle: UInt64 = 0
     /// Large bytes, part 2: the last fallbacks' circumstances.
     var fallbackRecords = RecordRing<FallbackRecord>(capacity: 16)
     /// The sweep stop: the last sweep stops' records.
@@ -542,6 +695,8 @@ struct MarkingLog {
     /// Large bytes, part 2: old allocations that waited for a marking
     /// cycle (`waitForMarkingCycle`), under their own lock.
     let waits: UnsafeMutablePointer<AllocationWaits>
+    /// Allocation stalls: every stall, under the same lock.
+    let stalls: UnsafeMutablePointer<StallLog>
     let waitsLock: UnsafeMutablePointer<pthread_mutex_t>
     /// Large bytes: the marker thread's QoS as it last set it, for readers
     /// on other threads (the fallback record); the marker's own `qos` is

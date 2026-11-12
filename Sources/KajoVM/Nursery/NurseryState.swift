@@ -334,6 +334,9 @@ struct ScavengeTotals: Sendable {
     /// A scavenge left old space past its soft limit: the next poll, or the
     /// next scavenge request, runs a full collection instead.
     let fullRequested: UnsafeMutablePointer<Atomic<Bool>>
+    /// Allocation stalls: who asked for the requested full collection
+    /// (`encodeFullRequest`), stored before `fullRequested` is set.
+    let fullRequestInfo: UnsafeMutablePointer<Atomic<UInt64>>
     /// The object memory's soft limit before the VM lowered it below the
     /// promotion reserve; given back at the VM's end.
     var softLimitBefore = 0
@@ -470,7 +473,8 @@ extension NurseryShared {
             bufferOwners: owners, concurrent: concurrent, deferredOwnership: deferredOwnership, rem: rem, remBytes: remBytes,
             phase: lined(ScavengePhase()), taskNext: atomicLine(0), sweepNext: atomicLine(0), inCopy: atomicLine(0),
             idle: atomicLine(0), copyEnd: atomicLine(UInt64(0)), packets: lined(pool), packetLock: makeMutex(),
-            poolCount: atomicLine(0), state: lined(NurseryLog(logCapacity: logCapacity)), fullRequested: atomicLine(false)))
+            poolCount: atomicLine(0), state: lined(NurseryLog(logCapacity: logCapacity)), fullRequested: atomicLine(false),
+            fullRequestInfo: atomicLine(UInt64(0))))
         return unsafe s
     }
 
@@ -533,6 +537,7 @@ extension NurseryShared {
         for unsafe p in unsafe [s.taskNext, s.sweepNext, s.inCopy, s.idle, s.poolCount] { unsafe unlined(p) }
         unsafe unlined(s.copyEnd)
         unsafe unlined(s.fullRequested)
+        unsafe unlined(s.fullRequestInfo)
         unsafe unlined(s.state)
         unsafe unlined(n)
     }

@@ -40,7 +40,8 @@ extension MarkingShared {
             lock: makeMutex(), cond: makeCond(), marker: lined(MarkerState()), markerWorker: markerWorker,
             log: lined(MarkingLog(logCapacity: vm.pointee.config.logCapacity)), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
             wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
-            waits: lined(AllocationWaits()), waitsLock: makeMutex(), qosNow: lined(Atomic<UInt32>(0)),
+            waits: lined(AllocationWaits()),
+            stalls: lined(StallLog(workers: count, capacity: vm.pointee.config.logCapacity)), waitsLock: makeMutex(), qosNow: lined(Atomic<UInt32>(0)),
             stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag), rootScans: rootScans, rootScanRanges: ranges,
             rootScanCount: nurseries, rootScanStats: stats))
@@ -71,6 +72,7 @@ extension MarkingShared {
         unsafe unlined(s.wantUserInitiated)
         unsafe unlined(s.markerWaits)
         unsafe unlined(s.waits)
+        unsafe unlined(s.stalls)
         unsafe unlined(s.qosNow)
         unsafe freeMutex(s.waitsLock)
         unsafe unlined(s.stopping)
@@ -91,7 +93,8 @@ extension MarkingShared {
 
 /// `VM.startCycle`'s stop: a scavenge (unless the textbook mode asks for
 /// none) and the initial mark.
-private func startCycleInStop(_ vm: VMPointer, _ mk: MarkingPointer, _ w: WorkerPointer, _ stop: StopContext, scavenge doScavenge: Bool) {
+func startCycleInStop(_ vm: VMPointer, _ mk: MarkingPointer, _ w: WorkerPointer, _ stop: StopContext, scavenge doScavenge: Bool,
+                      trigger: CycleTrigger = .forced) {
     let roots = stop.roots()
     if doScavenge {
         unsafe markStop(vm, .scavenge)
@@ -104,7 +107,7 @@ private func startCycleInStop(_ vm: VMPointer, _ mk: MarkingPointer, _ w: Worker
     guard unsafe mk.phaseNow == .idle, unsafe !fullCollectionDue(vm) else { return }
     unsafe countOldEntriesAtPause(vm, mk)
     unsafe updateWantedQoS(mk, oldEntries: nil)
-    unsafe initialMark(vm, mk, roots: roots, trigger: .forced, literal: !doScavenge)
+    unsafe initialMark(vm, mk, roots: roots, trigger: trigger, literal: !doScavenge)
 }
 
 extension VM {
@@ -133,6 +136,14 @@ extension VM {
             unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
             return c
         }
+    }
+
+    /// Allocation stalls: every stall so far (a copy, under the waits lock).
+    var stallLog: StallLog? {
+        guard let mk = unsafe state.pointee.marking else { return nil }
+        unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+        defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
+        return unsafe mk.pointee.stalls.pointee
     }
 
     /// The last cycles (`VMConfig.logCapacity` of them), oldest first.

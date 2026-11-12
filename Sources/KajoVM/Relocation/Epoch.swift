@@ -150,5 +150,14 @@ func tryFreePending(_ vm: VMPointer, _ r: RelocationPointer, atPause: Bool) -> I
         unsafe st.pointee.current.freedByEpoch &+= byEpoch
         unsafe st.pointee.current.freedAtPause &+= byPause
     }
+    // Allocation stalls: blocks freed outside a stop are the collector's
+    // progress a stalled worker may be waiting for (it waits on the
+    // safepoint condition for `progress` to change).
+    if !atPause && freed > 0 {
+        unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+        unsafe vm.pointee.safepoint.pointee.progress &+= 1
+        unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
+        unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    }
     return freed
 }

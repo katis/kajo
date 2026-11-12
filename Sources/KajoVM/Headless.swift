@@ -589,7 +589,12 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("promotionMBs", f(c.lastPromotionBytesPerSecond / 1e6)), ("predictedFillMs", ms(c.lastPredictedFillNs)),
         ("markVerifies", "\(c.verifierRuns)"), ("missed", "\(c.missed)"),
         ("cycleLogDropped", "\(totals.dropped)"),
-        ("fallbacksEntries", "\(c.fallbacksEntries)"), ("fallbacksSoftLimit", "\(c.fallbacksSoftLimit)"),
+        ("fallbacksEntries", "\(c.fallbacksEntries)"), ("fallbacksReserve", "\(c.fallbacksReserve)"),
+        ("fallbacksSoftLimit", "\(c.fallbacksSoftLimit)"),
+        ("fallbacksPromotion", "\(c.fallbacksPromotion)"), ("fallbacksByMain", "\(c.fallbacksByMain)"),
+        ("fallbacksByStall", "\(c.fallbacksByStall)"), ("fallbacksInStop", "\(c.fallbacksInStop)"),
+        ("fallbacksNoMarker", "\(c.fallbacksNoMarker)"), ("unjustifiedFallbacks", "\(c.unjustifiedFallbacks)"),
+        ("fallbacksAvoided", "\(c.fallbacksAvoided)"),
         ("fallbacksOld", "\(c.fallbacksOldAllocation)"), ("fallbackLog", fallbackSummary(vm.fallbackLog)),
         ("sweepsForEntries", "\(c.sweepsFinishedForEntries)"), ("sweepsForOld", "\(c.sweepsFinishedForOld)"),
         ("sweepsInStopMs", ms(c.sweepsFinishedForEntriesNs)),
@@ -613,8 +618,9 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("allocWaitMaxMs", ms(c.allocationWaits.maxNs)), ("allocWaitTimeouts", "\(c.allocationWaits.timeouts)"),
         ("triggersNotStarted", "\(vm.counters[.triggersNotStarted])"), ("largeTriggersUnrooted", "\(vm.counters[.largeTriggersUnrooted])"),
         ("cycleRecs", cycleRecordSummary(log)),
+        ("byStall", "\(c.cyclesByStall)"),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
-    ] + finalMarkReport(stops: stops, log: log) + [
+    ] + stallReport(vm) + finalMarkReport(stops: stops, log: log) + [
         ("finalGiveUps", "\(c.finalGiveUps)"), ("finalOverruns", "\(c.finalOverruns)"),
         ("finalUnitsMax", log.map(\.finalWorkUnitsMax).max().map { "\($0)" } ?? "-"),
     ] + rootScanReport(vm.rootScanStats)
@@ -710,6 +716,30 @@ func stopsByKind(_ stops: [StopRecord]) -> String {
 /// stop/entries freed in it (k)/its sweeping ms/its apply or hand-over
 /// ms/entries handed over (k)/relocation cut off (1)/old entries percent
 /// of the table, separated by commas; "-" when none.
+/// Allocation stalls: the stalls (docs/modules/allocation-stalls.md):
+/// how many, their total, p50, p99 and longest time over the records kept,
+/// by resource (promotion, entries, old) and outcome (justified: followed
+/// by a fallback), per worker (`stallsByWorker`: count/ms per worker from
+/// 1), the cycles stalls started, the marker's QoS overrides.
+func stallReport(_ vm: VM) -> [(String, String)] {
+    guard let s = vm.stallLog else { return [] }
+    func ms(_ ns: UInt64) -> String { unsafe String(format: "%.3f", Double(ns) / 1e6) }
+    let ns = s.records.records.map(\.ns).sorted()
+    func pct(_ q: Double) -> String { ns.isEmpty ? "-" : ms(ns[Swift.min(ns.count - 1, Int(Double(ns.count) * q))]) }
+    let all = s.all
+    let per = (1..<s.byWorkerCount.count).map { "\(s.byWorkerCount[$0])/\(unsafe String(format: "%.1f", Double(s.byWorkerNs[$0]) / 1e6))" }
+    return [
+        ("stalls", "\(all.count)"), ("stallMs", ms(all.ns)), ("stallP50ms", pct(0.5)), ("stallP99ms", pct(0.99)),
+        ("stallMaxMs", ms(all.maxNs)), ("stallsJustified", "\(all.justified)"),
+        ("stallsPromotion", "\(s.promotion.count)"), ("stallPromotionMs", ms(s.promotion.ns)),
+        ("stallsEntries", "\(s.entries.count)"), ("stallEntriesMs", ms(s.entries.ns)),
+        ("stallsOld", "\(s.old.count)"), ("stallOldMs", ms(s.old.ns)),
+        ("stallsByWorker", per.isEmpty ? "-" : per.joined(separator: ",")),
+        ("stallCyclesStarted", "\(s.cyclesStarted)"), ("markerOverrides", "\(s.markerOverrides)"),
+        ("stallLogDropped", "\(s.records.dropped)"),
+    ]
+}
+
 /// Allocation stalls, part 1: one item per cycle the log kept, fields
 /// separated by colons: number, trigger, state (c completed, a abandoned, r
 /// running), old space at the snapshot and at the end (MB), promoted while
@@ -759,10 +789,12 @@ func fallbackSummary(_ rs: [FallbackRecord]) -> String {
     if rs.isEmpty { return "-" }
     func pc(_ a: Double, _ b: Double) -> String { b > 0 ? unsafe String(format: "%.1f", 100 * a / b) : "-" }
     return rs.map { r in
-        let cause = ["soft", "entries", "other", "old"][Int(r.cause.rawValue)]
+        let cause = ["reserve", "entries", "other", "old", "promotion", "verifier", "soft"][Int(r.cause.rawValue)]
         let phase = ["idle", "marking", "sweeping", "swept"][Int(r.phase.rawValue)]
-        let trig = r.trigger.map { ["floor", "entries", "predictor", "forced", "entryRate"][Int($0.rawValue)] } ?? "-"
-        return [cause, phase, trig, unsafe String(format: "%.1f", Double(r.sinceCycleStartNs) / 1e6),
+        let trig = r.trigger.map { ["floor", "entries", "predictor", "forced", "entryRate", "stall"][Int($0.rawValue)] } ?? "-"
+        let who = ["main", "stall", "inStop", "noMarker", "background"][Int(r.requester.rawValue)]
+        return [cause, who, "\(r.worker)", "\(r.justifyingCycle)", unsafe String(format: "%.1f", Double(r.stalledNs) / 1e6),
+                phase, trig, unsafe String(format: "%.1f", Double(r.sinceCycleStartNs) / 1e6),
                 unsafe String(format: "%.1f", Double(r.sinceLastApplyNs) / 1e6), "\(r.cyclesStarted)",
                 unsafe String(format: "%.0f", r.sweptFraction * 100), pc(Double(r.highWater), Double(r.entryCapacity)),
                 "\(r.poolRuns)", "\(r.pendingRuns)", pc(Double(r.oldEntries), Double(r.entryCapacity)),

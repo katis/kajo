@@ -147,4 +147,19 @@ struct MarkingTestSwitches: Sendable {
     /// The sweep stop, part 3: the entry-rate rule off (the trigger and the
     /// QoS policy watch the table's headroom only, as before).
     var noEntryRateRule = false
+    /// Allocation stalls: no background worker stalls (the fallbacks of
+    /// before; the A/B and the failing-before runs).
+    var noStalls = false
+    /// A broken variant (tests only): the cycle already running when a
+    /// stall began justifies its fallback; the fallback must count as
+    /// unjustified or fail the verifier.
+    var stallJustifiedByRunningCycle = false
+    /// A broken variant (tests only): the stall's gate for an empty entry
+    /// table answers "available" (it ignores the table), so the allocation
+    /// falls back without a justifying cycle.
+    var stallIgnoresEntries = false
+    /// Allocation stalls, part 5: the marker does its tracing, relocation
+    /// and sweeping this many times over (1: off); it stands for a mutator
+    /// that many times faster. Counted (`markerSlowdownRepeats`).
+    var markerSlowdown = 1
 }

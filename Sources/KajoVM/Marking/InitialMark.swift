@@ -300,6 +300,7 @@ func initialMark(_ vm: VMPointer, _ mk: MarkingPointer, roots: [Oop], trigger: C
     case .entries: unsafe log.pointee.counters.cyclesByEntries &+= 1
     case .forced: unsafe log.pointee.counters.cyclesForced &+= 1
     case .entryRate: unsafe log.pointee.counters.cyclesByEntryRate &+= 1
+    case .stall: unsafe log.pointee.counters.cyclesByStall &+= 1
     }
     unsafe log.pointee.counters.initialMarkNs &+= t3 &- t0
     // The barrier is on before any mutator runs again (the stop's release

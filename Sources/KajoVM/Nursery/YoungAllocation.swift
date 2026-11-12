@@ -84,6 +84,8 @@ extension Machine {
         var collected = false
         var noRoom = 0
         var waitedForCycle = false
+        var justified = false
+        defer { if justified { unsafe stallFallbackDone(vm, w) } }
         while true {
             if !force {
                 if unsafe a.pointee.stash.next == a.pointee.stash.count, unsafe om.refillStash(stash, atLeast: 1024) {
@@ -121,6 +123,28 @@ extension Machine {
                 waitedForCycle = true
                 if unsafe waitForMarkingCycle(vm, w, holding: extra) { continue }
             }
+            // Allocation stalls (the stop-the-world young mode): a background
+            // worker whose scavenge could promote past the soft limit (every
+            // nursery's young generation, the reserve's own unit) waits for
+            // the collector instead; another worker's scavenge that empties
+            // this eden ends the wait too. A stall a cycle justified is
+            // followed by a full collection, once per allocation.
+            if !tableFull && !force && !justified, unsafe vm.pointee.young == nil {
+                let need = unsafe youngGenerationBlocks(n)
+                if om.blocksCommitted + need > om.softLimitBlocks {
+                    let outcome = unsafe stallForCollector(vm, w, .promotion, held: extra) {
+                        unsafe a.pointee.top &+ size <= a.pointee.end || om.blocksCommitted + need <= om.softLimitBlocks
+                    }
+                    if outcome == .available { continue }
+                    if outcome == .justified {
+                        justified = true
+                        unsafe justifiedFullCollection(vm, w, .promotion, keeping: keep) {
+                            unsafe a.pointee.top &+ size <= a.pointee.end || om.blocksCommitted + need <= om.softLimitBlocks
+                        }
+                        continue
+                    }
+                }
+            }
             let full = tableFull || (force && fullStress)
             let before = pauseCount()
             let collections = om.counters.collections
@@ -153,10 +177,10 @@ func youngPause(_ vm: VMPointer, _ w: WorkerPointer, _ stop: StopContext, full: 
         // The sweep stop: bounded, for the main worker too (a partial apply
         // hands over what is swept; the retry finds those entries).
         if !stress, unsafe finishSweepInStop(vm, for: .entries) != .none { return }
-        unsafe noteFullCollection(vm, stress ? .other : .entries)
+        unsafe noteFullCollection(vm, stress ? .other : .entries, requester: fallbackRequester(vm, w), worker: w.pointee.index)
         unsafe fullCollection(vm, stop)
     } else if unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) {
-        unsafe noteFullCollection(vm, .softLimit)
+        unsafe noteRequestedFullCollection(vm, n)
         unsafe fullCollection(vm, stop)
     } else {
         unsafe markStop(vm, .scavenge)
@@ -213,8 +237,16 @@ private func leavesNoHeadroom(_ vm: VMPointer, _ om: ObjectMemory) -> Bool {
     return Double(om.blocksInUse) >= floor * Double(om.softLimitBlocks)
 }
 
-/// A scavenge left old space past its soft limit and no full collection
-/// has run since.
+/// The requested full collection is about to run (world stopped): noted
+/// for whoever asked (allocation stalls: the reserve's fallback for the
+/// worker whose scavenge kept objects, a failed verifier).
+func noteRequestedFullCollection(_ vm: VMPointer, _ n: NurseryPointer) {
+    let (cause, who, worker) = decodeFullRequest(unsafe n.pointee.fullRequestInfo.pointee.load(ordering: .relaxed))
+    unsafe noteFullCollection(vm, cause, requester: who, worker: worker)
+}
+
+/// A full collection was requested (a promotion found no block, or the
+/// final mark's verifier failed) and none has run since.
 @inline(__always)
 func fullCollectionDue(_ vm: VMPointer) -> Bool {
     guard let n = unsafe vm.pointee.nursery else { return false }
@@ -228,7 +260,7 @@ func runDueFullCollection(_ vm: VMPointer, _ w: WorkerPointer) {
     unsafe stopWorld(vm, w, retry: true) { stop in
         guard let n = unsafe vm.pointee.nursery,
               unsafe n.pointee.fullRequested.pointee.exchange(false, ordering: .relaxed) else { return }
-        unsafe noteFullCollection(vm, .softLimit)
+        unsafe noteRequestedFullCollection(vm, n)
         unsafe fullCollection(vm, stop)
     }
     unsafe w.pointee.interp.counters.collectionsTriggered &+= 1
@@ -237,6 +269,35 @@ func runDueFullCollection(_ vm: VMPointer, _ w: WorkerPointer) {
 /// A scavenge in a stop of its own (the `scavenge` primitive, the host).
 func scavengeNow(_ vm: VMPointer, _ w: WorkerPointer) {
     unsafe stopWorld(vm, w, retry: true) { stop in unsafe youngPause(vm, w, stop, full: false) }
+}
+
+/// Allocation stalls: the blocks one scavenge may promote at most, every
+/// nursery's eden and survivor half (the unit the promotion reserve holds
+/// two of, with the same allowance for block tails).
+func youngGenerationBlocks(_ n: NurseryPointer) -> Int {
+    let config = unsafe n.pointee.config
+    let count = unsafe n.pointee.count
+    let young = (config.edenBytes + config.survivorHalf) * count
+    return (young * 4 / 3 + BlockHeap.blockBytes - 1) / BlockHeap.blockBytes + count
+}
+
+/// Allocation stalls: the full collection a justified stall leads to, in a
+/// stop of its own (`keeping` its roots), counted as the stalled worker's
+/// justified fallback, unless `available` finds the resource there in the
+/// stop (several workers' stalls end at the same apply: the first one's
+/// full collection serves the others). The justification lasts until the
+/// allocation ends (`stallFallbackDone`): what follows the full collection
+/// is module 4's out-of-memory rule, and its fallbacks are justified too.
+func justifiedFullCollection(_ vm: VMPointer, _ w: WorkerPointer, _ cause: FullCause, keeping: [Oop],
+                             available: () -> Bool) {
+    unsafe stopWorld(vm, w, retry: true, keeping: keeping) { stop in
+        if available() {
+            if let mk = unsafe vm.pointee.marking { unsafe mk.pointee.log.pointee.counters.fallbacksAvoided &+= 1 }
+            return
+        }
+        unsafe noteFullCollection(vm, cause, requester: fallbackRequester(vm, w), worker: w.pointee.index)
+        unsafe fullCollection(vm, stop)
+    }
 }
 
 // MARK: - the VM's nursery

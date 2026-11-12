@@ -128,6 +128,7 @@ func applyInStop(_ vm: VMPointer, _ mk: MarkingPointer) {
     unsafe log.pointee.lastCycleNs = t1 &- log.pointee.startNs
     if unsafe log.pointee.sweepStartNs != 0 { unsafe log.pointee.lastSweepNs = t1 &- log.pointee.sweepStartNs }
     unsafe log.pointee.lastApplyAtNs = t1
+    unsafe log.pointee.lastAppliedCycle = unsafe mk.cycleNow
     unsafe log.pointee.current = -1
     unsafe log.pointee.counters.cyclesCompleted &+= 1
     unsafe log.pointee.counters.applies &+= 1
@@ -444,8 +445,11 @@ func waitForSweep(_ vm: VMPointer, _ w: WorkerPointer, holding: Oop = .none) -> 
 
 /// Why module 4 ran a full collection.
 enum FullCause: UInt8, Sendable {
-    /// A scavenge left old space past its soft limit.
-    case softLimit
+    /// A promotion found no block (the reserve's fallback: objects kept in
+    /// place). Before the allocation stalls this case was `softLimit`, a
+    /// scavenge that left old space past its soft limit; crossing the soft
+    /// limit no longer asks for a full collection.
+    case reserve
     /// The entry table was full.
     case entries
     /// A stress flag or the host.
@@ -453,17 +457,41 @@ enum FullCause: UInt8, Sendable {
     /// Large bytes, part 2: an old (large) allocation found no room under
     /// the soft limit or no run of its length.
     case oldAllocation
+    /// Allocation stalls: a background worker's promotion after a stall a
+    /// cycle justified.
+    case promotion
+    /// The final mark's verifier failed (the cycle was abandoned).
+    case verifier
+    /// A collection left old space past its soft limit with no collector
+    /// to wait for (no marker thread, the switch `noStalls`): module 4's
+    /// rule before the allocation stalls, kept there.
+    case softLimit
 }
 
 /// A full collection is about to run in this stop (or, for an old
 /// allocation, ran: `record` was taken before it). With concurrent marking
 /// configured, one forced by space is a fallback: a provisioning failure,
 /// counted by the phase it found and by what ran out, never hidden. Its
-/// circumstances are recorded (large bytes, part 2).
-func noteFullCollection(_ vm: VMPointer, _ cause: FullCause, record: FallbackRecord? = nil) {
+/// circumstances are recorded (large bytes, part 2), with who asked
+/// (allocation stalls): the main worker, a background worker whose stall a
+/// cycle justified, an operation in a stop, a VM with no marker thread, or
+/// none of these, which is `unjustifiedFallbacks` (a verifier failure in
+/// checked builds).
+func noteFullCollection(_ vm: VMPointer, _ cause: FullCause, requester: FallbackRequester, worker: Int = -1,
+                        record: FallbackRecord? = nil) {
     guard let mk = unsafe vm.pointee.marking, cause != .other else { return }
     let log = unsafe mk.pointee.log
-    let r = unsafe record ?? fallbackRecord(vm, cause)!
+    var r = unsafe record ?? fallbackRecord(vm, cause)!
+    r.requester = requester
+    r.worker = worker
+    if requester == .stall {
+        r.justifyingCycle = unsafe log.pointee.lastAppliedCycle
+        unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+        if unsafe worker >= 0 && worker < mk.pointee.stalls.pointee.lastNs.count {
+            r.stalledNs = unsafe mk.pointee.stalls.pointee.lastNs[worker]
+        }
+        unsafe pthread_mutex_unlock(mk.pointee.waitsLock)
+    }
     unsafe log.pointee.counters.fallbacks &+= 1
     switch r.phase {
     case .idle: unsafe log.pointee.counters.fallbacksIdle &+= 1
@@ -472,11 +500,37 @@ func noteFullCollection(_ vm: VMPointer, _ cause: FullCause, record: FallbackRec
     }
     switch cause {
     case .entries: unsafe log.pointee.counters.fallbacksEntries &+= 1
-    case .softLimit: unsafe log.pointee.counters.fallbacksSoftLimit &+= 1
+    case .reserve: unsafe log.pointee.counters.fallbacksReserve &+= 1
     case .oldAllocation: unsafe log.pointee.counters.fallbacksOldAllocation &+= 1
-    case .other: break
+    case .promotion: unsafe log.pointee.counters.fallbacksPromotion &+= 1
+    case .softLimit: unsafe log.pointee.counters.fallbacksSoftLimit &+= 1
+    case .verifier, .other: break
+    }
+    switch requester {
+    case .main: unsafe log.pointee.counters.fallbacksByMain &+= 1
+    case .stall: unsafe log.pointee.counters.fallbacksByStall &+= 1
+    case .inStop: unsafe log.pointee.counters.fallbacksInStop &+= 1
+    case .noMarker: unsafe log.pointee.counters.fallbacksNoMarker &+= 1
+    case .background: unsafe log.pointee.counters.unjustifiedFallbacks &+= 1
     }
     unsafe log.pointee.fallbackRecords.append(r)
+    if unsafe requester == .background && vm.pointee.om.config.verify {
+        unsafe verifierFailed(vm, .unjustifiedFallbacks,
+                              "an unjustified fallback: background worker \(worker), cause \(cause), phase \(r.phase)")
+    }
+}
+
+/// The requester of a full collection module 4 was asked for, kept beside
+/// `fullRequested` (`NurseryShared.fullRequestInfo`): the cause, the
+/// requester and the worker.
+func encodeFullRequest(_ cause: FullCause, _ requester: FallbackRequester, worker: Int) -> UInt64 {
+    UInt64(cause.rawValue) | UInt64(requester.rawValue) &<< 8 | UInt64(truncatingIfNeeded: worker &+ 1) &<< 16
+}
+
+func decodeFullRequest(_ v: UInt64) -> (cause: FullCause, requester: FallbackRequester, worker: Int) {
+    (FullCause(rawValue: UInt8(truncatingIfNeeded: v)) ?? .reserve,
+     FallbackRequester(rawValue: UInt8(truncatingIfNeeded: v &>> 8)) ?? .inStop,
+     Int(truncatingIfNeeded: v &>> 16) &- 1)
 }
 
 /// The circumstances of a fallback now (world stopped); nil without

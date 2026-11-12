@@ -240,14 +240,38 @@ extension ObjectMemory {
     /// soft limit and the blocks in use) that no collection in flight was
     /// promised. Promised blocks are counted until `releasePromotion`, also
     /// once taken: conservative, never short. False when they do not fit.
-    func reservePromotion(blocks: Int) -> Bool {
+    /// Allocation stalls: `belowSoftLimit` (a background worker's
+    /// collection) promises only below the soft limit, the blocks in use and
+    /// every promise counted; the reserve above it is the main worker's and
+    /// the collector's own (docs/modules/allocation-stalls.md).
+    func reservePromotion(blocks: Int, belowSoftLimit: Bool = false) -> Bool {
         lockPools()
         defer { unlockPools() }
-        let p = unsafe pools.pointee
-        let free = p.hardLimitBlocks - Swift.max(p.blocksInUse, p.softLimitBlocks) - p.promotionReserved
-        if blocks > free { return false }
+        if blocks > promotionRoomLocked(belowSoftLimit: belowSoftLimit) { return false }
         unsafe pools.pointee.promotionReserved += blocks
         return true
+    }
+
+    /// Allocation stalls: would `reservePromotion` promise `blocks` now?
+    func canPromise(blocks: Int, belowSoftLimit: Bool) -> Bool {
+        lockPools()
+        defer { unlockPools() }
+        return blocks <= promotionRoomLocked(belowSoftLimit: belowSoftLimit)
+    }
+
+    /// Allocation stalls: blocks used (in use, and promised to collections
+    /// in flight) under the soft limit; the stop-the-world young mode's
+    /// background gate.
+    var blocksCommitted: Int {
+        lockPools()
+        defer { unlockPools() }
+        return unsafe pools.pointee.blocksInUse + pools.pointee.promotionReserved
+    }
+
+    private func promotionRoomLocked(belowSoftLimit: Bool) -> Int {
+        let p = unsafe pools.pointee
+        if belowSoftLimit { return p.softLimitBlocks - p.blocksInUse - p.promotionReserved }
+        return p.hardLimitBlocks - Swift.max(p.blocksInUse, p.softLimitBlocks) - p.promotionReserved
     }
 
     func releasePromotion(blocks: Int) {
