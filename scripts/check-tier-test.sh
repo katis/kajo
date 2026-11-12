@@ -80,7 +80,7 @@ check_gates "build-image dev-image kernel-test tools-test compiler-tests golden 
 check_gates "clean-build swift-test tsan kernel-test apps new-check" scripts/gates-lib.sh
 check_gates "clean-build swift-test tsan kernel-test apps new-check fuzz-protocol" Sources/KajoDev/Client.swift
 check_gates "clean-build swift-test tsan kernel-test apps new-check model-check" models/Package.swift
-check_gates "clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden test-release model-check soak fuzz-kasm fuzz-snapshot fuzz-syntax fuzz-protocol apps kernel-test new-check ab matrix-mac matrix-iphone" Sources/KajoVM/Marking/Marker.swift
+check_gates "clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak fuzz-kasm fuzz-snapshot fuzz-syntax fuzz-protocol apps kernel-test new-check ab matrix-mac matrix-iphone" Sources/KajoVM/Marking/Marker.swift
 # The review fixes, part 2, item 11 (tools.F5): shell-report.py --bar over a
 # directory with rows passes and over one with none fails, and the Mac
 # matrix gate's command fails when its matrix step fails (the scripts stood

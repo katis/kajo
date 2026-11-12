@@ -126,8 +126,8 @@ def bar(d):
     if w:
         print(w)
         print()
-    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | sweep stops (longest ms) | longest stop ms |")
-    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
+    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | longest stop ms |")
+    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
     tot = defaultdict(float)
     worst = None
     notes = []
@@ -145,6 +145,13 @@ def bar(d):
         noframes = [r for r in framed if (num(r.get("frames")) or 0) == 0]
         falling = [r for r in ok_rows if (num(r.get("gc_fallbacks")) or 0) > 0]
         fallbacks = sum(num(r.get("gc_fallbacks")) or 0 for r in ok_rows)
+        # Allocation stalls: unjustified fallbacks (0 in every row; absent
+        # on rows from before the module) and the stalls with the longest.
+        unjust = sum(num(r.get("gc_unjustifiedFallbacks")) or 0 for r in ok_rows)
+        stall_n = sum(num(r.get("gc_stalls")) or 0 for r in ok_rows)
+        stall_max = max([num(r.get("gc_stallMaxMs")) or 0 for r in ok_rows if "gc_stallMaxMs" in r], default=None)
+        if stall_max is not None:
+            tot["stallmax"] = max(tot["stallmax"], stall_max)
         sweeps = [kind_stops(r, "sweep") for r in ok_rows]
         sweep_n = sum(n for n, _ in sweeps)
         sweep_max = max([m for _, m in sweeps if m is not None], default=None)
@@ -158,11 +165,13 @@ def bar(d):
         if fw and (worst is None or fw[0] > worst[0]):
             worst = (fw[0], fw[1], fw[2], f)
         for k, v in [("rows", len(rows)), ("failed", failed), ("sums", bad_sum), ("missing", len(missing)), ("missed", missed),
-                     ("noframes", len(noframes)), ("falling", len(falling)), ("fallbacks", fallbacks), ("sweeps", sweep_n)]:
+                     ("noframes", len(noframes)), ("falling", len(falling)), ("fallbacks", fallbacks), ("sweeps", sweep_n),
+                     ("unjust", unjust), ("stalls", stall_n)]:
             tot[k] += v
         stop = f"{fw[0]:.2f} ({fw[1]})" if fw else "-"
         sw = f"{sweep_n} ({sweep_max:.2f})" if sweep_max is not None else f"{sweep_n}"
-        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {sw} | {stop} |")
+        st = f"{stall_n:.0f} ({stall_max:.2f})" if stall_max is not None else "-"
+        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {stop} |")
         for r in rows:
             if r.get("_failed"):
                 notes.append(f"- {f}: launch failed: {' '.join(k + '=' + v for k, v in r.items() if not k.startswith('_'))}")
@@ -174,9 +183,12 @@ def bar(d):
             notes.append(f"- {f}: no frames delivered (display asleep?): {row_name(r)}")
         for r in falling:
             notes.append(f"- {f}: {r.get('gc_fallbacks')} fallbacks: {row_name(r)} record {r.get('gc_fallbackLog', '-')}")
+        for r in [r for r in ok_rows if (num(r.get("gc_unjustifiedFallbacks")) or 0) > 0]:
+            notes.append(f"- {f}: UNJUSTIFIED fallbacks {r.get('gc_unjustifiedFallbacks')}: {row_name(r)} record {r.get('gc_fallbackLog', '-')}")
     stop = f"{worst[0]:.2f} ({worst[1]}, {worst[3]}: {row_name(worst[2])})" if worst else "-"
     sw = f"{tot['sweeps']:.0f} ({tot['sweepmax']:.2f})" if tot["sweeps"] else "0"
-    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {sw} | {stop} |")
+    stt = f"{tot['stalls']:.0f} ({tot['stallmax']:.2f})" if tot["stalls"] else "0"
+    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {stop} |")
     if notes:
         print()
         print("\n".join(notes))
@@ -216,8 +228,8 @@ def main():
         if not g:
             continue
         print(f"### {name}\n")
-        print("| scenario | young | events | hog | budget | Hz | missed of expected | max gap ms | main stopped for others ms/10 s | own ms/10 s | acks other (mean µs) | ev lat p50 / p99 / max ms | stuck ms | preemptions | collector P share | marker P share | power W | peak MB | fallbacks | sweep stops (max ms) | thermal end |")
-        print("|---|---|--:|--:|---|--:|---|--:|--:|--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|---|")
+        print("| scenario | young | events | hog | budget | Hz | missed of expected | max gap ms | main stopped for others ms/10 s | own ms/10 s | acks other (mean µs) | ev lat p50 / p99 / max ms | stuck ms | preemptions | collector P share | marker P share | power W | peak MB | fallbacks | stalls (max ms) | sweep stops (max ms) | thermal end |")
+        print("|---|---|--:|--:|---|--:|---|--:|--:|--:|---|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
         for key, rs in g.items():
             s, y, e, h, b = key
             exp = med(rs, "expected", "{:.0f}", False)
@@ -230,7 +242,8 @@ def main():
             print(f"| {s} | {y} | {e} | {h} | {b} | {med(rs, 'refresh_hz', '{:.0f}', False)} | {med(rs, 'missed', '{:.0f}')} of {exp} | {med(rs, 'gap_max_ms')} | "
                   f"{med(rs, 'main_stopped_others_ms_per10s')} | {med(rs, 'main_stopped_own_ms_per10s')} | {med(rs, 'main_acks_other', '{:.0f}')} ({med(rs, 'main_ack_other_mean_us', '{:.0f}', False)}) | {ev} | "
                   f"{med(rs, 'stuck_ms', '{:.0f}') if h == '1' else '-'} | {med(rs, 'preemptions', '{:.0f}')} | {med(rs, 'collector_p_frac', '{:.2f}')} | {med(rs, 'marker_p_frac', '{:.2f}')} | "
-                  f"{med(rs, 'power_w', '{:.1f}')} | {med(rs, 'footprint_peak_mb', '{:.0f}')} | {med(rs, 'gc_fallbacks', '{:.0f}')} | {sw} | {th} |")
+                  f"{med(rs, 'power_w', '{:.1f}')} | {med(rs, 'footprint_peak_mb', '{:.0f}')} | {med(rs, 'gc_fallbacks', '{:.0f}')} | "
+                  f"{med(rs, 'gc_stalls', '{:.0f}')} ({med(rs, 'gc_stallMaxMs', '{:.1f}', False)}) | {sw} | {th} |")
         print()
 
     dr = lines(d / "drift.txt")
