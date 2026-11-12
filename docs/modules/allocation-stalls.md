@@ -884,3 +884,84 @@ against 108.6 to 121.4.
    to-space (the default; skipping relocation was measured worse). Built.
 5. (New) A full collection that ran during a stall justifies it with no
    cycle named. Built.
+
+### `interpret`, the A/B, `arc-check`, `unsafe`
+
+`interpret` is identical instruction for instruction: 1819 lines each in
+aligned `-enable-testing` builds of efc546d and 6b8895d, offsets included
+(the diff names only the object files' paths). `just arc-check` passes
+(every listed function ARC 0, the dispatch loop one indirect branch and
+one jump table; `markerPoll` gained one call, to `markerSlowdownSpin`,
+behind the switch's test; `tryFreePending` the mutex for the progress
+bump, behind `freed > 0`). The gate's aligned A/B against efc546d, five
+interleaved runs: at 1 worker 0.977 to 1.008 with instruction ratios
+1.000 (`st-closures` 0.977 and 0.976 in cycles, the image's code not
+changed: placement); at 8 workers 0.941 to 1.058 with overlapping ranges
+(`sends` 228.1 [227–248] against 241.3 [226–249] ms) and instruction
+ratios 0.991 to 1.001. Nothing was added to the allocation fast path, the
+store path or the dispatch loop: the stall is reached only from the slow
+paths that already stopped the world. No struct the generated C reads
+changed layout (`Worker` untouched; the stall's state lives in
+`MarkingShared`, `SafepointState` and `RelocatorState`), so the layout
+hash covers nothing new and the generator is unchanged.
+
+New `unsafe`: 284 lines in `Sources/KajoVM` carry the keyword in the
+module's diff against efc546d and 93 lines with it were removed or
+rewritten, all in the core (`Marking/`, `Nursery/`, `YoungCollection/`,
+`Relocation/`, `Workers/`, `Interpreter/InterpreterState.swift`,
+`Headless.swift`); none outside it. The clean build's strict memory
+safety warnings: 0 (the gate's clean build; the first gate run's
+`ios-check` and `apps` found one, toolchain-dependent, fixed in a1061d2).
+
+### Gates
+
+`just check efc546d` on a18696a (docs above the final code commit
+26e3a50), the core tier, every gate in 19 660 s (`check/gates.log`):
+
+```
+2026-11-12 20:04:17 a18696a check-tier core: 42 files from efc546d...HEAD (efc546d...a18696a) and the working tree
+2026-11-12 20:04:40 a18696a end clean-build rc=0 23s
+2026-11-12 20:26:49 a18696a end swift-test rc=0 1329s
+2026-11-12 20:50:56 a18696a end swift-test-load rc=0 1447s
+2026-11-12 22:08:53 a18696a end tsan rc=0 4677s
+2026-11-12 23:47:02 a18696a end tsan-load rc=0 5889s
+2026-11-12 23:47:19 a18696a end ios-check rc=0 17s
+2026-11-12 23:48:06 a18696a end arc-check rc=0 47s
+2026-11-12 23:49:19 a18696a end golden rc=0 73s
+2026-11-12 23:50:58 a18696a end native-golden rc=0 99s
+2026-11-12 23:51:44 a18696a end native-kernel-test rc=0 46s
+2026-11-12 23:52:14 a18696a end native-cc rc=0 30s
+2026-11-13 00:02:05 a18696a end test-release rc=0 591s
+2026-11-13 00:02:27 a18696a end model-check rc=0 22s
+2026-11-13 00:10:27 a18696a end soak rc=0 480s
+2026-11-13 00:21:09 a18696a end fuzz-kasm rc=0 642s
+2026-11-13 00:31:13 a18696a end fuzz-snapshot rc=0 604s
+2026-11-13 00:41:17 a18696a end fuzz-syntax rc=0 604s
+2026-11-13 00:51:21 a18696a end fuzz-protocol rc=0 604s
+2026-11-13 00:53:24 a18696a end apps rc=0 123s
+2026-11-13 00:55:12 a18696a end kernel-test rc=0 108s
+2026-11-13 00:59:26 a18696a end new-check rc=0 254s
+2026-11-13 01:04:57 a18696a end ab rc=0 331s
+2026-11-13 01:17:54 a18696a end matrix-mac rc=0 776s
+2026-11-13 01:31:57 a18696a end matrix-iphone rc=0 843s
+2026-11-13 01:31:57 a18696a check-tier done core failed=0 19660s
+```
+
+444 + 161 tests in every test gate; ThreadSanitizer 0 reports alone and
+under load; 249 kernel tests; the four fuzzers with "libFuzzer build: ok"
+at 0.86 to 3.39 million runs; the gate's Mac matrix (3 runs, 7 workers,
+interpreted) missed frames only in the hog with the budget off (by
+design), the ring under `young=stw` 0 frames and 0 fallbacks with 714
+stalls (the longest 21.1 ms); the iPhone's (5 workers) 0 fallbacks, the
+ring under `young=stw` 2 to 4 frames behind scavenges of 13.6 to 16.2 ms,
+and the hog with the budget off. The swift-test gate took 1329 s against
+401 s before this module and the sanitizer gates 4677 and 5889 s against
+3034 and 3492: the new tests' slowed collectors.
+
+A first run on 390a0d7 (`check-run1/`, 19 833 s) failed three gates:
+`tsan-load` on `anEntryStallGateThatIgnoresTheTableFallsBackUnjustified`
+(its rings ran past 900 s under the sanitized suite with twelve busy
+loops; the test now waits for what must happen, 26e3a50), and `ios-check`
+and `apps` on one strict-memory-safety warning that only Xcode's
+toolchain and the iOS SDK report (a1061d2). Its other 21 gates passed,
+among them the A/B (0.962 to 1.041) and both matrices.
