@@ -770,3 +770,117 @@ its time is the Symbol-interning stops, `other:65524` in both, AOT 1's
 finding, unchanged); checksums equal; 0 fallbacks; binarytrees stalled 0
 to 5 times a run (longest 1.1 ms, one 0.75 ms sweep stop); stop tables
 beside each other in `comparison/summary.md`.
+
+### The devices
+
+The starting commit's iOS shell and the module's, both with
+`KAJO_SHELL_AOT=1`, 5 workers, in blocks run back to back, both engines,
+five launches a row a side, the thermal state on every line (`device/`;
+`iphone/`, `ipad/` the first pair of blocks, before then after;
+`iphone2/`, `ipad2/` a second pair in the other order, after then before,
+on the rows the first pair left in question). 0 launches failed in 260.
+
+| device, rows | frames missed before / after | fallbacks before / after | stalls after | main stopped ms/10 s before / after | thermal before / after |
+|---|---|---|---|---|---|
+| iPhone, pair 1: ring offload, ring stw, storm, large, photo | 0 everywhere but ring stw 0–3 and 0–6 / 0–17 and 0–6 | 0 / 0 | ring, storm, photo 0; large 0–4 (longest 3.0 ms) | every row's ranges overlap | nominal to serious / mostly serious |
+| iPhone, pair 2 (after first): ring stw, ring offload | ring stw 0–9 and 0–4 / 0–6 and 0–2; offload 0 / 0 | 0 / 0 | 0 | ring stw 641.9–1625.7 / 574.2–1626.8 interpreted, 385.9–1330.3 / 383.1–1183.6 native | 18 of 21 serious / 12 of 21 serious |
+| iPad, pair 1 | 0 everywhere but ring stw native 0–1 / ring stw 0–17 and 0–6, large interpreted 0–9 | 0 / 0 | large 299–648 interpreted, 234–379 native (longest 3.5 and 7.0 ms) | overlapping but the large row's after is lower | nominal and fair / 23 of 50 serious |
+| iPad, pair 2 (after first): ring stw, large | ring stw 0–1 and 0–2 / 0 and 0; large 0 / 0 | 0 / 0 | large 504–530 interpreted, 364–395 native (longest 7.6 and 3.0 ms) | ring stw 1218.7–1449.3 / 1245.6–1368.1 and 826.4–1461.4 / 745.4–1188.3; large 162.7–179.4 / 152.3–162.8 and 108.6–121.4 / 102.5–106.8 | 6 of 21 serious / none serious |
+
+0 fallbacks on either device, before and after, in every row: at 5 workers
+neither phone's ring outruns its collector, and no stall happened in any
+ring row on a device. The first pair's after blocks ran hotter (the
+iPhone at serious from its second run, the iPad 23 of 50 launches at
+serious) and missed more frames in two kinds of launch: the oracle ring
+behind scavenges past a frame (the iPhone's 16 and 17 frames behind 17.7
+ms scavenges at serious; the oracle's known cost), and two iPad launches
+behind long times to safepoint: a ring `young=stw` scavenge whose stop
+waited 141.3 ms for the safepoint (no stall in that launch), and a large
+churn initial mark that waited 41.5 ms; the before block had the same
+kind of wait (a large churn initial mark of 452.0 ms, no frame missed),
+the large fill that does not poll (module 10's open item, the sweep-stop
+follow-up's 570 ms). The second pair, the module's shell first and cooler,
+missed no more than the starting commit's: the iPhone 0 to 6 and 0 to 2
+against 0 to 9 and 0 to 4, the iPad 0 against 0 to 2, and the iPad's large
+churn 0 frames in all twenty launches. Neither long wait repeated in the
+second pair's 20 iPad launches of those rows.
+
+The iPad's large churn, the row the unified wait touches most: before,
+the large-bytes waits and the bounded sweep stops (128 to 587 sweep stops
+a launch across both pairs); after, 234 to 648 stalls for old space a
+launch, nearly one per sweep stop (the stall's sweep stop hands over what
+is swept; 226 to 641 sweep stops), the longest stall 1.7 to 7.6 ms, the
+main thread's stopped time per 10 s interpreted 158.4 to 188.8 against
+165.2 to 187.6 (pair 1) and 152.3 to 162.8 against 162.7 to 179.4 (pair
+2), natively 100.0 to 110.2 against 106.6 to 114.2 and 102.5 to 106.8
+against 108.6 to 121.4.
+
+### Deviations
+
+- The host worker (the last, entered by any thread that calls into the
+  VM, the shells' main thread among them) is exempt as the main worker
+  is: a host call allocating on the main thread must not wait outside a
+  stop.
+- A full collection that runs while a worker stalls (another worker's
+  justified fallback, a requested one, an old-space operation) also ends
+  the stall as justified, naming no cycle (`full`): it abandoned the cycle
+  the stall waited for and collected everything there was. Without it a
+  full heap's stalls waited on cycles that the out-of-memory rule's full
+  collections kept abandoning (the first full-suite run's hang).
+- Under `young=stw` a stall with no cycle running starts one with a
+  scavenge whose promotion takes the reserve once per cycle, and with no
+  room for one young generation below the hard limit the stall is
+  justified at once (`nostart`): the mode cannot start a cycle otherwise.
+- An old allocation larger than the soft limit itself does not stall.
+- Stalls need the marker thread running; `VM.start` now starts it before
+  the workers (it started after them).
+- `fullCollection` withdraws its own promote-all's request whatever old
+  space is left: a pre-existing livelock under a full heap
+  (`failing-before.txt`).
+- `scripts/check-tier-test.sh` failed on the starting commit (its
+  expected core-tier list lacked AOT 1's three native gates); fixed in
+  53860b7.
+- Commit 7de6598 does not build alone (its `cycleWaitedOn` and options
+  are in 1d42a59).
+- The shells' rows have no ring-iteration counter; throughput is the
+  background workers' young allocations (three a ring iteration).
+- The tests run the debug build, whose interpreter is slow against its
+  marker: the ring-like test slows the marker 16 times to make the
+  stalls certain, and every new test is scaled down under ThreadSanitizer
+  (be0dba2).
+- The devices: a second pair of blocks, in the other order, on the rows
+  the first pair's thermal state left in question (above).
+
+### Not done
+
+- The main worker never stalls in any host, headless ones included (open
+  question 1): one worker running everything on main still falls back
+  when it outruns the collector.
+- Under `young=stw` the main worker's scavenges promote every nursery's
+  young objects into the reserve (a scavenge is all nurseries'); a main
+  worker that scavenges often during a long cycle could exhaust the
+  reserve (a fallback named `main`). Not seen in any row.
+- No model change (the argument above); the save's hold with a stall is
+  tested, not model checked.
+- An allocation inside a stop never stalls and its collection (module 1's
+  policy) is not counted as a fallback, as before.
+- The large fill that does not poll (module 10) still makes long times
+  to safepoint on the iPad (41.5 and 452 ms initial marks, one 141 ms
+  scavenge wait in the oracle row), before and after.
+- The marker's QoS override is seen only through `markerOverrides` and
+  the records' `markerQoS`; no device energy measurement.
+
+### Open questions for the owner (built as recommended)
+
+1. The main worker (and the host worker) stays exempt everywhere,
+   headless hosts included; a host setting that lets a headless host stall
+   worker 0 is a later step. Built.
+2. A stall has no time bound; it ends with the collector's progress, at
+   most two cycles, or a full collection. Built.
+3. A background Process that stalls holding a Mutex the main thread waits
+   on makes the main thread wait for the stall; accepted and documented.
+   Built (nothing added).
+4. (New) A cycle a stall waits on may take the reserve for relocation's
+   to-space (the default; skipping relocation was measured worse). Built.
+5. (New) A full collection that ran during a stall justifies it with no
+   cycle named. Built.
