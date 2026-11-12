@@ -403,6 +403,9 @@ func startMarkerThread(_ vm: VMPointer) {
     }, UnsafeMutableRawPointer(vm))
     precondition(rc == 0, "pthread_create failed: \(rc)")
     unsafe mk.pointee.thread.pointee.thread = t
+    // Allocation stalls: the port is the marker's own store too; storing
+    // it here makes it visible before `VM.start` starts any worker.
+    if let t = unsafe t { unsafe mk.pointee.machThread.pointee.store(pthread_mach_thread_np(t), ordering: .relaxed) }
     unsafe pthread_attr_destroy(&attr)
 }
 

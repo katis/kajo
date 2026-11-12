@@ -132,6 +132,10 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     func start() {
         precondition(!started)
         started = true
+        // Allocation stalls: the marker thread first, its Mach port stored
+        // before any worker runs, so a background worker that stalls finds
+        // the collector it waits for (`stallsEnabled`) from its first slice.
+        unsafe startMarkerThread(state)
         for i in 1...max(1, config.backgroundWorkers) where i <= config.backgroundWorkers {
             let w = unsafe state.worker(i)
             var attr = pthread_attr_t()
@@ -147,7 +151,6 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             unsafe w.pointee.thread = t
             unsafe pthread_attr_destroy(&attr)
         }
-        unsafe startMarkerThread(state)
         unsafe startYoungCollector(state)
     }
 

@@ -631,7 +631,8 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         // Stalls started (asserted over the configuration's seeds, not per
         // seed: a small program may not stall), none unjustified.
         randomScavenges.add(config, rt.vm.stallLog?.all.count ?? 0)
-        #expect(rt.vm.markingCounters.unjustifiedFallbacks == 0 && rt.vm.markingCounters.missed == 0, "seed \(p.seed)")
+        #expect(rt.vm.markingCounters.unjustifiedFallbacks == 0 && rt.vm.markingCounters.missed == 0,
+                "seed \(p.seed): \(fallbackSummary(rt.vm.fallbackLog))")
     case .youngBarrierAlwaysOn:
         // Every store took the young slow path, cycles or not.
         let calls = (0..<(config.workers + 2)).reduce(UInt64(0)) { $0 &+ rt.vm.youngWorkerCounters($1).deletionBarrierCalls }
