@@ -82,6 +82,7 @@ t0=$(date +%s)
 wants() { [[ -z $ONLY || " $ONLY " == *" $1 "* ]] }
 
 GL_AB_BASE=$(gl_weekly_ab_base $WROOT/weekly.log HEAD)
+[[ -n $GL_AB_BASE ]] && gl_log "ab base $GL_AB_BASE: the last finished weekly run's commit ($WROOT/weekly.log)"
 for g in $gates; do
   wants $g || continue
   if [[ $g == ab && -z $GL_AB_BASE ]]; then
