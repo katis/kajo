@@ -373,11 +373,14 @@ is gone; those are not presented as backed by a file).
 
 Part 1, measured on 3cf22fe with the mini idle through `kajo test --heap
 256` (the `Headless.test` the suite calls, its events kept). Plain:
-`$GS/before-kernel-plain.ndjson` (249 tests, 102.1 s, 1:44 wall). Under
-the sanitizer the morning's run (09:13:49 to 10:03:01, 2921.5 s of
-tests, peak footprint 1.41 GB) is quoted; it was re-run after the loss
-into `$GS/before-kernel-tsan.ndjson` (see "Coverage"). The per-test
-sanitizer seconds of the morning run are the weights in
+`$GS/before-kernel-plain.ndjson` (249 tests, 102.1 s, 1:44 wall), built
+from `git archive 3cf22fe` in `$GS/before-src`. Under the sanitizer the
+morning's run (09:13:49 to 10:03:01, 2921.5 s of tests, peak footprint
+1.41 GB) is quoted; after the loss it was run again from the same archive,
+`$GS/before-kernel-tsan.ndjson` with `.run` and `.err` (12:48:31 to
+13:38:29, 249 of 249 passed, 2967.8 s of tests, the three long tests 689.0,
+681.9 and 661.3 s, peak footprint 1.39 GB, 0 sanitizer reports). The
+per-test sanitizer seconds of the morning run are the weights in
 `KernelTestParts.measuredSeconds`:
 
 | test | plain s | sanitizer s |
@@ -575,7 +578,13 @@ agree through a probe VM of its own) and printing `encoding limit <name>:
 <s> s`. A parameterized test counts once. The premise was half right: the
 cases are independent, but the two `selectors4094/4095` cases are nearly
 all of the time, so in parallel the test takes about one of them (see
-"Coverage" for the serial and parallel runs). Their cost is the kernel
+`$GS/limits-serial.txt` and `$GS/limits-parallel.txt`, plain, on
+8651da1's form, which prints each case: one after another
+(`--no-parallel`) 286.8 s for the test, keywordSend 1.6 and 0.2, copying
+0.6 and 0.6, chain 4.6 and 2.5, selectors 138.2 and 138.3; side by side
+147.5 s, every case slower from sharing the cores and the test as long as
+its longest, selectors4095 at 147.5; the brief's 300.7 s for the serial
+test is quoted). Their cost is the kernel
 compiler's `BytecodeGenerator>>literalIndex:`, a linear search of the
 literal frame per literal, so 4094 selectors are about 8.4 million
 comparisons: a finding, not this module's.
