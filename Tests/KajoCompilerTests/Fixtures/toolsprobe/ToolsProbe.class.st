@@ -214,6 +214,21 @@ ToolsProbe class >> reconnected [
 ]
 
 { #category : #remote }
+ToolsProbe class >> remoteState [
+	"The remote client for a failure message: its state, why it was lost, pending requests, reconnects, requests sent again, its outages ({microseconds from the loss to the new session. requests sent again}), whether the two requests of dropWithRequests were answered, and the tools' last transcript lines (where a failed request's error goes)."
+	| c |
+	c := self remote.
+	^ String streamContents: [:s |
+		s nextPutAll: 'remote '; print: (c ifNotNil: [:x | x state]); nextPutAll: ' lost '; print: (c ifNotNil: [:x | x lostReason]);
+			nextPutAll: ' pending '; print: (c ifNotNil: [:x | x pendingCount]);
+			nextPutAll: ' reconnects '; print: (c ifNotNil: [:x | x reconnects]);
+			nextPutAll: ' retried '; print: (c ifNotNil: [:x | x retried]);
+			nextPutAll: ' outages '; print: (c ifNotNil: [:x | x outages asArray]);
+			nextPutAll: ' listed '; print: listed notNil; nextPutAll: ' hierarchy '; print: hierarchy notNil;
+			nextPutAll: ' transcript '; print: (DevTools transcript lines last: (DevTools transcript lines size min: 6))]
+]
+
+{ #category : #remote }
 ToolsProbe class >> remoteRetried [
 	^ self remote retried
 ]
