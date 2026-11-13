@@ -677,9 +677,14 @@ the default 1 hit in `.build/native-test-cache`), `fuzz-sh.txt`
 run; its broken variants by `check-tier-test.sh`.
 
 Found by that check run: the refusal test's stand-in, compiled by the
-swiftly `clang` on PATH, found `unistd.h` only when the calling
-environment named the SDK (it passed in the morning and failed at 13:50);
-it is built by Apple's `/usr/bin/clang` now (b09d8fc).
+`clang` first on PATH, did not find `unistd.h` at 13:50 where it had
+passed in the morning. The cause was the session's environment, not
+swiftly: after the agent's session was restarted its PATH put Homebrew's
+LLVM (`/opt/homebrew/opt/llvm/bin/clang`, which knows no SDK) before
+`~/.swiftly/bin` (the commit message of b09d8fc blames swiftly's clang;
+that is wrong). The stand-in is built by Apple's `/usr/bin/clang` now
+(b09d8fc), which finds the SDK by itself. The same PATH failed the first
+final run's three native gates (below).
 
 ## Coverage
 
@@ -708,6 +713,14 @@ it is built by Apple's `/usr/bin/clang` now (b09d8fc).
   cases) is recorded, not fixed.
 - `TonelRoundTripTests` (a serialized suite of 594 s under the sanitizer)
   now bounds the compiler bundle with the every-method parts; not touched.
+- Found, not this module's: `scripts/native-check.sh` and
+  `NativeTest.clang` take the first `clang` on PATH; with Homebrew's LLVM
+  first (as in this session after its restart) `native-golden`,
+  `native-kernel-test` and `native-cc` fail at the link (`ld: library
+  'System' not found`), while the suites' native tests pass because
+  `swift test` hands its helper the SDK. The weekly's plist puts swiftly
+  first, so Sunday's run is not affected; whether the scripts should ask
+  `xcrun` for the SDK is the owner's call.
 
 ## Open questions
 
