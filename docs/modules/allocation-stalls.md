@@ -801,21 +801,37 @@ likeliest cause is the large fill that does not poll (module 10's open
 item, the sweep-stop follow-up's 570 ms). The other is a ring
 `young=stw` scavenge whose stop waited 141.3 ms for the safepoint, 17
 frames missed, at thermal nominal with no stall in that launch. The ring
-makes no large object, so the large fill does not explain it, and it is
-not explained: the row does not print the stop's last parker (the
-StopRecord holds it for every stop, `slowest` and `slowestVia`, but the
-shells' rows print it for final marks only, and `gc_scavSlowest` is the
-scavenger with the most copying time, not the one that parked last). It
-was seen once, in the after block only; no
-before launch of that row waited so, and one launch cannot show whether
-it is the module's. The second pair, the module's shell first and cooler,
+makes no large object, so the large fill does not explain it. The row
+names who parked last: `gc_scavSlowest` is `StopRecord.slowest` of the
+scavenge stop with the longest pause (this one: 146.6 ms of pause, 141.3
+of it the wait), and it reads 7, which at 5 workers is the marker, at
+utility QoS (`marker_qos_got=utility`, 0.3 percent of its time on the
+performance cores, no override in the launch). Over the 80 ring
+`young=stw` rows of both devices, both engines and all four blocks the
+marker is the last parker of the longest scavenge stop in 36 (20 of 40
+before, 16 of 40 after), and a row's longest wait for a scavenge's
+safepoint is 0.3 to 9.6 ms in every row but this one and one iPhone
+native row, after, at 16.8 ms. So a marker at utility on the efficiency
+cores that is the last to reach its poll is the shape before the module
+as well, and this launch is its outlier. It was seen once, in the after
+block only; no before launch of that row waited so, and one launch cannot
+show whether the module makes the outlier likelier. The second pair, the
+module's shell first and cooler,
 missed no more than the starting commit's: the iPhone 0 to 6 and 0 to 2
 against 0 to 9 and 0 to 4, the iPad 0 against 0 to 2, and the iPad's large
 churn 0 frames in all twenty launches. Neither long wait repeated in the
 second pair's 20 iPad launches of those rows.
 
-(The paragraph above was corrected by the main session at the hand-back:
-the first version put the ring's 141.3 ms wait down to the large fill.)
+(The paragraph above was corrected twice by the main session. At the
+hand-back: the first version put the ring's 141.3 ms wait down to the
+large fill. On 2026-11-13: the hand-back's correction said the row does
+not print the stop's last parker and that `gc_scavSlowest` is the
+scavenger that copied longest. That was wrong and it was pushed in
+8b4bd73: the field is the last parker of the longest scavenge stop, as
+`Headless.swift` prints it; the participant that copied longest is the
+scavenge record's `slowestParticipant`. What the rows lacked was how the
+last parker came and the same two facts for the other stop kinds; "The
+last parker in the rows" below.)
 
 The iPad's large churn, the row the unified wait touches most: before,
 the large-bytes waits and the bounded sweep stops (128 to 587 sweep stops
@@ -880,12 +896,12 @@ against 108.6 to 121.4.
   to safepoint in the iPad's large churn (initial marks that waited 452
   ms before and 41.5 ms after).
 - One iPad launch of the oracle ring row, after, waited 141.3 ms for a
-  scavenge's safepoint and missed 17 frames; unexplained (the ring has
-  no large fill), not repeated in 20 more launches, and not excluded as
-  the module's. Every StopRecord holds its last parker and how it came,
-  but the shells' rows print them for final marks only; printing them
-  beside the longest stop of each kind (`stopsByKind`) would have named
-  this one.
+  scavenge's safepoint and missed 17 frames. Its last parker was the
+  marker at utility QoS (above), the last parker in 36 of the 80 rows
+  with waits under 10 ms; the launch is an outlier of that shape, not
+  repeated in 20 more launches, and not excluded as made likelier by the
+  module. Why the marker took 141 ms to reach a poll there is not known
+  (the row does not say how it parked; since 40ce930 it would).
 - The marker's QoS override is seen only through `markerOverrides` and
   the records' `markerQoS`; no device energy measurement.
 
@@ -903,6 +919,9 @@ against 108.6 to 121.4.
    to-space (the default; skipping relocation was measured worse). Built.
 5. (New) A full collection that ran during a stall justifies it with no
    cycle named. Built.
+
+The owner accepted all five as recommended, which is as built, on
+2026-11-13.
 
 ### `interpret`, the A/B, `arc-check`, `unsafe`
 
@@ -975,7 +994,8 @@ stalls (the longest 21.1 ms); the iPhone's (5 workers) 0 fallbacks, the
 ring under `young=stw` 2 to 4 frames behind scavenges of 13.6 to 16.2 ms,
 and the hog with the budget off. The swift-test gate took 1329 s against
 401 s before this module and the sanitizer gates 4677 and 5889 s against
-3034 and 3492: the new tests' slowed collectors.
+3034 and 3492: the new tests' slowed collectors (the three earlier
+numbers are not the previous module's; corrected below).
 
 A first run on 390a0d7 (`check-run1/`, 19 833 s) failed three gates:
 `tsan-load` on `anEntryStallGateThatIgnoresTheTableFallsBackUnjustified`
@@ -984,3 +1004,46 @@ loops; the test now waits for what must happen, 26e3a50), and `ios-check`
 and `apps` on one strict-memory-safety warning that only Xcode's
 toolchain and the iOS SDK report (a1061d2). Its other 21 gates passed,
 among them the A/B (0.962 to 1.041) and both matrices.
+
+The gate times above were read against the wrong run: 401, 3034 and 3492
+s are review-fixes part 1's Swift tier run on 0110f70, three modules
+back. The run before this module (AOT 1, dcb6075) took 1017 s for
+`swift-test`, 4110 for `tsan` and 5144 for `tsan-load`, so this module's
+tests added 312, 567 and 745 s; the rest of the growth from 401 is
+review-fixes part 2's (618 s) and AOT 1's.
+
+## The last parker in the rows (follow-up, 2026-11-13)
+
+The owner asked for the prints the "Not done" list named. Built in
+40ce930, in `Headless.swift`, `scripts/shell-report.py` and one test;
+nothing in the VM's records changed, they held both facts already.
+
+- `stopsByKind` on the run line and `gc_stopsByKind` in the shells' rows
+  carry two more fields per kind: `kind:count/longest pause ms/longest
+  wait for the safepoint ms/last parker/how it parked`. The last two are
+  those of the stop with that longest wait, the stop a long time to
+  safepoint is asked about; `-/-` when the stop had nobody to wait for.
+  The parker is a name (`participantName`): `main`, `w1` to `wn`, `host`
+  (the last of the worker table, which a host thread enters), `marker`,
+  `young` (the young collector). How it parked is `ParkVia`: `poll`,
+  `wait` or `stopper`. An example run line:
+  `stopsByKind=finalMark:2/5.85/0.02/w4/poll,apply:2/2.94/0.03/w1/poll,initialMark:2/2.17/0.03/w3/poll`.
+- `gc_scavSlowest` and the final-mark records are unchanged; they are
+  the same index as a number, of the scavenge stop with the longest
+  pause and of each final mark.
+- `shell-report.py --bar` has a last column, the longest wait for a
+  safepoint in ms with its kind, its last parker and how it parked, per
+  file and over all files with the row that had it. A row written before
+  the fields existed reads `?` for the parker, so old matrices still
+  tabulate.
+- `stopsByKindNamesTheLastParkerOfTheLongestWait`
+  (`Tests/KajoVMTests/Workers/StopsByKindTests.swift`) builds stop
+  records by hand and reads the line.
+
+`just check` on 40ce930, the Swift tier, passed every gate in 6147 s
+(445 + 161 tests, ThreadSanitizer 0 reports in 4526 s, 249 kernel tests,
+apps, new-check).
+
+Not done: no device row has been run with the new fields, so the iPad's
+141 ms is still read from the old field alone; the weekly run of
+2026-11-15 writes the first device rows that have them.
