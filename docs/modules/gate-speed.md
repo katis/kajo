@@ -3,7 +3,8 @@
 Status: briefed 2026-11-13, from the owner's request of the same day
 ("figure out if we can optimize all these tests and checks, they're
 getting really long. Anything overlapping?") and the owner's acceptance of
-the investigation's proposals ("all sounds good, accepted"). Not built.
+the investigation's proposals ("all sounds good, accepted"). Built
+2026-11-13 (see "As built"); the final gate run is recorded below.
 
 ## What it hides
 
@@ -333,3 +334,339 @@ the device rows' form.
 None for the owner at the brief. The agent's choices that the owner may
 want to see (how the kernel's tests are divided, the cache's bound, the
 weekly's A/B base) are written as open questions with what was built.
+
+## As built
+
+Built 2026-11-13 on 3cf22fe (the starting commit and the `just check`
+base) with the toolchain first on PATH, swift.org's Swift 6.4.2
+(`swift-6.4.2-RELEASE`) through swiftly, and swiftly's `clang`, on the
+Mac mini (M2 Pro, 12 cores, 32 GiB). Nothing under `Sources/KajoVM`
+changed. Commits: 9df8d34 (the runner), 8651da1 (the tests), 33bbba8 (the
+scripts), then this doc.
+
+A note on evidence: the agent's scratch directory under `/private/tmp` was
+emptied at 12:44 the same day, taking the morning's raw outputs and the
+earlier modules' gate outputs with it. Every number below says where it
+comes from: a file under `/Users/jonikatajamaki/kajo-scratch/gate-speed/`
+(written after the loss, `$GS` below), the final gate run, or "quoted"
+(from the brief's baseline, or from the morning's measurement whose file
+is gone; those are not presented as backed by a file).
+
+| file | what changed |
+|---|---|
+| `kernel/SUnit/TestRunner.class.st` | `casesFilter:tag:tests:` (the selection, now also by a set of exact names), `listFilter:tag:tests:` (a `test.listed` event per selected test and `run.listed` with the total, nothing run), `runFilter:tag:tests:`; `runFilter:tag:` unchanged for its callers (DevSession, the shells, the tools) |
+| `kernel/System/Smalltalk.class.st` | `test:` reads `--test <Class>>selector>` (repeatable, exact) and `--list` |
+| `Sources/kajo/Test.swift`, `main.swift` | `kajo test --test <name>... --list` |
+| `Tests/KajoCompilerTests/KernelImageTests.swift` | `KernelTestParts`, `KernelTestPartsTests` (change 1) |
+| `Tests/KajoCompilerTests/LiveInstallTests.swift` | the duplicate run gone (change 1) |
+| `Tests/KajoCompilerTests/ReviewFixesPart2Tests.swift` | the limit cases as arguments (change 5) |
+| `Tests/KajoCompilerTests/ShellTests.swift` | `drive`'s bounds with a sanitizer value (below) |
+| `Tests/KajoVMTests/Native/NativeCache.swift` (new), `NativeSupport.swift`, `NativeCacheTests.swift` (new) | the disk cache (change 3) |
+| `justfile` | `test-release` skips `randomPrograms` (change 4) |
+| `scripts/fuzz.sh`, `scripts/fuzz-gate.sh` (new) | `--build` and `--run`; the fuzz gate (change 2) |
+| `scripts/gates-lib.sh` | the gates `fuzz` and `check-tier-test`, a `gates.log` line per fuzz target, `gl_skip`, `gl_weekly_ab_base` |
+| `scripts/check-tier.sh` | the core list without plain `swift-test` (change 7), `fuzz` for the four, `check-tier-test` when a gate script changed (change 8) |
+| `scripts/weekly.sh` | the full set (change 6), `--gates`, the A/B's base or a skip, the summary's note column, the refusal by swiftly's process names |
+| `scripts/check-tier-test.sh` | 36 checks to 96 |
+
+### 1. The kernel's tests in parallel VMs
+
+Part 1, measured on 3cf22fe with the mini idle through `kajo test --heap
+256` (the `Headless.test` the suite calls, its events kept). Plain:
+`$GS/before-kernel-plain.ndjson` (249 tests, 102.1 s, 1:44 wall). Under
+the sanitizer the morning's run (09:13:49 to 10:03:01, 2921.5 s of
+tests, peak footprint 1.41 GB) is quoted; it was re-run after the loss
+into `$GS/before-kernel-tsan.ndjson` (see "Coverage"). The per-test
+sanitizer seconds of the morning run are the weights in
+`KernelTestParts.measuredSeconds`:
+
+| test | plain s | sanitizer s |
+|---|--:|--:|
+| LiveCompileTest>>testEveryMethodMakesAsInstalled | 23.7 | 697.9 |
+| CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid | 23.3 | 691.4 |
+| CompilerTest>>testALongChainIsWalkedByALoop | 19.7 | 584.5 |
+| ClassFuzzTest>>testSeededSpecificationsAreRefusedOrAccepted | 5.7 | 152.8 |
+| TonelTest>>testTheReaderReadsWhatTheWriterWrote | 4.6 | 138.0 |
+| LargeObjectTest>>testStringsPastTheCountField | 4.5 | 123.7 |
+| the other 21 tests of 5 s or more under the sanitizer | | 533.1 |
+| the other 222 tests | | 71.5 (0.32 each) |
+
+The sanitizer costs 26 to 32 times a plain build, test for test (one
+exception, ClassFuzzTest's reshapes at 18.6). Three tests are 1974 s of
+2921; the other 246 are 948 s. The premise held: one serial VM was the
+sanitizer gates' long pole (3081 s in `tsan`, 3719 in `tsan-load`,
+quoted from the brief).
+
+Built:
+
+- The runner lists: `kajo test --list` (and `Smalltalk class>>test:`
+  with `--list`) emits a `test.listed` event per selected test (name,
+  class, selector, tags) and `run.listed` with the total, and runs
+  nothing. `--test <Class>>selector>` (repeatable) selects by exact name,
+  so a part names its tests and no glob can catch a neighbour's.
+- `KernelTestParts` lists the kernel image's tests once per test process
+  and splits them into 5 parts: heaviest first, each to the lightest
+  part, weighed by the sanitizer seconds above for the 27 tests of 5 s or
+  more there, 0.32 s for any other test and 150 s for an unknown one
+  tagged `<slow>`. The table decides the balance only: a new or renamed
+  test is in a part all the same. Five because the three long tests take
+  a part each and the other 246 fit in two of about 474 sanitizer
+  seconds; more parts add VMs without shortening the longest.
+- `KernelTestPartsTests.theKernelsTestsPassAndTheEventsAreTheProtocol(_:)`
+  is the old test as five cases in a suite without `.serialized`, so they
+  run at the same time; each is a whole run by the event protocol over
+  its part with every assertion the old test made (exit 0, all passed, one
+  JSON object a line, the kinds a subset of the v1 kinds and the required
+  ones present, `gc` among them since every run ends with the gc summary,
+  `v == 1`, `ts`, `run.started` first, `started == total`, the test events'
+  times sorted), plus that it ran exactly its part's names, each once.
+  `total > 100` became `total == names.count` per part; the union's count
+  is asserted by the next test. Each case prints `kernel test part i/5
+  <outcome> <Class>>selector> <s> s` per test and a summary line, so a
+  gate's output names every id with its outcome.
+- `KernelTestPartsTests.theKernelTestPartsAreExactlyTheUnfilteredRun`,
+  the standing assertion (a few seconds plain, 118 s under the sanitizer):
+  the unfiltered list has more than 100 tests with distinct names and
+  `run.listed`'s total; for each part the runner's own selection of its
+  `--test` names is exactly that part; the parts are disjoint and their
+  union is the unfiltered list; the split is deterministic; a filter and
+  names compose and never add.
+- `LiveInstallTests` no longer runs `--filter LiveCompileTest` on the
+  development `kernelImage`: the parts run every LiveCompileTest on that
+  image, the test asserts the list holds at least nine of them (its old
+  count) and says where they run, and keeps the seal, the flag through a
+  load and a save, `testTheReleaseFlag` and `ClassVariableTest` in the
+  sealed image.
+- The every-method tests are not split. With the parts, the longest part
+  is one of them; the chain test, one compile, is 585 s on its own and
+  `TonelRoundTripTests`, a serialized suite of the same bundle, took 594 s
+  in the stalls gate (quoted). Splitting would save at most about 100 s
+  per sanitizer gate for eight new kernel test ids: an open question.
+- Found when the parts first ran under the sanitizer: the compiler
+  bundle's first quarter hour is busier with five VMs, and
+  `ShellTests.theKernelsViewTestsPassAgainstTheShell`'s 120 s `drive` ran
+  out at 138 s (it took 30 to 57 s before). `drive`'s bounds, waits for
+  something that must come, are five times longer under the sanitizer
+  (`driveScale`); the assertions are unchanged. The compiler bundle then
+  passed under the sanitizer and twelve busy loops (1480 s, 0 reports, the
+  test 32.7 s; the morning's file is gone, the final run's `tsan-load` is
+  the record).
+
+Other tests that run kernel tests in a VM, none a duplicate of the
+unfiltered run, left alone: `KernelImageTests.filterAndTagSelectTests`,
+`failuresCarryTheMessageAndTheFrames` and
+`theTranscriptIsAnEventWithItsProcess` (images of their own),
+`theImageRoundTripsThroughLoadAndSave` (`ReflectionTest` in the image
+saved twice), `LiveInstallTests`' sealed part,
+`ToolsTests.theDevelopmentImageBuildsAndTheToolsTestsPass` (the tools'
+tests), `AppProjectTests.theGeneratedAppCompilesWithTheKernelAndItsTestPasses`,
+`DevelopmentAnswersTests.kajoTestReportsAndEndsAForkedProcessError`,
+`SnapshotScenarioTests.kajoTestRefusesAnImageWithSavedProcessesAndRunResumesIt`
+and `ShellTests.theKernelsViewTestsPassAgainstTheShell` (ViewTest against
+a shell host). Their sanitizer seconds in the stalls gate (quoted, file
+gone): 6.7, 27.1, 26.9, 13.5, about 25, 272.9, 89.2, 91.4, under 10 and
+56.5.
+
+### 2. The four fuzzers at the same time
+
+Part 1 (quoted, the files are gone): the four one-target gates of the
+stalls run took 642, 604, 604 and 604 s; their runs in 600 s were, for
+the review fixes part 2, AOT 1 and the stalls run: kasm 2 223 005,
+2 190 093, 2 196 708; snapshot 3 138 165, 3 531 582, 3 387 640; syntax
+865 147, 857 319, 856 218; protocol 1 810 269, 1 836 868, 1 855 288. Each
+libFuzzer process is one thread, so four on twelve cores should keep
+their rates; the final gate's runs are the measurement (below).
+
+Built: `scripts/fuzz.sh --build <target>` builds and prints the
+"libFuzzer build: ok" line (or the fallback's), recording the binary and
+its kind in `.build/fuzz-run/<target>/build.txt`; `--run <target>
+<seconds>` runs what was built; with neither it does both, as before.
+`scripts/fuzz-gate.sh <seconds> <out> <target>...` builds the targets one
+after another, then runs them side by side, each for the full seconds in
+its own run directory into `<out>/fuzz-<target>.txt` (the old gate's
+file), each under its own `gtimeout` (seconds + 900), and prints
+`fuzz-gate: <target> rc=<status> build=<ok|fallback|failed> runs=<n>
+<s>s`; it exits 1 unless every target built with libFuzzer and ran to
+status 0. It traps INT, TERM and HUP and kills every run's tree, because
+each run's `gtimeout` is a process group of its own that a signal to the
+gate's group does not reach (the broken variant without the trap, run by
+hand: both stand-in fuzzers alive after the script was killed). The gate
+`fuzz` runs it over `GL_FUZZ_TARGETS` (all four by default, the Swift
+tier's owed ones there), bound `GL_FUZZ_SECS + 3600`, checks every
+target's summary line and its file's "libFuzzer build: ok", and writes a
+`gates.log` line per target before its own end line, e.g. `end
+fuzz-protocol rc=0 61s runs=125702 build=ok` (the lost quick run).
+
+### 3. A disk cache of compiled native test modules
+
+Part 1: the investigation's serial native random programs at 10 seeds
+compiled 40 different sources of about 1.0 MB, 66.7 of 94.9 s in clang
+(quoted from the brief). The first plain suite with the cache, cold,
+printed `1335 misses` for 569 files, 195 MiB (quoted, file gone): the
+random programs' configurations start together and generate the same
+seed's C at the same moment, so without a lock per key every one of them
+compiled it; the in-memory cache by source never stopped that either. A
+cold sanitizer suite added 65 misses and 33 MiB (quoted).
+
+Built (`Tests/KajoVMTests/Native/NativeCache.swift`): `NativeTest.compile`
+asks `NativeCache.shared`, keyed by a 128-bit digest (`nativeDigest`) of
+the source (one file whose only includes are the system's), the clang's
+identity (its path, `--version`, the SDK path and build version from
+`xcrun`, read once per clang per process) and the whole argument list,
+`-fsanitize=thread` included. A hit loads the cached dylib and touches its
+date; a miss compiles to `<key>.dylib.tmp-<pid>-<serial>` beside it and
+renames into place; a file that does not load is removed, compiled again
+and counted as replaced. Threads of one process asking for one key wait
+for the first one's compile. The cache is `.build/native-test-cache/`;
+`KAJO_NATIVE_CACHE=<dir>` moves it, `KAJO_NATIVE_CACHE=off` restores the
+old behaviour (a temporary dylib per compile, removed after loading). The
+bound, from the measured sizes: at a process's first use temporaries
+older than an hour go, and past 2 GiB the oldest dylibs go until under
+1.5 GiB, never one used within the hour (about nine generator changes'
+worth of gate runs). At exit one line: `native test cache: <h> hits, <m>
+misses, <r> replaced, <t> trimmed at start; <n> files, <MiB> MiB in <dir>`.
+
+Tests (`NativeCacheTests.swift`): a changed source misses, a changed flag
+misses, the same source and flags hit and load (the descriptor's word read
+back), a truncated file under the key is replaced, eight threads of two
+caches over one directory (two processes' worth) all get their module
+with at most one compile per source per cache and no temporary left, and
+the trim takes the oldest first and never a file used within the hour.
+The race test found a bug of the first version: the temporary's serial was
+per cache, so two caches in one process wrote one temporary (`errno 2` at
+the rename); it is per process now.
+
+`native-cc`, `native-golden` and `native-kernel-test` do not use the
+cache.
+
+### 4. `test-release` without the random programs
+
+Part 1 (quoted): in the stalls run `test-release` was 591 s, its VM
+bundle's 489.7 s of wall bound by
+`randomProgramsAgreeWithTheirModelNatively`; `soak`, two gates later in
+the same `.build/release-tests` build, 480 s. The five tests' seed rules
+in `Tests/KajoVMTests/Workers/RandomPrograms.swift` outside the
+sanitizer, without and with `KAJO_SEEDS=1000 KAJO_SEED_BASE=1`:
+
+| test | test-release | soak |
+|---|---|---|
+| `randomProgramsAgreeWithTheirModel` | `randomSeedCount` 100 | 1000 |
+| `randomProgramsAgreeWithTheirModelNatively` | `min(randomSeedCount, 100)` 100 | `min(1000, 100)` 100 |
+| `randomProgramsAreDeterministic` | seeds 42 and 43, no count | the same |
+| `randomProgramsResumeFromASnapshot` | 100 | 1000 |
+| `randomProgramsResumeAcrossEngines` | `KAJO_NATIVE_SEEDS` or 40 | 40 |
+
+Every count starts at `KAJO_SEED_BASE` or 1, so the soak's seeds include
+test-release's in every configuration, and `randomPrograms` names exactly
+these five functions in the package.
+
+Built: `just test-release` adds `--skip randomPrograms`, its comment says
+why, and `check-tier-test.sh` fails when any gate list (each tier's, the
+weekly's) holds `test-release` without `soak` after it, or when the
+justfile stops splitting the random programs by `--skip` and `--filter`.
+
+### 5. The compilers' limit cases in parallel
+
+`bothCompilersRefuseAtEveryEncodingLimit(_:)` takes an
+`EncodingLimitCase` (name, source, whether the bootstrap accepts it): the
+same eight plain and four under the sanitizer, each case making the two
+assertions (the bootstrap accepts or refuses as listed; the two compilers
+agree through a probe VM of its own) and printing `encoding limit <name>:
+<s> s`. A parameterized test counts once. The premise was half right: the
+cases are independent, but the two `selectors4094/4095` cases are nearly
+all of the time, so in parallel the test takes about one of them (see
+"Coverage" for the serial and parallel runs). Their cost is the kernel
+compiler's `BytecodeGenerator>>literalIndex:`, a linear search of the
+literal frame per literal, so 4094 selectors are about 8.4 million
+comparisons: a finding, not this module's.
+
+### 6. The weekly run is the full set again
+
+`scripts/weekly.sh`'s gates: `check-tier-test clean-build swift-test
+swift-test-load tsan tsan-load ios-check arc-check golden native-golden
+native-kernel-test native-cc test-release model-check soak fuzz apps
+kernel-test new-check ab`, then `matrix-mac` and the attached devices
+(`scripts/weekly.sh --gates` prints them and exits). The A/B's base is
+`gl_weekly_ab_base`: the commit of the last weekly run whose `weekly
+start` line has `quick=0` and a `weekly done` after it (a quick run tests
+the plumbing, not a week's code); with none, or when it is HEAD,
+`gl_skip` writes `skip ab: <why>` and `end ab rc=skip 0s` and the summary
+shows `skipped` with the reason. On Sunday 2026-11-15 the base read from
+`~/kajo-weekly/weekly.log` will be a024a90. The summary's table has a
+note column (each fuzz target's runs and build, a skip's reason).
+
+Found and fixed in the same script: the refusal names `swift-build` and
+`swift-test`, but under swiftly `swift build` and `swift test` run as
+`swift-package` and the tests in `swiftpm-testing-helper` (`ps`:
+`swiftpm-testing-`), so at 10:18:36 a weekly started beside this module's
+running suite instead of refusing (the morning's file is gone).
+`swift-package` and `swiftpm-testing*` count now, and `check-tier-test.sh`
+starts a compiled program named `swift-package` in a process group of its
+own and expects the refusal naming it (a copy of `/bin/sleep` is killed
+for its signature and a link keeps the name `sleep`).
+
+### 7. Plain `swift-test` out of the core tier
+
+By the owner's decision: `check-tier.sh`'s core list and header,
+`check-tier-test.sh`'s lists, and a pointer in `gate-tiers.md`'s As
+built. The Swift tier and the weekly keep it.
+
+### 8. The gate scripts' own test is a gate
+
+`check-tier-test` (bound 900 s) runs first in the Swift and core tiers
+when the diff touches `scripts/check-tier.sh`, `check-tier-test.sh`,
+`gates-lib.sh`, `weekly.sh`, `fuzz.sh` or `fuzz-gate.sh`, and always in
+the weekly. The script grew from 36 to 96 checks: the new lists (core
+without `swift-test`, `fuzz` for the four, `check-tier-test` first for
+each gate script and not for another script), the fuzz gate's targets per
+tier, `test-release` followed by `soak` in every list and the justfile's
+split, the weekly's list a superset of the core tier's with every
+conditional gate (the device rows as `devices`) and plain `swift-test`,
+the A/B base over made-up logs (finished, HEAD, quick, unfinished, empty),
+the refusal beside a `swift-package`, and the fuzz gate with stand-ins for
+`fuzz.sh`: four good targets pass with four `gates.log` lines, a failing
+target fails it, one without "libFuzzer build: ok" fails it, and a gate
+killed through `gl_cleanup` or by a TERM to its script alone leaves no
+stand-in alive.
+
+## Coverage
+
+(Filled from the final run below.)
+
+## The final gate run
+
+(Pending.)
+
+## Deviations
+
+- The kernel's tests are divided by a table of measured sanitizer seconds
+  for the 27 tests of 5 s or more (the brief allowed classes grouped by
+  measured time); coverage never reads it.
+- The every-method tests are not split (above).
+- `drive`'s bounds in the compiler tests got a sanitizer value, a test
+  change outside the brief's list, needed because the parts make the
+  bundle busier.
+- The weekly's refusal names swiftly's process names (a bug found, fixed
+  in a script this module changes).
+- `kajo test` gained `--test` and `--list` beside the kernel's.
+
+## Not done
+
+- The kernel compiler's quadratic `literalIndex:` (the two 140 s limit
+  cases) is recorded, not fixed.
+- `TonelRoundTripTests` (a serialized suite of 594 s under the sanitizer)
+  now bounds the compiler bundle with the every-method parts; not touched.
+
+## Open questions
+
+1. Split the every-method kernel tests into slices (by a hash of
+   `Class>>selector`) to take about 100 s off each sanitizer gate, at the
+   price of eight new test ids? Recommended: not now; the bundle's other
+   floors are within that.
+2. The cache's bound, 2 GiB with an hour's protection: keep? Recommended:
+   keep.
+3. The weekly's A/B base, the last finished non-quick weekly run's commit:
+   keep? Recommended: keep (Sunday's run reads a024a90).
+4. Fix the kernel compiler's `literalIndex:` (a dictionary beside the
+   frame) as a follow-up? Recommended: yes, small, and the selectors
+   limit cases would drop from 140 s to seconds.
