@@ -76,7 +76,9 @@ def group(rows, keys):
 
 def longest_stop(r):
     """(ms, kind) of the longest stop in a row's gc_stopsByKind
-    (kind:count/max ms/ttsp max ms, comma separated), or None."""
+    (kind:count/max ms/ttsp max ms/last parker/via, comma separated; the
+    last two name who parked last in the stop with that wait and are absent
+    on rows from before 2026-11-13), or None."""
     best = None
     for part in r.get("gc_stopsByKind", "-").split(","):
         if ":" not in part:
@@ -86,6 +88,23 @@ def longest_stop(r):
         ms = num(fields[1]) if len(fields) > 1 else None
         if ms is not None and (best is None or ms > best[0]):
             best = (ms, kind)
+    return best
+
+
+def longest_wait(r):
+    """(ms, kind, last parker) of the longest time to safepoint in a row's
+    gc_stopsByKind, or None. The parker is "?" on a row written before the
+    field existed and "-" when the stop had nobody to wait for."""
+    best = None
+    for part in r.get("gc_stopsByKind", "-").split(","):
+        if ":" not in part:
+            continue
+        kind, rest = part.split(":", 1)
+        fields = rest.split("/")
+        ms = num(fields[2]) if len(fields) > 2 else None
+        who = "/".join(fields[3:5]) if len(fields) > 4 else "?"
+        if ms is not None and (best is None or ms > best[0]):
+            best = (ms, kind, "-" if who == "-/-" else who)
     return best
 
 
@@ -126,10 +145,11 @@ def bar(d):
     if w:
         print(w)
         print()
-    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | longest stop ms |")
-    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|")
+    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | longest stop ms | longest wait for a safepoint ms (kind, last parker/how it parked) |")
+    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|")
     tot = defaultdict(float)
     worst = None
+    worst_wait = None
     notes = []
     for f in files:
         rows = lines(d / f"{f}.txt")
@@ -164,6 +184,13 @@ def bar(d):
                 fw = (s[0], s[1], r)
         if fw and (worst is None or fw[0] > worst[0]):
             worst = (fw[0], fw[1], fw[2], f)
+        ww = None
+        for r in ok_rows:
+            s = longest_wait(r)
+            if s and (ww is None or s[0] > ww[0]):
+                ww = (s[0], s[1], s[2], r)
+        if ww and (worst_wait is None or ww[0] > worst_wait[0]):
+            worst_wait = (ww[0], ww[1], ww[2], ww[3], f)
         for k, v in [("rows", len(rows)), ("failed", failed), ("sums", bad_sum), ("missing", len(missing)), ("missed", missed),
                      ("noframes", len(noframes)), ("falling", len(falling)), ("fallbacks", fallbacks), ("sweeps", sweep_n),
                      ("unjust", unjust), ("stalls", stall_n)]:
@@ -171,7 +198,8 @@ def bar(d):
         stop = f"{fw[0]:.2f} ({fw[1]})" if fw else "-"
         sw = f"{sweep_n} ({sweep_max:.2f})" if sweep_max is not None else f"{sweep_n}"
         st = f"{stall_n:.0f} ({stall_max:.2f})" if stall_max is not None else "-"
-        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {stop} |")
+        wait = f"{ww[0]:.2f} ({ww[1]}, {ww[2]})" if ww else "-"
+        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {stop} | {wait} |")
         for r in rows:
             if r.get("_failed"):
                 notes.append(f"- {f}: launch failed: {' '.join(k + '=' + v for k, v in r.items() if not k.startswith('_'))}")
@@ -188,7 +216,8 @@ def bar(d):
     stop = f"{worst[0]:.2f} ({worst[1]}, {worst[3]}: {row_name(worst[2])})" if worst else "-"
     sw = f"{tot['sweeps']:.0f} ({tot['sweepmax']:.2f})" if tot["sweeps"] else "0"
     stt = f"{tot['stalls']:.0f} ({tot['stallmax']:.2f})" if tot["stalls"] else "0"
-    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {stop} |")
+    wait = f"{worst_wait[0]:.2f} ({worst_wait[1]}, {worst_wait[2]}, {worst_wait[4]}: {row_name(worst_wait[3])})" if worst_wait else "-"
+    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {stop} | {wait} |")
     if notes:
         print()
         print("\n".join(notes))

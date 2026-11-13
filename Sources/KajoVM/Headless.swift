@@ -630,7 +630,7 @@ func markingReport(_ vm: VM, stops: [StopRecord]) -> [(String, String)] {
         ("markerSlowdown", "\(vm.markerSlowdown)"), ("markerSlowSpins", "\(c.markerSlowSpins)"),
         ("markerSlowSpinMs", ms(c.markerSlowSpinNs)),
         ("qosRaisedCycles", "\(log.filter { $0.completed && $0.markerQoS == QOS_CLASS_USER_INITIATED.rawValue }.count)"),
-    ] + stallReport(vm) + finalMarkReport(stops: stops, log: log) + [
+    ] + stallReport(vm) + finalMarkReport(stops: stops, log: log, workerCount: vm.config.backgroundWorkers + 2) + [
         ("finalGiveUps", "\(c.finalGiveUps)"), ("finalOverruns", "\(c.finalOverruns)"),
         ("finalUnitsMax", log.map(\.finalWorkUnitsMax).max().map { "\($0)" } ?? "-"),
     ] + rootScanReport(vm.rootScanStats)
@@ -664,7 +664,7 @@ func rootScanReport(_ s: [UInt64]) -> [(String, String)] {
 /// before the raise, its share of CPU on performance cores and its clock
 /// there (GHz) from just before the wait to the end of the work, and the
 /// thermal state (0 nominal to 3 critical).
-func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, String)] {
+func finalMarkReport(stops: [StopRecord], log: [CycleRecord], workerCount: Int) -> [(String, String)] {
     func f(_ v: Double) -> String { unsafe String(format: "%.3f", v) }
     func ms(_ ns: UInt64) -> String { f(Double(ns) / 1e6) }
     func f2(_ ns: UInt64) -> String { unsafe String(format: "%.2f", Double(ns) / 1e6) }
@@ -695,27 +695,46 @@ func finalMarkReport(stops: [StopRecord], log: [CycleRecord]) -> [(String, Strin
         ("initialP50ms", pct(im.map(\.pauseNs), 0.5)), ("initialMaxMs", mx(im.map(\.pauseNs))),
         ("initialTtspMaxMs", mx(im.map(\.timeToSafepointNs))), ("initialBeforeRequestMaxMs", mx(im.map(\.beforeRequestNs))),
         ("finalLog", rows.isEmpty ? "-" : rows.joined(separator: ",")),
-        ("stopsByKind", stopsByKind(stops)),
+        ("stopsByKind", stopsByKind(stops, workerCount: workerCount)),
     ]
 }
 
-/// Every stop kind's count, longest stop and longest time to safepoint
-/// (from the request), as kind:count/max ms/ttsp max ms, comma separated.
-func stopsByKind(_ stops: [StopRecord]) -> String {
-    var by: [UInt8: (n: Int, max: UInt64, ttsp: UInt64)] = [:]
+/// Every stop kind's count, longest stop, longest time to safepoint (from
+/// the request) and, for the stop with that longest time to safepoint, the
+/// participant that parked last and where the stop found it (`ParkVia`):
+/// kind:count/max ms/ttsp max ms/last parker/via, comma separated. A reader
+/// that takes only the first fields (scripts/shell-report.py) reads rows
+/// written before the last two were added.
+func stopsByKind(_ stops: [StopRecord], workerCount: Int) -> String {
+    var by: [UInt8: (n: Int, max: UInt64, ttsp: StopRecord)] = [:]
     for s in stops {
-        var e = by[s.kind.rawValue] ?? (0, 0, 0)
+        var e = by[s.kind.rawValue] ?? (0, 0, s)
         e.n += 1
         e.max = Swift.max(e.max, s.pauseNs)
-        e.ttsp = Swift.max(e.ttsp, s.timeToSafepointNs)
+        if s.timeToSafepointNs > e.ttsp.timeToSafepointNs { e.ttsp = s }
         by[s.kind.rawValue] = e
     }
     if by.isEmpty { return "-" }
     return by.keys.sorted().map { k in
         let e = by[k]!
-        let times = unsafe String(format: "%.2f/%.2f", Double(e.max) / 1e6, Double(e.ttsp) / 1e6)
-        return "\(StopKind(rawValue: k).map { "\($0)" } ?? "\(k)"):\(e.n)/" + times
+        let times = unsafe String(format: "%.2f/%.2f", Double(e.max) / 1e6, Double(e.ttsp.timeToSafepointNs) / 1e6)
+        let parker = e.ttsp.slowest < 0 ? "-/-" : "\(participantName(e.ttsp.slowest, workerCount: workerCount))/\(e.ttsp.slowestVia)"
+        return "\(StopKind(rawValue: k).map { "\($0)" } ?? "\(k)"):\(e.n)/" + times + "/" + parker
     }.joined(separator: ",")
+}
+
+/// A stop participant by its index: the main worker, a background worker,
+/// the host worker (the last of the worker table), and past the table the
+/// marker and the young collector. The rows' `scavSlowest` and
+/// `slowestParticipant` are the same index as a number.
+func participantName(_ index: Int, workerCount: Int) -> String {
+    if index < 0 { return "-" }
+    if index == 0 { return "main" }
+    if index < workerCount - 1 { return "w\(index)" }
+    if index == workerCount - 1 { return "host" }
+    if index == workerCount { return "marker" }
+    if index == workerCount + 1 { return "young" }
+    return "\(index)"
 }
 
 /// The sweep stop (docs/modules/sweep-stop.md): each recorded sweep stop
