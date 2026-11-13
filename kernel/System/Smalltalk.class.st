@@ -184,14 +184,21 @@ Smalltalk class >> setup: workers [
 
 { #category : #'entry points' }
 Smalltalk class >> test: arguments [
-	"kajo test <image> [--filter pattern] [--tag tag]: run the matching TestCases, emitting the event stream. Answers the number of failures and errors."
-	| filter tag i |
+	"kajo test <image> [--filter pattern] [--tag tag] [--test name]... [--list]: run the matching TestCases, emitting the event stream. Answers the number of failures and errors. Each --test names one test exactly (Class>>selector); with several, a test is run when it is any of them. --list emits the selected tests without running them (gate speed)."
+	| filter tag names list i |
 	i := 1.
+	list := false.
 	[i <= arguments size] whileTrue: [
 		(arguments at: i) = '--filter' ifTrue: [filter := arguments at: i + 1. i := i + 1].
 		(arguments at: i) = '--tag' ifTrue: [tag := arguments at: i + 1. i := i + 1].
+		(arguments at: i) = '--test' ifTrue: [
+			names ifNil: [names := Set new].
+			names add: (arguments at: i + 1).
+			i := i + 1].
+		(arguments at: i) = '--list' ifTrue: [list := true].
 		i := i + 1].
-	^ TestRunner new runFilter: filter tag: tag
+	list ifTrue: [^ TestRunner new listFilter: filter tag: tag tests: names].
+	^ TestRunner new runFilter: filter tag: tag tests: names
 ]
 
 { #category : #'entry points' }

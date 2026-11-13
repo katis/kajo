@@ -9,6 +9,7 @@ func runTests(_ args: [String]) -> Never {
     var imagePath: String? = nil
     var arguments: [String] = []
     var junit: String? = nil
+    var listing = false
     var options = Headless.Options()
     var i = 0
     func value() -> String {
@@ -20,6 +21,10 @@ func runTests(_ args: [String]) -> Never {
         switch args[i] {
         case "--filter": arguments += ["--filter", value()]
         case "--tag": arguments += ["--tag", value()]
+        // Gate speed (docs/modules/gate-speed.md, change 1): exact names
+        // (each --test adds one) and the listing without a run.
+        case "--test": arguments += ["--test", value()]
+        case "--list": arguments += ["--list"]; listing = true
         case "--junit": junit = value()
         case "--workers": options.workers = Int(value()) ?? 0
         case "--heap": options.heapMiB = Int(value()) ?? 0
@@ -49,6 +54,14 @@ func runTests(_ args: [String]) -> Never {
     let outcome = Headless.test(image: bytes, arguments: arguments, options: options) { collector.add($0) }
     let events = collector.events
     let report = TestReport(events)
+    if listing {
+        let total = report.events.first { $0["kind"] as? String == "run.listed" }?["total"] as? Int ?? 0
+        FileHandle.standardError.write("kajo test: \(total) tests listed\n".data(using: .utf8)!)
+        switch outcome {
+        case .success(let n): exit(n == 0 ? 0 : 1)
+        case .failure(let f): fail("kajo test: \(f)", 2)
+        }
+    }
     FileHandle.standardError.write(report.summary.data(using: .utf8)!)
     // AOT 1: the native engine's counts (bound, interpreted, declined, switches).
     for e in events where e.starts(with: Array("{\"v\":1,\"kind\":\"native\"".utf8)) {

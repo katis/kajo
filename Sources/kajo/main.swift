@@ -20,7 +20,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo run <image.img> --protocol <socket>|tcp[:port] [--name <Bonjour name>] [the options above]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
-       kajo test [image.img] [--filter pattern] [--tag tag] [--junit path] [--workers N] [--heap MiB] [--sources dir]
+       kajo test [image.img] [--filter pattern] [--tag tag] [--test Class>>selector]... [--list] [--junit path] [--workers N] [--heap MiB] [--sources dir]
        kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS]
        kajo aot <file.kasm>...|<image.img> -o <dir>
        kajo run ... --native <module.dylib>
