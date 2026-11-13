@@ -62,9 +62,9 @@ native-cc:
 golden:
     scripts/golden.sh
 
-# The test suite in a release build, which adds the full-size golden kernels
+# The test suite in a release build, which adds the full-size golden kernels; without the five randomPrograms* tests, which `just soak` runs in the same build with every seed this recipe would have run and more (gate speed: a gate list with test-release and no soak fails scripts/check-tier-test.sh)
 test-release:
-    swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests
+    swift test -c release -Xswiftc -enable-testing --scratch-path .build/release-tests --skip randomPrograms
 
 # A thousand randomized programs under every configuration, in a release build with -enable-testing (SEEDS, BASE override)
 soak SEEDS="1000" BASE="1":

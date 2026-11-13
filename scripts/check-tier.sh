@@ -19,12 +19,18 @@
 # asks for:
 #   core       Sources/KajoVM/{ObjectMemory,Interpreter,Loader,Workers,Processes,
 #              Nursery,Marking,Relocation,YoungCollection,ObjectModel,Native}/,
-#              Sources/KajoAOT/ (AOT 1: the native engine and its generator)
+#              Sources/KajoAOT/ (AOT 1: the native engine and its generator);
+#              every gate but plain swift-test (gate speed: the owner's
+#              decision of 2026-11-13, the Swift tier and the weekly keep it)
 #   swift      anything that is in no other tier (Swift outside the core,
 #              Package.swift, Tests/, scripts/, justfile, apps/ but its
 #              Smalltalk, models/, experiments/ code ...)
 #   smalltalk  kernel/, tools/, apps/Shared/smalltalk/
 #   none       docs/, any *.md (experiments/*/RESULTS.md among them)
+# A swift or core diff that touches a gate script (check-tier.sh, its test,
+# gates-lib.sh, weekly.sh, fuzz.sh, fuzz-gate.sh) owes check-tier-test
+# first; one that touches models/ owes model-check (the core tier always
+# runs it). The fuzzers are one gate, `fuzz`, over the targets owed.
 set -uo pipefail
 root=${0:A:h:h}
 dry=0 tier= paths= base=
@@ -33,7 +39,7 @@ while (( $# )); do
     --dry-run) dry=1 ;;
     --tier) tier=${2:?--tier none|smalltalk|swift|core}; shift ;;
     --paths) paths=${2:?--paths <file>|-}; shift ;;
-    -h|--help) sed -n '2,26p' $0; exit 0 ;;
+    -h|--help) sed -n '2,/^set -uo/p' $0 | sed '$d'; exit 0 ;;
     -*) print "check-tier: unknown option $1"; exit 2 ;;
     *) base=$1 ;;
   esac
@@ -98,6 +104,12 @@ for f in $files; do fuzzers+=($(fuzzers_for $f)); done
 fuzzers=(${(u)fuzzers})
 models=0
 for f in $files; do [[ $f == models/* ]] && models=1; done
+# Gate speed (docs/modules/gate-speed.md, change 8): the gate scripts' own
+# test is owed by a diff that touches a gate script.
+tiertest=0
+for f in $files; do
+  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh) ]] && tiertest=1
+done
 
 print "check-tier: ${#files} files from $source_desc"
 if [[ -z $tier ]]; then
@@ -124,18 +136,23 @@ case $tier in
     gates=(build-image dev-image kernel-test tools-test compiler-tests golden mac-shell-tests) ;;
   swift)
     gates=(clean-build swift-test tsan kernel-test apps new-check)
-    for z in $fuzzers; do gates+=(fuzz-$z); done
+    (( ${#fuzzers} )) && gates+=(fuzz)
     (( models )) && gates+=(model-check) ;;
   core)
-    gates=(clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak
-           fuzz-kasm fuzz-snapshot fuzz-syntax fuzz-protocol apps kernel-test new-check ab matrix-mac matrix-iphone) ;;
+    # Gate speed: plain swift-test is not here (the owner's decision of
+    # 2026-11-13; the Swift tier and the weekly run keep it), the four
+    # fuzzers are one gate, and test-release leaves the random programs to
+    # soak, which must follow it (scripts/check-tier-test.sh checks that).
+    gates=(clean-build swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak
+           fuzz apps kernel-test new-check ab matrix-mac matrix-iphone) ;;
 esac
+[[ $tier == (swift|core) ]] && (( tiertest )) && gates=(check-tier-test $gates)
 [[ $tier == swift ]] && print "fuzzers: ${fuzzers:-none}"
 
 GL_ROOT=$root
 GL_OUT=${KAJO_CHECK_OUT:-$root/.build/check/$(date +%F)}
 source $root/scripts/gates-lib.sh
-[[ $tier == swift ]] && GL_FUZZ_SECS=${KAJO_CHECK_FUZZ_SECS:-120}
+[[ $tier == swift ]] && { GL_FUZZ_SECS=${KAJO_CHECK_FUZZ_SECS:-120}; GL_FUZZ_TARGETS="$fuzzers" }
 if [[ $tier == core ]]; then
   GL_FUZZ_SECS=${KAJO_CHECK_FUZZ_SECS:-600}
   GL_AB_BASE=$(git merge-base ${base:-origin/master} HEAD 2>/dev/null | cut -c1-7)

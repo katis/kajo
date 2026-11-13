@@ -10,13 +10,14 @@
 #
 # The caller sets GL_ROOT (the repository) and GL_OUT (the output
 # directory), calls gl_init, then gl_gate <name> for each gate, and
-# installs gl_cleanup in its traps. GL_FUZZ_SECS (600), GL_RUNS (the
-# matrix's RUNS, 3) and GL_AB_BASE (the A/B's base commit) parameterize
-# the gates that take them; GL_UDID[<label>] names a device for
-# matrix-<label>.
+# installs gl_cleanup in its traps. GL_FUZZ_SECS (600), GL_FUZZ_TARGETS
+# (the fuzz gate's targets, all four), GL_RUNS (the matrix's RUNS, 3) and
+# GL_AB_BASE (the A/B's base commit) parameterize the gates that take them;
+# GL_UDID[<label>] names a device for matrix-<label>.
 
 typeset -gA GL_UDID
 GL_FUZZ_SECS=${GL_FUZZ_SECS:-600}
+GL_FUZZ_TARGETS=${GL_FUZZ_TARGETS:-kasm snapshot syntax protocol}
 GL_RUNS=${GL_RUNS:-3}
 GL_AB_BASE=${GL_AB_BASE:-}
 GL_FAILED=()
@@ -54,8 +55,13 @@ gl_spec() {
     test-release)    spec_cmd="just test-release" ;;
     model-check)     spec_cmd="just model-check" ;;
     soak)            spec_cmd="just soak" ;;
-    fuzz-kasm|fuzz-snapshot|fuzz-syntax|fuzz-protocol)
-                     spec_cmd="just fuzz ${id#fuzz-} $GL_FUZZ_SECS"; spec_timeout=$(( GL_FUZZ_SECS + 1800 )); spec_check=libfuzzer ;;
+    # Gate speed (docs/modules/gate-speed.md, change 2): the targets in
+    # GL_FUZZ_TARGETS built one after another and run side by side, each
+    # for GL_FUZZ_SECS into <out>/fuzz-<target>.txt; gl_gate copies a line
+    # per target into gates.log.
+    fuzz)            spec_cmd="scripts/fuzz-gate.sh $GL_FUZZ_SECS $o $GL_FUZZ_TARGETS"; spec_timeout=$(( GL_FUZZ_SECS + 3600 )); spec_check=fuzz ;;
+    # Gate speed, change 8: the gate scripts' own test.
+    check-tier-test) spec_cmd="scripts/check-tier-test.sh"; spec_timeout=900 ;;
     apps)            spec_cmd="just apps" ;;
     kernel-test)     spec_cmd="just kernel-test" ;;
     new-check)       spec_cmd="just new-check" ;;
@@ -98,10 +104,55 @@ gl_check_clean() {
 }
 
 # AGENTS.md: read the "libFuzzer build: ok" line before counting a fuzz gate.
-gl_check_libfuzzer() {
-  grep -q '^libFuzzer build: ok' $1 && return 0
-  print -r -- "gate check: no 'libFuzzer build: ok' line (the fallback driver ran, no coverage)" >> $1
-  return 1
+# The fuzz gate's own script checks each target's output; this checks that
+# every target of GL_FUZZ_TARGETS has its line, built with libFuzzer and
+# ran to rc=0, so a script that exits 0 by mistake still fails the gate.
+gl_check_fuzz() {
+  local t ok=1
+  for t in ${=GL_FUZZ_TARGETS}; do
+    grep -q "^fuzz-gate: $t rc=0 build=ok " $1 && grep -q '^libFuzzer build: ok' $GL_OUT/fuzz-$t.txt && continue
+    print -r -- "gate check: fuzz-$t did not build with libFuzzer and run to rc=0 (the fallback driver is never counted)" >> $1
+    ok=0
+  done
+  (( ok ))
+}
+
+# gl_fuzz_lines <output>: one gates.log line per fuzz target, from the
+# fuzz gate's own summary lines, before the gate's end line.
+gl_fuzz_lines() {
+  local line t rest
+  grep '^fuzz-gate: [a-z-]* rc=' $1 | while read -r line; do
+    rest=${line#fuzz-gate: }
+    t=${rest%% *}
+    rest=${rest#* }
+    # rc=<rc> build=<b> runs=<n> <s>s -> end fuzz-<t> rc=<rc> <s>s runs=<n> build=<b>
+    local -a w=(${=rest})
+    gl_log "end fuzz-$t ${w[1]} ${w[4]} ${w[3]} ${w[2]}"
+  done
+}
+
+# gl_skip <gate> <reason>: a gate not run, said in gates.log (never a
+# failure, never silent).
+gl_skip() {
+  local id=$1; shift
+  gl_log "skip $id: $*"
+  gl_log "end $id rc=skip 0s"
+}
+
+# gl_weekly_ab_base <weekly.log> <head>: the commit of the last weekly run
+# that finished (a `weekly done` line after its `weekly start`, quick runs
+# not counted), or nothing when there is none or it is head (gate speed,
+# change 6: the weekly's A/B base).
+gl_weekly_ab_base() {
+  local log=$1 head=$2 c
+  [[ -r $log ]] || return 0
+  c=$(awk '$3 == "weekly" && $4 == "start" && $8 == "quick=0" { commit[$5] = $7 }
+           $3 == "weekly" && $4 == "done" && ($5 in commit) { last = commit[$5] }
+           END { print last }' $log)
+  [[ -n $c ]] || return 0
+  [[ $(git -C $GL_ROOT rev-parse -q --verify "$c^{commit}" 2>/dev/null) == $(git -C $GL_ROOT rev-parse -q --verify "$head^{commit}" 2>/dev/null) ]] && return 0
+  git -C $GL_ROOT rev-parse -q --verify "$c^{commit}" > /dev/null 2>&1 || return 0
+  print -r -- $c
 }
 
 gl_check_mactests() {
@@ -163,6 +214,7 @@ gl_gate() {
   GL_CHILD=
   (( spec_load )) && gl_load_off
   if [[ $rc == 0 && $spec_check != - ]]; then gl_check_$spec_check $f || rc=1; fi
+  [[ $id == fuzz ]] && gl_fuzz_lines $f
   gl_log "end $id rc=$rc $(( $(date +%s) - t0 ))s"
   (( rc )) && GL_FAILED+=($id)
   return $rc

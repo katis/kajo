@@ -10,6 +10,10 @@
 # anything of Kajo runs: a kajo, swift-build, swift-test, xcodebuild,
 # KajoShell, Kajo, Sample or yes process of this user outside its own process
 # group (by exact executable name, so nothing else of the owner's matches).
+# Under the swiftly toolchain `swift build` and `swift test` run as
+# swift-package and the tests in swiftpm-testing-helper (ps truncates it to
+# swiftpm-testing-), so those names count too (gate speed: found when a
+# weekly started beside a running suite; scripts/check-tier-test.sh).
 # It runs on the tree as checked out: it does not pull, switch or clean,
 # and says in the log when the tree is dirty or not on master.
 #
@@ -19,8 +23,21 @@
 # runs only the named steps (gate names as in scripts/gates-lib.sh,
 # matrix-mac, devices for every attached device, matrix-iphone or
 # matrix-ipad for one). KAJO_WEEKLY_ROOT moves ~/kajo-weekly.
+#
+# Gate speed (docs/modules/gate-speed.md, change 6): the weekly is the
+# full set again, every gate of the core tier (the device rows as
+# `devices`) plus plain swift-test and check-tier-test. The fuzzers are the
+# one fuzz gate (a line per target in gates.log and summary.md). The A/B's
+# base is the commit of the last weekly run that finished (quick runs not
+# counted, read from weekly.log); with none, or when it is this commit, the
+# A/B is skipped with a line saying so in gates.log and summary.md.
+# `scripts/weekly.sh --gates` prints the steps and exits (the superset check
+# in scripts/check-tier-test.sh).
 set -uo pipefail
 root=${0:A:h:h}
+gates=(check-tier-test clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc
+       test-release model-check soak fuzz apps kernel-test new-check ab)
+if [[ ${1:-} == --gates ]]; then print -r -- "$gates matrix-mac devices"; exit 0; fi
 WROOT=${KAJO_WEEKLY_ROOT:-$HOME/kajo-weekly}
 QUICK=${KAJO_WEEKLY_QUICK:-0}
 ONLY=${KAJO_WEEKLY_ONLY:-}
@@ -33,6 +50,7 @@ own=$(ps -o pgid= -p $$ | tr -d ' ')
 busy=$(ps -U $(id -u) -o pid=,pgid=,ucomm= | awk -v own=$own '
   { n = $0; sub(/^ *[0-9]+ +[0-9]+ +/, "", n); sub(/ +$/, "", n)
     if ($2 != own && (n == "kajo" || n == "swift-build" || n == "swift-test" || n == "xcodebuild" ||
+                      n == "swift-package" || n ~ /^swiftpm-testing/ ||
                       n == "KajoShell" || n == "Kajo" || n == "Sample" || n == "yes")) { printf "%s %s(%s)", sep, n, $1; sep = "," } }')
 if [[ -n $busy ]]; then
   wlog "weekly refused: Kajo is running:$busy"
@@ -63,9 +81,15 @@ trap 'gl_cleanup' EXIT
 t0=$(date +%s)
 wants() { [[ -z $ONLY || " $ONLY " == *" $1 "* ]] }
 
-gates=(clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden test-release model-check soak
-       fuzz-kasm fuzz-snapshot fuzz-syntax fuzz-protocol apps kernel-test new-check)
-for g in $gates; do wants $g && gl_gate $g; done
+GL_AB_BASE=$(gl_weekly_ab_base $WROOT/weekly.log HEAD)
+for g in $gates; do
+  wants $g || continue
+  if [[ $g == ab && -z $GL_AB_BASE ]]; then
+    gl_skip ab "no base: no weekly run before this one finished at another commit (weekly.log)"
+    continue
+  fi
+  gl_gate $g
+done
 wants matrix-mac && gl_gate matrix-mac
 
 # Every attached device (`devicectl list devices`, state connected).
@@ -93,12 +117,16 @@ fi
   print "Commit $GL_COMMIT on $branch, $GL_SWIFT; started $(date -r $t0 '+%F %T'), $(sysctl -n hw.model)."
   [[ -n $note ]] && print "\nNOTE:$note"
   print "\n## Gates\n"
-  print "| gate | result | time |"
-  print "|---|---|--:|"
-  grep " end " $GL_LOG | grep -E " $GL_COMMIT end " | awk '{ name = $5; rc = $6; sub("rc=", "", rc); t = $7;
-      r = (rc == "0") ? "pass" : (rc == "3" ? "skipped (codesign waited on a prompt)" : "FAIL (rc=" rc ")");
-      res[name] = r; tm[name] = t; if (!(name in seen)) { seen[name] = 1; order[++n] = name } }
-      END { for (i = 1; i <= n; i++) printf "| %s | %s | %s |\n", order[i], res[order[i]], tm[order[i]] }'
+  print "| gate | result | time | note |"
+  print "|---|---|--:|---|"
+  grep -E " $GL_COMMIT (end|skip) " $GL_LOG | awk '
+      $4 == "skip" { name = $5; sub(":$", "", name); why = $0; sub(/.* skip [^ ]*: /, "", why); reason[name] = why; next }
+      { name = $5; rc = $6; sub("rc=", "", rc); t = $7; note = ""
+        for (i = 8; i <= NF; i++) note = note (i > 8 ? " " : "") $i
+        r = (rc == "0") ? "pass" : (rc == "3" ? "skipped (codesign waited on a prompt)" : (rc == "skip" ? "skipped" : "FAIL (rc=" rc ")"))
+        res[name] = r; tm[name] = t; nt[name] = note; if (!(name in seen)) { seen[name] = 1; order[++n] = name } }
+      END { for (i = 1; i <= n; i++) { k = order[i]; x = nt[k]; if (k in reason) x = reason[k]
+              printf "| %s | %s | %s | %s |\n", k, res[k], tm[k], x } }'
   for m in matrix-mac ${devices/#/matrix-}; do
     [[ -d $out/$m ]] || continue
     print "\n## $m (every raw row of $m/*.txt; full tables in $m/report.md)\n"
