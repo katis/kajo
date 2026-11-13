@@ -155,9 +155,13 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         try run(vm, selector, on: "ToolsProbe", args, main: true)
     }
 
-    /// Turns until `ToolsProbe selector` answers true (60 s at most).
+    /// Turns until `ToolsProbe selector` answers true (60 s at most, five
+    /// times that under the sanitizer, `driveScale`: gate speed's second
+    /// final run lost `theToolsReconnectAfterADroppedLink` at this bound in
+    /// both sanitizer gates, the bundle busier with the kernel's parts; the
+    /// test alone took 94 s there and passed).
     func until(_ selector: String, _ args: [ShellValue] = []) -> Bool {
-        let end = ShellVM.now() + 60_000_000_000
+        let end = ShellVM.now() + UInt64(60 * driveScale) * 1_000_000_000
         while ShellVM.now() < end {
             if (try? probe(selector, args)) == .bool(true) { return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
