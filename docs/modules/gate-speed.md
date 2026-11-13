@@ -638,6 +638,49 @@ target fails it, one without "libFuzzer build: ok" fails it, and a gate
 killed through `gl_cleanup` or by a TERM to its script alone leaves no
 stand-in alive.
 
+### The quick weekly run and the switches
+
+The changed gates through the weekly script, on b09d8fc, under `env -i`
+with exactly the LaunchAgent's environment (`$GS/weekly-quick/command.txt`
+holds the command line: `HOME`, `USER`, `LOGNAME`, `SHELL`, `TMPDIR`, the
+plist's `PATH` and swiftly variables, `KAJO_WEEKLY_QUICK=1
+KAJO_WEEKLY_DEVICES=0 KAJO_WEEKLY_ROOT=$GS/weekly-quick
+KAJO_WEEKLY_ONLY='check-tier-test native-golden native-kernel-test
+native-cc test-release soak fuzz ab'`), with a copy of
+`~/kajo-weekly/weekly.log` in the root so the A/B found its base (a024a90,
+the 2026-11-08 run): 13:52 to 14:05, every gate passed
+(`$GS/weekly-quick/2026-11-13-quick/gates.log` and `summary.md`):
+check-tier-test 7 s, native-golden 141, native-kernel-test 47, native-cc
+31, test-release 35 (444 + 162 tests, 11 cache hits), soak 65 (1000
+interpreter seeds and 100 native per configuration, 655 hits and no
+miss: the soak's 480 s were clang's), the fuzz gate 120 s with kasm
+194 648, snapshot 302 741, syntax 57 159 (113 s: its kernel image is
+built at the start) and protocol 158 511 runs in 60 s each, ab 322 s
+against a024a90 (`ab/table.md`). The run did not log which base it used,
+so the weekly now writes `ab base <commit>: the last finished weekly run's
+commit (<weekly.log>)` (f9b9390; a run with nothing else,
+`$GS/weekly-base/`, shows the line). The skip path:
+`KAJO_WEEKLY_ONLY=ab` with an empty root (`$GS/weekly-skip/`) wrote `skip
+ab: no base: ...` and the summary row `| ab | skipped | 0s | no base: ...
+|` (that root was in the lost scratchpad; the A/B base test of
+`check-tier-test.sh` covers the same rule).
+
+One run of each new switch, in `$GS/switches/`: `kajo-test-list.txt`
+(`--list` 249 tests listed; `--list --test A --test B` two `test.listed`
+and `run.listed` total 2; `--test A --test B` two passed),
+`native-cache-switch.txt` (`KAJO_NATIVE_CACHE=off` prints the off line and
+compiles to a temporary; `=<dir>` 0 hits 1 miss, then 1 hit 0 misses;
+the default 1 hit in `.build/native-test-cache`), `fuzz-sh.txt`
+(`fuzz.sh protocol 5` both halves, `--build kasm` with its `build.txt`,
+`--run kasm 5`), `weekly-gates.txt` (`weekly.sh --gates`),
+`check-tier-test.txt` (96 checks, ok). The fuzz gate is run by the final
+run; its broken variants by `check-tier-test.sh`.
+
+Found by that check run: the refusal test's stand-in, compiled by the
+swiftly `clang` on PATH, found `unistd.h` only when the calling
+environment named the SDK (it passed in the morning and failed at 13:50);
+it is built by Apple's `/usr/bin/clang` now (b09d8fc).
+
 ## Coverage
 
 (Filled from the final run below.)
