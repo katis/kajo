@@ -111,7 +111,19 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
 /// arguments, a block copying 255 and 256 values, 32 760 and 32 763 bytes
 /// of bytecode, 4095 and 4096 literals (the source map counts). On
 /// 18e274f the kernel's generator wrapped or raised a generic Error.
-@Test func bothCompilersRefuseAtEveryEncodingLimit() throws {
+///
+/// Gate speed (docs/modules/gate-speed.md, change 5): one case per limit,
+/// run at the same time, each with a probe VM of its own; each case makes
+/// the test's two assertions (the bootstrap accepts or refuses as listed,
+/// the two compilers agree) and prints its time.
+struct EncodingLimitCase: CustomTestStringConvertible, Sendable {
+    let name: String
+    let source: String
+    let accepted: Bool
+    var testDescription: String { name }
+}
+
+let encodingLimitCases: [EncodingLimitCase] = {
     func keywordSend(_ n: Int) -> String { "f ^ self " + (1...n).map { "k\($0): 1" }.joined(separator: " ") }
     func copying(_ n: Int) -> String {
         // temps a block reads and nothing assigns: copied, not in a vector
@@ -121,14 +133,26 @@ func agreement(_ sources: [String]) throws -> [(String, String)] {
     func selectors(_ n: Int) -> String { "f " + (1...n).map { "self s\($0)" }.joined(separator: ". ") }
     // The big pairs (a method of 32 760 bytes, 4094 selectors) take minutes
     // in the Smalltalk compiler under ThreadSanitizer: the small ones there.
-    let all = [keywordSend(255), keywordSend(256), copying(255), copying(256), chain(10_919), chain(10_920),
-               selectors(4094), selectors(4095)]
-    let cases = compilerTestsUnderThreadSanitizer ? Array(all.prefix(4)) : all
+    let all = [EncodingLimitCase(name: "keywordSend255", source: keywordSend(255), accepted: true),
+               EncodingLimitCase(name: "keywordSend256", source: keywordSend(256), accepted: false),
+               EncodingLimitCase(name: "copying255", source: copying(255), accepted: true),
+               EncodingLimitCase(name: "copying256", source: copying(256), accepted: false),
+               EncodingLimitCase(name: "chain10919", source: chain(10_919), accepted: true),
+               EncodingLimitCase(name: "chain10920", source: chain(10_920), accepted: false),
+               EncodingLimitCase(name: "selectors4094", source: selectors(4094), accepted: true),
+               EncodingLimitCase(name: "selectors4095", source: selectors(4095), accepted: false)]
+    return compilerTestsUnderThreadSanitizer ? Array(all.prefix(4)) : all
+}()
+
+@Test(arguments: encodingLimitCases)
+func bothCompilersRefuseAtEveryEncodingLimit(_ limit: EncodingLimitCase) throws {
+    let t0 = Date()
     let ctx0 = CompilerAgreement.context(classNames: Set(["Object"]))
-    let accepted = cases.map { (try? compileMethod(Array($0.utf8), file: "limits", in: ctx0)) != nil }
-    #expect(accepted == Array([true, false, true, false, true, false, true, false].prefix(cases.count)), "\(accepted)")
-    let d = try agreement(cases)
-    #expect(d.isEmpty, "\(d.count) disagree: \(d.map { "\($0.0.prefix(40))…: \($0.1.prefix(200))" })")
+    let accepted = (try? compileMethod(Array(limit.source.utf8), file: "limits", in: ctx0)) != nil
+    #expect(accepted == limit.accepted, "\(limit.name): the bootstrap \(accepted ? "accepted" : "refused")")
+    let d = try agreement([limit.source])
+    #expect(d.isEmpty, "\(limit.name): \(d.count) disagree: \(d.map { "\($0.0.prefix(40))…: \($0.1.prefix(200))" })")
+    print("encoding limit \(limit.name): \(String(format: "%.1f", Date().timeIntervalSince(t0))) s")
 }
 
 /// Item 6 (kernel.F15): the compilers' corpus, methods that exercise each

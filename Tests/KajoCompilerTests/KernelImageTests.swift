@@ -35,28 +35,146 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
     return (r, lines.all)
 }
 
-@Suite(.serialized) struct KernelImageTests {
-    @Test func theKernelBuildsWithoutWarnings() throws {
-        let r = try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory]))
-        #expect(r.warnings.isEmpty, "\(r.warnings)")
-        #expect(r.classes > 100)
-        #expect(r.methods > 1300)
-        // and loads as an image (verified all or nothing)
-        let img = try Image.load(image: r.image)
-        defer { img.destroy() }
-        #expect(img.entryPoint != img.nilObject)
+// Gate speed (docs/modules/gate-speed.md, change 1): the kernel's tests run
+// as several VMs at the same time, each over a part of the tests, on the
+// same kernelImage. The parts are computed from what the runner lists
+// (`--list`, the tests the unfiltered run would run), so a test added to
+// kernel/ tomorrow is in a part without anyone editing a list; each part is
+// one run by the event protocol over its tests named exactly (`--test`);
+// theKernelTestPartsAreExactlyTheUnfilteredRun asserts that the parts hold
+// every listed test exactly once, and each part asserts that it ran exactly
+// its own. One VM ran all of them in turn before: 3081 s of the sanitizer
+// gate and 3719 s under load, the rest of the suite long finished.
+
+/// One test as the runner lists it.
+struct ListedKernelTest: Sendable, Hashable {
+    let name: String
+    let cls: String
+    let tags: [String]
+}
+
+/// The tests a run with these arguments would run, as `--list` answers
+/// them, with the run.listed total.
+func listKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (tests: [ListedKernelTest], total: Int?, ok: Bool) {
+    let (r, lines) = runKernelTests(image, ["--list"] + arguments)
+    let events = TestReport(lines).events
+    let tests = events.filter { $0["kind"] as? String == "test.listed" }.map {
+        ListedKernelTest(name: $0["test"] as? String ?? "?", cls: $0["class"] as? String ?? "?", tags: $0["tags"] as? [String] ?? [])
+    }
+    let total = events.first { $0["kind"] as? String == "run.listed" }?["total"] as? Int
+    return (tests, total, (try? r.get()) == 0)
+}
+
+/// Every test of the kernel image, listed once per test process.
+let kernelTestList: [ListedKernelTest] = listKernelTests(kernelImage).tests
+
+enum KernelTestParts {
+    /// How many VMs run at once. Measured on 3cf22fe under the sanitizer
+    /// (one VM, the mini idle): 2921 s of tests, of which the two
+    /// every-method tests are 698 and 691 s and the long chain 585 s, each
+    /// one test; the other 246 tests are 948 s. Three parts for those three
+    /// and two for the rest (about 474 s each) leave the longest part at
+    /// the longest test; more parts only add VMs.
+    static let count = 5
+
+    /// Seconds under the sanitizer measured on 3cf22fe for every test of 5 s
+    /// or more there (the doc's table; a plain build is 26 to 32 times
+    /// shorter, test for test). Only the balance of the parts reads this:
+    /// a test missing from it (a new one, a renamed one) is still in a part,
+    /// weighed as the measured mean of the rest (0.32 s), or as a
+    /// ClassFuzzTest (150 s) when it is tagged `<slow>`.
+    static let measuredSeconds: [String: Double] = [
+        "LiveCompileTest>>testEveryMethodMakesAsInstalled": 697.9,
+        "CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid": 691.4,
+        "CompilerTest>>testALongChainIsWalkedByALoop": 584.5,
+        "ClassFuzzTest>>testSeededSpecificationsAreRefusedOrAccepted": 152.8,
+        "TonelTest>>testTheReaderReadsWhatTheWriterWrote": 138.0,
+        "LargeObjectTest>>testStringsPastTheCountField": 123.7,
+        "DevelopmentTest>>testARemovedClassStillNamedIsKept": 95.8,
+        "LargeObjectTest>>testALargeArrayIsAnArray": 61.2,
+        "LargeObjectTest>>testJsonInPieces": 51.1,
+        "LargeObjectTest>>testLargeStringsAndByteArrays": 45.0,
+        "LargeObjectTest>>testGrowableCollectionsPassOneBlock": 36.7,
+        "ClassFuzzTest>>testSeededReshapesAreRefusedOrAccepted": 29.9,
+        "MakeFuzzTest>>testSeededMutationsAreRefusedOrRun": 17.7,
+        "RegistryTest>>testHandlesFromManyProcessesAreDistinct": 14.0,
+        "RegistryTest>>testThePragmaIndexIsWholeWhileItIsRebuilt": 13.9,
+        "DevelopmentTest>>testACollectionThatHoldsItselfPrintsCut": 13.5,
+        "TonelTest>>testAClassDefinedAndRedefinedFromTonel": 10.4,
+        "TonelTest>>testATagIsTheFilesDirectory": 10.3,
+        "LiveClassTest>>testReshapeKeepsValuesByNameAndRecompiles": 10.0,
+        "LiveClassTest>>testOldClosuresFollowTheirMethod": 7.8,
+        "LiveClassTest>>testARedefinitionThatTheSubclassesNamesClashWithIsRefused": 7.3,
+        "LiveClassTest>>testClassSideInstanceVariables": 6.7,
+        "DevelopmentTest>>testClassDefineIntoATagAndMoving": 6.7,
+        "LiveClassTest>>testDefinitionsTheVMRefuses": 6.4,
+        "LiveClassTest>>testARemovalThatBreaksAMethodChangesNothing": 6.4,
+        "LiveClassTest>>testARunningMethodRefusesTheReshape": 5.6,
+        "LiveClassTest>>testDefineInstantiateRemove": 5.3,
+    ]
+
+    static func weight(_ t: ListedKernelTest) -> Double {
+        measuredSeconds[t.name] ?? (t.tags.contains("slow") ? 150 : 0.32)
     }
 
-    @Test func theKernelsTestsPassAndTheEventsAreTheProtocol() throws {
-        let (result, lines) = runKernelTests(kernelImage)
+    /// The tests' names in `count` parts: heaviest first (then by name),
+    /// each to the lightest part so far (then the lowest index).
+    static func split(_ tests: [ListedKernelTest], into n: Int) -> [[String]] {
+        var parts = [[String]](repeating: [], count: n)
+        var load = [Double](repeating: 0, count: n)
+        for t in tests.sorted(by: { (weight($0), $1.name) > (weight($1), $0.name) }) {
+            let k = load.indices.min { (load[$0], $0) < (load[$1], $1) }!
+            parts[k].append(t.name)
+            load[k] += weight(t)
+        }
+        return parts
+    }
+}
+
+/// The parts of this test process's run.
+let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestList, into: KernelTestParts.count)
+
+@Suite struct KernelTestPartsTests {
+    /// The standing assertion, cheap in every build mode: what the runner
+    /// selects for each part's names is exactly that part, and the parts
+    /// together are the unfiltered run's tests, each once, by name.
+    @Test func theKernelTestPartsAreExactlyTheUnfilteredRun() throws {
+        let all = listKernelTests(kernelImage)
+        #expect(all.ok && all.total == all.tests.count)
+        #expect(all.tests.count > 100)
+        #expect(Set(all.tests.map(\.name)).count == all.tests.count)
+        #expect(all.tests == kernelTestList)
+        var union: [String] = []
+        for (k, part) in kernelTestParts.enumerated() {
+            #expect(!part.isEmpty, "part \(k) is empty")
+            let listed = listKernelTests(kernelImage, part.flatMap { ["--test", $0] })
+            #expect(listed.ok && listed.tests.map(\.name).sorted() == part.sorted(), "part \(k)")
+            union += listed.tests.map(\.name)
+        }
+        #expect(union.count == Set(union).count, "a test is in two parts")
+        #expect(union.sorted() == all.tests.map(\.name).sorted())
+        // the split is deterministic: a second split of the list is the same
+        #expect(KernelTestParts.split(kernelTestList, into: KernelTestParts.count) == kernelTestParts)
+        // a filter and a name compose (the --test path selects, never adds)
+        #expect(listKernelTests(kernelImage, ["--filter", "StringTest>>*", "--test", "ArrayTest>>testIsArray"]).tests.isEmpty)
+    }
+
+    /// Every part is a whole run by the event protocol (the assertions the
+    /// one unfiltered run made), and it ran exactly its tests. Each part
+    /// prints one line per test, so a gate's output names every test id
+    /// with its outcome (the doc's comparison reads them).
+    @Test(arguments: 0..<KernelTestParts.count)
+    func theKernelsTestsPassAndTheEventsAreTheProtocol(_ part: Int) throws {
+        let names = kernelTestParts[part]
+        let (result, lines) = runKernelTests(kernelImage, names.flatMap { ["--test", $0] })
         let report = TestReport(lines)
         #expect(try result.get() == 0, "\(report.failures.prefix(5))")
-        #expect(report.total > 100 && report.passed == report.total && report.failed == 0 && report.errored == 0)
+        #expect(report.total == names.count && report.passed == report.total && report.failed == 0 && report.errored == 0)
         #expect(report.events.count == lines.count)  // every line is one JSON object
         let kinds = Set(report.events.compactMap { $0["kind"] as? String })
         #expect(kinds.isSubset(of: ["run.started", "test.started", "test.passed", "test.failed", "test.errored", "transcript",
                                    "gc", "run.finished"]))
-        #expect(kinds.isSuperset(of: ["run.started", "test.started", "test.passed", "run.finished", "gc"]))
+        #expect(kinds.isSuperset(of: ["run.started", "test.started", "test.passed", "run.finished", "gc"]))  // gc: the run's summary at least
         for e in report.events {
             #expect(e["v"] as? Int == 1)
             #expect((e["ts"] as? Int ?? 0) > 1_700_000_000_000_000)  // microseconds since 1970
@@ -67,6 +185,27 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
         // the events of the tests come in the order they happened
         let testTimes = report.events.filter { ($0["kind"] as? String ?? "").hasPrefix("test.") }.compactMap { $0["ts"] as? Int }
         #expect(testTimes == testTimes.sorted())
+        // exactly this part's tests ran, each once
+        let ran = report.events.filter { ["test.passed", "test.failed", "test.errored"].contains($0["kind"] as? String ?? "") }
+        #expect(ran.compactMap { $0["test"] as? String }.sorted() == names.sorted())
+        let n = KernelTestParts.count
+        print(ran.map { e in
+            "kernel test part \(part + 1)/\(n) \((e["kind"] as? String ?? "?").dropFirst(5)) \(e["test"] as? String ?? "?") "
+                + String(format: "%.3f s", Double(e["us"] as? Int ?? 0) / 1e6)
+        }.joined(separator: "\n") + "\nkernel test part \(part + 1)/\(n): \(report.total) tests, \(report.passed) passed in \(report.microseconds / 1000) ms")
+    }
+}
+
+@Suite(.serialized) struct KernelImageTests {
+    @Test func theKernelBuildsWithoutWarnings() throws {
+        let r = try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory]))
+        #expect(r.warnings.isEmpty, "\(r.warnings)")
+        #expect(r.classes > 100)
+        #expect(r.methods > 1300)
+        // and loads as an image (verified all or nothing)
+        let img = try Image.load(image: r.image)
+        defer { img.destroy() }
+        #expect(img.entryPoint != img.nilObject)
     }
 
     @Test func filterAndTagSelectTests() throws {

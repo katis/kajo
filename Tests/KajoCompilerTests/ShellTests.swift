@@ -121,10 +121,19 @@ func openShell(_ shell: TestShell, image: [UInt8] = shellImage, workers: Int = 2
     return vm
 }
 
+/// `drive`'s bounds wait for something that must come (AGENTS.md: long
+/// everywhere, a sanitizer value of its own). Gate speed: the kernel's
+/// tests now run as five VMs beside the rest of this bundle, so under the
+/// sanitizer the bundle's first quarter hour is busier than before, and a
+/// 120 s drive ran out once at 138 s; the sanitizer's bounds are five times
+/// the plain ones.
+let driveScale: Double = compilerTestsUnderThreadSanitizer ? 5 : 1
+
 /// Turns on this thread until `cond` holds (a bound in seconds, for a hang
 /// only; the assertions are on what happened, not when).
 @discardableResult
 func drive(_ vm: ShellVM, seconds: Double = 30, until cond: () -> Bool) -> Bool {
+    let seconds = seconds * driveScale
     let end = ShellVM.now() + UInt64(seconds * 1e9)
     while !cond() {
         if ShellVM.now() > end { return false }

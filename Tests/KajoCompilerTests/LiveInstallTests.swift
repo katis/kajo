@@ -1,5 +1,6 @@
 // Module 8d: installing from Smalltalk through the whole stack: the kernel's
-// LiveCompileTest in a development image and in the same image sealed, the
+// LiveCompileTest in a development image (run by KernelTestParts) and in the
+// same image sealed, the
 // release flag in the header and in the loader's report, `kajo build-image
 // --release`.
 
@@ -11,12 +12,13 @@ import Testing
 @Suite(.serialized) struct LiveInstallTests {
     @Test func installingWorksInADevelopmentImageAndIsForbiddenInTheSameImageSealed() throws {
         #expect(Headless.isReleaseImage(kernelImage) == false)
-        // every LiveCompileTest in the development image (the slow one
-        // makes every method of the image)
-        let (r, lines) = runKernelTests(kernelImage, ["--filter", "LiveCompileTest"])
-        let report = TestReport(lines)
-        #expect(try r.get() == 0, "\(report.failures.prefix(3))")
-        #expect(report.total >= 9 && report.passed == report.total)
+        // Every LiveCompileTest in the development image is run by
+        // KernelTestParts (gate speed, docs/modules/gate-speed.md, change
+        // 1): the parts run every kernel test on this same kernelImage, and
+        // theKernelTestPartsAreExactlyTheUnfilteredRun asserts that the
+        // parts hold every test the unfiltered run selects, LiveCompileTest's
+        // among them. This test ran them a second time on the same image.
+        #expect(kernelTestList.filter { $0.cls == "LiveCompileTest" }.count >= 9)
 
         let sealed = try Headless.seal(image: kernelImage).get()
         #expect(Headless.isReleaseImage(sealed) == true)

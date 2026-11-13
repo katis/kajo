@@ -55,25 +55,38 @@ enum NativeTest {
     }
 
     /// Compile C into a dylib and load it. `flags` add to `-O1 -shared
-    /// -fPIC` (and `-fsanitize=thread` under the sanitizer).
+    /// -fPIC` (and `-fsanitize=thread` under the sanitizer). Gate speed
+    /// (docs/modules/gate-speed.md, change 3): a module compiled before
+    /// from the same source, by the same clang against the same SDK, with
+    /// the same arguments, is loaded from `NativeCache` instead.
     static func compile(_ source: String, name: String, flags: [String] = ["-O1"]) throws -> NativeModule {
         guard let cc = clang else { throw CompileError(description: "no clang on PATH") }
-        let n = counter.add(1, ordering: .relaxed).newValue
-        let c = directory.appendingPathComponent("\(name)-\(n).c")
-        let lib = directory.appendingPathComponent("\(name)-\(n).dylib")
-        try source.write(to: c, atomically: true, encoding: .utf8)
-        var args = flags + ["-shared", "-fPIC", "-w", "-o", lib.path, c.path]
+        var args = flags + ["-shared", "-fPIC", "-w"]
         if underThreadSanitizer { args.insert("-fsanitize=thread", at: 0) }
-        let (status, output) = run(cc, args)
-        guard status == 0 else { throw CompileError(description: "clang failed (\(status)): \(output.prefix(2000))") }
+        if let cache = NativeCache.shared {
+            return try cache.module(source: source, clang: cc, arguments: args, name: name)
+        }
+        let n = counter.add(1, ordering: .relaxed).newValue
+        let lib = directory.appendingPathComponent("\(name)-\(n).dylib")
+        try compileFile(source, clang: cc, arguments: args, into: lib.path, name: "\(name)-\(n)")
         let loaded = NativeModule.load(dylib: lib.path)
-        // The mapping stays; the files go (thousands of seeds per suite).
-        try? FileManager.default.removeItem(at: c)
+        // The mapping stays; the file goes (thousands of seeds per suite).
         try? FileManager.default.removeItem(at: lib)
         switch loaded {
         case .success(let m): return m
         case .failure(let e): throw CompileError(description: "\(e)")
         }
+    }
+
+    /// clang over `source` into the dylib at `path` (the C file is
+    /// written beside the other temporary files and removed).
+    static func compileFile(_ source: String, clang cc: String, arguments: [String], into path: String, name: String) throws {
+        let n = counter.add(1, ordering: .relaxed).newValue
+        let c = directory.appendingPathComponent("\(name)-\(n).c")
+        try source.write(to: c, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(at: c) }
+        let (status, output) = run(cc, arguments + ["-o", path, c.path])
+        guard status == 0 else { throw CompileError(description: "clang failed (\(status)): \(output.prefix(2000))") }
     }
 
     /// Run a tool; its status and its combined output.
