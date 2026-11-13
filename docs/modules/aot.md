@@ -888,6 +888,9 @@ diff; the clean build's 0 warnings are the `clean-build` gate's.
 
 ### Open questions, as built
 
+Answered by the owner on 2026-11-13: all four as recommended and as
+built.
+
 1. Native markers in a saved image: **stripped at the save** (as
    recommended; no format change). With returns by lookup only interpreted
    frames above native callers carry one, and the saver writes it as the
