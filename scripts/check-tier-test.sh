@@ -143,9 +143,10 @@ rm -f $wl
 # swift-build and swift-test (found in gate speed). A program named
 # swift-package that sleeps, in a process group of its own, stands in (a
 # copy of /bin/sleep is killed for its signature, a link keeps the name
-# sleep).
+# sleep). Apple's /usr/bin/clang finds the SDK by itself; swiftly's clang
+# found unistd.h only when the caller's environment named the SDK.
 fake=$(mktemp -d ${TMPDIR:-/tmp}/kajo-refuse-XXXXXX)
-print '#include <unistd.h>\nint main(void) { sleep(60); return 0; }' | clang -x c - -o $fake/swift-package
+print '#include <unistd.h>\nint main(void) { sleep(60); return 0; }' | /usr/bin/clang -x c - -o $fake/swift-package
 python3 -I -c 'import os, sys; os.setsid(); os.execv(sys.argv[1], sys.argv[1:])' $fake/swift-package &
 fp=$!
 for i in {1..50}; do ps -o ucomm= -p $fp 2>/dev/null | grep -q swift-package && break; sleep 0.1; done
