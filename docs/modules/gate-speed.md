@@ -764,13 +764,93 @@ random programs' VMs (up to 8 workers each, no longer waiting on clang)
 overlap the slowed-marker tests more densely. Recorded as found, for the
 main session; nothing under `Sources/KajoVM` and no bound was changed.
 
-## Coverage
-
-(Filled from the final run below.)
-
 ## The final gate run
 
-(Pending.)
+The fourth run, `KAJO_CHECK_OUT=$GS/check scripts/check-tier.sh --tier
+core 3cf22fe` with swiftly first on PATH (`$GS/check/env.txt`), on
+bf47868, whose code is 228c62f's (the commits above it are this doc):
+05:20 to 08:36 on 2026-11-14, 11 758 s, every gate passing but
+`swift-test-load` (`$GS/check/gates.log`). The baseline is the stalls
+run's per-gate seconds as the brief records them (quoted; that run's
+files are gone):
+
+| gate | before (a18696a, quoted) | after (bf47868) |
+|---|--:|--:|
+| check-tier-test | not a gate | 6 |
+| clean-build | 23 | 19 |
+| swift-test | 1329 | not in the core tier |
+| swift-test-load | 1447 | 958 (failed, below) |
+| tsan | 4677 | 3063 |
+| tsan-load | 5889 | 4258 |
+| ios-check | 17 | 16 |
+| arc-check | 47 | 6 |
+| golden | 73 | 72 |
+| native-golden | 99 | 99 |
+| native-kernel-test | 46 | 47 |
+| native-cc | 30 | 30 |
+| test-release | 591 | 62 |
+| model-check | 22 | 21 |
+| soak | 480 | 66 |
+| fuzz-kasm, -snapshot, -syntax, -protocol | 642 + 604 + 604 + 604 | one gate, 608 |
+| apps | 123 | 124 |
+| kernel-test | 108 | 108 |
+| new-check | 254 | 253 |
+| ab | 331 | 326 |
+| matrix-mac | 776 | 772 |
+| matrix-iphone | 843 | 844 |
+| total | 19 659 | 11 758 |
+
+`swift-test-load` failed on
+`AllocationStallTests.aStalledProcessTakesAnInterrupt` (the test ran 638
+s; its 120 s wait for the interrupts ran out), as in the third run; the
+main session took that test over (see its heading above), and every other
+gate's result is from this run. ThreadSanitizer: 0 reports in `tsan` and
+`tsan-load`. `arc-check` at 6 s is a warm release build of the same
+scratch path. The aligned A/B against 3cf22fe (`$GS/check/ab/table.md`)
+has no VM source change to show. The matrices: `scripts/shell-report.py
+--bar` over `$GS/check/matrix-mac` and `matrix-iphone` as each gate
+printed it.
+
+## Coverage
+
+From the gates' own files; "before" is the brief's baseline where its
+files are gone, said so.
+
+| gate | before | after (`$GS/check/`) |
+|---|---|---|
+| swift-test-load | 444 + 161 tests (the stalls run; 445 since 40ce930's StopsByKindTests) | 449 + 162: +4 `NativeCacheTests`, +1 `theKernelTestPartsAreExactlyTheUnfilteredRun`; the kernel test is one parameterized test as before, the limit test one parameterized test as before; 1 failed (above) |
+| tsan | 444 + 161 | 449 + 162, all passed, 0 reports |
+| tsan-load | 444 + 161 | 449 + 162, all passed, 0 reports |
+| test-release | 444 + 161 with the random programs | 444 + 162: the five `randomPrograms*` skipped (449 - 5), no `random programs` line in the file |
+| soak | 5 tests | 5 tests, 64 s, `$GS/seeds-table.md`: 1000 seeds in each of 28 interpreter configurations and both snapshot modes' 1000 per mode, 100 in each of 23 native configurations, 40 in each of 12 across-engines cases, all from 1 |
+
+Kernel test ids, compared by `$GS/tools/compare-ids.py` against the
+starting commit's unfiltered runs: `$GS/before-kernel-plain.ndjson` (plain)
+against `$GS/check/swift-test-load.txt`, and `$GS/before-kernel-tsan.ndjson`
+(sanitizer) against `$GS/check/tsan.txt` and `tsan-load.txt`: 249 ids
+each, each once, all passed, the same set, in every comparison. The parts
+in this run: 134 and 115 tests (79.6 and 87.4 s plain, 1475 and 1725 s
+under the sanitizer, 1938 and 2231 s under load).
+
+Seeds: test-release ran 100 per interpreter configuration and 100 per
+native one, 40 across engines (the rule table above; the 2026-11-08
+weekly's `test-release.txt` on a024a90 shows the 100s for the
+configurations of that time); the soak runs each of them with at least as
+many from the same base (`$GS/seeds-table.md`, the soak column of this run).
+
+Fuzz runs in 600 s, side by side, against the last three sequential runs
+(quoted above): kasm 2 059 697 (0.94 of the stalls run's 2 196 708),
+snapshot 3 316 649 (0.98), syntax 793 865 (0.93), protocol 1 764 906
+(0.95), each with "libFuzzer build: ok". No target fell below 0.8, so no
+time was raised.
+
+Native test modules: this run's suites compiled nothing (the cache was
+warm from the earlier runs): `swift-test-load` 571 hits, `tsan` 71,
+`tsan-load` 67, `test-release` 11, `soak` 627, 0 misses and 0 replaced
+each. A cold run is the first final run's (`$GS/check-run1/`):
+`swift-test-load` 944 hits and 569 misses (one compile per key: the
+first cold suite without the lock per key compiled 1335), `tsan` 23 hits
+and 65 misses, and `tsan-load` 67 hits.
 
 ## Deviations
 
