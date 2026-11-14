@@ -871,6 +871,19 @@ and 65 misses, and `tsan-load` 67 hits.
 
 ## Not done
 
+- No final run passed every gate: the fourth, on this module's final
+  code, failed `swift-test-load` on `aStalledProcessTakesAnInterrupt`
+  (recorded as found; the main session took it over). Its other gates
+  are the record. Plain `swift-test` (the Swift tier's extra gate) and
+  the Smalltalk tier's gates (`build-image`, `dev-image`, `tools-test`,
+  `compiler-tests`, `mac-shell-tests`) owed by the diff's `kernel/` and
+  `Sources/kajo` changes were not run apart; the core run's
+  `swift-test-load` ran the same suite under load and its `kernel-test`
+  and `golden` ran, the tools' image and the Mac shell's tests mode did
+  not.
+- The quick weekly run's skip path was in the lost scratchpad; the A/B
+  base rule is covered by `check-tier-test.sh`.
+
 - The kernel compiler's quadratic `literalIndex:` (the two 140 s limit
   cases) is recorded, not fixed.
 - `TonelRoundTripTests` (a serialized suite of 594 s under the sanitizer)
@@ -886,14 +899,26 @@ and 65 misses, and `tsan-load` 67 hits.
 
 ## Open questions
 
-1. Split the every-method kernel tests into slices (by a hash of
-   `Class>>selector`) to take about 100 s off each sanitizer gate, at the
-   price of eight new test ids? Recommended: not now; the bundle's other
-   floors are within that.
-2. The cache's bound, 2 GiB with an hour's protection: keep? Recommended:
+1. The tools' request timeout across a reconnect: `DevClient` arms a
+   request's 30 s timeout at its first send and does not re-arm it when
+   the request is sent again on the new session, so an outage near 30 s
+   fails a request the reconnect was about to answer (the reconnect
+   test's failures above, outages of 21 to 32 s under the sanitizer with
+   five kernel parts beside it). Re-arm the timeout when a request is
+   sent again (a `tools/` change and its test)? Recommended: yes, as a
+   follow-up; with two parts the test passed in every run since.
+2. Two kernel parts leave the compiler bundle under the sanitizer at about
+   1840 s (1060 at five, 3300 before). Keep two, or make the bundle's
+   timers independent of its load (the global-queue timers of
+   `ClientHost`) and go back to five? Recommended: keep two until 1 is
+   built, then measure five again.
+3. The cache's bound, 2 GiB with an hour's protection: keep? Recommended:
    keep.
-3. The weekly's A/B base, the last finished non-quick weekly run's commit:
+4. The weekly's A/B base, the last finished non-quick weekly run's commit:
    keep? Recommended: keep (Sunday's run reads a024a90).
-4. Fix the kernel compiler's `literalIndex:` (a dictionary beside the
+5. Split the every-method kernel tests into slices? With two parts each
+   part holds one of them and the long chain, so slicing no longer
+   shortens the longest part much. Recommended: no.
+6. Fix the kernel compiler's `literalIndex:` (a dictionary beside the
    frame) as a follow-up? Recommended: yes, small, and the selectors
    limit cases would drop from 140 s to seconds.
