@@ -769,7 +769,7 @@ so the gates' count is 2 of 4. Six more loaded VM-bundle runs on 228c62f
 with the cache, meant to stop at the first stall failure and sample the
 test process once a minute (`$GS/tools/stall-sample.sh`,
 `$GS/stall/sampled-{1..6}.txt`, `summary-sampled.txt`), all passed, so
-with the cache the loaded bundle failed a stall test in 3 of 16 runs
+with the cache the loaded bundle failed a stall test in 3 of 17 runs
 (gates 2 of 4, the filtered runs 1 of 13) against 0 of 3 on 3cf22fe and
 0 of 2 with the cache off. No thread samples exist: `sample` refuses the
 test process ("cannot examine process ... try running with sudo", the
@@ -885,13 +885,11 @@ and 65 misses, and `tsan-load` 67 hits.
 - No final run passed every gate: the fourth, on this module's final
   code, failed `swift-test-load` on `aStalledProcessTakesAnInterrupt`
   (recorded as found; the main session took it over). Its other gates
-  are the record. Plain `swift-test` (the Swift tier's extra gate) and
-  the Smalltalk tier's gates (`build-image`, `dev-image`, `tools-test`,
-  `compiler-tests`, `mac-shell-tests`) owed by the diff's `kernel/` and
-  `Sources/kajo` changes were not run apart; the core run's
-  `swift-test-load` ran the same suite under load and its `kernel-test`
-  and `golden` ran, the tools' image and the Mac shell's tests mode did
-  not.
+  are the record. The gates the diff's own tiers owe beyond the core tier
+  ran after it on 6f45187 (code as 228c62f) into `$GS/check-extra/`
+  (`gates.log`): the Smalltalk tier forced (`build-image`, `dev-image`,
+  `kernel-test`, `tools-test`, `compiler-tests`, `golden`,
+  `mac-shell-tests`) and plain `swift-test`, every one passing.
 - The quick weekly run's skip path was in the lost scratchpad; the A/B
   base rule is covered by `check-tier-test.sh`.
 
