@@ -725,6 +725,12 @@ struct MarkingLog {
     let qosNow: UnsafeMutablePointer<Atomic<UInt32>>
     /// The VM is shutting down: the marker abandons its work at its next poll.
     let stopping: UnsafeMutablePointer<Atomic<Bool>>
+    /// The slowed marker's factor now (`markerSlowdown`, a test switch; 1
+    /// off): starts at the configured value, read by the marker at every
+    /// poll, and set by a test from the host (`VM.setMarkerSlowdown`) once
+    /// the slowed marker has done what the test needs (a stall in
+    /// progress). An atomic, not the config, so the host may write it.
+    let slowdown: UnsafeMutablePointer<Atomic<Int>>
     /// The marker thread (the host starts and joins it) and its Mach port.
     let thread: UnsafeMutablePointer<MarkerThread>
     let machThread: UnsafeMutablePointer<Atomic<UInt32>>

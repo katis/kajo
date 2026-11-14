@@ -233,7 +233,12 @@ end
 
 /// A runtime whose background workers stall soon: two rings (one per
 /// background worker) on a 16 MiB heap, the marker 16 times slower, the
-/// ring Processes started.
+/// ring Processes started. The tests make their request while the workers
+/// stall and then set the marker to full speed (`StallDiag.unslow`): the
+/// slowdown is CPU-proportional, and in a loaded suite the marker's share
+/// of a core made a slowed cycle 45 to 70 s and a stall's two cycles race
+/// the 120 s waits (docs/modules/allocation-stalls.md, "The stall tests in
+/// a dense suite").
 private func stallingRuntime() throws -> (Runtime, [Oop]) {
     let rt = try Runtime(stalledSource, background: 2, heapBlocks: 512, configure: { c in
         c.nursery.bytes = 512 << 10
@@ -246,8 +251,117 @@ private func stallingRuntime() throws -> (Runtime, [Oop]) {
     return (rt, [rt.spawn("ringLong"), rt.spawn("ringLong")])
 }
 
-private func waitStalled(_ rt: Runtime) -> Bool {
-    eventually(underThreadSanitizer ? 600 : 120) { (rt.vm.stallLog?.stalledNow ?? 0) > 0 }
+private func waitStalled(_ rt: Runtime, _ d: StallDiag? = nil) -> Bool {
+    if let d { return d.wait("stalled", underThreadSanitizer ? 600 : 120) { (rt.vm.stallLog?.stalledNow ?? 0) > 0 } }
+    return eventually(underThreadSanitizer ? 600 : 120) { (rt.vm.stallLog?.stalledNow ?? 0) > 0 }
+}
+
+// MARK: - diagnostics (the stall tests in a dense suite)
+
+/// Seconds since this process started (kinfo_proc's start time).
+func processAgeSeconds() -> Double {
+    var kp = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.size
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    guard sysctl(&mib, 4, &kp, &size, nil, 0) == 0 else { return -1 }
+    let st = kp.kp_proc.p_starttime
+    var tv = timeval()
+    gettimeofday(&tv, nil)
+    return Double(tv.tv_sec - st.tv_sec) + Double(tv.tv_usec - st.tv_usec) / 1e6
+}
+
+/// The process's threads and CPU so far (proc_pidinfo PROC_PIDTASKINFO).
+private func processTask() -> (threads: Int32, cpuS: Double) {
+    var ti = proc_taskinfo()
+    let n = proc_pidinfo(getpid(), PROC_PIDTASKINFO, 0, &ti, Int32(MemoryLayout<proc_taskinfo>.size))
+    guard n == Int32(MemoryLayout<proc_taskinfo>.size) else { return (-1, -1) }
+    return (ti.pti_threadnum, Double(ti.pti_total_user + ti.pti_total_system) / 1e9)
+}
+
+/// A stall test explaining itself: at each wait, a line every 5 s with the
+/// marker thread's CPU and priorities, the phase and cycle, the stalls in
+/// progress, the workers' CPU and the process's density; every 30 s and at
+/// the wait's end the cycle records, the marking counters and the stops by
+/// kind. Printed as `stall-diag <test> ...` lines (the suite's output).
+final class StallDiag {
+    let rt: Runtime
+    let name: String
+    let t0 = now()
+    var lastMarkerCpu: UInt64 = 0
+    var lastWall: UInt64 = 0
+
+    init(_ rt: Runtime, _ name: String) {
+        self.rt = rt
+        self.name = name
+        print("stall-diag \(name) begin age=\(String(format: "%.1f", processAgeSeconds()))")
+    }
+
+    func line(_ label: String) -> String {
+        let t = Double(now() &- t0) / 1e9
+        let ms = rt.vm.markerThreadSample
+        let s = rt.vm.stallsNow
+        let w = rt.vm.workerCPUNanoseconds().map { String(format: "%.2f", Double($0) / 1e9) }.joined(separator: "/")
+        let task = processTask()
+        var la = [Double](repeating: 0, count: 3)
+        getloadavg(&la, 3)
+        var share = "-"
+        if let ms {
+            let wall = now()
+            if lastWall != 0 && wall > lastWall {
+                share = String(format: "%.3f", Double(ms.cpuNs &- lastMarkerCpu) / Double(wall &- lastWall))
+            }
+            lastMarkerCpu = ms.cpuNs
+            lastWall = wall
+        }
+        let marker = ms.map { "markerCpu=\(String(format: "%.3f", Double($0.cpuNs) / 1e9)) markerShare=\(share) curpri=\($0.curpri) basepri=\($0.basepri) run=\($0.runState) qosSet=\(String($0.qos, radix: 16))" } ?? "marker=-"
+        return "stall-diag \(name) \(label) t=\(String(format: "%.1f", t)) age=\(String(format: "%.1f", processAgeSeconds())) "
+            + "phase=\(rt.phase) cycle=\(rt.vm.markingCycleNow) "
+            + "stalledNow=\(s?.stalledNow ?? -1) stalls=\(s?.count ?? 0) overrides=\(s?.overrides ?? 0) started=\(s?.cyclesStarted ?? 0) "
+            + "interrupts=\(rt.vm.counters[.interrupts]) live=\(rt.vm.liveProcessCount) \(marker) workersCpu=\(w) "
+            + "threads=\(task.threads) procCpu=\(String(format: "%.0f", task.cpuS)) load=\(String(format: "%.1f", la[0]))"
+    }
+
+    func full(_ label: String) -> String {
+        let c = rt.marking
+        let stops = rt.vm.stops
+        return line(label) + "\n  stall-diag \(name) counters cycles=\(c.cycles) completed=\(c.cyclesCompleted) applies=\(c.applies) "
+            + "fallbacks=\(c.fallbacks) unjustified=\(c.unjustifiedFallbacks) slowSpins=\(c.markerSlowSpins) "
+            + "slowSpinS=\(String(format: "%.2f", Double(c.markerSlowSpinNs) / 1e9)) escalations=\(c.qosEscalations) "
+            + "lowerings=\(c.qosLowerings) markerWaits=\(c.markerWaits)"
+            + "\n  stall-diag \(name) stops n=\(stops.count) \(stopsByKind(stops, workerCount: rt.vm.config.backgroundWorkers + 2))"
+            + "\n  stall-diag \(name) cycleRecs \(cycleRecordSummary(rt.vm.cycleLog))"
+    }
+
+    /// `eventually`, reporting: the same bound and condition.
+    /// The marker at full speed from here: the slowed marker has done its
+    /// part (the workers stall, the request was made while they did); the
+    /// stall now ends by an unslowed cycle (docs/modules/allocation-stalls.md,
+    /// "The stall tests in a dense suite").
+    func unslow() {
+        print(line("unslow"))
+        rt.vm.setMarkerSlowdown(1)
+    }
+
+    /// The test's end: its body's own time.
+    func end() { print("stall-diag \(name) end body=\(String(format: "%.1f", Double(now() &- t0) / 1e9)) age=\(String(format: "%.1f", processAgeSeconds()))") }
+
+    func wait(_ label: String, _ seconds: Double, _ cond: () -> Bool) -> Bool {
+        let w0 = now()
+        let end = w0 + UInt64(seconds * 1e9)
+        var nextLine = w0 + 5_000_000_000, nextFull = w0 + 30_000_000_000
+        print(line("\(label)-start"))
+        var ok = false
+        while now() < end {
+            if cond() { ok = true; break }
+            let t = now()
+            if t >= nextFull { print(full(label)); nextFull = t + 30_000_000_000; nextLine = t + 5_000_000_000 }
+            else if t >= nextLine { print(line(label)); nextLine = t + 5_000_000_000 }
+            usleep(500)
+        }
+        if !ok { ok = cond() }
+        print(full("\(label)-\(ok ? "ok" : "TIMEOUT") waited=\(String(format: "%.1f", Double(now() &- w0) / 1e9))"))
+        return ok
+    }
 }
 
 /// A Process stalled in its allocation's slow path is terminated: the
@@ -255,27 +369,33 @@ private func waitStalled(_ rt: Runtime) -> Bool {
 /// progress ends; the termination completes.
 @Test func aStalledProcessIsTerminated() throws {
     let (rt, ps) = try stallingRuntime()
-    #expect(waitStalled(rt), "never stalled: \(String(describing: rt.vm.stallLog?.all))")
+    let d = StallDiag(rt, "terminated")
+    #expect(waitStalled(rt, d), "never stalled: \(String(describing: rt.vm.stallLog?.all))")
     for p in ps { rt.vm.terminate(p) }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    d.unslow()
+    #expect(d.wait("terminated", underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     #expect(ps.allSatisfy { rt.state($0) == .terminated })
     #expect(rt.marking.unjustifiedFallbacks == 0)
     for p in ps { rt.vm.release(p) }
     rt.stop(verifyHeap: false)
+    d.end()
 }
 
 /// Stalled Processes asked to stop for the debugger (primitive 155's
 /// interrupt, what stepping uses) run the interrupt once their stall ends.
 @Test func aStalledProcessTakesAnInterrupt() throws {
     let (rt, ps) = try stallingRuntime()
-    #expect(waitStalled(rt))
+    let d = StallDiag(rt, "interrupt")
+    #expect(waitStalled(rt, d))
     let i0 = rt.vm.counters[.interrupts]
     for p in ps { #expect(rt.vm.interruptProcess(p, kind: InterruptKind.debugStop)) }
-    #expect(eventually(underThreadSanitizer ? 600 : 120) { rt.vm.counters[.interrupts] >= i0 + 2 })
+    d.unslow()
+    #expect(d.wait("interrupts", underThreadSanitizer ? 600 : 120) { rt.vm.counters[.interrupts] >= i0 + 2 }, "\(d.full("fail"))")
     for p in ps { rt.vm.terminate(p) }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    #expect(d.wait("terminated", underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     for p in ps { rt.vm.release(p) }
     rt.stop(verifyHeap: false)
+    d.end()
 }
 
 /// `Smalltalk snapshot:` from another Process while one stalls: the save's
@@ -284,15 +404,18 @@ private func waitStalled(_ rt: Runtime) -> Bool {
 /// for the saver); the save completes and the image it wrote loads.
 @Test func aSaveWaitsForAStallAndItsImageLoads() throws {
     let (rt, ps) = try stallingRuntime()
-    #expect(waitStalled(rt))
+    let d = StallDiag(rt, "save")
+    #expect(waitStalled(rt, d))
     let saver = rt.spawn("saver")
-    #expect(eventually(underThreadSanitizer ? 600 : 120) { rt.state(saver) == .terminated })
+    d.unslow()
+    #expect(d.wait("saved", underThreadSanitizer ? 600 : 120) { rt.state(saver) == .terminated }, "\(d.full("fail"))")
     let images = rt.vm.takeSavedImages()
     #expect(images.count == 1)
     for p in ps { rt.vm.terminate(p) }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    #expect(d.wait("terminated", underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     for p in ps + [saver] { rt.vm.release(p) }
     rt.stop(verifyHeap: false)
+    d.end()
     if let bytes = images.first {
         let r = try Resumed(bytes, background: 1, heapBlocks: 4096, start: false)
         r.stop()

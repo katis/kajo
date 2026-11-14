@@ -204,7 +204,7 @@ func markerPoll(_ vm: VMPointer, _ mk: MarkingPointer, cycle: UInt64, phase: Mar
             unsafe m.pointee.parkSweepNs &+= dt
         }
     }
-    if unsafe mk.pointee.config.testSwitches.markerSlowdown > 1 { unsafe markerSlowdownSpin(vm, mk) }
+    if unsafe mk.pointee.slowdown.pointee.load(ordering: .relaxed) > 1 { unsafe markerSlowdownSpin(vm, mk) }
     unsafe applyWantedQoS(mk)
     return unsafe mk.cycleNow == cycle && mk.phaseNow == phase && !mk.pointee.stopping.pointee.load(ordering: .relaxed)
 }
@@ -221,7 +221,7 @@ func markerSlowdownSpin(_ vm: VMPointer, _ mk: MarkingPointer) {
     let now = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
     let last = unsafe m.pointee.slowLastCpuNs
     let work = last == 0 || now < last ? 0 : now &- last
-    let target = work &* UInt64(unsafe mk.pointee.config.testSwitches.markerSlowdown &- 1)
+    let target = work &* UInt64(unsafe mk.pointee.slowdown.pointee.load(ordering: .relaxed) &- 1)
     if target > 0 {
         let end = now &+ target
         var x: UInt64 = now

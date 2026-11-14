@@ -602,6 +602,9 @@ end
 /// once it has run, the save goes through. On d78afcc the save answered
 /// false (saved) and the image held the Process with no trace of the ask.
 @Test func aSaveWaitsForPendingInterrupts() throws {
+    let t0 = now()
+    print("stall-diag pendingSave begin age=\(String(format: "%.1f", processAgeSeconds()))")
+    defer { print("stall-diag pendingSave end body=\(String(format: "%.1f", Double(now() &- t0) / 1e9)) age=\(String(format: "%.1f", processAgeSeconds()))") }
     let rt = try Runtime(pendingSaveSource, background: 1, start: false)
     rt.semaphore(global: 3)
     let p = rt.spawn("waitOn3")

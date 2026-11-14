@@ -41,7 +41,8 @@ extension MarkingShared {
             log: lined(MarkingLog(logCapacity: vm.pointee.config.logCapacity)), phase: lined(Atomic<UInt8>(0)), cycle: lined(Atomic<UInt64>(0)),
             wantUserInitiated: lined(Atomic<Bool>(false)), markerWaits: lined(Atomic<UInt64>(0)),
             stalls: lined(StallLog(workers: count, capacity: vm.pointee.config.logCapacity)), waitsLock: makeMutex(), qosNow: lined(Atomic<UInt32>(0)),
-            stopping: lined(Atomic<Bool>(false)), thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
+            stopping: lined(Atomic<Bool>(false)), slowdown: lined(Atomic<Int>(Swift.max(1, config.testSwitches.markerSlowdown))),
+            thread: lined(MarkerThread()), machThread: lined(Atomic<UInt32>(0)),
             barrier: barrierWord(vm.pointee.flag), rootScans: rootScans, rootScanRanges: ranges,
             rootScanCount: nurseries, rootScanStats: stats))
         if config.stress.contains(.markingAlwaysOn) { unsafe markingBarrierOn(mk) }
@@ -74,6 +75,7 @@ extension MarkingShared {
         unsafe unlined(s.qosNow)
         unsafe freeMutex(s.waitsLock)
         unsafe unlined(s.stopping)
+        unsafe unlined(s.slowdown)
         unsafe unlined(s.thread)
         unsafe unlined(s.machThread)
         unsafe freeMutex(s.lock)
@@ -136,7 +138,18 @@ extension VM {
     }
 
     /// Allocation stalls, part 5: the slowed marker's factor (1: off).
-    var markerSlowdown: Int { unsafe state.pointee.marking?.pointee.config.testSwitches.markerSlowdown ?? 1 }
+    var markerSlowdown: Int { unsafe state.pointee.marking?.pointee.slowdown.pointee.load(ordering: .relaxed) ?? 1 }
+
+    /// Allocation stalls, the stall tests in a dense suite: set the slowed
+    /// marker's factor from the host (1: off). The tests slow the marker
+    /// only until their workers stall; what they then check (an interrupt,
+    /// a terminate or a save at the first poll after the stall) waits for
+    /// the collector, and a CPU-proportional slowdown made that wait 16
+    /// times the marker's work over whatever share of a core it got.
+    func setMarkerSlowdown(_ factor: Int) {
+        guard let mk = unsafe state.pointee.marking else { return }
+        unsafe mk.pointee.slowdown.pointee.store(Swift.max(1, factor), ordering: .relaxed)
+    }
 
     /// Allocation stalls: every stall so far (a copy, under the waits lock).
     var stallLog: StallLog? {
@@ -145,6 +158,40 @@ extension VM {
         defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
         return unsafe mk.pointee.stalls.pointee
     }
+
+    /// The marker thread as the kernel sees it now (no stop): its CPU time,
+    /// its scheduled and base priorities (`pth_curpri` shows a QoS
+    /// override, `pth_priority` the thread's own QoS), its run state (1
+    /// running, 2 stopped, 3 waiting, 4 uninterruptible, 5 halted), and the
+    /// QoS class the marker last set itself. nil without a marker thread.
+    var markerThreadSample: (cpuNs: UInt64, curpri: Int32, basepri: Int32, runState: Int32, qos: UInt32)? {
+        guard let mk = unsafe state.pointee.marking else { return nil }
+        let port = unsafe mk.pointee.machThread.pointee.load(ordering: .relaxed)
+        if port == 0 { return nil }
+        var info = thread_extended_info()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_extended_info>.size / MemoryLayout<integer_t>.size)
+        let kr = withUnsafeMutablePointer(to: &info) {
+            unsafe $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) {
+                unsafe thread_info(port, thread_flavor_t(THREAD_EXTENDED_INFO), $0, &count)
+            }
+        }
+        if kr != KERN_SUCCESS { return nil }
+        return (info.pth_user_time &+ info.pth_system_time, info.pth_curpri, info.pth_priority, info.pth_run_state,
+                unsafe mk.pointee.qosNow.pointee.load(ordering: .relaxed))
+    }
+
+    /// Stall diagnostics: the stalls in progress and the marker's QoS
+    /// overrides (under the waits lock, no stop).
+    var stallsNow: (stalledNow: Int, count: UInt64, overrides: UInt64, cyclesStarted: UInt64)? {
+        guard let mk = unsafe state.pointee.marking else { return nil }
+        unsafe pthread_mutex_lock(mk.pointee.waitsLock)
+        defer { unsafe pthread_mutex_unlock(mk.pointee.waitsLock) }
+        let s = unsafe mk.pointee.stalls.pointee
+        return (s.stalledNow, s.all.count, s.markerOverrides, s.cyclesStarted)
+    }
+
+    /// The cycle number now (an atomic read).
+    var markingCycleNow: UInt64 { unsafe state.pointee.marking?.cycleNow ?? 0 }
 
     /// The last cycles (`VMConfig.logCapacity` of them), oldest first.
     var cycleLog: [CycleRecord] {
