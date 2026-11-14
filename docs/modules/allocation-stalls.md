@@ -1306,3 +1306,82 @@ another test rather than run the tier again.
    loaded run) or print them only on a failed wait? Recommended: keep;
    they cost nothing measurable and are what made this module's finding
    a reading of records.
+
+### The fifth test: `theRunningCycleDoesNotJustifyAFallback` (2026-11-14, evening)
+
+The main session's follow-up to the failed `tsan-load` above. Files in
+`~/kajo-scratch/stall-tests/p5/`.
+
+**Measured.** The test filtered under ThreadSanitizer with the twelve
+loops, every stop's pause summed by kind (`StallDiag.stopTotals`;
+`p5/m1.txt`). With the rule the run took 195.0 s, 163.4 s of it in 47
+full collections. With the broken variant it took 231.3 s, 216.3 s of it
+in 55. Inside the bundle the same two runs took 515 to 824 s and 528 to
+658 s (`p3-tsan/`), 41 to 58 full collections of up to 20 to 32 s each.
+Nearly all the time was full collections, one per justified stall
+between the soft and the hard limit. The test ran each heap to module 4's
+out-of-memory answer, which its claim does not need. The claim is that
+the fallback a justified stall leads to is never justified by the cycle
+that was already running, and that the broken variant breaks this. The
+broken variant broke it at every fallback it took (45 to 54 of 45 to 54).
+`aFullHeapFallsBackJustifiedThenRunsOutOfMemory` checks the
+out-of-memory answer.
+
+**Changed** (test only, 11c0f4b). Both runs now end after four justified
+stalls; the broken run also ends at its first unjustified fallback, read
+from the marking counters at most once a second. A justified stall's
+worker runs its fallback before its next poll, so once the Processes have
+been terminated every one of those fallbacks has been checked and
+counted. Neither wait races a clock (`StallDiag.waitProgress`). Each ends
+when its condition holds, and fails only when the collector has counted
+nothing (no stop but the test's own inspections, no cycle begun, no stall
+ended) for 120 s, or 600 s under the sanitizer. A failure prints where
+the run stood. The 900/300 s bound is gone, not widened. The broken
+variant still fails its check: 4 of 4 fallbacks unjustified in the
+filtered sanitizer run, 4 of 4 and 49 of 49 in two plain runs.
+
+| | before | after |
+|---|---|---|
+| rule's run | both Processes end (out of memory) within 900 s (300 plain); 0 unjustified in the log and in the VM's counter | 4 justified stalls seen (or the Processes ended), then terminated; 0 unjustified in both counts; new: at least one justified stall and at least one `fallbacksByStall` |
+| broken variant | ends within 900 s; at least 1 unjustified | 4 justified stalls or the first unjustified fallback, then terminated; at least 1 unjustified |
+| body, filtered, sanitizer + loops | 426 s (195.0 + 231.3) | 17.1 s |
+| body, plain | not measured (an intermediate version whose broken run still went to the end: 14.3 s) | 1.2 to 1.6 s |
+| body, loaded sanitized bundle | 1043 to 1352 s (sum of the two runs) | 26.6 to 32.9 s |
+
+**Beside it.** Every test in `AllocationStallTests.swift` now prints its
+body time (`stall-diag body <test> s=`), and the `slowedMarker` random
+programs print each seed's time. The table covers three loaded sanitized
+bundle runs on 11c0f4b (`p5/tsan/run-{1,2,3}.txt`; bundles 1575, 1726 and
+1757 s, 0 failures, 0 reports). "Body" is the test's whole body, so for a
+test with several waits it is an upper bound on each one.
+
+| test | wall-clock bound under the sanitizer | body s | worst margin |
+|---|---|--:|--:|
+| `aRingLikeLoadStallsInsteadOfFallingBack` (3) | none (a headless run ends by itself) | 202 to 375 | - |
+| `aSlowedMarkerPacesTheMutator` (4) | none | 183 to 328 | - |
+| `aFullHeapFallsBackJustifiedThenRunsOutOfMemory` | none | 903 to 1525 | - |
+| `fragmentationIsToldFromAFullHeap` | none | 435 to 632 | - |
+| `theMainWorkerNeverStallsAndItsFallbacksNameIt` | 900 s loop deadline | 226 to 265 | 29 % |
+| `aStalledProcessIsTerminated` | 600 s per wait | 216 to 230 | 38 % |
+| `aStalledProcessTakesAnInterrupt` | 600 s per wait | 220 to 262 | 44 % |
+| `aSaveWaitsForAStallAndItsImageLoads` | 600 s per wait | 227 to 273 | 46 % |
+| `aVMIdleAfterStallsWakesNoThread` | 900 s per ring wait | 455 to 655 | up to 73 %: changed, below |
+| `theRunningCycleDoesNotJustifyAFallback` | none now (was 900) | 27 to 33 | - |
+| `anEntryStallGateThatIgnoresTheTableFallsBackUnjustified` | 1800 s per wait, two runs | 392 to 504 | 28 % |
+| random programs, `slowedMarker` | 600 s per seed | at most 10.2 (60 seeds) | 2 % |
+
+`aVMIdleAfterStallsWakesNoThread` ran both rings to the end with the
+marker 16 times slower. That took 455 to 655 s of its body against a
+900 s wait, the only test above half its bound. Changed the same way
+(4527a6c): the marker is slowed until a stall has happened (a 600/120 s
+wait, which met it in 2.2 s plain), then runs at full speed, and both
+ring waits end on the collector's progress with the quiet bound. The
+claim (stalls happened; 1 s idle wakes the marker, the workers and the
+young collector at most 5 times each; work after idling completes; 0
+unjustified) is unchanged. Plain, its body is 18.6 s (not measured
+before).
+
+`aFullHeapFallsBackJustifiedThenRunsOutOfMemory` has no wall-clock bound
+and cannot fail on time. At 903 to 1525 s it is now the longest test of
+the sanitized bundle, and the bundle ends when it does (an open
+question).
