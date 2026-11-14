@@ -1421,3 +1421,30 @@ and stalls ended. It does not count young collections that are not
 stops, so a mutator running long without a stop reads as quiet. The
 longest quiet stretch measured was 89.6 s of the 600 s bound under the
 sanitizer (the ring after idling); plain runs are far below their 120 s.
+
+**The test gates on the final code.** Only test files changed after
+f2e8aec, whose code passed every other gate of the core tier above
+(`check/`). The three test gates ran on 2dc41e6 through
+`scripts/gates-lib.sh`'s own definitions and `gl_gate`, as
+`check-tier.sh` runs them (`check-tier.sh` cannot run a subset; the
+driver is `~/kajo-scratch/stall-tests/tools/three-gates.sh`). Output and
+`gates.log` are in `~/kajo-scratch/stall-tests/check2/`; swiftly's 6.4.2
+was first on PATH. Every gate passed, 7980 s in all:
+
+| gate | s | tests | the five tests' bodies (s) |
+|---|--:|---|---|
+| swift-test-load | 917 | 449 + 162 passed | full heap 8.1, terminated 32.4, interrupt 33.4, save 46.0, pending 0.1, idle 72.1 |
+| tsan | 3010 | 449 + 162 passed, 0 reports | 25.4, 131.1, 172.2, 160.5, 0.3, idle 234.6 |
+| tsan-load | 4053 | 449 + 162 passed, 0 reports | 34.6, 205.9, 264.1, 256.5, 0.6, idle 378.9 |
+
+Not done here: `aFullHeapFallsBackJustifiedThenRunsOutOfMemory` (no
+bound, 903 to 1554 s under the sanitizer, now what the sanitized bundle
+waits for) is untouched. The progress signature leaves out young
+collections that are not stops. Open questions:
+4. Shorten `aFullHeapFallsBackJustifiedThenRunsOutOfMemory` under the
+   sanitizer (a smaller heap there, as the full-heap test's 160 blocks)?
+   Recommended: yes, measured first: it now sets the sanitized bundle's
+   length (about 1600 s of a 1575 to 1803 s bundle).
+5. Count young collections in `StallDiag.progress`? Recommended: yes,
+   with the next change to these tests. The longest quiet stretch so far
+   is 15 percent of its bound.
