@@ -72,10 +72,14 @@ enum KernelTestParts {
     /// How many VMs run at once. Measured on 3cf22fe under the sanitizer
     /// (one VM, the mini idle): 2921 s of tests, of which the two
     /// every-method tests are 698 and 691 s and the long chain 585 s, each
-    /// one test; the other 246 tests are 948 s. Three parts for those three
-    /// and two for the rest (about 474 s each) leave the longest part at
-    /// the longest test; more parts only add VMs.
-    static let count = 5
+    /// one test; the other 246 tests are 948 s. Five parts would make the
+    /// longest part the longest test, but five VMs beside the rest of the
+    /// bundle starve its timers: `theToolsReconnectAfterADroppedLink` failed
+    /// in 6 of 8 sanitizer runs at five parts, 1 of 2 at three, 0 of 1 at two
+    /// and at one (docs/modules/gate-speed.md, "The reconnect test"). Two
+    /// parts of about 1460 sanitizer seconds each. `KAJO_KERNEL_TEST_PARTS`
+    /// overrides the count (the measurement).
+    static let count = Int(ProcessInfo.processInfo.environment["KAJO_KERNEL_TEST_PARTS"] ?? "").flatMap { $0 > 0 ? $0 : nil } ?? 2
 
     /// Seconds under the sanitizer measured on 3cf22fe for every test of 5 s
     /// or more there (the doc's table; a plain build is 26 to 32 times
