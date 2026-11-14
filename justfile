@@ -120,7 +120,7 @@ check *ARGS:
 weekly:
     scripts/weekly.sh
 
-# Gate tiers: the weekly LaunchAgent (Sundays 02:00) copied to ~/Library/LaunchAgents/ with this checkout's paths; prints the launchctl command, loads nothing
+# Gate tiers: the weekly LaunchAgent (Mondays 02:00) copied to ~/Library/LaunchAgents/ with this checkout's paths; prints the launchctl command, loads nothing
 weekly-install:
     #!/bin/zsh
     set -euo pipefail

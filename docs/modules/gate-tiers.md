@@ -70,7 +70,8 @@ the argument given.
   sits at 0 percent CPU for 60 s, kills it, writes the fact and skips the
   device rows.
 - `scripts/launchd/dev.katajamaki.kajo.weekly.plist`: a user LaunchAgent
-  for Sunday 02:00 running `scripts/weekly.sh` with `PATH` set so the
+  for Monday 02:00 (Sunday until the owner's decision of 2026-11-14)
+  running `scripts/weekly.sh` with `PATH` set so the
   swiftly toolchain is first (as the shell's is), `StandardOutPath` and
   `StandardErrorPath` under `~/kajo-weekly/launchd.log`; `just
   weekly-install` copies it to `~/Library/LaunchAgents/` and prints the
@@ -358,7 +359,7 @@ WorkingDirectory       /Users/jonikatajamaki/code/kajo
 EnvironmentVariables   PATH /Users/jonikatajamaki/.swiftly/bin:/opt/homebrew/bin:/opt/homebrew/sbin:
                             /Users/jonikatajamaki/.cargo/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
                        SWIFTLY_HOME_DIR, SWIFTLY_BIN_DIR, SWIFTLY_TOOLCHAINS_DIR
-StartCalendarInterval  Weekday 0, Hour 2, Minute 0
+StartCalendarInterval  Weekday 0, Hour 2, Minute 0   (Weekday 1, Monday, since 2026-11-14)
 ProcessType            Interactive
 RunAtLoad              false
 StandardOutPath        /Users/jonikatajamaki/kajo-weekly/launchd.log

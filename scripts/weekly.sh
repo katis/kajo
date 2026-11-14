@@ -4,7 +4,7 @@
 # Mac and on every attached device, into ~/kajo-weekly/<YYYY-MM-DD>/ with a
 # gates.log and a summary.md that ends with a `weekly done` line. Run by
 # the LaunchAgent scripts/launchd/dev.katajamaki.kajo.weekly.plist on
-# Sundays at 02:00, or by hand (`just weekly`).
+# Mondays at 02:00, or by hand (`just weekly`).
 #
 # It refuses to start (exit 0, one line in ~/kajo-weekly/weekly.log) when
 # anything of Kajo runs: a kajo, swift-build, swift-test, xcodebuild,

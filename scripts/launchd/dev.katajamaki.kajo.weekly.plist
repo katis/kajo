@@ -2,7 +2,7 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Kajo's weekly run (docs/modules/gate-tiers.md): scripts/weekly.sh on
-  Sundays at 02:00 as a user LaunchAgent. `just weekly-install` replaces
+  Mondays at 02:00 as a user LaunchAgent. `just weekly-install` replaces
   __HOME__ and __REPO__, copies the result to ~/Library/LaunchAgents/ and
   prints the launchctl command; nothing loads it but the owner.
   PATH puts the swiftly toolchain first, as the owner's shell does.
@@ -34,7 +34,7 @@
   <key>StartCalendarInterval</key>
   <dict>
     <key>Weekday</key>
-    <integer>0</integer>
+    <integer>1</integer>
     <key>Hour</key>
     <integer>2</integer>
     <key>Minute</key>
