@@ -806,10 +806,14 @@ s; its 120 s wait for the interrupts ran out), as in the third run; the
 main session took that test over (see its heading above), and every other
 gate's result is from this run. ThreadSanitizer: 0 reports in `tsan` and
 `tsan-load`. `arc-check` at 6 s is a warm release build of the same
-scratch path. The aligned A/B against 3cf22fe (`$GS/check/ab/table.md`)
-has no VM source change to show. The matrices: `scripts/shell-report.py
---bar` over `$GS/check/matrix-mac` and `matrix-iphone` as each gate
-printed it.
+scratch path. The aligned A/B against 3cf22fe (`$GS/check/ab/table.md`),
+with no VM source changed: 0.991 to 1.010 at 1 worker and 0.963 to 1.027
+at 8 (the usual 8-worker spread). The matrices' bars
+(`$GS/check/matrix-mac.txt`, `matrix-iphone.txt`): no launch failed, no
+checksum off, 0 fallbacks; the Mac's frames missed only in the three hog
+rows with the budget off (by design), 706 stalls (longest 21.36 ms); the
+iPhone's in the hog rows and the ring under `young=stw` (2, 5 and 7 frames
+behind scavenges of 15.6 to 18.3 ms), as in earlier modules.
 
 ## Coverage
 
