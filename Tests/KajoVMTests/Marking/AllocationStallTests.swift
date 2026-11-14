@@ -248,7 +248,10 @@ end
 /// slowdown is CPU-proportional, and in a loaded suite the marker's share
 /// of a core made a slowed cycle 45 to 70 s and a stall's two cycles race
 /// the 120 s waits (docs/modules/allocation-stalls.md, "The stall tests in
-/// a dense suite").
+/// a dense suite"). The waits after the request end on the collector's
+/// progress (`StallDiag.waitProgress`): under ThreadSanitizer with the
+/// twelve loops the interrupts' wait took up to 322 s of a 600 s bound even
+/// with the marker at full speed (full collections of 20 to 30 s).
 private func stallingRuntime() throws -> (Runtime, [Oop]) {
     let rt = try Runtime(stalledSource, background: 2, heapBlocks: 512, configure: { c in
         c.nursery.bytes = 512 << 10
@@ -459,7 +462,7 @@ final class StallDiag {
     #expect(waitStalled(rt, d), "never stalled: \(String(describing: rt.vm.stallLog?.all))")
     for p in ps { rt.vm.terminate(p) }
     d.unslow()
-    #expect(d.wait("terminated", underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
+    #expect(d.waitProgress("terminated", quiet: underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     #expect(ps.allSatisfy { rt.state($0) == .terminated })
     #expect(rt.marking.unjustifiedFallbacks == 0)
     for p in ps { rt.vm.release(p) }
@@ -478,9 +481,9 @@ final class StallDiag {
     let i0 = rt.vm.counters[.interrupts]
     for p in ps { #expect(rt.vm.interruptProcess(p, kind: InterruptKind.debugStop)) }
     d.unslow()
-    #expect(d.wait("interrupts", underThreadSanitizer ? 600 : 120) { rt.vm.counters[.interrupts] >= i0 + 2 }, "\(d.full("fail"))")
+    #expect(d.waitProgress("interrupts", quiet: underThreadSanitizer ? 600 : 120) { rt.vm.counters[.interrupts] >= i0 + 2 }, "\(d.full("fail"))")
     for p in ps { rt.vm.terminate(p) }
-    #expect(d.wait("terminated", underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
+    #expect(d.waitProgress("terminated", quiet: underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     for p in ps { rt.vm.release(p) }
     rt.stop(verifyHeap: false)
     d.end()
@@ -498,11 +501,11 @@ final class StallDiag {
     #expect(waitStalled(rt, d))
     let saver = rt.spawn("saver")
     d.unslow()
-    #expect(d.wait("saved", underThreadSanitizer ? 600 : 120) { rt.state(saver) == .terminated }, "\(d.full("fail"))")
+    #expect(d.waitProgress("saved", quiet: underThreadSanitizer ? 600 : 120) { rt.state(saver) == .terminated }, "\(d.full("fail"))")
     let images = rt.vm.takeSavedImages()
     #expect(images.count == 1)
     for p in ps { rt.vm.terminate(p) }
-    #expect(d.wait("terminated", underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
+    #expect(d.waitProgress("terminated", quiet: underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     for p in ps + [saver] { rt.vm.release(p) }
     rt.stop(verifyHeap: false)
     d.end()
