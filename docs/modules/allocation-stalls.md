@@ -1385,3 +1385,39 @@ before).
 and cannot fail on time. At 903 to 1525 s it is now the longest test of
 the sanitized bundle, and the bundle ends when it does (an open
 question).
+
+**The stalled-Process waits too** (2dc41e6). The loaded sanitized runs
+on 4527a6c (`p5/tsan-final/`) put each wait's own time beside its bound.
+The interrupts' wait in `aStalledProcessTakesAnInterrupt` took 215 to
+322 s of its 600 s bound, even with the marker at full speed after the
+request: under the sanitizer and the loops a stall still waits for a
+cycle and a fallback's full collection of 20 to 30 s. That is above half
+the bound, so the waits after the request in the three stalled-Process
+tests (interrupts, the save, termination) now end on the collector's
+progress with the 600/120 s quiet bound, as the full-heap test's do. The
+wait for the first stall stays a 600/120 s wait; it was met in 0.1 to
+0.2 s.
+
+**The runs on the final code** (2dc41e6): the VM bundle under
+ThreadSanitizer with the twelve loops, three runs
+(`p5/tsan-final2/run-{1,2,3}.txt`): 0 failures, 0 reports, bundles
+1575, 1584 and 1667 s. Bodies and each wait, in seconds:
+
+| test | bodies | waits (bound) |
+|---|--:|---|
+| `theRunningCycleDoesNotJustifyAFallback` | 29.5, 32.6, 42.4 | progress; longest quiet stretch in any wait 89.6 s of 600 |
+| `aStalledProcessIsTerminated` | 121.9, 244.6, 267.5 | stalled 0.1 to 0.2 (600); terminated 121 to 266 (progress) |
+| `aStalledProcessTakesAnInterrupt` | 198.4, 282.6, 292.7 | stalled 0.1 to 0.2 (600); interrupts 74 to 292, terminated 0 to 208 (progress) |
+| `aSaveWaitsForAStallAndItsImageLoads` | 255.0, 280.0, 331.6 | stalled 0.1 to 0.2 (600); saved 250 to 324, terminated 0 (progress) |
+| `aSaveWaitsForPendingInterrupts` | 0.4 to 0.6 | none |
+| `aVMIdleAfterStallsWakesNoThread` | 364.4, 381.6, 448.9 | stalled 123 to 159 (600, 26 %); rings 145 to 178, ring after idle 45 to 97 (progress); idle 0 (600, unchecked as before) |
+| `theMainWorkerNeverStallsAndItsFallbacksNameIt` | 186.6 to 277.5 | 900 s loop deadline, 31 % |
+| `anEntryStallGateThatIgnoresTheTableFallsBackUnjustified` | 607.3 to 680.0 | 1800 s per wait, two runs: at most 38 % |
+| the headless tests (ring, slowed marker, full heap, fragmentation) | 195 to 1493 | none |
+| random programs, `slowedMarker` | at most 10.6 per seed | 600, 2 % |
+
+`progress` counts stops (less the test's own inspections), cycles begun
+and stalls ended. It does not count young collections that are not
+stops, so a mutator running long without a stop reads as quiet. The
+longest quiet stretch measured was 89.6 s of the 600 s bound under the
+sanitizer (the ring after idling); plain runs are far below their 120 s.
