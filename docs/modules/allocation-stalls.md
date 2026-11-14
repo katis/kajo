@@ -1165,3 +1165,144 @@ clock. There is no broken variant: the change is in what the tests wait
 for, and the starting behaviour is the failure itself (2 of 4 gate runs,
 1 of 13 loaded bundle runs). With it the bodies take 4 to 7 s alone,
 unloaded (from 9 to 12).
+
+### Part 3: the runs
+
+Twelve VM-bundle runs under the twelve busy loops with the native test
+cache on (573 hits each), one after another on f2e8aec
+(`p3/run-<n>.txt`, `p3/summary.txt`): 12 of 12 passed, no stall test
+failed. Each cell is the body's own time, then what Swift Testing
+reported (the pool wait included); the longest single wait in any of the
+three is inside its body.
+
+| run | bundle s | terminated | interrupt | save | pending interrupts | failed |
+|--:|--:|--:|--:|--:|--:|--:|
+| 1 | 768 | 4.0 / 539.6 | 5.7 / 581.6 | 29.3 / 559.9 | 0.2 / 604.5 | 0 |
+| 2 | 750 | 37.1 / 568.5 | 4.1 / 569.0 | 35.5 / 567.9 | 0.1 / 312.9 | 0 |
+| 3 | 744 | 15.7 / 698.7 | 20.3 / 694.8 | 30.4 / 685.4 | 0.4 / 685.4 | 0 |
+| 4 | 745 | 6.3 / 680.0 | 31.8 / 680.0 | 32.7 / 680.0 | 0.3 / 680.0 | 0 |
+| 5 | 744 | 32.6 / 592.6 | 27.8 / 592.6 | 33.3 / 592.6 | 0.1 / 592.6 | 0 |
+| 6 | 744 | 4.3 / 618.3 | 5.1 / 618.3 | 36.5 / 618.3 | 0.2 / 618.3 | 0 |
+| 7 | 754 | 32.5 / 633.7 | 30.7 / 633.7 | 38.8 / 633.7 | 0.1 / 633.7 | 0 |
+| 8 | 723 | 30.8 / 595.2 | 4.0 / 595.2 | 39.6 / 595.2 | 0.2 / 595.2 | 0 |
+| 9 | 767 | 32.7 / 585.7 | 25.0 / 587.3 | 8.7 / 587.2 | 0.2 / 585.8 | 0 |
+| 10 | 756 | 31.4 / 607.5 | 28.2 / 609.6 | 37.6 / 609.6 | 0.3 / 607.7 | 0 |
+| 11 | 746 | 4.7 / 633.1 | 30.0 / 631.7 | 30.2 / 631.7 | 0.1 / 631.7 | 0 |
+| 12 | 744 | 29.7 / 629.5 | 26.1 / 629.4 | 39.7 / 629.5 | 0.1 / 629.5 | 0 |
+
+The gate run's `swift-test-load` is a thirteenth (bodies 36.8, 29.9,
+14.7 and 0.2 s, passed). Before, the same bodies took 92.9 to 126.0 s in
+the one instrumented loaded run, and their waits 73.8 to 78.2 s of the
+120 s bound; after, at most 39.7 s. The reported durations did not
+change, and cannot from inside a test: they are the pool's.
+
+Under ThreadSanitizer with the twelve loops, three VM-bundle runs from
+`.build/tsan-check` (`p3-tsan/`; 0 sanitizer reports in each; the
+slowdown before the stall is 4 there): 3 of 3 passed, the bodies
+terminated 194.7, 239.9, 232.4 s, interrupt 60.8, 218.8, 268.6 s, save
+267.1, 237.5, 264.6 s, pending interrupts 0.4 to 0.7 s, against 600 s
+bounds; bundles 1847, 1746 and 1783 s. These runs carried a measurement
+patch that was not committed (`tools/fullheap-diag.py`, below), which
+changes nothing of the four tests.
+
+### The gates
+
+`just check 3cf22fe` on e8f9585 (the code is f2e8aec's; the commit above
+it is this doc), the core tier's 21 gates, swiftly's 6.4.2 first on PATH
+(`check/env.txt`), 11 802 s, `check/gates.log`: 20 passed, `tsan-load`
+failed.
+
+| gate | s | result |
+|---|--:|---|
+| check-tier-test | 6 | passed |
+| clean-build | 20 | passed (0 warnings) |
+| swift-test-load | 965 | passed, 449 + 162 tests |
+| tsan | 2997 | passed, 449 + 162, 0 reports |
+| tsan-load | 4103 | failed: `theRunningCycleDoesNotJustifyAFallback`, below; 0 reports, 162 compiler tests passed |
+| ios-check | 16 | passed |
+| arc-check | 58 | passed |
+| golden | 75 | passed |
+| native-golden | 96 | passed |
+| native-kernel-test | 46 | passed |
+| native-cc | 29 | passed |
+| test-release | 117 | passed |
+| model-check | 20 | passed |
+| soak | 64 | passed |
+| fuzz | 662 | passed, "libFuzzer build: ok", 2.08, 3.18, 0.77 and 1.67 million runs |
+| apps | 125 | passed |
+| kernel-test | 107 | passed |
+| new-check | 251 | passed |
+| ab | 323 | passed |
+| matrix-mac | 822 | passed: 0 fallbacks in 156 rows, frames missed only in the hog rows with the budget off, 668 stalls (longest 28.38 ms) |
+| matrix-iphone | 900 | passed: 0 fallbacks, the ring under `young=stw` 3 to 5 frames behind scavenges of 13.5 to 14.8 ms, the hog rows by design |
+
+The aligned A/B against 3cf22fe (`check/ab/table.md`): 0.991 to 1.011 at
+1 worker and 0.956 to 1.032 at 8, instruction ratios 1.000 (0.989 for
+`alloc` at 8 workers), checksums the same. `interpret` in the two A/B
+builds' `Dispatch.o` is identical, 1816 lines each. New `unsafe` lines:
+13 (16 added, 3 changed), in `MarkingHost.swift`'s two readers and the
+setter, `Marker.swift`'s two reads and `MarkingState.swift`'s field; the
+clean build has 0 warnings and `just ios-check` and `just apps` passed
+on the change before the run.
+
+### `theRunningCycleDoesNotJustifyAFallback` under ThreadSanitizer and load
+
+The failing gate's test is not one of the four: it fills a 160-block heap
+from two background workers until module 4's out-of-memory rule ends
+them, twice (the rule, then the broken variant), each run bounded by
+`waitAllTerminated` at 900 s; one of the two ran out
+(`check/tsan-load.txt`). It never failed in the gate-speed module's four
+`tsan-load` runs, which recorded no body time. The three runs above
+carried a print-only patch on its wait (`StallDiag` around it, removed
+before the commit) and say what it costs: 514.8 to 823.7 s for the rule
+and 528.0 to 658.0 s for the broken variant, each run 41 to 58 full
+collections (every one a justified fallback in the rule's run, every one
+unjustified in the broken one, as designed), the longest 20.3 to 31.9 s
+under the sanitizer and the load. So it is the same class as the stall
+tests: a fixed amount of collector work (a full heap's full collections
+between the soft and the hard limit) under a wall-clock bound, at 57 to
+92 percent of that bound in a passing run. Whether this module's change
+moved it (the stall tests now leave the pool minutes earlier, so the
+bundle is denser where this test runs, as the cache made it before) is
+not shown: there is no body time from before. Nothing in its records is
+wrong (0 unjustified fallbacks in the rule's runs, the broken variant
+caught). Not fixed here: the brief says to hand back a gate that fails on
+another test rather than run the tier again.
+
+### Not done
+
+- `theRunningCycleDoesNotJustifyAFallback` (above): open, with a
+  recommendation below; `tsan-load` has not passed on this code.
+- The other slowed-marker tests (`aRingLikeLoadStallsInsteadOfFallingBack`,
+  `aSlowedMarkerPacesTheMutator`, `fragmentationIsToldFromAFullHeap`,
+  `aVMIdleAfterStallsWakesNoThread`, the entry gate) still slow the
+  marker for their whole run; none failed, and their waits (300 to 1800
+  s) were not instrumented.
+- 3cf22fe was not rebuilt; its behaviour is argued from the shared code.
+- Swift Testing's per-test times in a loaded bundle include the wait for
+  a cooperative-pool thread (a 0.1 s body read 408.8 s); nothing in the
+  suite separates that from a test's own time but the bodies printed by
+  these four.
+
+### Open questions for the owner
+
+1. `theRunningCycleDoesNotJustifyAFallback` under ThreadSanitizer: make
+   its wait one for the collector's progress (end when the Processes end,
+   fail only when no fallback or cycle has been counted for, say, 120 s,
+   printing where it stood), or give the sanitizer a heap with a smaller
+   gap between the soft and the hard limit so fewer full collections
+   precede the out-of-memory answer. Recommended: the progress wait, as
+   `underRelocation` does, since the test's claim is about what each
+   fallback is, not how fast a full heap fills; then one `tsan-load` run.
+2. A command-line process gets priority 31 for user-initiated QoS on this
+   Mac, so a stalled worker's override does not lift the marker above a
+   default-QoS load for `kajo run`, the tests or any headless host (the
+   shells, apps, get 37). Accept for headless hosts, or raise the marker
+   by another route there (none is available without an entitlement or a
+   real-time policy)? Recommended: accept and say so where the override
+   is described; the stall still ends by the collector's progress, at a
+   fair share.
+3. Keep the `stall-diag` lines in the suite's output (about 60 lines per
+   loaded run) or print them only on a failed wait? Recommended: keep;
+   they cost nothing measurable and are what made this module's finding
+   a reading of records.
