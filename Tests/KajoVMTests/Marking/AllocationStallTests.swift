@@ -83,6 +83,8 @@ private let ringReference: Int64? = {
 /// spare.
 @Test(arguments: ["stw", "local", "offload"])
 func aRingLikeLoadStallsInsteadOfFallingBack(_ young: String) throws {
+    let endBody = bodyTimer("aRingLikeLoadStallsInsteadOfFallingBack \(young)")
+    defer { endBody() }
     let r = try headless(ringFiles(ringIters), young: young, heapMiB: 16, slowdown: 16)
     #expect(r.checksum != nil && r.checksum == ringReference, "\(young): \(r.failure ?? "") \(r.summary)")
     #expect(r.n("fallbacks") == 0 && r.n("unjustifiedFallbacks") == 0, "\(young): \(r.summary)")
@@ -95,6 +97,8 @@ func aRingLikeLoadStallsInsteadOfFallingBack(_ young: String) throws {
 /// not outrun the marker at all), the switch's slow path taken.
 @Test(arguments: [4, 16], ["stw", "offload"])
 func aSlowedMarkerPacesTheMutator(_ factor: Int, _ young: String) throws {
+    let endBody = bodyTimer("aSlowedMarkerPacesTheMutator \(factor) \(young)")
+    defer { endBody() }
     let r = try headless(ringFiles(ringIters), young: young, heapMiB: 16, slowdown: factor)
     print("slowed marker x\(factor) \(young): \(r.summary)")
     #expect(r.checksum == ringReference, "x\(factor) \(young): \(r.failure ?? "") \(r.summary)")
@@ -110,6 +114,8 @@ func aSlowedMarkerPacesTheMutator(_ factor: Int, _ young: String) throws {
 /// out-of-memory rule applies: the run fails, nothing is unjustified. It
 /// ends by itself (no wall-clock bound).
 @Test func aFullHeapFallsBackJustifiedThenRunsOutOfMemory() throws {
+    let endBody = bodyTimer("aFullHeapFallsBackJustifiedThenRunsOutOfMemory")
+    defer { endBody() }
     let src = """
     method UndefinedObject run:of: temps=2
       push_nil
@@ -154,6 +160,8 @@ func aSlowedMarkerPacesTheMutator(_ factor: Int, _ young: String) throws {
 /// cycles that stalls wait on evacuate the sparse blocks and nothing falls
 /// back.
 @Test func fragmentationIsToldFromAFullHeap() throws {
+    let endBody = bodyTimer("fragmentationIsToldFromAFullHeap")
+    defer { endBody() }
     let off = try headless(ringFiles(ringIters), young: "offload", heapMiB: 16, slowdown: 16, reloc: "off")
     #expect(off.checksum == ringReference, "\(off.failure ?? "") \(off.summary)")
     #expect(off.n("unjustifiedFallbacks") == 0, "\(off.summary)")
@@ -187,6 +195,8 @@ end
 /// reserve's: a promotion that found no block) name the main worker; no
 /// background stall is charged.
 @Test func theMainWorkerNeverStallsAndItsFallbacksNameIt() throws {
+    let endBody = bodyTimer("theMainWorkerNeverStallsAndItsFallbacksNameIt")
+    defer { endBody() }
     let rt = try Runtime(mainChurnSource, background: 2, heapBlocks: 640, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
@@ -258,6 +268,14 @@ private func waitStalled(_ rt: Runtime, _ d: StallDiag? = nil) -> Bool {
 
 // MARK: - diagnostics (the stall tests in a dense suite)
 
+/// A test's body time, printed at its end (`stall-diag body <test> s=`):
+/// Swift Testing's own per-test time in a loaded bundle includes the wait
+/// for a thread of the cooperative pool.
+func bodyTimer(_ name: String) -> () -> Void {
+    let t0 = now()
+    return { print("stall-diag body \(name) s=\(String(format: "%.1f", Double(now() &- t0) / 1e9))") }
+}
+
 /// Seconds since this process started (kinfo_proc's start time).
 func processAgeSeconds() -> Double {
     var kp = kinfo_proc()
@@ -289,6 +307,10 @@ final class StallDiag {
     let t0 = now()
     var lastMarkerCpu: UInt64 = 0
     var lastWall: UInt64 = 0
+    /// Stops this object took itself (inspections), left out of `progress`.
+    var ownStops: UInt64 = 0
+    var lastMarkingRead: UInt64 = 0
+    var lastMarking = MarkingCounters()
 
     init(_ rt: Runtime, _ name: String) {
         self.rt = rt
@@ -321,7 +343,19 @@ final class StallDiag {
             + "threads=\(task.threads) procCpu=\(String(format: "%.0f", task.cpuS)) load=\(String(format: "%.1f", la[0]))"
     }
 
+    /// The marking counters (one inspection stop), at most once a second.
+    func markingNow() -> MarkingCounters {
+        let t = now()
+        if t &- lastMarkingRead >= 1_000_000_000 {
+            lastMarking = rt.marking
+            ownStops &+= 1
+            lastMarkingRead = t
+        }
+        return lastMarking
+    }
+
     func full(_ label: String) -> String {
+        ownStops &+= 2  // the counters and the cycle log
         let c = rt.marking
         let stops = rt.vm.stops
         return line(label) + "\n  stall-diag \(name) counters cycles=\(c.cycles) completed=\(c.cyclesCompleted) applies=\(c.applies) "
@@ -329,7 +363,57 @@ final class StallDiag {
             + "slowSpinS=\(String(format: "%.2f", Double(c.markerSlowSpinNs) / 1e9)) escalations=\(c.qosEscalations) "
             + "lowerings=\(c.qosLowerings) markerWaits=\(c.markerWaits)"
             + "\n  stall-diag \(name) stops n=\(stops.count) \(stopsByKind(stops, workerCount: rt.vm.config.backgroundWorkers + 2))"
+            + "\n  stall-diag \(name) stopTotals \(stopTotals(stops))"
             + "\n  stall-diag \(name) cycleRecs \(cycleRecordSummary(rt.vm.cycleLog))"
+    }
+
+    /// Each stop kind's count and summed pause and time to safepoint, in
+    /// seconds: where a test's wall time went.
+    func stopTotals(_ stops: [StopRecord]) -> String {
+        var by: [String: (n: Int, pause: UInt64, ttsp: UInt64)] = [:]
+        for st in stops {
+            var e = by["\(st.kind)"] ?? (0, 0, 0)
+            e.n += 1
+            e.pause &+= st.pauseNs
+            e.ttsp &+= st.timeToSafepointNs
+            by["\(st.kind)"] = e
+        }
+        return by.keys.sorted().map { k in
+            let e = by[k]!
+            return "\(k):\(e.n)/\(String(format: "%.1f", Double(e.pause) / 1e9))/\(String(format: "%.1f", Double(e.ttsp) / 1e9))"
+        }.joined(separator: ",")
+    }
+
+    /// The collector's own count of what it has done, read without a stop:
+    /// stops (scavenges, full collections, marks, applies), cycles begun,
+    /// stalls ended.
+    func progress() -> [UInt64] {
+        [rt.vm.counters[.stops] &- ownStops, rt.vm.markingCycleNow, rt.vm.stallsNow?.count ?? 0]
+    }
+
+    /// Wait for `cond` with no clock on the work itself: the wait fails only
+    /// when the collector has counted nothing (no stop, no cycle, no stall;
+    /// `progress`) for `quiet` seconds. Reports as `wait`; inspection stops
+    /// only at the end, so the reporting adds nothing to the count.
+    func waitProgress(_ label: String, quiet: Double, _ cond: () -> Bool) -> Bool {
+        let w0 = now()
+        var last = progress(), lastChange = w0
+        var nextLine = w0 + 10_000_000_000
+        print(line("\(label)-start"))
+        var ok = false
+        while true {
+            if cond() { ok = true; break }
+            let t = now()
+            let p = progress()
+            if p != last { last = p; lastChange = t }
+            if t &- lastChange > UInt64(quiet * 1e9) { break }
+            if t >= nextLine { print(line(label) + " progress=\(p.map(String.init).joined(separator: "/"))"); nextLine = t + 10_000_000_000 }
+            usleep(500)
+        }
+        if !ok { ok = cond() }
+        let quietS = Double(now() &- lastChange) / 1e9
+        print(full("\(label)-\(ok ? "ok" : "QUIET") waited=\(String(format: "%.1f", Double(now() &- w0) / 1e9)) quiet=\(String(format: "%.1f", quietS))"))
+        return ok
     }
 
     /// `eventually`, reporting: the same bound and condition.
@@ -368,6 +452,8 @@ final class StallDiag {
 /// request lands at its first poll after the stall, which the collector's
 /// progress ends; the termination completes.
 @Test func aStalledProcessIsTerminated() throws {
+    let endBody = bodyTimer("aStalledProcessIsTerminated")
+    defer { endBody() }
     let (rt, ps) = try stallingRuntime()
     let d = StallDiag(rt, "terminated")
     #expect(waitStalled(rt, d), "never stalled: \(String(describing: rt.vm.stallLog?.all))")
@@ -384,6 +470,8 @@ final class StallDiag {
 /// Stalled Processes asked to stop for the debugger (primitive 155's
 /// interrupt, what stepping uses) run the interrupt once their stall ends.
 @Test func aStalledProcessTakesAnInterrupt() throws {
+    let endBody = bodyTimer("aStalledProcessTakesAnInterrupt")
+    defer { endBody() }
     let (rt, ps) = try stallingRuntime()
     let d = StallDiag(rt, "interrupt")
     #expect(waitStalled(rt, d))
@@ -403,6 +491,8 @@ final class StallDiag {
 /// it reaches when the collector ends the stall (the collector never waits
 /// for the saver); the save completes and the image it wrote loads.
 @Test func aSaveWaitsForAStallAndItsImageLoads() throws {
+    let endBody = bodyTimer("aSaveWaitsForAStallAndItsImageLoads")
+    defer { endBody() }
     let (rt, ps) = try stallingRuntime()
     let d = StallDiag(rt, "save")
     #expect(waitStalled(rt, d))
@@ -428,6 +518,8 @@ final class StallDiag {
 /// idle (every wait in the stall is untimed), and work after the idle
 /// period completes.
 @Test func aVMIdleAfterStallsWakesNoThread() throws {
+    let endBody = bodyTimer("aVMIdleAfterStallsWakesNoThread")
+    defer { endBody() }
     let src = kernel("fragment") + itersSource(underThreadSanitizer ? 100_000 : 300_000) + """
     method UndefinedObject ringShort: temps=0
       push_nil
@@ -491,7 +583,20 @@ end
 /// full collections under every verifier take minutes in a debug build);
 /// the checked build's verifier on an unjustified fallback is the entry
 /// gate's test below.
-private func fullHeapUnjustified(broken: Bool) throws -> (UInt64, UInt64) {
+///
+/// The run stops at what the claim needs, not at the out-of-memory answer
+/// (`aFullHeapFallsBackJustifiedThenRunsOutOfMemory` has that): the first
+/// `fullHeapStalls` justified stalls, each one's fallback checked as it
+/// runs, in both runs: none unjustified with the rule, at least one with
+/// the broken variant (in every measured run all of them were; the broken
+/// run also ends at its first unjustified fallback, read once a second). Run
+/// to the end, a full heap took 41 to 58 full collections and 515 to 824 s
+/// under ThreadSanitizer with the twelve loops, against a 900 s bound. No
+/// wait races a clock: each ends when it is met or when the collector has
+/// counted nothing for the quiet bound (`StallDiag.waitProgress`).
+private let fullHeapStalls: UInt64 = 4
+
+private func fullHeapUnjustified(broken: Bool) throws -> (MarkingCounters, UInt64, StallTally) {
     let rt = try Runtime(fullSource, background: 2, heapBlocks: underThreadSanitizer ? 160 : 320, verify: false, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
@@ -499,19 +604,37 @@ private func fullHeapUnjustified(broken: Bool) throws -> (UInt64, UInt64) {
         c.marking.testSwitches.stallJustifiedByRunningCycle = broken
     })
     let ps = (0..<2).map { _ in rt.spawn("keepAll") }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 900 : 300))
+    let d = StallDiag(rt, broken ? "fullHeapBroken" : "fullHeap")
+    let quiet: Double = underThreadSanitizer ? 600 : 120
+    // Each justified stall's worker runs its fallback before its next
+    // poll, so once the Processes have terminated every such fallback has
+    // been checked and counted (the VM-wide counter only in a checked
+    // build; the marking log's in every build, read after the run).
+    let seen = d.waitProgress("seen", quiet: quiet) {
+        rt.vm.liveProcessCount == 0 || (rt.vm.stallLog?.all.justified ?? 0) >= fullHeapStalls
+            || (broken && d.markingNow().unjustifiedFallbacks > 0)
+    }
+    #expect(seen, "\(d.full("fail"))")
+    for p in ps { rt.vm.terminate(p) }
+    #expect(d.waitProgress("terminated", quiet: quiet) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
+    d.end()
     let c = rt.marking
+    let tally = rt.vm.stallLog?.all ?? StallTally()
     for p in ps { rt.vm.release(p) }
     let v = rt.vm.counters[.unjustifiedFallbacks]
     rt.stop(verifyHeap: false)
-    return (c.unjustifiedFallbacks, v)
+    return (c, v, tally)
 }
 
 @Test func theRunningCycleDoesNotJustifyAFallback() throws {
-    let (u, v) = try fullHeapUnjustified(broken: false)
-    #expect(u == 0 && v == 0)
-    let (bu, _) = try fullHeapUnjustified(broken: true)
-    #expect(bu >= 1, "broken variant: unjustified \(bu)")
+    let endBody = bodyTimer("theRunningCycleDoesNotJustifyAFallback")
+    defer { endBody() }
+    let (c, v, t) = try fullHeapUnjustified(broken: false)
+    #expect(c.unjustifiedFallbacks == 0 && v == 0, "\(c)")
+    // The claim is about fallbacks that stalls led to: there were some.
+    #expect(t.justified >= 1 && c.fallbacksByStall >= 1, "no justified stall's fallback: \(t) \(c)")
+    let (bc, _, _) = try fullHeapUnjustified(broken: true)
+    #expect(bc.unjustifiedFallbacks >= 1, "broken variant: unjustified \(bc.unjustifiedFallbacks)")
 }
 
 /// The entry table runs out under the ring (a table of 160 000 entries);
@@ -556,6 +679,8 @@ private func entriesGate(broken: Bool) throws -> (MarkingCounters, StallLog?, UI
 }
 
 @Test func anEntryStallGateThatIgnoresTheTableFallsBackUnjustified() throws {
+    let endBody = bodyTimer("anEntryStallGateThatIgnoresTheTableFallsBackUnjustified")
+    defer { endBody() }
     let (c, s, v) = try entriesGate(broken: false)
     #expect((s?.entries.count ?? 0) > 0 && c.unjustifiedFallbacks == 0 && v == 0, "\(String(describing: s?.entries)) \(c)")
     let (bc, _, bv) = try entriesGate(broken: true)

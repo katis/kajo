@@ -550,6 +550,12 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
             if rt.vm.runMain(budgetNs: 2_000_000).slices == 0 { usleep(200) }
         }
     }
+    let wait0 = now()
+    defer {
+        if config == .slowedMarker {
+            print("stall-diag random slowedMarker seed=\(p.seed) s=\(String(format: "%.1f", Double(now() &- wait0) / 1e9))")
+        }
+    }
     guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
         Issue.record("seed \(p.seed) \(config): did not finish (stops \(rt.vm.counters.stops), scavenges \(rt.vm.nurseryCounters.scavenges), collections \(rt.image.om.counters.collections))")
         rt.vm.terminateAll()
