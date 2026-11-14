@@ -147,8 +147,17 @@ extension Machine {
     /// pinned, read-only) and put it in its bucket, growing the bucket.
     private func insertSymbol(_ o: Oop, hash h: Int64, roots: [Oop]) -> Oop {
         let table = unsafe state.pointee.symbolTable
-        let again = om.symbolLookup(table, hash: h) { om.sameBytes($0, o) }
-        if again != .none { return again }
+        // Symbol interning, the brief's suspected hole (confirmed): the
+        // Symbol found here was interned by another worker after this
+        // worker's lookup missed and may be a snapshot entry held only by
+        // the bucket's weak slot; it is handed on, so it goes through the
+        // keep-alive barrier like every weak read that hands its value on.
+        let again = om.symbolLookupSlot(table, hash: h) { om.sameBytes($0, o) }
+        if again.symbol != .none {
+            let noKeepAlive = unsafe workerOf(state).pointee.vm.map { unsafe $0.pointee.config.testSwitches.internNoKeepAlive } ?? false
+            if !noKeepAlive { unsafe keepAliveRead(state, again.bucket, again.slot, again.symbol) }
+            return again.symbol
+        }
         let ctx = unsafe state.pointee.context
         let n = Int(om.count(of: o))
         guard let sym = om.allocateBytes(ctx, classIndex: WellKnown.symbol, count: n, extraRoots: roots) else {

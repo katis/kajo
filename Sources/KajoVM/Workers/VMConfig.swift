@@ -132,6 +132,10 @@ struct VMTestSwitches: Sendable {
     /// (`slowPeek:`) runs only when a test sets this; in every other VM it
     /// fails, so no program reads a slot through it.
     var slowPeek = false
+    /// Symbol interning without a stop (docs/modules/symbol-interning.md):
+    /// the broken variant in which the second lookup hands its Symbol on
+    /// with no keep-alive barrier.
+    var internNoKeepAlive = false
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no

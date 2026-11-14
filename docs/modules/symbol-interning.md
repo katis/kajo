@@ -1,7 +1,7 @@
 # Symbol interning without a stop
 
 Status: briefed 2026-11-13 (the owner, the same day: "do it after
-gate-speed"). Not built.
+gate-speed"). Built 2026-11-15 ("As built" below).
 
 ## What it is
 
@@ -270,3 +270,160 @@ measurement at a new worker count measures everything.
 
 None at the brief. The table's shape, if part 1 finds the scan is the
 larger cost, comes back as one.
+
+## As built
+
+Built 2026-11-15 on master from 9c5e984, the toolchain first on PATH
+swift.org's 6.4.2 through swiftly (`~/.swiftly/bin`, as
+`~/kajo-scratch/stall-tests/check/env.txt`). Raw files are under
+`~/kajo-scratch/symbol-interning/` (`p1/` part 1, `hole/`, `model/`,
+`p4/` part 4, `check/` the gates); every number below names its file.
+
+### Part 1: what was measured
+
+**The `intern` stop kind** (6361677): a new Symbol's stop is its own
+kind in the stop records and in `stopsByKind`, and the run line carries
+`internStops`, `internStopNs` and `internTtspNs` as totals (the stop log
+is a ring of 65 536 records and a run makes up to 285 000 intern stops)
+and `symbolsInterned`. Kept as instrumentation (after part 2 the kind
+never occurs; the counters read 0 in every row).
+
+**The matrix** (`p1/matrix-raw.txt`, summary `p1/matrix-summary.md`,
+script `p1/matrix.sh`): `collections` and `collections-dict` at 1, 2, 4
+and 8 workers, interpreted and native (each image's own module, `kajo
+aot` and `clang -O2`), five interleaved rounds on the mini, every run at
+thermal nominal, checksums equal, the aligned release build of 6361677.
+Medians (range):
+
+| program | engine | workers | wall ms | intern stops | pause mean µs | ttsp mean µs | parked worker-s | cache misses M | cache flushes M |
+|---|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| collections | interp | 1 | 4352 (4333-4379) | 200 000 | 0.7 | 0.0 | 0.0 | 2.8 | 0.2 |
+| collections | interp | 2 | 5842 (5815-5868) | 200 000 | 5.2 | 3.7 | 1.5 | 4.1 | 0.4 |
+| collections | interp | 4 | 8437 (8381-8723) | 200 010 | 15.6 | 13.4 | 10.4 | 7.7 | 0.8 |
+| collections | interp | 8 | 32 484 (32 292-32 758) | 268 903 | 90.7 | 85.0 | 165.8 | 14.5 | 2.2 |
+| collections | native | 1 | 2329 (2305-2360) | 200 000 | 0.7 | 0.0 | 0.0 | 2.8 | 0.2 |
+| collections | native | 2 | 3817 (3808-3841) | 200 000 | 5.5 | 3.9 | 1.5 | 4.2 | 0.4 |
+| collections | native | 4 | 8131 (6365-8308) | 285 795 | 15.8 | 13.6 | 15.1 | 8.6 | 1.1 |
+| collections | native | 8 | 31 520 (31 176-31 736) | 280 296 | 91.1 | 85.2 | 174.1 | 14.3 | 2.2 |
+| collections-dict | interp | 1 | 1601 (1589-1624) | 200 000 | 0.7 | 0.0 | 0.0 | 2.8 | 0.2 |
+| collections-dict | interp | 8 | 30 059 (29 776-30 351) | 272 657 | 91.0 | 85.2 | 169.2 | 14.6 | 2.2 |
+| collections-dict | native | 1 | 1139 (1136-1157) | 200 000 | 0.7 | 0.0 | 0.0 | 2.8 | 0.2 |
+| collections-dict | native | 8 | 30 584 (30 413-30 736) | 283 833 | 91.1 | 85.3 | 176.6 | 14.3 | 2.3 |
+
+(2 and 4 workers of `collections-dict` are in the summary file.) The
+pause percentiles over the ring (all stop kinds, the intern stops nearly
+all of them) are p50 0.001 / p99 0.001 ms at 1 worker and 0.091 / 0.138
+ms at 8; the ring's longest intern stop 0.22 to 0.35 ms, its last parker
+a background worker parked at a poll (`w4/poll`, `w7/poll`; once
+`w8/stopper`, a worker that was itself asking for an intern stop). Every
+worker runs the whole program, so 8 workers do 8 times the work: the
+sends are 57.1 M at 1 worker and 456.8 M at 8. `symbolsInterned` is
+200 000 in every row: of 268 903 stops at 8 workers 68 903 found the
+Symbol already inserted inside the stop (another worker's stop came
+first). At 8 workers 24.4 s of the 32.5 are intern stops (268 903 x
+90.7 µs), and 166 of 260 worker-seconds are parked: the brief's numbers
+reproduce.
+
+**The flush's share** (`p1/cheat-raw.txt`, the same runs under the
+cheating build, which bumps no epoch): the method cache misses
+are 2.80 M against 1.20 M at 1 worker and 14.5 M against 9.6 M at 8, so
+the stop's flush costs about 1.6 M extra misses per 200 000 interns
+(eight per intern); at 1 worker the stop and its flush together are
+4350 against 4165 ms (4 percent), at 8 workers the flush is noise
+beside the stop.
+
+**The lookup alone by table size** (`p1/lookup/UndefinedObject.extension.st`,
+run at 1 worker, `p1/lookup-raw.txt` holds the Transcript lines and the
+run line): 200 000 hits (`asSymbol` on a String copy, primitive 129's
+fast path) and 200 000 misses (`Symbol lookup:` of bytes never
+interned, primitive 135) at each table size, the loop's own cost
+(`yourself`) beside them:
+
+| Symbols in the table | loop ns | hit ns | miss ns | Symbols per bucket (mean) |
+|--:|--:|--:|--:|--:|
+| 3 140 | 34 | 80 | 75 | 3 |
+| 12 140 | 32 | 109 | 86 | 12 |
+| 102 140 | 32 | 245 | 195 | 100 |
+| 1 002 140 | 32 | 4443 | 2521 | 979 |
+
+A hit compares the count of every Symbol before it in the bucket and a
+miss of every Symbol in it; each comparison is a slot load, an entry
+(state word) load and a header load, so a bucket of 979 is about 2900
+dependent loads, most of them misses at a million Symbols. At the 200 000
+Symbols of `collections` a bucket holds about 195 and a hit costs about
+0.3 µs; the program's 600 000 `asSymbol` per worker cost about 0.15 s of
+its 1.6 s (dict) at 1 worker. The scan is not the cost that matters
+here (the stop is, by two orders of magnitude at 8 workers), but at a
+million Symbols it is 4.4 µs a hit: an open question below, not a
+change made here (rule 9).
+
+**The cheating build** (never committed; `p1/cheat.py` applied to a
+`git archive` of 6361677 in `cheat-src/`, built into `build-cheat/`,
+removed before the hand-back): the intern stop replaced by one global
+mutex around the same insert. What was switched off to make that safe
+enough to time: the insert's allocation can fall back to a full
+collection with no stop, so both builds ran with `--heap 3072` (8192
+is past the 4 GiB address limit, `p1/cheat-raw.txt`'s first attempt),
+and every cheating line reads `fullCollections=0`, `collections=0`;
+nothing flushes the method caches (no stop, no epoch); the second
+lookup has no keep-alive barrier (the hole below; the runs' marking
+cycles found nothing missed, which proves nothing). Three interleaved
+rounds against the starting build with the same heap
+(`p1/cheat-raw.txt`, summary `p1/cheat-summary.md`):
+
+| program | engine | 1 worker ms | 8 workers ms | 8 / 1 | starting build 8 / 1 |
+|---|---|--:|--:|--:|--:|
+| collections | interp | 4165 | 4847 | 1.16 | 7.54 (32 820 / 4350) |
+| collections | native | 2163 | 2844 | 1.31 | 13.5 (31 774 / 2346) |
+| collections-dict | interp | 1422 | 2002 | 1.41 | 18.8 |
+| collections-dict | native | 989 | 1642 | 1.66 | 26.6 |
+
+So one global lock with no stop already brings `collections` under the
+bar's 1.5 in both engines: the ceiling is near the 1-worker time and the
+module does not need a lock per bucket; part 2 builds the one lock. The
+dictionary part alone, natively, is 1.66: its 8 workers intern the same
+200 000 Symbols in step, and the extra half second is the serialised
+inserts and allocation of eight times the Strings; it is not the bar's
+row.
+
+**Other operations of the same shape** (`p1/others-*/`,
+`p1/others-raw.txt`, 1 and 8 workers, the starting build): `asSymbol`
+on the bytes of an existing Symbol, 1 000 000 times: 58.8 and 60.2 ms,
+0 stops (a hit never stops); `Symbol lookup:` of bytes never interned,
+1 000 000 times: 46.6 and 51.6 ms, 0 stops (primitive 135 never
+inserts); `perform:` with a selector made by `asSymbol` from a String,
+1 000 000 times: 82.9 and 81.8 ms, 0 stops, and `perform:` with a String
+is an Error (primitive 89 fails, `perform: needs a Symbol`), no intern;
+`Symbol new` and `Symbol basicNew: 3`, 100 000 times each: every one an
+Error (`shouldNotImplement`, and the instantiation primitive refuses
+Symbol), 0 stops, so no program makes a Symbol outside the table. The
+operations a program can loop on that still stop are the ones the brief
+keeps (installing a method, defining a class) and the walks of
+primitives 167 to 170 (one stop each by design); none is in a
+benchmark's loop.
+
+**What part 1 decided.** The brief held: the stop is the cost, a single
+lock is enough (the cheating build's ceiling, 1.16 and 1.31), the scan
+is the next cost only at a million Symbols. One deviation from the
+candidate: a bucket with no hole is grown before the Symbol is made
+(the candidate made the Symbol and then grew), so no Symbol is held
+across the bucket's allocation, a poll at which an instance walk could
+have answered a Symbol not yet in the table.
+
+### The suspected hole: real, fixed first
+
+`Tests/KajoVMTests/ObjectModel/SymbolInterningTests.swift`,
+`aSymbolTheSecondLookupFindsDuringMarkingIsKeptAlive`: a Process
+interns `zzHole` and drops it; a scavenge, `startCycle` and a mark step
+scan the holder H, the table and the bucket but not the Symbol (held
+only weakly); the host worker then runs `Machine.internSlow` alone (the
+schedule in which its lock-free lookup missed just before another
+worker's insert, no switch in the fast path) and stores the answer into
+H; the final mark follows. On the code of 6361677 (the intern stop) it
+fails: `missed 1` (`hole/before-fix.txt`: "Expectation failed: missed
+== 0 && alive ... missed 1"). The fix is the keep-alive barrier on the
+second lookup (`keepAliveRead` on the slot it read), with the test
+switch `internNoKeepAlive` as the broken variant the test also runs;
+after it the test passes, with the bucket-growth and weak-symbol tests
+beside it (`hole/after-fix.txt`). The fix came in its own commit before
+the protocol, on the stop-based insert, and the protocol keeps it.
