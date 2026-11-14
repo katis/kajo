@@ -127,11 +127,14 @@ extension Machine {
         return internSlow(o, h)
     }
 
+    /// The slow path (internal for the tests, which call it from the host
+    /// worker to force the schedule in which the lock-free lookup missed).
     @inline(never)
-    private func internSlow(_ o: Oop, _ h: Int64) -> Oop {
+    func internSlow(_ o: Oop, _ h: Int64) -> Oop {
         var result = Oop.none
         if let vm = unsafe workerOf(state).pointee.vm {
             unsafe stopWorld(vm, workerOf(state), retry: true, keeping: [o]) { stop in
+                unsafe markStop(vm, .intern)
                 result = insertSymbol(o, hash: h, roots: stop.roots() + [o])
             }
         } else {

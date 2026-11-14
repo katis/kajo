@@ -631,6 +631,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             c.primitiveCalls &+= x.primitiveCalls; c.primitiveFailures &+= x.primitiveFailures
             c.specialSendFallbacks &+= x.specialSendFallbacks; c.errors &+= x.errors
             c.safepointPolls &+= x.safepointPolls; c.collectionsTriggered &+= x.collectionsTriggered
+            c.symbolsInterned &+= x.symbolsInterned
         }
         return c
     }

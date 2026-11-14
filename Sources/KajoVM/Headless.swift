@@ -429,12 +429,12 @@ public enum Headless {
             ("sends", c.sends), ("cacheMisses", c.cacheMisses), ("cacheFlushes", c.cacheFlushes),
             ("primitiveCalls", c.primitiveCalls), ("primitiveFailures", c.primitiveFailures),
             ("specialSendFallbacks", c.specialSendFallbacks), ("errors", c.errors),
-            ("safepointPolls", c.safepointPolls), ("collectionsTriggered", c.collectionsTriggered),
+            ("safepointPolls", c.safepointPolls), ("symbolsInterned", c.symbolsInterned), ("collectionsTriggered", c.collectionsTriggered),
             ("collections", m.collections), ("compactions", m.compactions), ("allocations", m.allocations),
             ("allocatedBytes", m.allocatedBytes), ("weakSlotsNiled", m.weakSlotsNiled), ("ephemeronsQueued", m.ephemeronsQueued),
         ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
-                              "stopperQoSRaises"].contains($0.name) },
+                              "stopperQoSRaises", "internStops", "internStopNs", "internTtspNs"].contains($0.name) },
         report: report)
     }
 }

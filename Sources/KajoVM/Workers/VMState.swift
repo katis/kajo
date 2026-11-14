@@ -194,6 +194,10 @@ enum StopKind: UInt8, Sendable {
     /// The discoverability follow-up: primitives 167 and 168 walk old space
     /// for instances (ObjectModel/InstancePrimitives.swift).
     case instances
+    /// Symbol interning without a stop, part 1 (docs/modules/symbol-interning.md):
+    /// a new Symbol inserted into the symbol table (`Machine.internSlow`),
+    /// counted in `other` before.
+    case intern
 }
 
 struct StopRecord: Sendable {
@@ -345,6 +349,10 @@ enum Counter: Int, CaseIterable {
     /// The review fixes (item 24): saves refused because a Process had an
     /// interrupt or a terminate request still to run.
     case snapshotsRefusedPending
+    /// Symbol interning without a stop, part 1: intern stops, their pause
+    /// and time to safepoint in all (the stop log is a ring and a run makes
+    /// hundreds of thousands).
+    case internStops, internStopNs, internTtspNs
 }
 
 /// A snapshot of the counters.

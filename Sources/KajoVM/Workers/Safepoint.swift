@@ -229,6 +229,7 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
         timeToSafepointNs: t1 &- tr, pauseNs: t2 &- tr, slowest: slowest, requester: w.pointee.index, kind: sp.pointee.kind,
         atNs: tr, beforeRequestNs: tr &- t0, collectionsOpen: collectionsOpen, slowestVia: slowestVia,
         parkedFromWaits: fromWaits, words: sp.pointee.words)
+    let kind = unsafe sp.pointee.kind
     unsafe sp.pointee.kind = .other
     unsafe sp.pointee.words = 0
     unsafe sp.pointee.stopCount = i &+ 1
@@ -244,6 +245,11 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
     unsafe vm.count(.stopNs, t2 &- tr)
     unsafe vm.count(.timeToSafepointNs, t1 &- tr)
     unsafe vm.count(.stopRequestWaitNs, tr &- t0)
+    if kind == .intern {
+        unsafe vm.count(.internStops)
+        unsafe vm.count(.internStopNs, t2 &- tr)
+        unsafe vm.count(.internTtspNs, t1 &- tr)
+    }
     return true
 }
 
