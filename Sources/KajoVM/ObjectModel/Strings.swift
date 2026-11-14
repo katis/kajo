@@ -149,13 +149,13 @@ extension Machine {
     @inline(never)
     func internSlow(_ o: Oop, _ h: Int64) -> Oop {
         let vm = unsafe workerOf(state).pointee.vm
-        let sw = vm.map { unsafe $0.pointee.config.testSwitches } ?? VMTestSwitches()
+        let sw = unsafe vm.map { unsafe $0.pointee.config.testSwitches } ?? VMTestSwitches()
         let table = unsafe state.pointee.symbolTable
         let n = Int(om.count(of: o))
         while true {
             if om.symbolSlot(table, hash: h) == nil {
                 // A hint read without the lock; the growth checks under it.
-                if !growBucket(vm, table, h, keeping: o) { return .none }
+                if unsafe !growBucket(vm, table, h, keeping: o) { return .none }
                 continue
             }
             let sym = allocateOld(WellKnown.symbol, count: n, bytes: true, keeping: o, softFailure: true)
@@ -163,12 +163,12 @@ extension Machine {
             if !sw.internPublishBeforeFill { copyBytes(o, 0, into: sym, 0, n) }
             om.pinForGood(sym)
             om.setReadOnly(sym, true)
-            let t0 = internLock(vm)
+            let t0 = unsafe internLock(vm)
             if !sw.internNoSecondLookup {
                 let f = om.symbolLookupSlot(table, hash: h) { om.sameBytes($0, o) }
                 if f.symbol != .none {
                     if !sw.internNoKeepAlive { unsafe keepAliveRead(state, f.bucket, f.slot, f.symbol) }
-                    internUnlock(vm, t0) { unsafe $0.pointee.madeForNothing &+= 1 }
+                    unsafe internUnlock(vm, t0) { unsafe $0.pointee.madeForNothing &+= 1 }
                     discardSymbol(sym)
                     return f.symbol
                 }
@@ -182,11 +182,11 @@ extension Machine {
                     atomicMemoryFence(ordering: .releasing)
                     store(b, i, sym, .symbolTable)
                 }
-                internUnlock(vm, t0) { unsafe $0.pointee.inserted &+= 1 }
+                unsafe internUnlock(vm, t0) { unsafe $0.pointee.inserted &+= 1 }
                 unsafe state.pointee.counters.symbolsInterned &+= 1
                 return sym
             }
-            internUnlock(vm, t0) { s in
+            unsafe internUnlock(vm, t0) { s in
                 unsafe s.pointee.madeForNothing &+= 1
                 unsafe s.pointee.bucketFilled &+= 1
             }
@@ -208,9 +208,9 @@ extension Machine {
         guard let size = SymbolTable.grownBucketSize(k) else { return false }
         let nb = allocateOld(WellKnown.weakArray, count: size, bytes: false, keeping: o, softFailure: true)
         if nb == .none { return false }
-        let t0 = internLock(vm)
+        let t0 = unsafe internLock(vm)
         if om.load(table, j) != old {
-            internUnlock(vm, t0) { unsafe $0.pointee.growthRetries &+= 1 }
+            unsafe internUnlock(vm, t0) { unsafe $0.pointee.growthRetries &+= 1 }
             return true
         }
         for x in 0..<k {
@@ -220,7 +220,7 @@ extension Machine {
         }
         atomicMemoryFence(ordering: .releasing)
         store(table, j, nb, .symbolTable)
-        internUnlock(vm, t0) { unsafe $0.pointee.growths &+= 1 }
+        unsafe internUnlock(vm, t0) { unsafe $0.pointee.growths &+= 1 }
         return true
     }
 
@@ -228,7 +228,7 @@ extension Machine {
     /// time it was taken.
     @inline(__always)
     private func internLock(_ vm: UnsafeMutablePointer<VMState>?) -> UInt64 {
-        guard let vm else { return 0 }
+        guard let vm = unsafe vm else { return 0 }
         unsafe lockCounted(vm.pointee.internLock, vm, contended: .internContended, waitNs: .internWaitNs)
         return nanoseconds()
     }
@@ -237,9 +237,9 @@ extension Machine {
     @inline(__always)
     private func internUnlock(_ vm: UnsafeMutablePointer<VMState>?, _ t0: UInt64,
                               _ count: (UnsafeMutablePointer<InternState>) -> Void) {
-        guard let vm else { return }
+        guard let vm = unsafe vm else { return }
         let s = unsafe vm.pointee.intern
-        count(s)
+        unsafe count(s)
         let dt = nanoseconds() &- t0
         unsafe s.pointee.holds &+= 1
         unsafe s.pointee.holdNs &+= dt

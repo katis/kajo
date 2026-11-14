@@ -100,7 +100,7 @@ import Synchronization
 
 /// Symbol interning without a stop: what the inserts did. Under
 /// `internLock`.
-@unsafe struct InternState {
+struct InternState: Sendable {
     /// Symbols stored into the table.
     var inserted: UInt64 = 0
     /// Symbols made for nothing: the second lookup found the bytes
