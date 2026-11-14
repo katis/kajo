@@ -24,5 +24,8 @@ let package = Package(
         // Module 8c: the save's hold on the scheduler (docs/models/save-hold.md).
         .target(name: "SaveHoldModel", dependencies: ["ModelKit"], swiftSettings: optimized),
         .testTarget(name: "SaveHoldModelTests", dependencies: ["SaveHoldModel"]),
+        // Symbol interning without a stop (docs/models/symbol-interning.md).
+        .target(name: "SymbolInterningModel", dependencies: ["ModelKit"], swiftSettings: optimized),
+        .testTarget(name: "SymbolInterningModelTests", dependencies: ["SymbolInterningModel"]),
     ]
 )
