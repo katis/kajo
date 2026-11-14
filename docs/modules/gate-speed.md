@@ -686,6 +686,70 @@ that is wrong). The stand-in is built by Apple's `/usr/bin/clang` now
 (b09d8fc), which finds the SDK by itself. The same PATH failed the first
 final run's three native gates (below).
 
+### The final runs that failed, and why
+
+Three runs of `just check --tier core 3cf22fe` failed before the one
+recorded under "The final gate run":
+
+1. On f9b9390 at 14:07 (`$GS/check-run1/`): every gate that ran passed
+   but `native-golden`, `native-kernel-test` and `native-cc`, which failed
+   at the link (`ld: library 'System' not found`): the restarted agent
+   session's PATH put Homebrew's LLVM first. Stopped during `ab`; every
+   later run sets swiftly first (`env.txt` in each run's directory).
+2. On ba7d92c at 17:23 (`$GS/check-run2/`, 10 157 s): every gate passed
+   but `tsan` and `tsan-load`, each on
+   `PhoneTransportTests.theToolsReconnectAfterADroppedLink`. 94ea552 then
+   gave the tools tests' 60 s `until` five times longer under the
+   sanitizer, which was the wrong answer (see below; reverted in e49f340).
+3. On 94ea552 at 20:22 (`$GS/check-run3/`): `swift-test-load` failed on
+   `AllocationStallTests.aStalledProcessTakesAnInterrupt` and `tsan` on the
+   reconnect test again (after 345 s), and the run was stopped.
+
+#### The reconnect test
+
+`ToolsProbe class>>remoteState` (e49f340) prints the remote client for the
+failure message. Three runs of the compiler bundle alone under the
+sanitizer on e49f340 with five parts (`$GS/reconnect/bundle-{1,2,3}.txt`)
+failed all three, and said:
+
+| run | remote state | reconnects | requests sent again | outage (loss to new session) | answered |
+|---|---|--:|--:|--:|---|
+| 1 | open | 1 | 2 | 24.3 s | the process list, not the hierarchy |
+| 2 | open | 1 | 0 | 31.7 s | neither |
+| 3 | still reconnecting after 60 s | 0 | 0 | none | neither, both still pending |
+
+A request's 30 s timeout counts from its first send and is not re-armed
+when it is sent again, so an outage near 30 s fails it; and in run 3 not
+even the 1 s backoff timer had fired in a minute. Both timers are
+`ClientHost`'s `DispatchQueue.global().asyncAfter` events, so the timers
+themselves were late: the bundle with five kernel VMs running beside it
+starves the global queue's work. Alone under the sanitizer the test passes
+in 94 s (`$GS/reconnect/swiftly-{1,2}.txt`, `brew-1.txt`). The number of
+parts is the lever, measured below.
+
+#### `aStalledProcessTakesAnInterrupt`
+
+Counted under twelve busy loops (`$GS/stall/`):
+
+| what | runs | failed |
+|---|--:|--:|
+| that one test filtered, head (e49f340's VM tests) | 5 | 0 |
+| that one test filtered, `git archive 3cf22fe` | 5 | 0 |
+| the VM bundle, head with the cache (`vm-head-1`, `-2`, `vm-on-3` to `-7`) | 7 | 1 (`aSaveWaitsForAStallAndItsImageLoads`, `vm-head-1.txt`) |
+| the VM bundle, head with `KAJO_NATIVE_CACHE=off` | 2 | 0 |
+| the VM bundle, 3cf22fe | 3 | 0 |
+| `swift-test-load` of the three final runs | 3 | 1 (`aStalledProcessTakesAnInterrupt`, run 3) |
+
+Both failures are allocation-stall tests that wait for a stall to end
+under a marker slowed 16 times (`markerSlowdown`), each past its 120 s
+bound. They never failed filtered, nor on 3cf22fe, nor with the cache off,
+but 2 failures in 10 loaded runs against 0 in 5 is not a cause. The one
+thing of this diff that reaches the VM bundle is the native cache: with it
+the bundle runs in about 750 s instead of 1100 under load, so the native
+random programs' VMs (up to 8 workers each, no longer waiting on clang)
+overlap the slowed-marker tests more densely. Recorded as found, for the
+main session; nothing under `Sources/KajoVM` and no bound was changed.
+
 ## Coverage
 
 (Filled from the final run below.)
