@@ -538,17 +538,29 @@ final class StallDiag {
         c.marking.testSwitches.markerSlowdown = 16
     })
     let ps = (0..<2).map { rt.spawn("ringShort:", [int(Int64($0))]) }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 900 : 300))
+    let d = StallDiag(rt, "idle")
+    // The slowed marker makes the stalls; once one has happened the rings
+    // finish with the marker at full speed, and the wait for them is on
+    // the collector's progress, not a clock (a slowed run to the end took
+    // 455 to 655 s of this body under ThreadSanitizer with the twelve
+    // loops, against the 900 s bound).
+    let quiet: Double = underThreadSanitizer ? 600 : 120
+    #expect(d.wait("stalled", underThreadSanitizer ? 600 : 120) {
+        (rt.vm.stallLog.map { $0.stalledNow > 0 || $0.all.count > 0 } ?? false) || rt.vm.liveProcessCount == 0
+    },
+            "\(d.full("fail"))")
+    d.unslow()
+    #expect(d.waitProgress("rings", quiet: quiet) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     #expect((rt.vm.stallLog?.all.count ?? 0) > 0, "no stall: \(String(describing: rt.vm.stallLog?.all))")
     // The collector finishes the cycles the run started, then idles.
-    _ = eventually(underThreadSanitizer ? 600 : 120) { rt.phase == .idle }
+    _ = d.wait("idle", underThreadSanitizer ? 600 : 120) { rt.phase == .idle }
     usleep(200_000)
     let m0 = rt.marking.markerWaits, i0 = rt.vm.counters.idleWakeups, y0 = rt.vm.youngCounters.collectorWakeups
     usleep(1_000_000)
     let m = rt.marking.markerWaits &- m0, i = rt.vm.counters.idleWakeups &- i0, y = rt.vm.youngCounters.collectorWakeups &- y0
     #expect(m <= 5 && i <= 5 && y <= 5, "woke in 1 s idle: marker \(m), workers \(i), young collector \(y)")
     let q = rt.spawn("ringShort:", [int(0)])
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 900 : 300))
+    #expect(d.waitProgress("ringAfterIdle", quiet: quiet) { rt.vm.liveProcessCount == 0 }, "\(d.full("fail"))")
     #expect(rt.state(q) == .terminated)
     for p in ps + [q] { rt.vm.release(p) }
     #expect(rt.marking.unjustifiedFallbacks == 0)
