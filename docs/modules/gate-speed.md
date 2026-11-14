@@ -764,6 +764,17 @@ random programs' VMs (up to 8 workers each, no longer waiting on clang)
 overlap the slowed-marker tests more densely. Recorded as found, for the
 main session; nothing under `Sources/KajoVM` and no bound was changed.
 
+The fourth final run failed `swift-test-load` on the same test (638 s),
+so the gates' count is 2 of 4. Six more loaded VM-bundle runs on 228c62f
+with the cache, meant to stop at the first stall failure and sample the
+test process once a minute (`$GS/tools/stall-sample.sh`,
+`$GS/stall/sampled-{1..6}.txt`, `summary-sampled.txt`), all passed, so
+with the cache the loaded bundle failed a stall test in 3 of 16 runs
+(gates 2 of 4, the filtered runs 1 of 13) against 0 of 3 on 3cf22fe and
+0 of 2 with the cache off. No thread samples exist: `sample` refuses the
+test process ("cannot examine process ... try running with sudo", the
+helper is not debuggable without root), and `sudo` is not this agent's.
+
 ## The final gate run
 
 The fourth run, `KAJO_CHECK_OUT=$GS/check scripts/check-tier.sh --tier
