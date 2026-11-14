@@ -1047,3 +1047,121 @@ apps, new-check).
 Not done: no device row has been run with the new fields, so the iPad's
 141 ms is still read from the old field alone; the weekly run of
 2026-11-15 writes the first device rows that have them.
+
+## The stall tests in a dense suite (follow-up, 2026-11-14)
+
+The owner's "fix the stall first": since the gate-speed module made the
+VM bundle denser (its native test cache removes the clang waits), the
+loaded bundle failed a stalled-Process test in 3 of 17 runs, each a 120 s
+wait running out (`aStalledProcessTakesAnInterrupt` in two `swift-test-load`
+gates, `aSaveWaitsForAStallAndItsImageLoads` once), and these tests read
+as taking 460 to 1290 s inside the bundle. Toolchain: swiftly's 6.4.2
+first on PATH, as the gates. Files under
+`~/kajo-scratch/stall-tests/` (`p1/` part 1, `p3/` and `p3-tsan/` part 3,
+`check/` the gates, `qosprobe/` the priority probe).
+
+### Part 1: what the records said
+
+The three tests print a `stall-diag` line every 5 s of each wait (the
+marker thread's CPU and its share of a core since the last line, its
+scheduled and base priority and run state from `thread_info`, the QoS it
+set itself, the phase and cycle, the stalls in progress, the overrides,
+the interrupts, the workers' CPU, the process's threads and the load
+average) and every 30 s and at the wait's end the marking counters
+(`markerSlowSpins` and their seconds among them), the stops by kind with
+their last parker and the cycle records (`StallDiag` in the test file;
+`VM.markerThreadSample`, `stallsNow` and `markingCycleNow` read without a
+stop). A failed wait puts the same text in its expectation. One loaded
+bundle run with the cache on, before any fix (`p1/run1.txt`, passed,
+750 s):
+
+| | alone, unloaded (filtered) | in the loaded bundle |
+|---|--:|--:|
+| marker's share of a core while a stall waits | 0.40 | 0.39 to 0.48 |
+| marker's priority (base / scheduled) | 31 / 31 | 31 / 6 to 31 |
+| a slowed cycle's duration | 3.2 s | 43.5 to 45.8 s |
+| its sweep, wall / marker CPU | 5.7 / 2.7 s | 54.5 to 68.8 / 16.0 to 17.5 s |
+| its mark, marker CPU | 0.28 s | 0.23 to 0.45 s |
+| a justified fallback's full collection (`other` stop) | 1.8 s | 9.7 to 10.5 s |
+| the final mark's stop | 0.19 s | 2.8 to 3.6 s |
+| the body's wait for the request to be served | interrupts 9.0 s | interrupts 8.5 s, terminate 73.8 s, save 78.2 s |
+
+So it is (a), with a twist. The marker is not starved in the sense of
+"gets nothing": it gets about 0.4 of a core, and the stall's override
+works as built. But the override cannot help in this process: a
+command-line process on this Mac caps user-initiated (and
+user-interactive) at priority 31, the priority of the twelve default-QoS
+busy loops and of every other test's workers (`qosprobe/q.c`, run from
+the same shell as the gates: utility 20, default 31, user-initiated 31,
+user-interactive 31). The shells are apps, where user-initiated is 37 and
+beats a default-QoS load; that is why the override helps there. And the
+slowdown is CPU-proportional: the sweep's own CPU grows from about 0.17 s
+to about 1.1 s under the load (efficiency cores, a shared memory system),
+the spin multiplies that by 15, and the share divides the sum, so a cycle
+that takes 3 s alone takes 45 to 70 s in the bundle. A stall waits for a
+cycle begun after it, up to two cycles when one was running, plus the
+fallback's full collection: 90 to 150 s against the 120 s bound. The
+bound was won or lost by where the stall fell in the cycle, not by where
+the rest of the bundle ended.
+
+Not (b): the stops in a test's VM were 10 to 24 over its whole run, the
+test's own polling reads atomics and takes two inspection stops every 30
+s; no stop storm. Not (c): every wait ended once the cycle the stall
+waited on was applied (`stalledNow` 0, then the interrupts or the
+termination in the same 5 s line), and the one failing run of the gates
+recorded no other issue (terminate and `waitAllTerminated` succeeded
+after the interrupts' 120 s). A real program does not meet a wrong
+behaviour here: a stalled worker waits for the collector at whatever
+share of a core the collector gets, which is the rule; in a command-line
+process under a default-QoS load that share is a fair one, not a raised
+one (an open question below).
+
+The 460 to 1290 s were never the tests' own: they are Swift Testing's
+time from a test's start event, and a synchronous test body waits for a
+thread of the cooperative pool that the suite's other blocking tests
+hold. `aSaveWaitsForPendingInterrupts`, a 0.1 s body that runs no
+collector at all, read 408.8 s in the same run; most of the bundle's
+stall and marking tests read the same number to the millisecond in
+earlier runs (`$GS/stall/vm-*.txt`). The body times are printed now
+(`stall-diag <test> end body=`).
+
+3cf22fe: nothing under `Sources/` and none of these tests changed
+between it and d33273d (`git diff --stat 3cf22fe d33273d -- Sources
+Tests` touches only the native cache's tests and support), so it has the
+same race with a less dense bundle (the clang waits); its reported 942
+to 1050 s are the same pool waits. Not rebuilt: the durations say
+nothing, and the mechanism is in code both commits share.
+
+### The fix
+
+In the tests, with one small VM hook. The slowed marker exists in these
+three tests to make the workers stall; what each test then checks (a
+request served at the first poll after the stall) is a wait for the
+collector, and a CPU-proportional slowdown made that wait 16 times the
+collector's work over its share of a core. So the tests now slow the
+marker until their workers stall, make their request while they stall,
+and then set the marker to full speed (`StallDiag.unslow`,
+`VM.setMarkerSlowdown(1)`). For that the factor is an atomic beside the
+marker (`MarkingShared.slowdown`, set from the config at install, read at
+every `markerPoll` and in `markerSlowdownSpin`; `vm.markerSlowdown` reads
+it), since the host may not write the config while the marker reads it.
+Nothing on the allocation fast path, the store path or the dispatch loop
+changed; the marker's poll reads an atomic word instead of a config
+field.
+
+| test | asserted before | asserted after |
+|---|---|---|
+| `aStalledProcessIsTerminated` | a stall in progress within 120 s; with the marker 16 times slower throughout, both Processes terminated within 120 s of the request; 0 unjustified fallbacks | the same, the request made during the stall, the marker at full speed from just after it |
+| `aStalledProcessTakesAnInterrupt` | a stall in progress; the two interrupts run within 120 s of the requests; termination within 120 s | the same, the marker at full speed after the requests |
+| `aSaveWaitsForAStallAndItsImageLoads` | a stall in progress; the saver terminates within 120 s; one image, which loads | the same, the marker at full speed after the saver is spawned |
+| `aSaveWaitsForPendingInterrupts` | (no collector, driven slice by slice) | unchanged: its body is 0.1 s; only its begin and end are printed |
+
+No bound changed (120 s, 600 s under ThreadSanitizer) and no assertion
+was dropped; the ThreadSanitizer slowdown stays 4. What the tests no
+longer exercise is a stall that ends by a slowed cycle; that is
+`aRingLikeLoadStallsInsteadOfFallingBack`, `aSlowedMarkerPacesTheMutator`
+and the random programs' `slowedMarker`, whose assertions do not race a
+clock. There is no broken variant: the change is in what the tests wait
+for, and the starting behaviour is the failure itself (2 of 4 gate runs,
+1 of 13 loaded bundle runs). With it the bodies take 4 to 7 s alone,
+unloaded (from 9 to 12).
