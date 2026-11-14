@@ -408,23 +408,25 @@ Built:
   nothing. `--test <Class>>selector>` (repeatable) selects by exact name,
   so a part names its tests and no glob can catch a neighbour's.
 - `KernelTestParts` lists the kernel image's tests once per test process
-  and splits them into 5 parts: heaviest first, each to the lightest
-  part, weighed by the sanitizer seconds above for the 27 tests of 5 s or
+  and splits them into 2 parts (5 at first; see "The reconnect test"):
+  heaviest first, each to the lightest part, weighed by the sanitizer seconds above for the 27 tests of 5 s or
   more there, 0.32 s for any other test and 150 s for an unknown one
   tagged `<slow>`. The table decides the balance only: a new or renamed
-  test is in a part all the same. Five because the three long tests take
-  a part each and the other 246 fit in two of about 474 sanitizer
-  seconds; more parts add VMs without shortening the longest.
+  test is in a part all the same. Five parts (the three long tests one
+  each, the other 246 in two of about 474 sanitizer seconds) would have
+  made the longest part the longest test, but the measurement below put
+  the count at two parts of about 1460 sanitizer seconds each;
+  `KAJO_KERNEL_TEST_PARTS=<n>` overrides it.
 - `KernelTestPartsTests.theKernelsTestsPassAndTheEventsAreTheProtocol(_:)`
-  is the old test as five cases in a suite without `.serialized`, so they
-  run at the same time; each is a whole run by the event protocol over
+  is the old test as one case per part in a suite without `.serialized`,
+  so they run at the same time; each is a whole run by the event protocol over
   its part with every assertion the old test made (exit 0, all passed, one
   JSON object a line, the kinds a subset of the v1 kinds and the required
   ones present, `gc` among them since every run ends with the gc summary,
   `v == 1`, `ts`, `run.started` first, `started == total`, the test events'
   times sorted), plus that it ran exactly its part's names, each once.
   `total > 100` became `total == names.count` per part; the union's count
-  is asserted by the next test. Each case prints `kernel test part i/5
+  is asserted by the next test. Each case prints `kernel test part i/n
   <outcome> <Class>>selector> <s> s` per test and a summary line, so a
   gate's output names every id with its outcome.
 - `KernelTestPartsTests.theKernelTestPartsAreExactlyTheUnfilteredRun`,
@@ -725,7 +727,19 @@ even the 1 s backoff timer had fired in a minute. Both timers are
 themselves were late: the bundle with five kernel VMs running beside it
 starves the global queue's work. Alone under the sanitizer the test passes
 in 94 s (`$GS/reconnect/swiftly-{1,2}.txt`, `brew-1.txt`). The number of
-parts is the lever, measured below.
+parts is the lever (`$GS/reconnect/summary-parts.txt`, the compiler bundle
+under the sanitizer with `KAJO_KERNEL_TEST_PARTS`):
+
+| parts | runs | the reconnect test failed | compiler bundle s |
+|--:|--:|--:|--:|
+| 5 | 8 (the three final runs' two sanitizer gates, three bundle runs) | 6 | 1033 to 1162 |
+| 3 | 2 | 1 (outage 21.3 s, the hierarchy request timed out) | 1427, 1439 |
+| 2 | 1 | 0 | 1837 |
+| 1 | 1 | 0 | 3149 |
+
+Built: two parts (228c62f). The race itself, a request's timeout counting
+from its first send across a reconnect, is the tools' and is an open
+question.
 
 #### `aStalledProcessTakesAnInterrupt`
 
