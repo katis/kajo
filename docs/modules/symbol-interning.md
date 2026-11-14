@@ -427,3 +427,205 @@ switch `internNoKeepAlive` as the broken variant the test also runs;
 after it the test passes, with the bucket-growth and weak-symbol tests
 beside it (`hole/after-fix.txt`). The fix came in its own commit before
 the protocol, on the stop-based insert, and the protocol keeps it.
+
+### The model
+
+`docs/models/symbol-interning.md` (aba0ad4), built before the protocol's
+code. Claims: one Symbol per byte sequence among what threads hold and
+the table names; lookups read only whole buckets and Symbols; no Symbol
+held is swept; every thread finishes. Three configurations (`sameBytes`,
+`bucketMates`, `growth`), each under the store-buffer model and under
+sequential consistency, hold every claim (8 779 to 43 999 states,
+`~/kajo-scratch/symbol-interning/model/run2.txt`). Each switch off finds
+its violation: no second lookup, claim 1 ("bytes 1 have Symbols [1, 4]");
+publish before fill and relaxed publishing stores, claim 2 ("Symbol 1
+read before its bytes were filled", also through a growth; nothing under
+sequential consistency, so the violation is the store order); no
+keep-alive on the second lookup, on the lock-free hit or on the growth
+copy, claim 3 (the hole's 24-step trace; "the table's bucket names S0,
+which the sweep freed"). Two of the first run's "passes" were modelling
+bugs, written down in the model's doc (`model/run1.txt`): the lock had
+been a full fence, which hid the relaxed store's reordering, and the
+model's lookup stopped at its match and never saw the hole behind it.
+
+### The protocol (part 2)
+
+`Sources/KajoVM/ObjectModel/Strings.swift`: `Machine.intern` is
+unchanged (the lock-free lookup, the weak read barrier on a hit, then
+`internSlow`). `internSlow` no longer stops the world:
+
+1. If the bucket of the hash has no hole (a hint read without the lock),
+   `growBucket` first: the larger WeakArray is allocated old
+   (`allocateOld`, a poll, with the allocation stalls; the String held),
+   then under the lock the table must still name the bucket measured
+   (else the new one is garbage, `internGrowthRetries`), the old slots
+   are copied each through `keepAliveRead`, a release fence, and the
+   new bucket is stored into the table. Then again from the top. The
+   brief's candidate made the Symbol first; growing first means no
+   Symbol is ever held across an allocation (an instance walk in a stop
+   at that poll could have answered a Symbol not in the table).
+2. The Symbol is made whole with no lock held: `allocateOld` of a byte
+   object of class Symbol (old at birth, `softFailure`, the String
+   held), its bytes copied, `pinForGood`, `setReadOnly`, all by the
+   allocating worker before the oop escapes.
+3. Under `VMState.internLock` (a mutex beside `VMState.intern`, the
+   counters it guards, never inside them): the bytes are looked up
+   again; a hit goes through `keepAliveRead` (the hole's fix, kept) and
+   the Symbol made is turned into a String (`discardSymbol`: its class
+   index swapped with one relaxed atomic store; nobody saw it and no
+   poll passed since it was made, so no walk can answer two Symbols of
+   the same bytes) and counted `internMadeForNothing`. Else a hole of the
+   bucket (`symbolSlot`) gets the Symbol: a release fence, then the
+   ordinary barriered store (SATB, the post-store check's seq_cst store
+   and reload, the insertion barrier). A bucket filled between the hint
+   and the lock: let go, discard, again (`internBucketFilled`).
+4. The critical section holds no allocation, no poll, no stall and no
+   park: two lookups over at most 4095 slots, at most 4095 copied slots
+   and three stores. Its length is measured (`internHoldMeanUs`,
+   `internHoldMaxUs`), its contended acquisitions and their wait counted
+   (`internContended`, `internWaitNs`).
+
+Failure is a value as before: no room or a bucket at 4095 answers
+`.none`, primitive 129 fails and the kernel's `asSymbol` reports
+`primitiveFailed`. Without a VM (the module 2 interpreter, one thread)
+the same code runs with no lock.
+
+**What the protocol keeps** (the brief's nine rules):
+
+1. One Symbol per byte sequence: every insert looks again under the one
+   lock that every insert holds; a Symbol made for nothing becomes a
+   String before anything can see it. Model claim 1; tests
+   `workersInterningTheSameBytesAtOnceGetOneSymbol` (until a race was
+   seen, `madeForNothing > 0`), `withoutTheSecondLookupTwoSymbolsOfTheSameBytesAppear`
+   (switch `internNoSecondLookup`), the verifier.
+2. Whole reads: the fill, the pin and the read-only bit come before the
+   release fence and the publishing store, and a new bucket's nils and
+   copies before its table store. Readers' loads are relaxed atomic
+   loads (`ObjectMemory.load`), and every body address is computed from
+   the state word just loaded (the address dependency module 6
+   relies on). The publishing store is the post-store check's seq_cst
+   store followed by its seq_cst reload, so a barrier's load after it
+   never overtakes it (the young-collection model's finding). Model
+   claim 2; test `aLookupNeverReadsASymbolBeforeItIsWhole` (switches
+   `internPublishBeforeFill`, `internPauseUs`).
+3. No Symbol a worker received is swept: both lookups and the growth
+   copy read weak slots through the keep-alive barrier. Model claim 3;
+   tests `aSymbolTheSecondLookupFindsDuringMarkingIsKeptAlive` (switch
+   `internNoKeepAlive`), `aSymbolCopiedIntoAGrownBucketDuringMarkingIsKeptAlive`
+   (marking's `noWeakKeepAlive`), `symbolsDroppedCollectedAndInternedAgainStayUnique`.
+4. Nothing is decided across a poll: the lock is taken after the last
+   allocation of an attempt and let go before the next. So a stop never
+   begins while it is held (a holder runs no poll; a waiter is not
+   parked), a stop whose own work interns finds it free, and a save's
+   hold never meets a half-done insert. Checked at every stop:
+   `verifyInternLockFreeAtStop` (one trylock under `verifyStops`, every
+   test runtime and checked build).
+5. A worker waiting for the lock waits inside the VM, so a stop waits
+   for it; by rule 4 that wait is bounded by the critical sections ahead
+   of it, at most one per other worker. Measured below (part 4:
+   `internHoldMaxUs`).
+6. The collectors, each with what it reads:
+   - *The scavenge and module 7's young collections.* Symbols and
+     buckets are old at birth (`allocateOld`), and the table holds only
+     them, so no store of the insert makes a remembered holder (the
+     insertion barrier runs and finds an old value). The String `o` may
+     be young and moves; it is held through `allocateOld`'s `keeping`
+     and read by entry, never by a raw pointer.
+   - *The marker and the final mark's weak pass.* A Symbol or bucket
+     made while a cycle runs is not a snapshot entry: never swept by that
+     cycle, and the final mark never nils a new bucket's slots, which is
+     why every Symbol the growth copies is kept alive. The weak pass runs
+     in a stop, so it never runs during a copy (rule 4): the marker
+     running concurrently with a copy only traces strong slots and never
+     reads a bucket's weak ones.
+   - *The lazy sweep and the bounded sweep stop.* An entry the sweep
+     frees reaches an allocator only through a stop's apply or
+     `publishSwept`, so the Symbol an allocation answers was free at a
+     pause every worker noted; nothing of the table is swept while the
+     insert holds it (the table is a root, the buckets strongly held by
+     it, a replaced bucket recorded by the SATB barrier).
+   - *The relocator.* Buckets and the table move; every store of the
+     insert is the barriered store with the post-store check, which
+     redoes it after a concurrent move, as every heap store does.
+     Symbols are pinned for good before they are published and never
+     move (the interpreter keeps raw pointers into nothing of a Symbol
+     anyway; its bytes are read by entry).
+   - *The full collection and compaction* run in stops: never during a
+     critical section.
+7. The readers, in one table:
+
+| reader | when | lock | what it reads | how it stays safe |
+|---|---|---|---|---|
+| `Machine.intern` (primitive 129's fast path, `perform:`'s callers, the compiler through 129) | any time | none | table slot, bucket slots, Symbols' counts and bytes | relaxed loads by entry; rule 2's ordering; `weakReadBarrier` on a hit |
+| primitive 135 (`Symbol lookup:`) | any time | none | the same | the same; it inserts nothing |
+| the second lookup and `symbolSlot` in `internSlow` | under the lock | intern | the same | sees every insert (each was made under the lock); `keepAliveRead` on a hit |
+| `growBucket`'s copy | under the lock | intern | the old bucket's slots | `keepAliveRead` per slot; the weak pass cannot run (a stop) |
+| `Image.intern` and `Image.insertSymbol` (loader, image build, module 2's `runToReturn`) | no VM running, or a stop | none | all | no insert runs concurrently: rule 4 |
+| `Image.symbol` (`VM.spawn`'s selector, through `host`) | inside the VM as the host worker | none | the same as a lookup | a lock-free reader; the Symbol is only compared, never stored, so it needs no keep-alive |
+| `ObjectMemory.symbolCount` | tests, the host | none | every bucket | stops or no VM |
+| the snapshot writer and the save (8c) | in the save's stop, behind the scheduler hold | none | the table as an object graph | rule 4: no half-done insert at a stop; discarded Symbols are Strings |
+| the loader (`ImageFile`) | no VM | none | every bucket: Arrays, Symbols, uniqueness | unchanged (rule 9): the table's shape and the image format are the same |
+| the heap verifiers and `verifySymbolTable` | stops | none (trylock for the check) | everything | stops |
+| primitives 167 to 170 (`allInstances`, `pointersTo`) | their own stop | none | every old object | only published Symbols are Symbols: a Symbol made for nothing is a String before any poll, and no Symbol is held across a poll unpublished |
+| `Image.saveImage` after `VM.destroy` | no VM | none | all | no insert |
+
+8. The method cache: a line is (class index, selector entry, method),
+   and a line naming a Symbol exists only while a method dictionary
+   holds that Symbol (only found methods are cached). A Symbol's entry
+   is freed only by the old-space sweep's apply or a full collection,
+   both at a pause; every worker flushes its cache when it notes the
+   pause (`noteEpoch` at a park and at `enterVM`). So no line can name an
+   entry freed and reused: the stop's flush at every intern was never
+   what kept this. Test `aSelectorCollectedAndInternedAgainFindsNoStaleLine`
+   plants a line on worker 1 for a Symbol nothing holds, runs the cycle
+   that frees it, and checks that worker 1's next slice flushed the line
+   and that `perform:` of the bytes interned again does not find the
+   planted method. The young collections that free entries without a
+   pause free only young entries, and no Symbol is young (`Symbol new`
+   and `basicNew:` are errors, part 1).
+9. The table's shape and the image format do not change: the loader's
+   rules are untouched and the image version stays 6.
+
+### Tests, the verifier, the broken variants, the counters (part 3)
+
+`Tests/KajoVMTests/ObjectModel/SymbolInterningTests.swift`; the random
+programs gained an intern step (`Tests/KajoVMTests/Workers/RandomPrograms.swift`,
+case 14: a name of a pool of six every task shares, interned twice from
+two Strings and compared by identity, or a name a Symbol literal holds,
+compared with the literal; the model counts one per step) and run with
+the symbol-table verifier on (`VMConfig.verifySymbols`) in every
+configuration. The verifier (`ObjectMemory.verifySymbolTable`, run by
+`verifySymbolTableAfterInserts` at the first stop after inserts, when
+`verifySymbols` is on): every bucket nil or a WeakArray, every Symbol in
+its hash's bucket, read-only and pinned for good, no two with the same
+bytes; failures go to the object memory's reports and
+`symbolVerifierFailures`. The tests were written with the protocol, not
+before it (a deviation); their evidence is the broken variants below and
+the hole's test, which failed on the code it was written against.
+
+The broken variants, one quoted run each (debug build,
+`~/kajo-scratch/symbol-interning/tests/variants.txt`; every test passes
+because each asserts its variant's failure):
+
+| switch | where the failure is | quoted |
+|---|---|---|
+| `internNoKeepAlive` | the final mark's verifier | "broken variant internNoKeepAlive: the final mark missed 1, the Symbol alive false" |
+| `internNoSecondLookup` | the answers and the symbol-table verifier | "6 byte sequences answered by two Symbols in 8 rounds; 6 verifier failures, first: object memory verifier, symbol table at a stop: two Symbols in the table with the bytes of d7_94; ..." |
+| `internPublishBeforeFill` with `internPauseUs` 20 000 | lock-free lookups of six NUL bytes | "2941 lookups of six NUL bytes answered a Symbol" (skipped under ThreadSanitizer only: bytes written while readers compare them is a data race by construction) |
+
+The correct runs beside them: "same bytes at once: 4 rounds, 1600
+inserted, 17 made for nothing, 10 contended, longest hold 615292 ns" (a
+debug build with every verifier on); the re-interning test, the growth
+test (every size to 4095, the 4096th answered nil by the primitive's
+fallback) and the method-cache test pass. The random programs with the
+intern step: 20 seeds in each of the 23 configurations, none failing
+(`tests/random20.txt`). The rule "a stop never finds the lock held" has
+no switch: its broken variant (a poll inside the critical section) would
+deadlock the stop against the waiter, not fail a check; the verifier is
+its check in every run instead.
+
+Counters on the run line: `internInserted`, `internMadeForNothing`,
+`internBucketFilled`, `internGrowths`, `internGrowthRetries`,
+`internHolds`, `internHoldMeanUs`, `internHoldMaxUs`, `internContended`,
+`internWaitNs`, `symbolVerifies`, `symbolVerifyMs`,
+`symbolVerifierFailures`, and part 1's `internStops` (0 since).

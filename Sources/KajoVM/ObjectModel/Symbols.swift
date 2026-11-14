@@ -1,3 +1,5 @@
+import Darwin
+
 /// Strings and Symbols as the VM sees them (ADR 0009 section 8): byte
 /// objects of UTF-8. A Symbol is an interned String: one object per byte
 /// sequence, found through the symbol table, a pointer object (an Array)
@@ -110,6 +112,46 @@ extension ObjectMemory {
     }
 }
 
+extension ObjectMemory {
+    /// The symbol table's verifier (docs/modules/symbol-interning.md, part
+    /// 3): every bucket nil or a WeakArray; every Symbol in it a used
+    /// Symbol in its hash's bucket, read-only and (`pins`) pinned for good;
+    /// no two Symbols with the same bytes. O(Symbols): run at the pauses
+    /// that follow inserts, never at every stop. World stopped, or no VM.
+    func verifySymbolTable(_ table: Oop, pins: Bool = true) -> [String] {
+        var out: [String] = []
+        var seen = Set<[UInt8]>()
+        let nilObj = nilObject
+        for j in 0..<SymbolTable.buckets {
+            let b = load(table, j)
+            if b == nilObj { continue }
+            guard b.isObject, isUsedReference(b), header(b).classIndex == WellKnown.weakArray else {
+                out.append("symbol table bucket \(j) is not a WeakArray")
+                continue
+            }
+            for i in 0..<Int(count(of: b)) {
+                let s = load(b, i)
+                if s == nilObj { continue }
+                guard s.isObject, isUsedReference(s), header(s).classIndex == WellKnown.symbol, header(s).isBytes else {
+                    out.append("symbol table bucket \(j) slot \(i) holds \(s.raw), not a Symbol")
+                    continue
+                }
+                if pins && !header(s).isPinnedForGood { out.append("Symbol \(s.raw) in bucket \(j) is not pinned for good") }
+                if headerWord(s.raw) & Header.readOnlyBit == 0 { out.append("Symbol \(s.raw) in bucket \(j) is not read-only") }
+                let bytes = self.bytes(of: s)
+                if Int(truncatingIfNeeded: utf8Hash(bytes)) & (SymbolTable.buckets &- 1) != j {
+                    out.append("Symbol \(s.raw) is in bucket \(j), not its hash's")
+                }
+                if !seen.insert(bytes).inserted {
+                    out.append("two Symbols in the table with the bytes of \(String(decoding: bytes, as: UTF8.self))")
+                }
+                if out.count >= 16 { return out }
+            }
+        }
+        return out
+    }
+}
+
 /// The symbol table's shape: an Array of `buckets` slots, each nil or a
 /// WeakArray of Symbols with nil where none is (never used, or collected).
 /// A full bucket is replaced by one twice its size (the old one's symbols
@@ -125,4 +167,42 @@ enum SymbolTable {
         if old >= maxBucket { return nil }
         return old == 0 ? firstBucket : min(2 * old, maxBucket)
     }
+}
+
+// MARK: - the intern lock's verifiers (docs/modules/symbol-interning.md)
+
+/// World stopped: the intern lock is free. Its holder never polls, parks,
+/// stalls or allocates, and a waiter for it is not parked, so no stop can
+/// begin while anyone holds it; a stop that finds it held is the bug
+/// (part 2's rule 4). Every stop when `verifyStops` is on (one trylock).
+func verifyInternLockFreeAtStop(_ vm: UnsafeMutablePointer<VMState>) {
+    if unsafe pthread_mutex_trylock(vm.pointee.internLock) != 0 {
+        unsafe vm.count(.symbolVerifierFailures)
+        unsafe vm.pointee.om.record("intern lock at a stop", ["a stop found the intern lock held"])
+        return
+    }
+    unsafe pthread_mutex_unlock(vm.pointee.internLock)
+}
+
+/// World stopped: the symbol table's verifier, when Symbols were inserted
+/// since it last ran (`VMConfig.verifySymbols`).
+func verifySymbolTableAfterInserts(_ vm: UnsafeMutablePointer<VMState>) {
+    let s = unsafe vm.pointee.intern
+    unsafe pthread_mutex_lock(vm.pointee.internLock)
+    let inserted = unsafe s.pointee.inserted
+    let due = unsafe inserted != s.pointee.verifiedAt
+    unsafe pthread_mutex_unlock(vm.pointee.internLock)
+    guard due else { return }
+    let t0 = nanoseconds()
+    let image = unsafe vm.pointee.image
+    let problems = unsafe vm.pointee.om.verifySymbolTable(image.symbolTable, pins: image.pinsForGood)
+    let dt = nanoseconds() &- t0
+    unsafe pthread_mutex_lock(vm.pointee.internLock)
+    unsafe s.pointee.verifiedAt = inserted
+    unsafe s.pointee.verifies &+= 1
+    unsafe s.pointee.verifyNs &+= dt
+    unsafe pthread_mutex_unlock(vm.pointee.internLock)
+    if problems.isEmpty { return }
+    unsafe vm.count(.symbolVerifierFailures, UInt64(problems.count))
+    unsafe vm.pointee.om.record("symbol table at a stop", problems)
 }

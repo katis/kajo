@@ -1,3 +1,7 @@
+import Darwin
+import Synchronization
+
+
 // The VM side of the one String (ADR 0009 section 8, kernel.md "String"):
 // a String is a byte object of valid UTF-8, a Symbol an interned one.
 // Positions are 1-based byte offsets valid only at scalar boundaries;
@@ -113,9 +117,10 @@ extension Machine {
     }
 
     /// The Symbol with the bytes of text `o`, interned if new: the lookup
-    /// reads the table and compares bytes in place; a new Symbol is made
-    /// and inserted with the world stopped (looked up again inside the
-    /// stop), so two workers never intern the same bytes twice.
+    /// reads the table without a lock and compares bytes in place; a miss
+    /// makes the Symbol and inserts it under the intern lock, looked up
+    /// again there, so two workers never intern the same bytes twice
+    /// (`internSlow`; before this module, in a stop).
     func intern(_ o: Oop) -> Oop {
         if om.classIndex(of: o) == WellKnown.symbol { return o }
         let h = om.byteObjectHash(o)
@@ -127,68 +132,129 @@ extension Machine {
         return internSlow(o, h)
     }
 
-    /// The slow path (internal for the tests, which call it from the host
-    /// worker to force the schedule in which the lock-free lookup missed).
+    /// Symbol interning without a stop (docs/modules/symbol-interning.md,
+    /// part 2; the model in docs/models/symbol-interning.md). The lock-free
+    /// lookup missed. A bucket with no hole is grown first. The Symbol is
+    /// made whole before anyone can see it: old at birth through
+    /// `allocateOld` (a poll, the allocation stalls; `o` held), its bytes,
+    /// pinned for good, read-only. Then under the intern lock, a critical
+    /// section with no allocation, poll, stall or park in it: the bytes are
+    /// looked up again (a hit goes through the keep-alive barrier, and the
+    /// Symbol made becomes a String nobody saw), else the Symbol is stored
+    /// into a hole of its bucket (a release fence, then the store's own
+    /// seq_cst store and post-store check). A bucket filled meanwhile: let
+    /// go, make it a String, grow, again. Answers `.none` (the primitive
+    /// fails and the kernel reports it, as before) when the heap has no
+    /// room or the bucket is full at `SymbolTable.maxBucket`.
     @inline(never)
     func internSlow(_ o: Oop, _ h: Int64) -> Oop {
-        var result = Oop.none
-        if let vm = unsafe workerOf(state).pointee.vm {
-            unsafe stopWorld(vm, workerOf(state), retry: true, keeping: [o]) { stop in
-                unsafe markStop(vm, .intern)
-                result = insertSymbol(o, hash: h, roots: stop.roots() + [o])
+        let vm = unsafe workerOf(state).pointee.vm
+        let sw = vm.map { unsafe $0.pointee.config.testSwitches } ?? VMTestSwitches()
+        let table = unsafe state.pointee.symbolTable
+        let n = Int(om.count(of: o))
+        while true {
+            if om.symbolSlot(table, hash: h) == nil {
+                // A hint read without the lock; the growth checks under it.
+                if !growBucket(vm, table, h, keeping: o) { return .none }
+                continue
             }
-        } else {
-            result = insertSymbol(o, hash: h, roots: rootsForPause() + [o])
+            let sym = allocateOld(WellKnown.symbol, count: n, bytes: true, keeping: o, softFailure: true)
+            if sym == .none { return .none }
+            if !sw.internPublishBeforeFill { copyBytes(o, 0, into: sym, 0, n) }
+            om.pinForGood(sym)
+            om.setReadOnly(sym, true)
+            let t0 = internLock(vm)
+            if !sw.internNoSecondLookup {
+                let f = om.symbolLookupSlot(table, hash: h) { om.sameBytes($0, o) }
+                if f.symbol != .none {
+                    if !sw.internNoKeepAlive { unsafe keepAliveRead(state, f.bucket, f.slot, f.symbol) }
+                    internUnlock(vm, t0) { unsafe $0.pointee.madeForNothing &+= 1 }
+                    discardSymbol(sym)
+                    return f.symbol
+                }
+            }
+            if let (b, i) = om.symbolSlot(table, hash: h) {
+                if sw.internPublishBeforeFill {
+                    store(b, i, sym, .symbolTable)
+                    if sw.internPauseUs > 0 { usleep(UInt32(truncatingIfNeeded: sw.internPauseUs)) }
+                    copyBytes(o, 0, into: sym, 0, n)
+                } else {
+                    atomicMemoryFence(ordering: .releasing)
+                    store(b, i, sym, .symbolTable)
+                }
+                internUnlock(vm, t0) { unsafe $0.pointee.inserted &+= 1 }
+                unsafe state.pointee.counters.symbolsInterned &+= 1
+                return sym
+            }
+            internUnlock(vm, t0) { s in
+                unsafe s.pointee.madeForNothing &+= 1
+                unsafe s.pointee.bucketFilled &+= 1
+            }
+            discardSymbol(sym)
         }
-        return result
     }
 
-    /// World stopped (or no VM): look up again, else make the Symbol (old,
-    /// pinned, read-only) and put it in its bucket, growing the bucket.
-    private func insertSymbol(_ o: Oop, hash h: Int64, roots: [Oop]) -> Oop {
-        let table = unsafe state.pointee.symbolTable
-        // Symbol interning, the brief's suspected hole (confirmed): the
-        // Symbol found here was interned by another worker after this
-        // worker's lookup missed and may be a snapshot entry held only by
-        // the bucket's weak slot; it is handed on, so it goes through the
-        // keep-alive barrier like every weak read that hands its value on.
-        let again = om.symbolLookupSlot(table, hash: h) { om.sameBytes($0, o) }
-        if again.symbol != .none {
-            let noKeepAlive = unsafe workerOf(state).pointee.vm.map { unsafe $0.pointee.config.testSwitches.internNoKeepAlive } ?? false
-            if !noKeepAlive { unsafe keepAliveRead(state, again.bucket, again.slot, again.symbol) }
-            return again.symbol
+    /// Replace the full bucket of hash `h` by one twice its size: allocated
+    /// (old, nil) before the lock, filled and published under it if the
+    /// table still names the bucket measured, thrown away otherwise. The
+    /// copy reads weak slots and hands their Symbols on to a bucket born
+    /// after any snapshot (the final mark never nils its slots): every read
+    /// goes through the keep-alive barrier. False: no room, or the bucket
+    /// is at its largest.
+    private func growBucket(_ vm: UnsafeMutablePointer<VMState>?, _ table: Oop, _ h: Int64, keeping o: Oop) -> Bool {
+        let j = Int(truncatingIfNeeded: h) & (SymbolTable.buckets &- 1)
+        let old = om.load(table, j)
+        let k = old == nilObject ? 0 : Int(om.count(of: old))
+        guard let size = SymbolTable.grownBucketSize(k) else { return false }
+        let nb = allocateOld(WellKnown.weakArray, count: size, bytes: false, keeping: o, softFailure: true)
+        if nb == .none { return false }
+        let t0 = internLock(vm)
+        if om.load(table, j) != old {
+            internUnlock(vm, t0) { unsafe $0.pointee.growthRetries &+= 1 }
+            return true
         }
-        let ctx = unsafe state.pointee.context
-        let n = Int(om.count(of: o))
-        guard let sym = om.allocateBytes(ctx, classIndex: WellKnown.symbol, count: n, extraRoots: roots) else {
-            return .none
+        for x in 0..<k {
+            let v = om.load(old, x)
+            unsafe keepAliveRead(state, old, x, v)
+            store(nb, x, v, .symbolTable)
         }
-        copyBytes(o, 0, into: sym, 0, n)
-        om.pinForGood(sym)
-        om.setReadOnly(sym, true)
-        if let (b, i) = om.symbolSlot(table, hash: h) {
-            store(b, i, sym, .symbolTable)
-        } else {
-            let j = Int(truncatingIfNeeded: h) & (SymbolTable.buckets - 1)
-            let old = om.load(table, j)
-            let k = old == nilObject ? 0 : Int(om.count(of: old))
-            guard let size = SymbolTable.grownBucketSize(k),
-                  let nb = om.allocate(ctx, classIndex: WellKnown.weakArray, slots: size, fill: nilObject, extraRoots: roots + [sym])
-            else { return .none }
-            // the bucket is full (no hole), so every slot holds a Symbol.
-            // The new bucket is not a snapshot entry, so the final mark
-            // never nils its slots: a Symbol held only by the old bucket
-            // is kept alive while marking (the keep-alive read barrier).
-            for x in 0..<k {
-                let v = om.load(old, x)
-                unsafe keepAliveRead(state, old, x, v)
-                store(nb, x, v, .symbolTable)
-            }
-            store(nb, k, sym, .symbolTable)
-            store(table, j, nb, .symbolTable)
-        }
-        unsafe state.pointee.counters.symbolsInterned &+= 1
-        return sym
+        atomicMemoryFence(ordering: .releasing)
+        store(table, j, nb, .symbolTable)
+        internUnlock(vm, t0) { unsafe $0.pointee.growths &+= 1 }
+        return true
+    }
+
+    /// Take the intern lock (none without a VM: one thread). Answers the
+    /// time it was taken.
+    @inline(__always)
+    private func internLock(_ vm: UnsafeMutablePointer<VMState>?) -> UInt64 {
+        guard let vm else { return 0 }
+        unsafe lockCounted(vm.pointee.internLock, vm, contended: .internContended, waitNs: .internWaitNs)
+        return nanoseconds()
+    }
+
+    /// Count (under the lock) and let it go.
+    @inline(__always)
+    private func internUnlock(_ vm: UnsafeMutablePointer<VMState>?, _ t0: UInt64,
+                              _ count: (UnsafeMutablePointer<InternState>) -> Void) {
+        guard let vm else { return }
+        let s = unsafe vm.pointee.intern
+        count(s)
+        let dt = nanoseconds() &- t0
+        unsafe s.pointee.holds &+= 1
+        unsafe s.pointee.holdNs &+= dt
+        if unsafe dt > s.pointee.longestHoldNs { unsafe s.pointee.longestHoldNs = dt }
+        unsafe pthread_mutex_unlock(vm.pointee.internLock)
+    }
+
+    /// A Symbol made for nothing, which no other thread has seen and no
+    /// poll has passed since it was made: it becomes a String (its header
+    /// written by the allocating worker before the oop escapes), so no
+    /// instance walk can ever answer a second Symbol of the same bytes.
+    private func discardSymbol(_ sym: Oop) {
+        let h = unsafe om.headerAtomic(sym.raw)
+        let w = unsafe h.pointee.load(ordering: .relaxed)
+        unsafe h.pointee.store(w & ~Header.classMask | WellKnown.string, ordering: .relaxed)
     }
 
     /// A String of the bytes of `o` with each ill-formed sequence replaced by

@@ -416,6 +416,16 @@ public enum Headless {
             ("workerInstructions", "\(counts1.instructions &- counts0.instructions)"),
             ("workerCycles", "\(counts1.cycles &- counts0.cycles)"),
         ]
+        // Symbol interning without a stop: the intern lock's counters.
+        let ic = vm.internCounters
+        report += [
+            ("internInserted", "\(ic.inserted)"), ("internMadeForNothing", "\(ic.madeForNothing)"),
+            ("internBucketFilled", "\(ic.bucketFilled)"), ("internGrowths", "\(ic.growths)"),
+            ("internGrowthRetries", "\(ic.growthRetries)"), ("internHolds", "\(ic.holds)"),
+            ("internHoldMeanUs", ic.holds == 0 ? "-" : unsafe String(format: "%.3f", Double(ic.holdNs) / Double(ic.holds) / 1e3)),
+            ("internHoldMaxUs", unsafe String(format: "%.3f", Double(ic.longestHoldNs) / 1e3)),
+            ("symbolVerifies", "\(ic.verifies)"), ("symbolVerifyMs", unsafe String(format: "%.3f", Double(ic.verifyNs) / 1e6)),
+        ]
         report += nurseryReport(vm, stops: stops, ms: ms)
         report += markingReport(vm, stops: stops)
         report += relocationReport(vm)
@@ -434,7 +444,8 @@ public enum Headless {
             ("allocatedBytes", m.allocatedBytes), ("weakSlotsNiled", m.weakSlotsNiled), ("ephemeronsQueued", m.ephemeronsQueued),
         ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
-                              "stopperQoSRaises", "internStops", "internStopNs", "internTtspNs"].contains($0.name) },
+                              "stopperQoSRaises", "internStops", "internStopNs", "internTtspNs", "internContended", "internWaitNs",
+                              "symbolVerifierFailures"].contains($0.name) },
         report: report)
     }
 }

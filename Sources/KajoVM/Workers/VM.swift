@@ -62,7 +62,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             workerShared: shared, errors: lined(ErrorLog()), errorsLock: makeMutex(), counters: counters,
             finalization: lined(FinalizationState()), epoch: lined(Atomic<UInt64>(1)), hazardsHeld: lined(Atomic<Int>(0)),
             enterWindow: lined(EnterWindowHook()), saveHold: lined(Atomic<Bool>(false)), slowPolls: lined(Atomic<Int>(0)),
-            savedImages: SavedImages()))
+            savedImages: SavedImages(), intern: lined(InternState()), internLock: makeMutex()))
         let seed = config.perturb?.seed ?? 0x9E37_79B9_7F4A_7C15
         for i in 0..<workerCount {
             unsafe workers[i] = Worker.make(image: image, vm: state, index: i, isMain: i == 0, flag: flag,
@@ -221,6 +221,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe unlined(s.pending)
         unsafe unlined(s.errors)
         unsafe unlined(s.finalization)
+        unsafe unlined(s.intern)
         unsafe s.queues.deallocate()
         unsafe s.records.deallocate()
         unsafe s.pendingSlots.deallocate()
@@ -228,7 +229,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         unsafe s.pendingBuilding.deallocate()
         unsafe s.counters.deinitialize(count: Counter.allCases.count)
         unsafe s.counters.deallocate()
-        for unsafe m in unsafe [s.safepointLock, s.schedLock, s.pendingLock, s.hostLock, s.errorsLock] { unsafe freeMutex(m) }
+        for unsafe m in unsafe [s.safepointLock, s.schedLock, s.pendingLock, s.hostLock, s.errorsLock, s.internLock] { unsafe freeMutex(m) }
         for unsafe c in unsafe [s.safepointCond, s.schedCond, s.doneCond] { unsafe freeCond(c) }
         unsafe state.deinitialize(count: 1)
         unsafe UnsafeMutableRawPointer(state).deallocate()
@@ -621,6 +622,14 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             }
             return c
         }
+    }
+
+    /// Symbol interning without a stop: the intern lock's counters, read
+    /// under it.
+    var internCounters: InternState {
+        unsafe pthread_mutex_lock(state.pointee.internLock)
+        defer { unsafe pthread_mutex_unlock(state.pointee.internLock) }
+        return unsafe state.pointee.intern.pointee
     }
 
     var interpreterCounters: InterpreterCounters {

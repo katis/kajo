@@ -51,6 +51,11 @@ struct VMConfig: Sendable {
     var perturb: Perturbation? = nil
     /// The stop and schedule verifiers at every stop (checked builds).
     var verifyStops = checkedBuild
+    /// Symbol interning without a stop, part 3: the symbol-table verifier
+    /// (`ObjectMemory.verifySymbolTable`, O(Symbols)) at every stop that
+    /// follows inserts. Off by default; the tests and the random programs
+    /// turn it on.
+    var verifySymbols = false
     /// Module 8c (tests and `kajo run --snapshot-at`): the n-th slow poll
     /// (VM wide) saves the image with every Process in it for the host
     /// (`VM.takeSavedImages`); 0 never.
@@ -136,6 +141,14 @@ struct VMTestSwitches: Sendable {
     /// the broken variant in which the second lookup hands its Symbol on
     /// with no keep-alive barrier.
     var internNoKeepAlive = false
+    /// Part 2's other broken variants: the insert does not look the bytes
+    /// up again under the lock (two Symbols of the same bytes), and it
+    /// stores the Symbol into its bucket before filling its bytes, waiting
+    /// `internPauseUs` between the two (a lock-free lookup can read the
+    /// Symbol's zero fill).
+    var internNoSecondLookup = false
+    var internPublishBeforeFill = false
+    var internPauseUs = 0
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no

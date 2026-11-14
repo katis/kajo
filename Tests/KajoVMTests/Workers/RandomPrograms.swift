@@ -73,7 +73,7 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                 waitsLeft -= 1
                 continue
             }
-            switch rng.below(14) {
+            switch rng.below(15) {
             case 0, 1:  // allocate
                 objects.append(Array(repeating: .none, count: 8))
                 current = objects.count - 1
@@ -149,6 +149,20 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
                 let b = Int64(rng.below(256))
                 acc &+= b
                 out += ["push_temp 1", "push_nil", "push_lit \(b)", "send longBytes: 1", "add", "store_temp 1"]
+            case 14:  // Symbol interning without a stop: a name of a small pool every task shares (interned
+                      // by several workers at once, dropped, collected and interned again across cycles), or a
+                      // name whose Symbol a literal holds; interned from a String and compared by identity with
+                      // the same bytes interned again (or the literal): the model knows a Symbol by its bytes
+                acc &+= 1
+                if rng.chance(30) {
+                    let name = "rs\(rng.below(4))"
+                    out += ["push_temp 1", "push_nil", "push_lit '\(name)'", "send asSymbol 0", "push_lit #\(name)",
+                            "send same:as: 2", "add", "store_temp 1"]
+                } else {
+                    let name = "rq\(rng.below(6))"
+                    out += ["push_temp 1", "push_nil", "push_lit '\(name)'", "send asSymbol 0", "push_lit '\(name)'",
+                            "send asSymbol 0", "send same:as: 2", "add", "store_temp 1"]
+                }
             case 13:  // module 8: acc += nil nlr: v (a non-local return from a block two frames up)
                 let v = Int64(rng.below(201) - 100)
                 acc &+= v
@@ -230,6 +244,23 @@ func randomProgram(_ seed: UInt64) -> RandomProgram {
 /// 8 slots of an Array. Module 8: `nil nlr: v` answers v by a non-local
 /// return from a block evaluated by `apply:`.
 private let sumSource = """
+method String asSymbol temps=0 prim=129
+  push_lit @Array
+  push_int 1
+  send new: 1
+  return_top
+end
+method UndefinedObject same:as: temps=0
+  push_temp 0
+  push_temp 1
+  identical
+  jump_if_false no
+  push_int 1
+  return_top
+no:
+  push_int 0
+  return_top
+end
 method UndefinedObject nlr: temps=0
   push_nil
   push_temp 0
@@ -379,6 +410,10 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         return try Runtime(source, background: workers, heapBlocks: heapBlocks,
                            reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
                            configure: { c in
+                               // Symbol interning without a stop: the
+                               // symbol-table verifier at every stop that
+                               // follows inserts.
+                               c.verifySymbols = true
                                // Programs allocate tens of KiB: 512 KiB
                                // nurseries keep the promotion reserve (and
                                // with it each full collection's block walk)

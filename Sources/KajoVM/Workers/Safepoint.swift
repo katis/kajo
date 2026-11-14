@@ -200,7 +200,11 @@ func stopWorld(_ vm: UnsafeMutablePointer<VMState>, _ w: WorkerPointer, retry: B
                             collectionsOpen: collectionsOpen, slowest: slowest, slowestVia: slowestVia,
                             parkedFromWaits: fromWaits, workStartNs: nanoseconds()))
     unsafe relocationAtPauseEnd(vm)
-    if unsafe vm.pointee.config.verifyStops { unsafe verifySchedule(vm) }
+    if unsafe vm.pointee.config.verifyStops {
+        unsafe verifySchedule(vm)
+        unsafe verifyInternLockFreeAtStop(vm)
+    }
+    if unsafe vm.pointee.config.verifySymbols { unsafe verifySymbolTableAfterInserts(vm) }
     // A full collection fired ephemerons: signal the finalization
     // Semaphore through the external queue (module 4, ADR 0009 section 1).
     if unsafe vm.pointee.om.takeFinalizationSignal() { unsafe signalFinalization(vm) }

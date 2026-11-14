@@ -90,6 +90,37 @@ import Synchronization
     /// AOT 1: the bound native module (Native/NativeBinding.swift), nil
     /// when none is.
     var native: UnsafeMutablePointer<NativeBinding>? = nil
+    /// Symbol interning without a stop (docs/modules/symbol-interning.md):
+    /// the intern lock, beside its counters. Every insert into the symbol
+    /// table from a running VM takes it, for a critical section with no
+    /// allocation, poll, stall or park in it.
+    let intern: UnsafeMutablePointer<InternState>
+    let internLock: UnsafeMutablePointer<pthread_mutex_t>
+}
+
+/// Symbol interning without a stop: what the inserts did. Under
+/// `internLock`.
+@unsafe struct InternState {
+    /// Symbols stored into the table.
+    var inserted: UInt64 = 0
+    /// Symbols made for nothing: the second lookup found the bytes
+    /// (another worker's insert came first), or the bucket filled up
+    /// between the lock-free look and the lock. Each became a String.
+    var madeForNothing: UInt64 = 0
+    var bucketFilled: UInt64 = 0
+    /// Buckets replaced by larger ones, and grown buckets thrown away
+    /// because the table no longer named the bucket measured.
+    var growths: UInt64 = 0
+    var growthRetries: UInt64 = 0
+    /// Critical sections, their time in all and the longest.
+    var holds: UInt64 = 0
+    var holdNs: UInt64 = 0
+    var longestHoldNs: UInt64 = 0
+    /// The symbol-table verifier: `inserted` when it last ran, its runs
+    /// and their time.
+    var verifiedAt: UInt64 = 0
+    var verifies: UInt64 = 0
+    var verifyNs: UInt64 = 0
 }
 
 /// Read by other threads: atomics only, one line per worker.
@@ -353,6 +384,9 @@ enum Counter: Int, CaseIterable {
     /// and time to safepoint in all (the stop log is a ring and a run makes
     /// hundreds of thousands).
     case internStops, internStopNs, internTtspNs
+    /// Part 2: intern-lock acquisitions that found it held and their
+    /// wait, and the symbol-table verifier's failures.
+    case internContended, internWaitNs, symbolVerifierFailures
 }
 
 /// A snapshot of the counters.
