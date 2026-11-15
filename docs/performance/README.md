@@ -495,6 +495,25 @@ through the VM's invoke, as the interpreter does), the kasm `dispatch`
 program sends `at:` as an ordinary send to a primitive method (the
 Smalltalk form uses the inlined special send), and `collections` at eight
 workers is dominated by something both engines share (31 s against 4.4 s
-at one worker in both; not explained here). The kernels' table (cycles and
+at one worker in both; explained and removed since: see below). The kernels' table (cycles and
 instructions per send and per bytecode) is in `docs/modules/aot.md`, "The
 bar".
+
+**The collections row at 8 workers after Symbol interning without a
+stop** (2026-11-15, `docs/modules/symbol-interning.md`; hand-written; the
+same program and image, an aligned release build of f117715, five
+interleaved rounds, run line `ms`, the other rows not re-run). The 31 s
+of both engines were 268 000 to 285 000 stops a run that interned a new
+Symbol each (8b's rule), 85 µs to a safepoint each at 8 workers; the
+symbol table now takes a new Symbol under a lock with no stop.
+
+| program | form | workers | interpreter before | interpreter after | native before | native after |
+|---|---|---|---|---|---|---|
+| collections | Smalltalk | 1 | 4.35 | 4.18 (4.15–4.20) | 2.33 | 2.19 (2.17–2.19) |
+| collections | Smalltalk | 8 | 32.5 | 4.91 (4.89–4.93) | 31.5 | 2.96 (2.93–3.04) |
+
+8 workers now take 1.18 (interpreter) and 1.35 (native) times the
+1-worker time, every worker running the whole program; the rest is the
+eight workers queuing on the one lock as they intern the same Strings in
+step. "Before" is the same module's part 1 (`p1/matrix-raw.txt` in its
+scratch directory), which reproduced this section's 31.6 and 30.5 s.

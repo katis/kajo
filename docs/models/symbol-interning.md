@@ -20,8 +20,9 @@ and one cycle of the concurrent old-space collector.
 | step | production (`Sources/KajoVM/ObjectModel/Strings.swift`) |
 |---|---|
 | T lock-free lookup of x (finds / misses) | `Machine.intern`: `symbolLookupSlot` over the bucket, `weakReadBarrier` on a hit |
-| T allocates S (old, pinned, read-only) | `internSlow`: `allocateOld` (a poll: stops, stalls), `pinForGood`, `setReadOnly` |
-| T fills S's bytes | `copyBytes` before the lock |
+| T allocates S under the lock (fast path) / the fast allocation fails | `internSlow`: `tryAllocateAny` in the worker's old context under the lock (no poll), `makeWhole` |
+| T allocates S (old, pinned, read-only) | the slow path outside the lock: `allocateOld` (a poll: stops, stalls), `makeWhole` |
+| T fills S's bytes (under the lock) | `copyBytes` in `makeWhole` |
 | T takes the lock / lets it go | `internLock` / `internUnlock` (`VMState.internLock`, a full fence in the model) |
 | T second lookup (finds: S becomes a String / hole / full) | the lookup under the lock, `keepAliveRead` on a hit, `discardSymbol` |
 | T stores S into B[i] (release) | `atomicMemoryFence(.releasing)` then `store(b, i, sym, .symbolTable)` (the post-store check's seq_cst store) |
@@ -71,21 +72,34 @@ stop falls inside a critical section.
 
 ## Results
 
-The run of record: `~/kajo-scratch/symbol-interning/model/run2.txt`
-(`swift test --filter SymbolInterning`, swift.org 6.4.2, 0.24 s for all
-seven tests).
+Two orders are modelled. Part 4 of the module changed the production
+order after the model was first run: the brief's candidate made the
+Symbol before taking the lock (`allocateUnderLock = false`, run
+`~/kajo-scratch/symbol-interning/model/run2.txt`, every table below
+held there too); production now takes the lock first, makes the Symbol
+under it by the allocation fast path (no poll), and only when that has
+no room lets go, makes it by the slow path (a poll) and takes the lock
+again (`allocateUnderLock = true`, the default: the steps "T allocates
+S under the lock (fast path)", "T fills S's bytes under the lock" and
+the branch "the fast allocation fails"). The run of record for the
+production order: `~/kajo-scratch/symbol-interning/model/run3.txt`
+(0.32 s for all seven tests).
 
-| configuration | states | longest trace | finished | result |
-|---|--:|--:|--:|---|
-| `sameBytes` | 8 779 | 30 | 22 | every claim holds |
-| `sameBytes`, sequentially consistent | 2 378 | 22 | 22 | every claim holds |
-| `bucketMates` | 29 157 | 50 | 50 | every claim holds |
-| `bucketMates`, sequentially consistent | 5 729 | 34 | 50 | every claim holds |
-| `growth` | 43 999 | 59 | 117 | every claim holds |
-| `growth`, sequentially consistent | 5 194 | 37 | 117 | every claim holds |
+| configuration | order | states | longest trace | finished | result |
+|---|---|--:|--:|--:|---|
+| `sameBytes` | lock first | 12 778 | 32 | 22 | every claim holds |
+| `sameBytes`, sequentially consistent | lock first | 3 534 | 24 | 22 | every claim holds |
+| `sameBytes` | made before the lock | 8 779 | 30 | 22 | every claim holds |
+| `bucketMates` | lock first | 44 003 | 58 | 89 | every claim holds |
+| `bucketMates`, sequentially consistent | lock first | 12 745 | 40 | 89 | every claim holds |
+| `bucketMates` | made before the lock | 29 157 | 50 | 50 | every claim holds |
+| `growth` | lock first | 21 381 | 57 | 101 | every claim holds |
+| `growth`, sequentially consistent | lock first | 4 329 | 38 | 101 | every claim holds |
+| `growth` | made before the lock | 43 999 | 59 | 117 | every claim holds |
 
-Each rule off finds the claim it protects broken (the test prints the
-shortest trace):
+Each rule off finds the claim it protects broken, in both orders (the
+test prints the shortest trace; the messages below are run3's, run2's
+are the same):
 
 | rule off | configuration | claim broken, as the explorer reports it |
 |---|---|---|
@@ -98,7 +112,7 @@ shortest trace):
 | the keep-alive barrier on the lock-free lookup | `sameBytes` | 3: the same through the hit path |
 | the keep-alive barrier on the growth copy | `growth` | 3: "the table's bucket names S0, which the sweep freed" |
 
-The hole's shortest trace, as printed: T0 and T1 both miss A; T1
+The hole's shortest trace in the first order (run2), as printed: T0 and T1 both miss A; T1
 allocates S4, fills it, takes the lock, finds a hole, stores S4 into
 B0[0], lets go and drops S4; the initial mark takes the snapshot (S4 in
 it, held by nothing but the weak slot); T0 allocates S1 (its poll is

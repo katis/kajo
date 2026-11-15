@@ -464,26 +464,48 @@ unchanged (the lock-free lookup, the weak read barrier on a hit, then
    brief's candidate made the Symbol first; growing first means no
    Symbol is ever held across an allocation (an instance walk in a stop
    at that poll could have answered a Symbol not in the table).
-2. The Symbol is made whole with no lock held: `allocateOld` of a byte
-   object of class Symbol (old at birth, `softFailure`, the String
-   held), its bytes copied, `pinForGood`, `setReadOnly`, all by the
-   allocating worker before the oop escapes.
-3. Under `VMState.internLock` (a mutex beside `VMState.intern`, the
+2. Under `VMState.internLock` (a mutex beside `VMState.intern`, the
    counters it guards, never inside them): the bytes are looked up
    again; a hit goes through `keepAliveRead` (the hole's fix, kept) and
-   the Symbol made is turned into a String (`discardSymbol`: its class
-   index swapped with one relaxed atomic store; nobody saw it and no
-   poll passed since it was made, so no walk can answer two Symbols of
-   the same bytes) and counted `internMadeForNothing`. Else a hole of the
-   bucket (`symbolSlot`) gets the Symbol: a release fence, then the
-   ordinary barriered store (SATB, the post-store check's seq_cst store
-   and reload, the insertion barrier). A bucket filled between the hint
-   and the lock: let go, discard, again (`internBucketFilled`).
-4. The critical section holds no allocation, no poll, no stall and no
-   park: two lookups over at most 4095 slots, at most 4095 copied slots
-   and three stores. Its length is measured (`internHoldMeanUs`,
-   `internHoldMaxUs`), its contended acquisitions and their wait counted
-   (`internContended`, `internWaitNs`).
+   is answered (`internFoundUnderLock`). Else, with a hole in the bucket
+   (`symbolSlot`), the Symbol is made by the allocation fast path,
+   `tryAllocateAny` in the worker's own old context (a bump; it may
+   take a block from the pool, never polls, stalls or parks), and made
+   whole there (`makeWhole`: bytes, `pinForGood`, `setReadOnly`, all by
+   the allocating worker before the oop escapes); a release fence; the
+   ordinary barriered store into the hole (SATB, the post-store check's
+   seq_cst store and reload, the insertion barrier). A bucket filled
+   between the hint and the lock: let go, grow, again
+   (`internBucketFilled`).
+3. When the fast path has no room (its context's block and pool are
+   out, or the name is larger than one block), the lock is let go and
+   the Symbol is made whole outside it by `allocateOld` (a poll, with
+   the allocation stalls; the String held; `internSlowAllocations`),
+   then the lock is taken again and step 2 repeats with that Symbol. If
+   the second lookup then finds the bytes, or the bucket must grow, the
+   Symbol made is turned into a String (`discardSymbol`: its class index
+   swapped with one relaxed atomic store; nobody saw it and no poll
+   passed since it was made, so no instance walk can answer two Symbols
+   of the same bytes) and counted `internMadeForNothing`.
+4. The critical section holds no poll, stall or park and no allocation
+   that can do one: two lookups over at most 4095 slots, at most one
+   fast-path allocation and a copy of the name's bytes, or at most 4095
+   copied slots, and three stores. Its length is measured
+   (`internHoldMeanUs`, `internHoldMaxUs`), its contended acquisitions
+   and their wait counted (`internContended`, `internWaitNs`).
+
+**The order is part 4's, not the brief's.** The brief's candidate made
+the Symbol before taking the lock (built so first, 3eea94b). Part 4's
+first matrix (`p4/matrix-raw-made-before-lock.txt`, summary
+`p4/matrix-summary-made-before-lock.md`) showed what it costs when
+eight workers intern the same bytes in step, as `collections` does: 137
+000 Symbols a run made for nothing (each an old allocation, pinned, then
+garbage), `collections` at 8 workers 5786 ms (4882-6395) interpreted
+against 4226 at 1 (1.37) and natively 3538 (3050-3873) against 2176
+(1.63, past the bar). With the lock first and the fast path under it
+(f117715) no Symbol is made for nothing in those runs
+(`internMadeForNothing` 0 in every 8-worker row) and the rows below
+follow. The model has both orders (`allocateUnderLock`).
 
 Failure is a value as before: no room or a bucket at 4095 answers
 `.none`, primitive 129 fails and the kernel's `asSymbol` reports
@@ -493,13 +515,14 @@ the same code runs with no lock.
 **What the protocol keeps** (the brief's nine rules):
 
 1. One Symbol per byte sequence: every insert looks again under the one
-   lock that every insert holds; a Symbol made for nothing becomes a
-   String before anything can see it. Model claim 1; tests
-   `workersInterningTheSameBytesAtOnceGetOneSymbol` (until a race was
-   seen, `madeForNothing > 0`), `withoutTheSecondLookupTwoSymbolsOfTheSameBytesAppear`
+   lock that every insert holds; a Symbol made outside the lock for
+   nothing becomes a String before anything can see it. Model claim 1;
+   tests `workersInterningTheSameBytesAtOnceGetOneSymbol`, both paths
+   (`internSlowAllocation` forces the outside one), until a race was
+   seen (`internFoundUnderLock > 0`), `withoutTheSecondLookupTwoSymbolsOfTheSameBytesAppear`
    (switch `internNoSecondLookup`), the verifier.
 2. Whole reads: the fill, the pin and the read-only bit come before the
-   release fence and the publishing store, and a new bucket's nils and
+   release fence and the publishing store (under the lock or before it), and a new bucket's nils and
    copies before its table store. Readers' loads are relaxed atomic
    loads (`ObjectMemory.load`), and every body address is computed from
    the state word just loaded (the address dependency module 6
@@ -513,8 +536,9 @@ the same code runs with no lock.
    tests `aSymbolTheSecondLookupFindsDuringMarkingIsKeptAlive` (switch
    `internNoKeepAlive`), `aSymbolCopiedIntoAGrownBucketDuringMarkingIsKeptAlive`
    (marking's `noWeakKeepAlive`), `symbolsDroppedCollectedAndInternedAgainStayUnique`.
-4. Nothing is decided across a poll: the lock is taken after the last
-   allocation of an attempt and let go before the next. So a stop never
+4. Nothing is decided across a poll: the lock is let go before every
+   allocation that can poll (the slow path, a bucket's growth) and taken
+   again after it, and everything is looked up again under it. So a stop never
    begins while it is held (a holder runs no poll; a waiter is not
    parked), a stop whose own work interns finds it free, and a save's
    hold never meets a half-done insert. Checked at every stop:
@@ -604,22 +628,32 @@ before it (a deviation); their evidence is the broken variants below and
 the hole's test, which failed on the code it was written against.
 
 The broken variants, one quoted run each (debug build,
-`~/kajo-scratch/symbol-interning/tests/variants.txt`; every test passes
+`~/kajo-scratch/symbol-interning/tests/variants3.txt`, on f117715; every test passes
 because each asserts its variant's failure):
 
 | switch | where the failure is | quoted |
 |---|---|---|
 | `internNoKeepAlive` | the final mark's verifier | "broken variant internNoKeepAlive: the final mark missed 1, the Symbol alive false" |
-| `internNoSecondLookup` | the answers and the symbol-table verifier | "6 byte sequences answered by two Symbols in 8 rounds; 6 verifier failures, first: object memory verifier, symbol table at a stop: two Symbols in the table with the bytes of d7_94; ..." |
-| `internPublishBeforeFill` with `internPauseUs` 20 000 | lock-free lookups of six NUL bytes | "2941 lookups of six NUL bytes answered a Symbol" (skipped under ThreadSanitizer only: bytes written while readers compare them is a data race by construction) |
+| `internNoSecondLookup` | the answers and the symbol-table verifier | "1 byte sequences answered by two Symbols in 11 rounds; 1 verifier failures, first: object memory verifier, symbol table at a stop: two Symbols in the table with the bytes of d10_88" (on 3eea94b, the first order: "6 byte sequences ... in 8 rounds", `tests/variants.txt`) |
+| `internPublishBeforeFill` with `internPauseUs` 20 000 | lock-free lookups of six NUL bytes | "4512 lookups of six NUL bytes answered a Symbol" (skipped under ThreadSanitizer only: bytes written while readers compare them is a data race by construction) |
 
-The correct runs beside them: "same bytes at once: 4 rounds, 1600
-inserted, 17 made for nothing, 10 contended, longest hold 615292 ns" (a
-debug build with every verifier on); the re-interning test, the growth
+The correct runs beside them: "same bytes at once (slow allocation
+false): 1 rounds, 400 inserted, 3 found under the lock, 0 made for
+nothing, 0 made outside the lock, 3 contended, longest hold 2108542 ns"
+and "(slow allocation true): 1 rounds, 400 inserted, 12 found under the
+lock, 7 made for nothing, 407 made outside the lock, 8 contended,
+longest hold 1087833 ns" (a debug build with every verifier on, eight
+workers on the mini's ten cores: the holds of 1 to 2 ms there are a
+debug build's growth copies and the OS descheduling a holder; release
+numbers are in part 4); the re-interning test (both paths), the growth
 test (every size to 4095, the 4096th answered nil by the primitive's
 fallback) and the method-cache test pass. The random programs with the
 intern step: 20 seeds in each of the 23 configurations, none failing
-(`tests/random20.txt`). The rule "a stop never finds the lock held" has
+(`tests/random20.txt` on 3eea94b, `tests/random20b.txt` on the final
+order). The new suite once under ThreadSanitizer with twelve busy loops
+(on 4b217ac, the first order; `tests/tsan-new.txt`): 11 tests, 0
+reports, 381 s, 369 of them the growth test, which 577ce9c cut (its
+candidates hashed from a byte buffer, the verifier once at the end). The rule "a stop never finds the lock held" has
 no switch: its broken variant (a poll inside the critical section) would
 deadlock the stop against the waiter, not fail a check; the verifier is
 its check in every run instead.
@@ -629,3 +663,73 @@ Counters on the run line: `internInserted`, `internMadeForNothing`,
 `internHolds`, `internHoldMeanUs`, `internHoldMaxUs`, `internContended`,
 `internWaitNs`, `symbolVerifies`, `symbolVerifyMs`,
 `symbolVerifierFailures`, and part 1's `internStops` (0 since).
+
+### Part 4: after
+
+**Part 1's table again** (`p4/matrix-raw.txt`, summary
+`p4/matrix-summary.md`, the same script, images and native modules, the
+aligned release build of f117715 in `build-p4/`, five interleaved
+rounds, every run at thermal "fair" where part 1's were at nominal (the after
+rows are the slower-clocked ones if anything), checksums equal to part 1's,
+every native run binding all 3283 or 3289 methods):
+
+| program | engine | workers | wall ms before | wall ms after | 8 / 1 after | intern stops after |
+|---|---|--:|--:|--:|--:|--:|
+| collections | interp | 1 | 4352 | 4176 (4153-4203) | | 0 |
+| collections | interp | 2 | 5842 | 4417 (4395-4428) | | 0 |
+| collections | interp | 4 | 8437 | 4636 (4611-4662) | | 0 |
+| collections | interp | 8 | 32 484 | 4909 (4892-4930) | **1.18** | 0 |
+| collections | native | 1 | 2329 | 2188 (2168-2188) | | 0 |
+| collections | native | 2 | 3817 | 2369 (2363-2381) | | 0 |
+| collections | native | 4 | 8131 | 2901 (2594-3045) | | 0 |
+| collections | native | 8 | 31 520 | 2964 (2930-3043) | **1.35** | 0 |
+| collections-dict | interp | 1 | 1601 | 1426 (1419-1446) | | 0 |
+| collections-dict | interp | 8 | 30 059 | 2070 (2063-2100) | 1.45 | 0 |
+| collections-dict | native | 1 | 1139 | 980 (976-989) | | 0 |
+| collections-dict | native | 8 | 30 584 | 1682 (1673-1701) | 1.72 | 0 |
+
+At 8 workers, medians over the five runs of each `collections` row:
+`internInserted` 200 000, `internFoundUnderLock` 127 928 interpreted and
+124 558 natively (the other workers' interns of the same bytes, now
+answered under the lock with nothing made), `internMadeForNothing` 0,
+`internSlowAllocations` 0, `internGrowths` about 6240 with 1500 to 3000
+growth retries, `internContended` 133 358 and 130 823 with 2.2 and 2.4 s
+of waiting summed over the eight workers (about 6 percent of their 39 and
+24 worker-seconds), the critical section 0.50 µs on average and at most
+99.5 and 113.0 µs (the dictionary part 113.6 and 167.5); the stops are
+9 to 12 a run, all the collector's (scavenges, initial and final marks,
+applies), the longest time to a safepoint of any stop at 8 workers 0.42
+ms (0.72 before), parked worker-seconds 0.0 (166 before); the method
+cache's misses 9.6 M against 14.5 M before, 1.2 M at 1 worker against 2.8
+M (the stop's flush gone) and the 1-worker runs 4 and 6 percent faster
+(4176 against 4352 ms, 2188 against 2329). The cheating build's ceiling
+was 1.16 and 1.31; the protocol lands at 1.18 and 1.35.
+
+What is left at 8 workers is contention on the one lock, not the insert
+being slow: eight workers that intern the same 200 000 Strings in step
+queue on it (130 000 contended acquisitions a run), and natively the
+mutator is twice as fast, so the queue is a larger share. The dictionary
+part alone does nothing but that, and natively it is 1.72; it is not
+the bar's row. A lock per bucket would let the eight workers' different
+bytes proceed at once; it is an open question below, with these numbers.
+
+**The bar, item by item:**
+
+1. `collections` at 8 workers at most 1.5 times its 1-worker time in
+   both engines: **met**, 1.18 interpreted and 1.35 native (7.46 and
+   13.5 before).
+2. No intern stop exists: **met**. `markStop(.intern)` is gone,
+   `internStops` reads 0 in every row of `p4/matrix-raw.txt` and in
+   every test runtime (`workersInterningTheSameBytesAtOnceGetOneSymbol`
+   asserts it); the stop kind stays as instrumentation. The uniqueness
+   tests and the model's claims hold, and each broken variant fails
+   where it should (tables above).
+3. Kernels within noise, `interpret` identical: see the gates below (the
+   aligned A/B against 9c5e984 and the disassembly diff of the A/B's own
+   objects).
+4. The core tier through `just check 9c5e984` on the final code commit:
+   see the gates below.
+
+**The method cache** after the protocol: `cacheFlushes` 0 in every row
+(each intern stop flushed every worker's cache before); the stale-line
+test passes, on the argument of rule 8.
