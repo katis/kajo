@@ -718,15 +718,55 @@ the matrix runs interpreted, nothing under it changed), the rest 0 but the
 hog with the budget off. Before it: the new suite once under ThreadSanitizer
 with twelve busy loops, 5 tests, 0 reports (`part2/tsan-new.log`).
 
-### Part 5: not this sitting
+### Part 5: the Sample on the Mac, the iPhone and the iPad (in part)
 
-Not run: the dmg-made Sample on the Mac, the iPhone and the iPad, Release
-with the module on against off in both orders (binary and bundle sizes, the
-Release build from clean and unchanged, cold launch to first frame, the bind
-time, `kajo-bench` fib, sends and alloc, the scenario columns, the kernel's
-tests through the Sample's engine). The bar's "first frame within 20 ms and
-no more frames missed on both devices" is therefore open; so is the iPhone
-slice's bind (the Mac's and the simulator's are shown above).
+Run after the core tier, nothing changed in the code. The Sample was made by
+`kajo new` from a checkout `dist.sh checkout` built from 1f7828f's tree (the
+`Prebuilt/` a dmg carries; no dmg was built, a deviation), twice: `--native`
+and not (`part5/on`, `part5/off`); the Mac's Release builds by `xcodebuild`,
+the devices' through `scripts/device.sh` (`PROJECT`, `SCHEME=Sample-iOS`,
+`BUNDLE=dev.katajamaki.kajo.sample`), every launch with `kajo-launch-report`,
+the devices five launches a side and then the other order
+(`scripts/part5-device.sh`, `part5/iphone.txt`, `part5/ipad.txt`,
+`part5/mac-launch.txt`).
+
+| device | order | module | first frame ms median | range |
+|---|---|---|--:|---|
+| iphone | A | off | 114.0 | 107.6–128.4 |
+| iphone | A | on | 116.1 | 112.6–127.5 |
+| iphone | B | off | 110.3 | 107.4–132.3 |
+| iphone | B | on | 114.7 | 113.0–128.3 |
+| ipad | A | off | 242.9 | 236.5–1236.0 |
+| ipad | A | on | 250.7 | 248.4–264.0 |
+| ipad | B | off | 239.6 | 233.5–263.6 |
+| ipad | B | on | 247.7 | 246.1–260.1 |
+| mac | interleaved | off | 222.8 | 208.5–557.5 |
+| mac | interleaved | on | 228.3 | 221.6–411.3 |
+
+(The first launch after an install is the slowest on both sides: 557.5 ms
+off on the Mac, 1236 ms off on the iPad.) Thermal state on every device line
+0 (nominal) but the iPhone's first five (1, fair).
+
+- **Binds on every slice**: the iPhone and the iPad print `native=bound
+  methods=3290 bound=1433 unbound=1857 generated=1048 declined=0 groups=888`
+  at every launch, so the layout hash of the checkout's `kajo` matches the
+  prebuilt iOS frameworks; bind 5.3 to 6.1 ms on the iPhone, 8.8 to 10.0 on
+  the iPad, 5.1 to 5.5 on the Mac.
+- **First frame within 20 ms: met** on both devices in both orders and on the
+  Mac (medians: iPhone 110.3 and 114.0 off against 114.7 and 116.1 on; iPad
+  239.6 and 242.9 off against 247.7 and 250.7 on, the module's 9 ms bind
+  being most of the 8 ms; Mac 222.8 against 228.3).
+- **Sizes on the devices** (as installed, unstripped): the iOS Release
+  binary 2 109 248 bytes off and 4 956 384 on, the app 8 696 KiB and 11 480.
+- **Not measured** (said plainly): frames missed (the Sample's launch report
+  counts no frames; the bar's "misses no more frames" is open); `kajo-bench`
+  (it runs a kasm kernel in the app's VM, whose methods are not the image's,
+  so the module binds none of them: a native `kajo-bench` would need a module
+  of that kernel); the scenario matrix (the Sample runs no scenario); the
+  kernel's tests through the Sample's engine (no way to run them in the
+  Sample; the shells' `native=1` rows of AOT 1 and the gates' native
+  kernel tests stand for it); the Release build's times on the devices'
+  side (Mac numbers in part 3).
 
 ### Deviations
 
@@ -753,8 +793,8 @@ slice's bind (the Mac's and the simulator's are shown above).
 
 ### Not done
 
-- Part 5 (above). The core tier ran on 1f7828f (above); a part 5 that
-  changes no code needs no second run.
+- Part 5's frames missed, a native `kajo-bench`, the dmg itself (above).
+  The core tier ran on 1f7828f (above); part 5 changed no code.
 - Narrower per-pc tables (lever g, found here: 0.54 MB of the chosen 2.59).
 - Pruning of `.build/kajo/native/<key>/` libraries of earlier images (each
   Release build after an image change adds one, 4 MB).
@@ -767,8 +807,9 @@ slice's bind (the Mac's and the simulator's are shown above).
    `KAJO_NATIVE: NO` unless `kajo new --native`; the module adds 2.54 MB
    stripped to a 1.70 MB Mac binary (2.5 times) and makes the kernel tests 1.2
    times slower than full native through engine switches (6.1 s against 4.9;
-   both 249 of 249) while the kernels run at 0.96 of full native.
-   Recommendation: keep opt-in until part 5's device numbers are in.
+   both 249 of 249) while the kernels run at 0.96 of full native; first frame
+   within 10 ms on every device (part 5). Recommendation: keep opt-in until
+   the owner has read the sizes; turning it on is one setting.
 2. **The size rule: 0.9 of full speed (built, as recommended).** The rule
    chose 2.59 MB; the smallest configuration at all that is not 0.3 to 0.6
    is 1.74 MB at 0.866 (`--subset callees --hot none --send-helper`); none
