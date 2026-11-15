@@ -5,7 +5,8 @@ build Kajo. It was a habit of one long conversation and of that session's
 private notes; it lives here so that a new session, a new tool or a new
 person can pick the work up from the repository alone.
 
-`AGENTS.md` holds the lessons, the decisions and the structure.
+`AGENTS.md` holds the lessons and the structure, `docs/decisions/` one
+record per module.
 `docs/PLAN.md` holds the module order. This file holds how a module goes
 from an idea to a pushed, recorded commit. Where this file and a lesson
 in `AGENTS.md` disagree, the lesson is newer and wins; fix this file.
@@ -77,21 +78,24 @@ would want" is the agent's sentence.
    final commit; when only test files changed after a run in which every
    other gate passed, the failed test gates may be run again alone
    through `gates-lib.sh`'s own definitions, said plainly.
-7. **Recording.** `AGENTS.md` and `docs/PLAN.md` are edited by the main
-   session only, with a small script that replaces exact anchors and
-   asserts each occurs once (below), run with `--check` first:
-   - the decisions paragraph of `AGENTS.md` gains the module (what was
-     measured and decided, the numbers, the gates, deviations, not done,
-     the open questions awaiting the owner), chained at the end, just
-     before "ADRs 0003, 0006 and 0008 carry…"; when the owner answers,
-     "await the owner" is replaced by the answer and its date;
-   - new lessons go at the end of the lessons list, before
+7. **Recording.** `AGENTS.md`, `docs/PLAN.md` and `docs/decisions/` are
+   edited by the main session only:
+   - a new file `docs/decisions/<next number>-<name>.md` holds the
+     module's record (what was measured and decided, the numbers, the
+     gates, deviations, not done, the open questions with their
+     recommendations), in ordinary prose, and `AGENTS.md`'s Decisions
+     list gains its line; open questions are added to the list of what
+     awaits the owner there;
+   - new lessons go at the end of `AGENTS.md`'s lessons list, before
      `## Verification`: one paragraph each, the rule first, the incident
      that taught it after;
    - the Project structure section gains a "Since <module>…" note naming
      the new files, flags and switches;
    - `## Verification` changes when the gates change;
    - `docs/PLAN.md`: the module's row and the Status sentence.
+   Edits inside existing long text (`docs/PLAN.md`'s rows, the structure
+   notes) are made with a small script that replaces exact anchors and
+   asserts each occurs once (below), run with `--check` first.
 8. **Commit and push** by the main session: the record as one commit on
    master, then `git push`. Files are added by name.
 9. **Report to the owner:** what was built, the numbers that matter with
@@ -207,7 +211,6 @@ def edit(path, old, new):
     assert n == 1, f"{path}: anchor occurs {n} times: {old[:80]!r}"
     edits[path] = text.replace(old, new)
 
-# edit("AGENTS.md", "<end of the previous record>. ADRs", NEW + " ADRs")
 # edit("AGENTS.md", "<last line of the last lesson>\n", that line + LESSONS)
 # edit("AGENTS.md", "<end of the last structure note>", that end + NOTE)
 # edit("docs/PLAN.md", "| next | **<module>", "| built | **<module>")
@@ -219,14 +222,15 @@ else:
         open(root + p, "w", encoding="utf-8").write(t)
 ```
 
-All edits apply or none does. `docs/PLAN.md`'s and the decisions
-paragraph's lines are very long: read them with `cut -c` or a short
-Python slice, never whole.
+All edits apply or none does. `docs/PLAN.md`'s rows are very long lines:
+read them with `cut -c` or a short Python slice, never whole.
 
 ## When the owner answers
 
-An answer is recorded with its date and the owner's words where they are
-short ("as recommended" is enough). If an agent's unverified commits sit
+An answer is appended to the record it answers in `docs/decisions/` under
+a dated line, with the owner's words where they are short ("as
+recommended" is enough), and the question leaves `AGENTS.md`'s list of
+what awaits the owner. If an agent's unverified commits sit
 on master when the answer arrives, the answer is written to a note in
 the scratch directory and recorded with the next record commit. An
 answer that changes what is built becomes a brief or a follow-up, not an
