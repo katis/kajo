@@ -670,6 +670,54 @@ checkout `dist.sh checkout` built (`part3/`):**
   fuzzer's generator mode (`part2/fuzz-kasm-aot.txt`).
 - New `unsafe`: 5 lines in `NativeBinding.swift` (`linkedInMainImage`).
 
+### The core tier
+
+`KAJO_CHECK_OUT=~/kajo-scratch/aot-product/check just check 4127bb8` on the
+final code commit 1f7828f (swift.org 6.4.2 and swiftly's clang first on PATH,
+as `stall-tests/check/env.txt`): every gate passed in 11 307 s.
+
+```
+2026-11-15 16:06:52 1f7828f end clean-build rc=0 20s
+2026-11-15 16:20:37 1f7828f end swift-test-load rc=0 825s
+2026-11-15 17:09:21 1f7828f end tsan rc=0 2924s
+2026-11-15 18:12:11 1f7828f end tsan-load rc=0 3770s
+2026-11-15 18:12:27 1f7828f end ios-check rc=0 16s
+2026-11-15 18:12:35 1f7828f end arc-check rc=0 8s
+2026-11-15 18:13:46 1f7828f end golden rc=0 71s
+2026-11-15 18:16:24 1f7828f end native-golden rc=0 158s
+2026-11-15 18:17:32 1f7828f end native-kernel-test rc=0 68s
+2026-11-15 18:18:08 1f7828f end native-cc rc=0 35s
+2026-11-15 18:20:10 1f7828f end test-release rc=0 122s
+2026-11-15 18:20:32 1f7828f end model-check rc=0 22s
+2026-11-15 18:21:34 1f7828f end soak rc=0 62s
+2026-11-15 18:31:56 1f7828f end fuzz rc=0 622s
+2026-11-15 18:34:02 1f7828f end apps rc=0 126s
+2026-11-15 18:35:48 1f7828f end kernel-test rc=0 106s
+2026-11-15 18:40:49 1f7828f end new-check rc=0 301s
+2026-11-15 18:46:13 1f7828f end ab rc=0 324s
+2026-11-15 18:59:59 1f7828f end matrix-mac rc=0 826s
+2026-11-15 19:14:59 1f7828f end matrix-iphone rc=0 900s
+2026-11-15 19:14:59 1f7828f check-tier done core failed=0 11307s
+```
+
+461 + 162 tests in every test gate (456 + 162 on c98d981: the five new
+tests), ThreadSanitizer 0 reports alone and under load, the new tests'
+cost within the gates' spread (`swift-test-load` 825 s against c98d981's
+1058, `tsan` 2924 against 2969, `tsan-load` 3770 against 3934); the native
+gates in both configurations (the product's: 1433 of 3285 kernel methods
+bound, 1048 generated, 0 declined; the full one 3285 of 3285); the four
+fuzzers with "libFuzzer build: ok" at 0.81 to 3.24 million runs; `new-check`
+with the module's checks (the Mac launch `native=bound methods=3290
+bound=1433 unbound=1857 generated=1048 declined=0`, the stale library
+refused); the A/B against 4127bb8 0.997 to 1.002 at one worker and 0.995 to
+1.025 at eight, instruction ratios 1.000 to 1.002; the Mac matrix 0
+fallbacks in 156 rows, frames missed only in the hog rows with the budget
+off; the iPhone 0 fallbacks and 4, 6 and 9 frames in the ring under
+`young=stw` behind 16.3 to 19.1 ms scavenges (the oracle row's known cost;
+the matrix runs interpreted, nothing under it changed), the rest 0 but the
+hog with the budget off. Before it: the new suite once under ThreadSanitizer
+with twelve busy loops, 5 tests, 0 reports (`part2/tsan-new.log`).
+
 ### Part 5: not this sitting
 
 Not run: the dmg-made Sample on the Mac, the iPhone and the iPad, Release
@@ -705,8 +753,8 @@ slice's bind (the Mac's and the simulator's are shown above).
 
 ### Not done
 
-- Part 5 (above) and the final `just check 4127bb8` core-tier run (below
-  if it ran this sitting).
+- Part 5 (above). The core tier ran on 1f7828f (above); a part 5 that
+  changes no code needs no second run.
 - Narrower per-pc tables (lever g, found here: 0.54 MB of the chosen 2.59).
 - Pruning of `.build/kajo/native/<key>/` libraries of earlier images (each
   Release build after an image change adds one, 4 MB).
