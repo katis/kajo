@@ -1028,3 +1028,76 @@ before run is 7ec1bca's kernel built by `git archive`), the compilers'
 corpus test passes (`corpus-after.txt`), and `canonical-tonel.sh --check`
 passes (`canonical-check.txt`). Under ThreadSanitizer the limit test runs
 only the four small cases and gains nothing; the gates' gains are below.
+
+### Three kernel-test parts, measured again
+
+Open question 2's measurement, recorded as a number and nothing changed
+(the kernel's tests stay at two parts): the compiler bundle under the
+sanitizer with the twelve loops and `KAJO_KERNEL_TEST_PARTS=3`, on 723b3fe
+with item 1 built (`KAJO_KERNEL_TEST_PARTS=3 swift test --sanitize=thread
+--scratch-path .build/tsan-check --filter KajoCompilerTests` under
+`$GF/tools/loaded.sh`, `$GF/parts3/out.txt`): one run, 162 of 162 passed
+in 1905 s, `theToolsReconnectAfterADroppedLink` among them in 105.7 s.
+Gate speed's own runs at three parts failed that test once in two (1427
+and 1439 s, unloaded) and two parts under load took 2380 s. One run is not
+a rate; it says three parts can pass the reconnect test under load now.
+
+### The gates of the follow-ups
+
+On 723b3fe, the final code commit (the commits above it are docs), with
+swiftly's 6.4.2 first on PATH (each `gates.log` line names it; the driver
+is `$GF/tools/gates.sh`). Nothing under `Sources/` changed, so no `unsafe`
+line was added. Every gate passed:
+
+| gate | s | before (s, where) | tests |
+|---|--:|---|---|
+| Swift tier (`$GF/check/gates.log`) | 3959 | | |
+| clean-build | 20 | 19 (b478aaf, `symbol-interning/check`) | |
+| swift-test | 731 | 839 (6fc183e, `gate-speed/check-extra`) | 456 + 162 passed |
+| tsan | 2725 | 2969 (c98d981, `symbol-interning/check2`) | 456 + 162 passed, 0 reports |
+| kernel-test | 106 | 107 (b478aaf) | 249 of 249 |
+| apps | 125 | 129 (b478aaf) | |
+| new-check | 252 | 253 (b478aaf) | |
+| Smalltalk tier forced (`$GF/check-st/gates.log`) | 405 | | |
+| build-image, dev-image | 3, 2 | 4, 2 (6f45187, `gate-speed/check-extra`) | |
+| kernel-test | 105 | 104 | 249 of 249 |
+| tools-test | 119 | 120 | 295 of 295 (292 + the three new) |
+| compiler-tests | 71 | 154 | 162 passed |
+| golden | 72 | 72 | |
+| mac-shell-tests | 33 | 34 | 249 of 249 |
+| tsan-load, `gates-lib.sh`'s own definition (`$GF/check-tsanload/gates.log`) | 3777 | 3934 (c98d981) | 456 + 162 passed, 0 reports |
+
+What the changes bought, from the gates' own files: the compiler bundle
+in plain `swift test` took 68.3 s against 159.3 (6fc183e) and the
+Smalltalk tier's `compiler-tests` 71 against 154 s, the limit test no
+longer waiting 147 s for the selectors cases; under the sanitizer the
+limit test runs only its small cases, so the compiler bundle is as long
+as before (1792 s in `tsan` against 1796, 2298 in `tsan-load` against
+2304), bounded by the kernel's tests in two parts. The VM bundle under the
+sanitizer took 922 s in `tsan` against 1154 and 1463 in `tsan-load`
+against 1614, the full-heap test no longer its longest (bodies 565.1 and
+559.8 s against 691.9 and 1059.7; allocation-stalls.md's section has the
+rest). The three new tools tests take milliseconds.
+
+### Deviations, not done, open questions (the follow-ups)
+
+- Deviation: item 1 adds a send limit (four sends) beside the re-arm, so
+  that a request never answered ends even on a link that keeps dropping
+  within its timeout; the brief asked only for the re-arm and that such a
+  request must still end.
+- Deviation: item 2 keeps the whole-frame search up to 32 literals; the
+  buckets alone made the long chain test 17 percent slower in the first
+  build.
+- Not done: the limit test still runs only its four small cases under
+  ThreadSanitizer; the selectors cases would now take seconds there too,
+  but the chain cases (a method of 32 760 bytes) were not measured under
+  the sanitizer and the split was left as it is.
+- Not done: the kernel's tests stay at two parts (the brief's rule); the
+  three-parts run above is one run.
+- Open question: four sends as the limit? Recommended: keep; with the
+  backoff (1, 2, 4 s) and a 30 s timeout per send it bounds a request at
+  about two minutes of a flapping link.
+- Open question: go back to three or five kernel parts now that a resent
+  request has its full timeout? Recommended: measure five parts in a few
+  loaded sanitizer runs before changing anything; one run at three
+  passed.

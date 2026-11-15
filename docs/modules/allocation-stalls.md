@@ -1584,3 +1584,39 @@ without a stop as progress.
   its fair share only, and a stall lasts longer; it is never wrong (the
   justification rule does not depend on the marker's speed).
 - The `stall-diag` lines stay in the suite's output.
+
+#### The gates
+
+On 723b3fe (`docs/modules/gate-speed.md`, "The gates of the follow-ups",
+has every gate): `swift-test`, `tsan` and `tsan-load` passed with 456 +
+162 tests and 0 sanitizer reports. The tests' bodies against the Symbol
+interning module's gates (b478aaf `check/`, c98d981 `check2/`):
+
+| test | swift-test | tsan | tsan-load |
+|---|---|---|---|
+| ring, stw / local / offload | 32.6 / 32.2 / 31.4 (no plain baseline; 49.3 / 40.1 / 42.0 in b478aaf's `swift-test-load`) | 155.6 / 154.9 / 153.6 (269.8 / 265.7 / 236.0 and 365.6 / 365.5 / 353.5) | 208.0 / 206.6 / 199.4 (332.4 / 332.2 / 331.6) |
+| full heap | 348.5 (12 MiB as before; 155.7 and 112.4 in the loaded `swift-test-load`) | 565.1 (727.1, 691.9) | 559.8 (1059.7) |
+
+The plain full-heap body, at its unchanged 12 MiB, read 348.5 s in this
+`swift-test` (31 and 50 full collections of up to 5.9 and 6.5 s, the
+`stall-diag fullheap` lines of `$GF/check/swift-test.txt`) against 69.1 s
+filtered (`$GF/item3/stall-file-plain.txt`); the loaded gates before
+read 112 to 156. Not explained here: the test's time is its full
+collections, whose length in a dense suite depends on the share of the
+cores they get, and nothing of this change runs in that test. It is not
+on the plain suite's critical path (the VM bundle took 661 s).
+
+#### Not done, open questions
+
+- `aSlowedMarkerPacesTheMutator` and `fragmentationIsToldFromAFullHeap`
+  still run the headless ring with the marker slowed for the whole run;
+  neither asserts a stall (the first prints them, the second asserts
+  fallbacks with relocation off), so the schedule cannot fail them the
+  ring test's way.
+- Open question: keep 64 under `local` and `offload` and 16 under `stw`
+  for the ring test's slowdown until the stall? Recommended: keep; 30 of
+  30 loaded sanitizer cases stalled, and the bodies fell.
+- Open question: the full-heap test at 3 MiB under the sanitizer only,
+  or 3 MiB everywhere? Recommended: under the sanitizer only, as built
+  (the brief's rule); a plain run at 12 MiB keeps the larger heap's
+  numbers.
