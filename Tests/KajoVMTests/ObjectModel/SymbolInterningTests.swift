@@ -140,7 +140,7 @@ private func internConcurrently(_ rt: Runtime, _ names: [String], processes: Int
     rt.waitAllTerminated(600)
     let out = ps.map { p -> [Oop] in
         let a = rt.vm.result(of: p)
-        return (0..<names.count).map { rt.slot(a, $0) }
+        return rt.vm.inspect { om in (0..<names.count).map { om.load(a, $0) } }
     }
     for p in ps { rt.vm.release(p) }
     return out
@@ -151,14 +151,18 @@ private func internConcurrently(_ rt: Runtime, _ names: [String], processes: Int
 /// came back as more than one Symbol.
 private func duplicates(_ rt: Runtime, _ names: [String], _ answers: [[Oop]]) -> Int {
     var dup = 0
-    for (i, name) in names.enumerated() {
-        let set = Set(answers.map { $0[i] })
-        if set.count > 1 { dup += 1 }
-        for s in set {
-            let ok = rt.vm.inspect { om in s.isObject && om.header(s).classIndex == WellKnown.symbol && om.sameBytes(s, Array(name.utf8)) }
-            #expect(ok, "the answer for \(name) is not its Symbol")
+    let wrong = rt.vm.inspect { om -> [String] in
+        var out: [String] = []
+        for (i, name) in names.enumerated() {
+            let set = Set(answers.map { $0[i] })
+            if set.count > 1 { dup += 1 }
+            for s in set where !(s.isObject && om.header(s).classIndex == WellKnown.symbol && om.sameBytes(s, Array(name.utf8))) {
+                out.append(name)
+            }
         }
+        return out
     }
+    #expect(wrong.isEmpty, "answers that are not the Symbol of their bytes: \(wrong.prefix(5))")
     return dup
 }
 
@@ -247,18 +251,30 @@ func internSymbolsRuntime(background: Int = 7, noSecondLookup: Bool = false, mar
 /// primitive 129 fails (the method's fallback answers nil here; the
 /// kernel's `asSymbol` reports `primitiveFailed`), a value and not a trap.
 @Test func aBucketGrowsThroughEverySizeAndTheOnePastItIsRefused() throws {
-    let rt = try internSymbolsRuntime(background: 1, marker: false)
+    // The verifier runs once at the end, not at every stop of 4095 inserts
+    // (O(Symbols) each: 369 s under the sanitizer with it on).
+    let rt = try internSymbolsRuntime(background: 1, marker: false) { $0.verifySymbols = false }
     let table = rt.image.symbolTable
-    func bucket(_ s: String) -> Int { Int(truncatingIfNeeded: utf8Hash(Array(s.utf8))) & (SymbolTable.buckets - 1) }
+    func bucket(_ s: String) -> Int { Int(truncatingIfNeeded: utf8Hash(s.utf8)) & (SymbolTable.buckets - 1) }
     let b = bucket("fill0")
     let used = rt.vm.inspect { om -> Int in
         let k = om.load(table, b)
         return k == rt.image.nilObject ? 0 : (0..<Int(om.count(of: k))).filter { om.load(k, $0) != rt.image.nilObject }.count
     }
     let need = SymbolTable.maxBucket - used + 1
+    // About 4 million candidates: hashed from a byte buffer, not Strings
+    // (a debug build spent 30 s making them).
     var names: [String] = []
     var i = 0
-    while names.count < need { if bucket("fill\(i)") == b { names.append("fill\(i)") }; i += 1 }
+    var buf: [UInt8] = Array("fill".utf8)
+    while names.count < need {
+        buf.removeSubrange(4...)
+        var d = i, digits: [UInt8] = []
+        repeat { digits.append(UInt8(48 + d % 10)); d /= 10 } while d > 0
+        buf.append(contentsOf: digits.reversed())
+        if Int(truncatingIfNeeded: utf8Hash(buf)) & (SymbolTable.buckets - 1) == b { names.append(String(decoding: buf, as: UTF8.self)) }
+        i += 1
+    }
     let growths0 = rt.vm.internCounters.growths
     let answers = internConcurrently(rt, names, processes: 1)[0]
     #expect(answers.dropLast().allSatisfy { $0 != rt.image.nilObject })
@@ -267,8 +283,8 @@ func internSymbolsRuntime(background: Int = 7, noSecondLookup: Bool = false, mar
     #expect(size == SymbolTable.maxBucket)
     // 4, 8, ..., 2048, 4095 from wherever the bucket stood.
     #expect(rt.vm.internCounters.growths > growths0)
-    _ = rt.vm.scavenge()
-    #expect(rt.vm.counters[.symbolVerifierFailures] == 0)
+    let problems = rt.vm.inspect { $0.verifySymbolTable(table) }
+    #expect(problems.isEmpty, "\(problems.prefix(3))")
     rt.stop()
 }
 
@@ -328,7 +344,7 @@ private func lookupsDuringAnInsert(publishBeforeFill: Bool) throws -> Int64 {
     while bucket(Array(String(format: "q%05d", i).utf8)) != bucket(zeros) { i += 1 }
     let name = String(format: "q%05d", i)
     let z = rt.vm.newString(String(decoding: zeros, as: UTF8.self))
-    let readers = (0..<6).map { _ in rt.spawn("countFound:times:", [z, int(300_000)]) }
+    let readers = (0..<6).map { _ in rt.spawn("countFound:times:", [z, int(underThreadSanitizer ? 50_000 : 300_000)]) }
     usleep(5_000)
     let inserter = rt.spawn("internAll:", [rt.vm.newStringArray([name])])
     rt.waitAllTerminated(600)
