@@ -5,6 +5,7 @@ Class {
 	#instVars : [
 		'lines',
 		'literals',
+		'literalBuckets',
 		'labels'
 	]
 }
@@ -14,6 +15,7 @@ BytecodeGenerator >> assembleWithExtraLiterals: extra [
 	"Answer {bytes. literals. maxStack. hasSourceMap}."
 	| ins offsets bytes n k sources map |
 	literals := OrderedCollection new.
+	literalBuckets := nil.
 	labels := Dictionary new.
 	ins := OrderedCollection new.
 	sources := OrderedCollection new.
@@ -78,8 +80,20 @@ BytecodeGenerator >> fail: aString [
 
 { #category : #accessing }
 BytecodeGenerator >> literalIndex: anObject [
-	literals doWithIndex: [:l :i | (BytecodeGenerator literal: l sameAs: anObject) ifTrue: [^ i - 1]].
+	"The index of anObject's literal in the frame, added at its end the first time (first-use order). Gate speed's follow-up (docs/modules/gate-speed.md, The agreed follow-ups): a frame of up to 32 literals is searched whole as before; past that through buckets by literalKey:, built once from the frame in its order, so a method of n literals costs about n lookups and not n squared over 2 comparisons (4094 selectors took 138 s). Within a bucket literal:sameAs: decides as before, and every literal it calls the same has the same key, so the answer is the index the whole search would find."
+	| bucket |
+	literals size < 32 ifTrue: [
+		literals doWithIndex: [:l :i | (BytecodeGenerator literal: l sameAs: anObject) ifTrue: [^ i - 1]].
+		literals add: anObject.
+		^ literals size - 1].
+	literalBuckets isNil ifTrue: [
+		literalBuckets := Dictionary new.
+		literals doWithIndex: [:l :i |
+			(literalBuckets at: (BytecodeGenerator literalKey: l) ifAbsentPut: [OrderedCollection new]) add: i - 1]].
+	bucket := literalBuckets at: (BytecodeGenerator literalKey: anObject) ifAbsentPut: [OrderedCollection new].
+	bucket do: [:i | (BytecodeGenerator literal: (literals at: i + 1) sameAs: anObject) ifTrue: [^ i]].
 	literals add: anObject.
+	bucket add: literals size - 1.
 	^ literals size - 1
 ]
 
@@ -145,6 +159,17 @@ BytecodeGenerator class >> literal: a sameAs: b [
 	(a isKindOf: CompiledCode) ifTrue: [^ a == b].
 	(a isKindOf: Pragma) ifTrue: [^ a == b].
 	^ a = b
+]
+
+{ #category : #accessing }
+BytecodeGenerator class >> literalKey: anObject [
+	"literalIndex:'s bucket: equal for any two literals literal:sameAs: calls the same (same class; an Array by its size, a Float by its spelling, a method or pragma by its class alone, anything else by its value, whose = and hash agree), so a bucket holds only candidates and literal:sameAs: still decides."
+	| c |
+	c := anObject class.
+	anObject isArray ifTrue: [^ {c. anObject size}].
+	anObject isFloat ifTrue: [^ {c. anObject printString}].
+	((anObject isKindOf: CompiledCode) or: [anObject isKindOf: Pragma]) ifTrue: [^ {c}].
+	^ {c. anObject}
 ]
 
 { #category : #accessing }
