@@ -1,0 +1,222 @@
+# AOT 2: the product
+
+Status: briefed 2026-11-15 (the owner's "let's do AOT 2 after interning"
+of the same day; the choices of 2026-11-11: C as the generator's output,
+Xcode's clang on Apple platforms, Zig only when a non-Apple target
+exists). Follows AOT 1 (`docs/modules/aot.md`, ADR 0015) and module 11b
+(`docs/modules/distribution.md`).
+
+## What it is
+
+AOT 1 built the native engine: `kajo aot` turns an image's methods into
+C, the VM binds a compiled module method by method, and the interpreter
+stays whole beside it. Only the shells use it, through a signed dylib per
+image and a launch argument. This module makes it a property of an app a
+developer builds: a generated app's Release build generates the C of its
+sealed image, compiles it with the developer's Xcode, links it into the
+app and binds it at launch. Debug builds stay interpreted.
+
+Size comes first. The kernel image's module is 13.4 MB of text at `-O2`
+against a Release app binary of about 2 MB, so before anything is wired
+into a build the module measures what the size can be brought down to and
+what each step costs in speed.
+
+## What is known (AOT 1, measured on the mini, dcb6075)
+
+- The kernel image: 3276 methods in 2573 groups, 42 MB of C in 19 files,
+  13.7 s at `-O2` on ten cores, 13.4 MB of text, bound in 5.1 to 5.4 ms,
+  none declined. The development image 16.9 MB; the 2000-class image
+  26.5 MB and 24 ms. `-Os` is 7 percent slower on fib and `arith` and
+  under 1 percent smaller.
+- A group has an activation, a hot resume function per resume point
+  (entry, after each send and each `value`, backward-jump targets) and a
+  cold function holding the whole method once. Every send carries the
+  method-cache probe inline. The code is not deduplicated across hot
+  regions.
+- Speed against the interpreter at 1 worker: fib 3.43, `sends` 1.79,
+  `st-sends` 4.71, `arith` 9.76, `ivars` 4.43, `storeheavy` 3.58, `alloc`
+  1.36, `st-closures` 2.51.
+- A module is refused whole on a wrong layout hash or version, and a
+  method whose content hash does not match runs interpreted.
+- A generated app (11b) links four prebuilt static xcframeworks and its
+  image phase (`scripts/build-images.sh`, generated) runs the prebuilt
+  `kajo` and compiles nothing (0.12 s). A Release image is sealed: its
+  methods cannot change, so every method can stay bound.
+
+Check these before building on them.
+
+## Starting positions (measure, then decide; say where one was wrong)
+
+1. **Size levers**, each measured alone and then together on the kernel
+   image, the Sample's sealed image and the 2000-class image, as text
+   bytes, compile seconds and the eight kernels' speed against full
+   `-O2`:
+   a. `-Oz` with the machine outliner, and `-Os`, per file.
+   b. No hot resume functions: the cold function only (every pc enters
+      it), and the middle forms (hot entry only; hot entry and
+      backward-jump targets).
+   c. The send sequence out of line: one shared probe-and-call helper per
+      arity instead of the inline cache probe at every site.
+   d. Shared slow-path tails (the `special`, `fail`, `poll_send` call
+      sequences) as one cold block per function or one helper.
+   e. Identical functions folded at link (`-Wl,-dead_strip`, ICF where
+      the linker has it) and identical groups merged by the generator.
+   f. A subset: only the methods a profile or a static rule names
+      (methods with a backward jump or sent from one; no accessors; a
+      size cap per method) are compiled and the rest run interpreted.
+      The engine already runs both in one program; say what the kernels
+      and the comparison's programs lose at each cut.
+   Bound each lever with the cheapest build that shows its ceiling before
+   building it properly (the lesson: bound an optimization with a
+   cheating build first).
+2. **Where the C is compiled.** A script phase that runs `kajo aot` and
+   `clang` itself into one static library per platform and architecture,
+   cached by the image's hash and the flags, with the link naming the
+   library; against generated C files as sources of the target. The
+   number of files changes with the image, and Xcode's index and
+   sandboxed script phases have rules of their own: try each shape in
+   Debug and Release, for the Mac, the iPhone and the simulator, before
+   the generator writes it (the lesson: a pin is what the build system
+   can resolve).
+3. **How the app finds the module.** The descriptor `kajo_native_module`
+   linked into the app binary and found by `KajoApp` at launch (a symbol
+   the link keeps, looked up in the main image only), against an explicit
+   argument from the generated `App.swift`. No `dlopen` of a file: the
+   module is code of the signed binary.
+4. **The layout hash across the boundary.** The prebuilt frameworks are
+   built by `dist.sh` and the C by the developer's clang later; the hash
+   covers every offset the C reads. Show that a module generated by the
+   checkout's `kajo` binds against the same checkout's frameworks on all
+   three slices, and what a developer sees when it does not (a stale
+   library after a Kajo update): a refusal with its reason at launch, the
+   app running interpreted, never a crash.
+5. **Compile time.** 13.7 s on the mini's ten cores for the kernel alone;
+   a developer's Release build pays it once per image change. Measure the
+   Sample's from clean and again unchanged (the cache must make it about
+   zero), on the Mac target and the iOS target.
+
+## Parts
+
+Part 1, measure, nothing wired: the levers' table above on three images,
+with the speed of each configuration on the eight kernels and the
+comparison's five programs at 1 and 8 workers, checksums equal. Decide
+the product's configuration by a rule stated before the numbers are read:
+the smallest configuration that keeps the geometric mean of the eight
+kernels at 0.9 or more of full `-O2`; say what that is and what the next
+smaller and next faster ones are. If no configuration brings the Sample's
+module under the size of the rest of the app's binary, say so plainly;
+that is a result for the owner, not a failure of the module.
+
+Part 2, the generator's side: whatever part 1 kept, as options of
+`kajo aot` with the default the rule chose, the content and layout hashes
+covering every option that changes what a method's code assumes, the
+broken variants of AOT 1 still failing, and the native gates
+(`native-golden`, `native-kernel-test`, `native-cc`) run in the product's
+configuration as well as full `-O2`.
+
+Part 3, the app's build: `kajo new` gains the native module in Release
+(opt-in by a flag of `kajo new` and a setting in the generated project
+that turns it on or off without regenerating; the default is the owner's
+question), the generated `build-images.sh` or a script beside it
+generating, compiling, caching and linking as part 2 of the starting
+positions decided, for macOS arm64, iOS arm64 and the arm64 simulator.
+`dist.sh` carries what the build needs (the bundled `kajo` already links
+the generator; say what else). The fixture under
+`Tests/KajoCompilerTests/Fixtures/app-project` and its byte-for-byte test
+change in the same commit. Debug builds are unchanged: no C, no module.
+
+Part 4, the checks: `new-check.sh` asserts on the Release binaries with
+the module on that the descriptor is present, that a launch reports
+methods bound N of N and 0 declined (a line the launch report prints),
+that no symbol of `KajoAOT`, `KajoDev`, `KajoAppDevelopment`,
+`KajoCompiler` or `KajoShellCore` is in it (the generator never ships in
+an app), with a positive control; and with the module off that the
+binary is what it was. A stale or foreign module is a test: refused with
+its reason, the app runs interpreted.
+
+Part 5, measured from a dmg-made Sample on the Mac, the iPhone and the
+iPad, Release with the module on against off, back to back in both orders
+on the devices: binary size and the app bundle's, the Release build from
+clean and unchanged, cold launch to first frame (five each), the bind
+time, `kajo-bench` fib, sends and alloc, the scenario matrix's bar columns
+if the Sample can run a scenario (else say so), and the kernel's tests
+through the Sample's engine if there is a way to run them (else the
+shells' `native=1` rows stand for it; say so).
+
+## Tests
+
+Before the code they test where that is possible: the generator's
+options (a method compiled under each kept lever answers what the
+interpreter answers: the golden kernels, the kernel's tests bound, the
+random programs natively in every configuration at the product's
+setting), the cache (unchanged image: nothing compiled; changed image or
+flags: rebuilt; a truncated library: rebuilt, never linked), the
+refusals of part 4, the generator's fixture. A subset build's interpreted
+methods and native methods call each other in the random programs. The
+kasm fuzzer's generator mode (`KAJO_FUZZ_AOT=1`) runs once with the
+product's options and the run is quoted.
+
+## The bar
+
+- Part 1's table, the rule's choice, and the Sample's Release binary with
+  the module on at a size the doc states beside the module-off size.
+- Every native gate passes in the product's configuration; the kernel's
+  tests 249 of 249 bound with 0 declined (or, for a subset, the declined
+  count equal to the subset's complement and named).
+- A generated app's Release build with the module on builds from clean
+  with 0 warnings for the Mac, the iPhone and the simulator, launches,
+  binds, and passes `new-check`; with it off it is byte for byte what
+  11b built, or the difference is named.
+- On both devices the Release Sample with the module on reaches its first
+  frame within 20 ms of the module-off build and misses no more frames.
+- `interpret` identical instruction for instruction, the aligned A/B of
+  the interpreter within noise, `just arc-check` passing.
+- The core tier through `just check <base>` on the final code commit.
+
+## Rules of the house that bind here
+
+- The generator never links into an app; "not in the release build" is
+  checked on the linked binary by symbol.
+- Nothing is downloaded or installed; Xcode's clang is the one the
+  developer has. No Xcode component downloads.
+- Signing and notarization are the owner's; `dist.sh` is run without a
+  notary profile and the dmg is the unsigned-dev one. No `v0.2` tag, no
+  upload.
+- A changed gate script is run once on its own before the gate run; a
+  generated project's shape is tried in both configurations before the
+  generator writes it.
+- Device runs and gates never at the same time; a before and after on a
+  device is run in both orders with the thermal state on each line.
+- Size numbers are of linked, stripped binaries (`size -m`, the file on
+  disk and the app bundle), never of object files alone.
+
+## Not in this module
+
+Zig and any non-Apple target. The optimizer (guarded direct calls,
+inlining across sends, a receiver-class profile: AOT 3). Inline
+allocation, `at:put:`, `size`, `class`, `perform:` and Float arithmetic
+in generated code, unless part 1 shows one of them is a size win. Native
+code in Debug builds. Intel and x86_64 simulator slices. Dead-method
+stripping of a sealed image (its own module if part 1's subset numbers
+argue for it). The release itself.
+
+## Deliverables
+
+The doc's "As built" (part 1's tables and the decision, each starting
+position and where it was wrong, the build's shape with the files a
+generated project gains, the checks, part 5's tables, the gates,
+deviations, not done, open questions with recommendations), ADR 0015's
+Built (AOT 2) note, the generator's fixture, `new-check` and `dist.sh`
+as changed.
+
+## Open questions (build the recommended option; decisions only)
+
+1. Native code in a Release build: opt-in (recommended until the owner
+   has read part 1's sizes) or on by default.
+2. The size rule: 0.9 of full speed (recommended) or the smallest
+   configuration whatever it costs.
+3. A subset by static rule if part 1 shows it is the only lever that
+   reaches the app's own size: built (recommended only then) or left for
+   AOT 3's profile.
+4. The module's place: in the app binary (recommended) or a framework of
+   the app's own.
