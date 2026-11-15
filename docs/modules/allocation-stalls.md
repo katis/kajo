@@ -1448,3 +1448,139 @@ collections that are not stops. Open questions:
 5. Count young collections in `StallDiag.progress`? Recommended: yes,
    with the next change to these tests. The longest quiet stretch so far
    is 15 percent of its bound.
+
+### Gate speed's follow-up: three stall tests (2026-11-15)
+
+Three changes to `Tests/KajoVMTests/Marking/AllocationStallTests.swift`
+and nothing else (no file under `Sources/` changed); `$GF` is
+`~/kajo-scratch/gate-speed-followup/`. Swiftly's 6.4.2 first on PATH.
+
+#### The ring test's missing stall
+
+`aRingLikeLoadStallsInsteadOfFallingBack` failed in the Symbol interning
+module's `tsan` gate on b478aaf (`~/kajo-scratch/symbol-interning/check/tsan.txt`,
+line 482): the `offload` case answered the reference with 0 fallbacks, 2
+cycles and 0 stalls. The run's summary was all that file kept, so the
+test now prints where old space stood (`stall-diag ring` lines: old
+space's peak and end, the cycle records, the stops by kind), and the
+three cases ran filtered under ThreadSanitizer with the twelve loops
+(`$GF/item3/run1/out.txt`). That run failed the same way in the `local`
+case:
+
+| case | old peak MB | stalls | cycles: MB at start, at end, promoted during |
+|---|--:|--:|---|
+| offload | 16.2 | 1 | 10.3, 14.0, 5.2; 14.3, 11.3, 2.4; third running |
+| local | 16.0 | 0 | 10.1, 13.6, 5.0; 13.6, 11.5, 2.8; third running |
+| stw | 14.3 | 4 | 10.4, 13.1, 4.3; 13.4, 10.6, 1.7; third running |
+
+The VM is right; no stall was owed. Under `local` and `offload` a
+background worker stalls when its collection cannot be promised room
+below the soft limit (`canPromise(blocks:belowSoftLimit:)`: blocks in use
+plus blocks promised plus one young generation, 17 to 25 blocks of 32
+KiB, past the 512 of a 16 MiB heap). Blocks in use peaked at 488 (16.0
+MB) in the `local` run, so a stall needed more than one collection's
+room promised at once, and none came; the `offload` run peaked at 494
+and stalled once. A run's peak is where its cycle starts (the floor
+trigger, 10 to 13.6 MB) plus what the mutators promote while the slowed
+cycle runs (1.7 to 5.2 MB), so whether it crosses the edge depends on
+how the cores were shared between the two workers and the marker that
+run. Under `stw` the gate is every nursery's young generation over the
+committed blocks, a wider margin, and that case stalled in every
+recorded run.
+
+Repeating the round until one stalled (at most four) did not answer it:
+filtered under load, two `local` rounds and three `offload` rounds peaked
+at 14.5 to 15.7 MB with no stall before the run was stopped
+(`$GF/item3/ring10-rounds-abandoned/run1/out.txt`); the `stw` case
+stalled in its first. So the test now slows the marker until a
+background worker has stalled and then lets it run at full speed, as the
+stalled-Process tests do (`StallDiag.unslow`): a `Runtime` of the same
+program (`fragment.kasm` with the same iterations, two background workers,
+16 MiB, 512 KiB nurseries, unchecked as the headless run was, the heap
+verified once at the end), `run:of:` spawned as the headless run spawns
+it, the marker 64 times slower under `local` and `offload` (its first
+cycle promoted 3.9 to 5.2 MB at 16 times against the 5.9 MB of room above
+its trigger, so at 64 it cannot finish before a worker stalls) and 16
+times under `stw`, a wait on the collector's progress for the first stall
+(or the end), the marker at full speed, a wait on progress for the end,
+and the same assertions: the two results sum to the reference checksum, 0
+fallbacks and 0 unjustified, stalls counted, the slowdown's spins
+counted. Two drafts were measured and dropped: the heap verifier at every
+stop (`Runtime`'s default) made the `stw` case's scavenge stops 340 s of
+its 540 under the sanitizer with load (`$GF/item3/ring10-verify-abandoned/`),
+and 64 times under `stw` took 348 s to its first stall
+(`$GF/item3/tsanload-1/out.txt`).
+
+Ten runs of the three cases filtered under ThreadSanitizer with the
+twelve loops (`$GF/tools/ring10.sh`, `$GF/item3/ring10/summary.txt`,
+`rounds.txt`, each run's output in `run<n>/out.txt`): 10 of 10 passed,
+every case of every run stalled before the marker went to full speed
+(`local` 1 stall in 7 runs and 2 in 3, `offload` 1 in 8 and 2 in 2, `stw`
+2 in all 10), 0 fallbacks and 0 unjustified in all 30, bodies 238.3 to
+241.9 s (each case's body includes the wait for the shared reference
+checksum, computed by whichever case first reads it, so the three end
+together; the same file's earlier runs: 236.0 to 269.8 in `tsan` and 331.6
+to 365.6 in the gates on b478aaf and c98d981). A plain run of the file's
+tests passed (`$GF/item3/stall-file-plain.txt`, the ring cases 34.5 to
+86.5 s).
+
+#### The full-heap test's heap under the sanitizer
+
+`aFullHeapFallsBackJustifiedThenRunsOutOfMemory` took 903 to 1554 s
+under ThreadSanitizer in earlier gates and 727.1, 691.9 (`tsan`) and
+1059.7 s (`tsan-load`) in the Symbol interning module's
+(`~/kajo-scratch/symbol-interning/check/tsan.txt`, `check2/tsan.txt`,
+`check2/tsan-load.txt`). Measured first, filtered under the sanitizer
+with the twelve loops, with a line per young mode (`stall-diag fullheap`:
+the mode's seconds, old space's peak, full collections and the longest,
+stalls, cycles, the stops' count and summed time; `$GF/item4/run12/out.txt`):
+
+| heap | mode | s | stops' time s | full collections (longest s) | stalls | old peak MB | body s |
+|--:|---|--:|--:|---|--:|--:|--:|
+| 12 MiB | stw | 218.1 | 190.1 | 26 (9.6) | 45 | 17.8 | 588.4 |
+| 12 MiB | offload | 370.3 | 303.2 | 52 (9.7) | 41 | 17.8 | |
+| 6 MiB | stw | 167.9 | 154.7 | 31 (6.5) | 44 | 11.5 | 392.9 |
+| 6 MiB | offload | 225.0 | 186.3 | 51 (6.5) | 40 | 11.5 | |
+| 3 MiB | stw | 105.5 | 97.9 | 28 (4.8) | 32 | 8.3 | 239.1 |
+| 3 MiB | offload | 133.6 | 111.0 | 42 (4.8) | 34 | 8.3 | |
+
+(6 MiB `$GF/item4/run6/out.txt`, 3 MiB `$GF/item4/run3/out.txt`.) The
+time is the stops, 82 to 93 percent of each mode's run, nearly all of it
+the full collections that follow the justified stalls, each one marking
+and compacting a heap full of live 14-slot Arrays: the soft limit plus
+the promotion reserve (the reserve, four nurseries' worth, is the same at
+every heap size, which is why the peak falls by less than the heap). The
+number of full collections does not shrink with the heap; their length
+does. Built: `fullHeapMiB`, 3 MiB under ThreadSanitizer and 12 otherwise,
+with the claim and every assertion unchanged (the out-of-memory answer,
+0 unjustified, at least one fallback by a stall, each stall's record
+naming what justified it). The test has no broken variant of its own;
+`theRunningCycleDoesNotJustifyAFallback`'s (`stallJustifiedByRunningCycle`)
+covers the justification rule and is untouched. The gates' bodies are
+below.
+
+#### Young collections in the progress wait
+
+`StallDiag.progress` counted stops, cycles begun and stalls ended; a
+young collection under `local` or `offload` is not a stop. Module 7
+already counts them where a test can read them without a stop:
+`VM.youngCounters` (`collectionsLocal`, `collectionsOffloaded`) is read
+under the safepoint mutex, as the idle test already reads its
+`collectorWakeups`. `progress` now has a fourth term, those two summed,
+read at most every 100 ms so the 0.5 ms wait loop does not take the
+mutex at every turn. Nothing under `Sources/` changed. The stalled-
+Process tests and the idle test run under the default young mode,
+`offload`, so their waits now see a mutator that collects its nursery
+without a stop as progress.
+
+#### The owner's decisions (2026-11-15)
+
+- The priority limit of a command-line process is accepted and
+  documented as a limit of headless hosts: a command-line process on
+  macOS runs user-initiated and user-interactive threads at priority 31,
+  the priority of default-QoS work, so the stall's QoS raise of the
+  marker (`markerOverrides`) has no effect in a test process, `kajo run`
+  or any other headless host. Under outside load the marker there gets
+  its fair share only, and a stall lasts longer; it is never wrong (the
+  justification rule does not depend on the marker's speed).
+- The `stall-diag` lines stay in the suite's output.

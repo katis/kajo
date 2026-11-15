@@ -27,6 +27,14 @@ struct StallRun {
     let failure: String?
     let report: [String: String]
     func n(_ k: String) -> Double { Double(report[k] ?? "") ?? -1 }
+    /// Where old space stood: its peak and end against the soft limit
+    /// (the heap's size), what was promoted, the cycles' records
+    /// (`cycleRecordSummary`: number, trigger, state, MB at start and end,
+    /// promoted during, ...), the stops by kind.
+    var room: String {
+        ["oldPeakMB", "oldEndMB", "promotedMB", "fullCollections", "fullMaxMs", "stalls", "stallMaxMs", "cycles",
+         "markerSlowSpins", "stops", "stopNs", "timeToSafepointNs", "cycleRecs", "stopsByKind"].map { "\($0)=\(report[$0] ?? "-")" }.joined(separator: " ")
+    }
     var summary: String {
         ["fallbacks", "unjustifiedFallbacks", "fallbacksByStall", "fallbacksByMain", "stalls", "stallMaxMs", "cycles",
          "markerSlowSpins", "fallbackLog"].map { "\($0)=\(report[$0] ?? "-")" }.joined(separator: " ")
@@ -76,19 +84,74 @@ private let ringReference: Int64? = {
 
 // MARK: - the ring-like load
 
-/// A slowed marker (16 times, standing for a mutator 16 times faster: the
-/// tests run a debug build, whose interpreter is slow against its
-/// marker) on a heap the live data fits with room: every young mode stalls
-/// instead of falling back, and answers what the load answers with room to
-/// spare.
+/// A slowed marker (standing for a mutator many times faster: the tests
+/// run a debug build, whose interpreter is slow against its marker) on a
+/// heap the live data fits with room: every young mode stalls instead of
+/// falling back, and answers what the load answers with room to spare.
+///
+/// Gate speed's follow-up (2026-11-15, docs/modules/allocation-stalls.md,
+/// "The ring test's missing stall"): with the marker 16 times slower for
+/// the whole run, whether a run stalled depended on the schedule. A
+/// background worker stalls only when old space comes within one young
+/// generation of the soft limit (`canPromise`: 17 to 25 of the 512
+/// blocks), and a run's peak is its cycle's floor trigger (about 10 to
+/// 13.5 MB) plus what the mutators promote while the slowed cycle runs:
+/// 14.5 to 16.2 MB in the measured runs under ThreadSanitizer, under and at
+/// that edge, with nothing owed below it. Repeating the round did not
+/// help (filtered, local and offload peaked at 14.5 to 15.7 MB round after
+/// round). So the marker runs `ringSlowdown` times slower until a
+/// background worker has stalled, which its first cycle cannot then
+/// outrun (it promoted 3.9 to 5.2 MB at 16 times against the 5.9 MB of
+/// room above its trigger), and at full speed after that, as the stalled
+/// Process tests do; the wait for the stall and for the end are on the
+/// collector's progress, never a clock. The rest is the test as it was:
+/// the reference checksum, no fallback, the stall, the slowdown's spins.
+/// The stop-the-world young mode keeps 16: its background gate is the
+/// whole young generation over the committed blocks, a wider margin, and
+/// it stalled in every recorded run at 16 for the whole run (at 64 it
+/// took 348 s to its first stall under the sanitizer with the twelve loops
+/// against the other modes' 112).
+private func ringSlowdown(_ young: String) -> Int { young == "stw" ? 16 : 64 }
+
 @Test(arguments: ["stw", "local", "offload"])
 func aRingLikeLoadStallsInsteadOfFallingBack(_ young: String) throws {
     let endBody = bodyTimer("aRingLikeLoadStallsInsteadOfFallingBack \(young)")
     defer { endBody() }
-    let r = try headless(ringFiles(ringIters), young: young, heapMiB: 16, slowdown: 16)
-    #expect(r.checksum != nil && r.checksum == ringReference, "\(young): \(r.failure ?? "") \(r.summary)")
-    #expect(r.n("fallbacks") == 0 && r.n("unjustifiedFallbacks") == 0, "\(young): \(r.summary)")
-    #expect(r.n("stalls") > 0 && r.n("markerSlowSpins") > 0, "\(young): \(r.summary)")
+    let src = kernel("fragment") + itersSource(ringIters)
+    // Unchecked as the headless run it replaces (a heap verifier at every
+    // scavenge stop made the stop-the-world case's stops 340 s of 540 under
+    // the sanitizer with the twelve loops); the heap is verified once at
+    // the end (`rt.stop()`).
+    let rt = try Runtime(src, background: 2, heapBlocks: (16 << 20) / BlockHeap.blockBytes, verify: false, configure: { c in
+        c.nursery.bytes = 512 << 10
+        c.young.mode = YoungMode(name: young)!
+        c.marking.enabled = true
+        c.marking.markerThread = true
+        c.marking.testSwitches.markerSlowdown = ringSlowdown(young)
+    })
+    let ps = (0..<2).map { rt.spawn("run:of:", [int(Int64($0)), int(2)]) }
+    let d = StallDiag(rt, "ring-\(young)")
+    let quiet: Double = underThreadSanitizer ? 600 : 120
+    let stalled = d.waitProgress("stalled", quiet: quiet) {
+        (rt.vm.stallLog.map { $0.stalledNow > 0 || $0.all.count > 0 } ?? false) || rt.vm.liveProcessCount == 0
+    }
+    d.unslow()
+    #expect(d.waitProgress("rings", quiet: quiet) { rt.vm.liveProcessCount == 0 }, "\(young): \(d.full("fail"))")
+    var sum: Int64? = 0
+    for p in ps {
+        let v = rt.vm.result(of: p)
+        sum = v.isSmallInteger ? sum.map { $0 &+ v.smallIntegerValue } : nil
+    }
+    let c = rt.marking
+    let stalls = rt.vm.stallLog?.all.count ?? 0
+    let summary = "stalled=\(stalled) stalls=\(stalls) fallbacks=\(c.fallbacks) unjustified=\(c.unjustifiedFallbacks) "
+        + "slowSpins=\(c.markerSlowSpins) cycles=\(c.cycles)"
+    print("stall-diag ring \(young) \(summary) cycleRecs=\(cycleRecordSummary(rt.vm.cycleLog))")
+    #expect(sum != nil && sum == ringReference, "\(young): \(String(describing: sum)) \(summary)")
+    #expect(c.fallbacks == 0 && c.unjustifiedFallbacks == 0, "\(young): \(summary)")
+    #expect(stalls > 0 && c.markerSlowSpins > 0, "\(young): \(summary)")
+    for p in ps { rt.vm.release(p) }
+    rt.stop()
 }
 
 /// Part 5: the marker 4 and 16 times slower. The claim is speed
@@ -113,6 +176,17 @@ func aSlowedMarkerPacesTheMutator(_ factor: Int, _ young: String) throws {
 /// began after it (its record names the cycle), then module 4's
 /// out-of-memory rule applies: the run fails, nothing is unjustified. It
 /// ends by itself (no wall-clock bound).
+///
+/// Under ThreadSanitizer the heap is a quarter as large (gate speed's
+/// follow-up, 2026-11-15): at 12 MiB the test took 588 to 1554 s there,
+/// 82 to 87 percent of it in stops, nearly all the 26 to 52 full
+/// collections of a full heap (up to 9.7 s each with the twelve loops),
+/// each marking the soft limit plus the promotion reserve; at 3 MiB the
+/// filtered loaded run took 239 s against 588 (docs/modules/allocation-stalls.md,
+/// "The full-heap test's heap under the sanitizer"). The claim and its
+/// assertions are the same at either size.
+private let fullHeapMiB = underThreadSanitizer ? 3 : 12
+
 @Test func aFullHeapFallsBackJustifiedThenRunsOutOfMemory() throws {
     let endBody = bodyTimer("aFullHeapFallsBackJustifiedThenRunsOutOfMemory")
     defer { endBody() }
@@ -137,7 +211,9 @@ func aSlowedMarkerPacesTheMutator(_ factor: Int, _ young: String) throws {
     """
     let files = [("prelude.kasm", kernel("prelude")), ("lib.kasm", kernel("lib")), ("full.kasm", src)]
     for young in ["stw", "offload"] {
-        let r = try headless(files, young: young, heapMiB: 12)
+        let t0 = now()
+        let r = try headless(files, young: young, heapMiB: fullHeapMiB)
+        print("stall-diag fullheap \(young) s=\(String(format: "%.1f", Double(now() &- t0) / 1e9)) \(r.room) fallbacks=\(r.report["fallbacks"] ?? "-")")
         #expect(r.failure?.contains("outOfMemory") == true || r.failure?.contains("out of memory") == true,
                 "\(young): \(r.failure ?? "answered \(String(describing: r.checksum))")")
         #expect(r.n("unjustifiedFallbacks") == 0, "\(young): \(r.summary)")
@@ -389,14 +465,32 @@ final class StallDiag {
 
     /// The collector's own count of what it has done, read without a stop:
     /// stops (scavenges, full collections, marks, applies), cycles begun,
-    /// stalls ended.
+    /// stalls ended, and (gate speed's follow-up, 2026-11-15) the young
+    /// collections of the `local` and `offload` modes, which are not stops:
+    /// module 7's counts, read under the safepoint mutex (`youngCounters`,
+    /// no stop) at most every 100 ms.
     func progress() -> [UInt64] {
-        [rt.vm.counters[.stops] &- ownStops, rt.vm.markingCycleNow, rt.vm.stallsNow?.count ?? 0]
+        [rt.vm.counters[.stops] &- ownStops, rt.vm.markingCycleNow, rt.vm.stallsNow?.count ?? 0, youngCollections()]
+    }
+
+    var lastYoungRead: UInt64 = 0
+    var lastYoung: UInt64 = 0
+
+    /// Young collections done without a stop (local and offloaded), 0
+    /// without module 7.
+    func youngCollections() -> UInt64 {
+        let t = now()
+        if lastYoungRead == 0 || t &- lastYoungRead >= 100_000_000 {
+            let y = rt.vm.youngCounters
+            lastYoung = y.collectionsLocal &+ y.collectionsOffloaded
+            lastYoungRead = t
+        }
+        return lastYoung
     }
 
     /// Wait for `cond` with no clock on the work itself: the wait fails only
-    /// when the collector has counted nothing (no stop, no cycle, no stall;
-    /// `progress`) for `quiet` seconds. Reports as `wait`; inspection stops
+    /// when the collector has counted nothing (no stop, no cycle, no stall,
+    /// no young collection; `progress`) for `quiet` seconds. Reports as `wait`; inspection stops
     /// only at the end, so the reporting adds nothing to the count.
     func waitProgress(_ label: String, quiet: Double, _ cond: () -> Bool) -> Bool {
         let w0 = now()

@@ -931,3 +931,100 @@ and 65 misses, and `tsan-load` 67 hits.
 6. Fix the kernel compiler's `literalIndex:` (a dictionary beside the
    frame) as a follow-up? Recommended: yes, small, and the selectors
    limit cases would drop from 140 s to seconds.
+
+## The agreed follow-ups (2026-11-15)
+
+The owner agreed on 2026-11-15 to open questions 1 and 6 as recommended.
+Both are built on top of 7ec1bca; `$GF` is
+`~/kajo-scratch/gate-speed-followup/`. Toolchain: swiftly's 6.4.2 first
+on PATH (as `$GF/check/env.txt` records for the gate run).
+
+### 1. The tools' request timeout across a reconnect (06e0d08)
+
+`DevClient` armed a request's 30 s timeout at its first send and never
+again, so a request sent again on a new session after a dropped link had
+whatever was left of the first send's 30 s, the outage included (the
+reconnect test's failures above, outages of 21 to 32 s). Built:
+
+- The timeout counts from the request's latest send. `reopened` cancels
+  the timer armed at the earlier send and arms a new one
+  (`armTimeoutFor:`) as it sends the request again. While the link is
+  down the earlier send's timer keeps running, so an outage still counts
+  against the send before it: a request waiting through an outage longer
+  than its timeout fails then, as before, and the client goes on
+  reconnecting.
+- A request is sent at most `DevClient class>>sendLimit` times (4, its
+  first send included). At the next new session after its fourth send it
+  fails ("got no reply in 4 sends across dropped links: not sent again")
+  instead of being sent a fifth time. So a request that is never answered
+  ends in every case: its timer fires within 30 s of a send unless a
+  reconnect re-arms it, a reconnect re-arms it at most three times, and
+  `close` or a refused session ends it at once as before. Without the
+  limit a link that dropped every 20 s would have kept such a request
+  alive for as long as the link flapped.
+- The requests' timers go through `requestTimerAfter:do:` and
+  `cancelRequestTimer:` (`UIEventLoop` in the product), which
+  `FakeDevClient` overrides to record (`requestTimers`,
+  `fireRequestTimer:`), so a test fires a timeout without waiting for one.
+  The reconnect timers stay on `after:do:` and `cancelTimer:`, and the
+  existing tests' assertions on them are unchanged.
+
+Tests (`tools/Tests/DevClientTest.class.st`):
+`testARequestSentAgainHasItsTimeoutReArmed` (the first send's timer is
+still armed through the outage; after the reconnect exactly one timer is
+armed for the request and it is not the first one; the reply lands; the
+re-armed timer fails an unanswered request), `testARequestTimesOutDuringAnOutage`
+and `testARequestNeverAnsweredEndsAfterItsSendLimit`. No clock is read:
+every timer is fired by the test. With the new test and fake files over
+7ec1bca's `DevClient` (`$GF/item1/devclient-7ec1bca.txt`) all three fail:
+the re-arm test with "Expected 1 but was 0" (the old client arms its
+timeouts on `UIEventLoop` directly and never again, so no request timer
+exists to re-arm; headless, where `UIEventLoop after:do:` answers nil
+without a host, the old client's requests had no timeout at all), the
+outage test on the missing timer and the limit test on the missing
+`sendLimit`. On 06e0d08: 16 of 16 (`$GF/item1/devclient-head.txt`).
+`canonical-tonel.sh --check` passes (`$GF/item1/canonical-check.txt`
+after the rewrite into the image's method order).
+
+### 2. The kernel compiler's `literalIndex:` (5bfbb7b)
+
+Measured first, a debug build, the limit test one case after another
+(`swift test --filter bothCompilersRefuseAtEveryEncodingLimit
+--no-parallel`, `$GF/item2/limits-serial-before.txt`): keywordSend 1.6 and
+0.2 s, copying 0.6 and 0.6, chain 4.5 and 2.5, selectors4094 137.4 and
+selectors4095 138.2, 285.6 s in all. The two selectors cases are a method
+of 4094 (4095) unary sends to distinct selectors; the kernel compiler's
+`BytecodeGenerator>>literalIndex:` searched the whole literal frame with
+`literal:sameAs:` for each literal, 4094 x 4095 / 2, about 8.4 million
+calls of a method of several sends each. Where the time is was read off
+the fix: replacing only the search took the cases from 137.4 and 138.2 s
+to 4.9 and 4.8 s (the first build, `$GF/item2/` before the threshold), so
+about 133 s of each was the search and what remains is the bootstrap's
+compile and the probe VM's.
+
+Built: past 32 literals the generator keeps buckets of literal indices by
+`BytecodeGenerator class>>literalKey:` (the literal's class with its
+value, an Array's size, a Float's spelling, a method or pragma by class
+alone), built once from the frame in its order when the frame passes 32;
+within a bucket `literal:sameAs:` still decides. Every pair that
+`literal:sameAs:` calls the same has the same key (same class; Arrays of
+one size; Floats of one spelling; otherwise `=`, whose `hash` agrees for
+every literal class the compiler makes: SmallInteger, the LargeIntegers,
+Float, Character, String, Symbol, ByteArray, Array, Binding by identity),
+and a bucket holds indices in frame order, so the answer is the index the
+whole search found and no method's bytes change. Up to 32 literals the
+frame is searched whole as before: a first build with buckets for every
+frame made the long chain test (one literal, 120 000 sends) 19.9 to 23.3 s,
+the bucket's key and hash costing more than one comparison.
+
+After (`$GF/item2/limits-serial-after.txt`): keywordSend 1.6 and 0.2 s,
+copying 0.6 and 0.6, chain 4.6 and 2.5, selectors 5.0 and 4.8, 20.0 s in
+all against 285.6. Side by side, as the suite runs it, the test is as long
+as its longest case, about 5 s against 147.5. Unchanged: the kernel's
+`CompilerTest` 9 of 9, `testEveryMethodCompilesAsTheBootstrapDid` 23.5 s
+against 23.5 and `testALongChainIsWalkedByALoop` 20.1 against 19.9
+(`$GF/item2/compilertest-before.txt`, `compilertest-after.txt`; the
+before run is 7ec1bca's kernel built by `git archive`), the compilers'
+corpus test passes (`corpus-after.txt`), and `canonical-tonel.sh --check`
+passes (`canonical-check.txt`). Under ThreadSanitizer the limit test runs
+only the four small cases and gains nothing; the gates' gains are below.
