@@ -983,8 +983,10 @@ exists to re-arm; headless, where `UIEventLoop after:do:` answers nil
 without a host, the old client's requests had no timeout at all), the
 outage test on the missing timer and the limit test on the missing
 `sendLimit`. On 06e0d08: 16 of 16 (`$GF/item1/devclient-head.txt`).
-`canonical-tonel.sh --check` passes (`$GF/item1/canonical-check.txt`
-after the rewrite into the image's method order).
+`canonical-tonel.sh --check` first listed the three edited files
+(`$GF/item1/canonical-check.txt`); `canonical-tonel.sh` rewrote them into
+the image's method order before the commit, and the check after items 1
+and 2 printed nothing and exited 0 (`$GF/item2/canonical-check.txt`).
 
 ### 2. The kernel compiler's `literalIndex:` (5bfbb7b)
 
