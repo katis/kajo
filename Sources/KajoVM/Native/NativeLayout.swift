@@ -141,6 +141,9 @@ package struct NativeMethodInfo: Sendable {
     /// The literal frame's raw words.
     package let literals: [UInt64]
     package let hash: (UInt64, UInt64)
+    /// The method's selector (raw; nil's for a block method). AOT 2's
+    /// subset rules read it; the generated code does not.
+    package var selector: UInt64 = 0
     package var isBlock: Bool { flags & MethodFlags.block != 0 }
 }
 
@@ -234,6 +237,6 @@ extension Image {
                                 argc: int(MethodLayout.argc), temps: int(MethodLayout.temps), maxStack: int(MethodLayout.maxStack),
                                 flags: Int64(int(MethodLayout.flags)), primitive: int(MethodLayout.primitive),
                                 copied: int(MethodLayout.copied), codeLength: bytes.count, instructions: instrs,
-                                literals: literals, hash: hash)
+                                literals: literals, hash: hash, selector: om.load(m, MethodLayout.selector).raw)
     }
 }

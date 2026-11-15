@@ -46,7 +46,7 @@ func scratchDirectory(_ tag: String) -> String {
         }
         // The same input twice: the same bytes.
         #expect(try generated(fixtureSpec) == files)
-        #expect(files.filter(\.executable).map(\.path) == ["scripts/build-images.sh"])
+        #expect(files.filter(\.executable).map(\.path) == ["scripts/build-images.sh", "scripts/build-native.sh"])
     }
 
     @Test func onlyDebugPlistsNameTheLocalNetwork() throws {
@@ -197,7 +197,7 @@ func scratchDirectory(_ tag: String) -> String {
         let d = scratchDirectory("write")
         defer { try? fm.removeItem(atPath: d) }
         let written = try AppProjectGenerator.write(fixtureSpec, into: d).get()
-        #expect(written.count == 12)
+        #expect(written.count == 13)
         let mode = try fm.attributesOfItem(atPath: d + "/scripts/build-images.sh")[.posixPermissions] as? Int
         #expect(mode == 0o755)
         #expect(fm.contents(atPath: d + "/src/package.st") == Data("Package { #name : #Sample }\n".utf8))
@@ -207,7 +207,7 @@ func scratchDirectory(_ tag: String) -> String {
         let empty = scratchDirectory("empty")
         try fm.createDirectory(atPath: empty, withIntermediateDirectories: true)
         defer { try? fm.removeItem(atPath: empty) }
-        #expect((try? AppProjectGenerator.write(fixtureSpec, into: empty).get())?.count == 12)
+        #expect((try? AppProjectGenerator.write(fixtureSpec, into: empty).get())?.count == 13)
         let file = scratchDirectory("file")
         fm.createFile(atPath: file, contents: Data("x".utf8))
         defer { try? fm.removeItem(atPath: file) }

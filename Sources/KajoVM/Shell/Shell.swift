@@ -541,6 +541,12 @@ public final class ShellVM: @unchecked Sendable {
     public var resumedProcessCount: Int { vm.resumedProcesses.count }
     /// Module 8d: the image is a release image (its header's flag).
     public var isReleaseImage: Bool { image.isRelease }
+    /// AOT 2: what binding the native module did (nil: none was given).
+    public var nativeBindReport: NativeBindReport? { vm.nativeReport }
+    /// AOT 2: the methods the given module's generator wrote and declined.
+    public var nativeGenerated: (generated: UInt64, declined: UInt64)? {
+        vm.config.native.map { ($0.methodsGenerated, $0.methodsDeclined) }
+    }
 
     // MARK: snapshot
 

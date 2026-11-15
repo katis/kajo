@@ -6,14 +6,18 @@
 # (sealed; it does not serve, and its methods cannot change). An image is
 # built again only when src/, the kernel or kajo is newer. No compiler,
 # no network. By hand: scripts/build-images.sh <resources dir> Debug|Release
+# (--image-only <config>: the cached image alone, which
+# scripts/build-native.sh compiles).
 set -euo pipefail
 project=${0:A:h:h}
 kajo_root='/path/to/kajo'
 kajo=$kajo_root/Prebuilt/bin/kajo
+only=0
+if [[ ${1:-} == --image-only ]]; then only=1; shift; set -- . "$@"; fi
 out=${1:-$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH}/kajo
 config=${2:-$CONFIGURATION}
 cache=$project/.build/kajo
-mkdir -p $cache $out
+mkdir -p $cache
 [[ -x $kajo ]] || { print "error: no prebuilt kajo at $kajo (is the Kajo checkout still there? Open the Kajo app once)"; exit 1; }
 if [[ $config == Release ]]; then kind=release; flags=(--release); else kind=development; flags=(); fi
 img=$cache/app-$kind.img
@@ -21,4 +25,6 @@ if [[ ! -f $img || -n $(find $project/src $kajo_root/kernel $kajo -newer $img -p
   $kajo build-image -o $img.new $flags $kajo_root/kernel $project/src > $cache/image.log 2>&1 || { cat $cache/image.log; exit 1; }
   mv $img.new $img
 fi
+(( only )) && exit 0
+mkdir -p $out
 cp $img $out/app.img

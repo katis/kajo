@@ -18,6 +18,12 @@ settings:
     CODE_SIGN_STYLE: Automatic
     SWIFT_VERSION: "6.0"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
+    # AOT 2: YES compiles the Release image's methods to native code
+    # linked into the app (scripts/build-native.sh); NO runs them
+    # interpreted. Debug builds are interpreted either way.
+    KAJO_NATIVE: NO
+    KAJO_NATIVE_LDFLAGS_YES: -Wl,-force_load,$(PROJECT_DIR)/.build/kajo/native/$(PLATFORM_NAME)/libkajo_native.a
+    KAJO_NATIVE_LDFLAGS_NO: ""
     GENERATE_INFOPLIST_FILE: NO
     PRODUCT_NAME: Sample
     PRODUCT_BUNDLE_IDENTIFIER: dev.katajamaki.kajo.sample
@@ -39,12 +45,22 @@ targets:
           OTHER_LDFLAGS: $(inherited) -framework KajoAppDevelopment -framework KajoDev
         Release:
           INFOPLIST_FILE: Info-macOS-Release.plist
+          OTHER_LDFLAGS: $(inherited) $(KAJO_NATIVE_LDFLAGS_$(KAJO_NATIVE))
     dependencies:
       - package: Kajo
         product: KajoApp
       - package: Kajo
         product: KajoAppDevelopment
         link: false
+    preBuildScripts:
+      - name: Build the native module
+        basedOnDependencyAnalysis: false
+        # The library the Release link takes (KAJO_NATIVE_LDFLAGS_YES):
+        # Xcode plans a -force_load file as an input of the link.
+        outputFiles:
+          - $(PROJECT_DIR)/.build/kajo/native/$(PLATFORM_NAME)/libkajo_native.a
+        script: |
+          "$PROJECT_DIR/scripts/build-native.sh"
     postBuildScripts:
       - name: Build the image
         basedOnDependencyAnalysis: false
@@ -67,12 +83,22 @@ targets:
           OTHER_LDFLAGS: $(inherited) -framework KajoAppDevelopment -framework KajoDev
         Release:
           INFOPLIST_FILE: Info-iOS-Release.plist
+          OTHER_LDFLAGS: $(inherited) $(KAJO_NATIVE_LDFLAGS_$(KAJO_NATIVE))
     dependencies:
       - package: Kajo
         product: KajoApp
       - package: Kajo
         product: KajoAppDevelopment
         link: false
+    preBuildScripts:
+      - name: Build the native module
+        basedOnDependencyAnalysis: false
+        # The library the Release link takes (KAJO_NATIVE_LDFLAGS_YES):
+        # Xcode plans a -force_load file as an input of the link.
+        outputFiles:
+          - $(PROJECT_DIR)/.build/kajo/native/$(PLATFORM_NAME)/libkajo_native.a
+        script: |
+          "$PROJECT_DIR/scripts/build-native.sh"
     postBuildScripts:
       - name: Build the image
         basedOnDependencyAnalysis: false

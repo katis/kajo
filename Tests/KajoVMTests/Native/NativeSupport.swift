@@ -15,14 +15,30 @@ enum NativeTest {
     /// methods (and so the same oops folded) share one compiled module.
     private static let cache = Mutex<[String: NativeModule]>([:])
 
+    /// AOT 2: the generator's options every test module is made with:
+    /// the product's configuration (`kajo aot`'s defaults) with every
+    /// method generated (`--no-subset`: the tests count bound methods; the
+    /// subset has tests of its own), or what `KAJO_AOT_OPTIONS` names
+    /// applied to that (`--full` for AOT 1's, `--subset callees` for the
+    /// product's own).
+    static let options: AOTOptions = {
+        var base = AOTOptions()
+        base.subset = nil
+        guard let v = ProcessInfo.processInfo.environment["KAJO_AOT_OPTIONS"] else { return base }
+        switch AOTOptions.parse(v.split(separator: " ").map(String.init), base: base) {
+        case .success(let (o, rest)) where rest.isEmpty: return o
+        default: fatalError("KAJO_AOT_OPTIONS: not kajo aot's options: \(v)")
+        }
+    }()
+
     /// The generated C for an image's methods.
-    static func source(for image: Image, options: AOTOptions = AOTOptions()) -> AOTOutput {
+    static func source(for image: Image, options: AOTOptions = NativeTest.options) -> AOTOutput {
         AOTGenerator.generate(image.nativeMethodInfos(), nilOop: image.nilObject.raw, trueOop: image.trueObject.raw,
                               falseOop: image.falseObject.raw, options: options)
     }
 
     /// The compiled module for an image's methods.
-    static func module(for image: Image, options: AOTOptions = AOTOptions()) throws -> NativeModule {
+    static func module(for image: Image, options: AOTOptions = NativeTest.options) throws -> NativeModule {
         let out = source(for: image, options: options)
         let h = nativeDigest(Array(out.source.utf8))
         let key = "\(h.0)-\(h.1)"

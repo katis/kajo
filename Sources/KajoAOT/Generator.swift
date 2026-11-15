@@ -39,6 +39,10 @@ package struct AOTOutput: Sendable {
     /// Methods the generator declined, with the reason (none in the bar).
     package var declined: [(name: String, reason: String)]
     package var resumePoints: Int
+    /// Methods a subset rule left out (they run interpreted).
+    package var excluded: Int = 0
+    /// Their names (`kajo aot` writes them to `excluded.txt`).
+    package var excludedNames: [String] = []
 }
 
 /// Generator variants kept for measurement (docs/modules/aot.md, part 1:
@@ -62,7 +66,178 @@ package struct AOTOptions: Sendable {
     /// each a hot resume function.
     package var inlineClosures = true
     package var brokenNoFlushAtPoll = false
+    /// AOT 2 (docs/modules/aot-product.md), part 1's size levers.
+    /// Which pcs get a hot resume function (lever b): every one AOT 1
+    /// chose, the entry and backward-jump targets, the entry alone, or
+    /// none (the cold function is entered at every pc).
+    package var hot: HotForm = .all
+    // AOT 2's defaults are the product's configuration, part 1's rule's
+    // choice (docs/modules/aot-product.md): the send helper, the cold
+    // functions for size and the subset of loops and their callees.
+    // `--full` is AOT 1's configuration.
+    /// Lever c: a send is one tail call of a shared helper (the poll, the
+    /// count, the cache probe, the native activation or the VM's send).
+    package var sendHelper = true
+    /// Lever d: every slow path's continuation (`KOUT`, `KGO`'s tail) is
+    /// one tail call of a shared helper.
+    package var sharedTails = false
+    /// Lever f: only the methods the rule names are generated; the rest
+    /// run interpreted (not declined: `AOTOutput.excluded`).
+    package var subset: AOTSubset? = AOTSubset(callees: true)
+    /// Lever a, per function: the cold functions
+    /// compiled for size (`minsize, cold`), the hot ones and
+    /// the activations at the file's flag.
+    package var coldMinsize = true
     package init() {}
+}
+
+extension AOTOptions {
+    /// `kajo aot`'s options (and the tests' `KAJO_AOT_OPTIONS`), applied in
+    /// order to `base`: `--full` (AOT 1's configuration: every hot
+    /// function, sends and tails inline, every method), `--hot
+    /// all|entry-loops|entry|none`, `--send-helper` and `--no-send-helper`,
+    /// `--shared-tails` and `--no-shared-tails`, `--subset
+    /// loops|callees[,no-accessors][,max=<bytes>]` and `--no-subset`, and
+    /// AOT 1's measurement switches `--return-marker`, `--no-inline-stores`,
+    /// `--no-inline-closures`. Answers the options and the arguments left
+    /// over, or the reason an option is wrong.
+    package static func parse(_ args: [String], base: AOTOptions = AOTOptions()) -> Result<(AOTOptions, [String]), AOTOptionError> {
+        var o = base
+        var rest: [String] = []
+        var i = 0
+        while i < args.count {
+            let a = args[i]
+            func value() -> String? {
+                i += 1
+                return i < args.count ? args[i] : nil
+            }
+            switch a {
+            case "--full":
+                o.hot = .all
+                o.sendHelper = false
+                o.sharedTails = false
+                o.subset = nil
+                o.coldMinsize = false
+            case "--hot":
+                guard let v = value(), let h = HotForm(rawValue: v) else { return .failure(AOTOptionError(reason: "--hot takes all, entry-loops, entry or none")) }
+                o.hot = h
+            case "--send-helper": o.sendHelper = true
+            case "--no-send-helper": o.sendHelper = false
+            case "--shared-tails": o.sharedTails = true
+            case "--no-shared-tails": o.sharedTails = false
+            case "--no-subset": o.subset = nil
+            case "--cold-minsize": o.coldMinsize = true
+            case "--no-cold-minsize": o.coldMinsize = false
+            case "--subset":
+                guard let v = value() else { return .failure(AOTOptionError(reason: "--subset takes loops or callees[,no-accessors][,max=<bytes>]")) }
+                var r = AOTSubset()
+                for part in v.split(separator: ",") {
+                    switch part {
+                    case "loops": break
+                    case "callees": r.callees = true
+                    case "no-accessors": r.noAccessors = true
+                    default:
+                        guard part.hasPrefix("max="), let n = Int(part.dropFirst(4)), n > 0 else {
+                            return .failure(AOTOptionError(reason: "--subset takes loops or callees[,no-accessors][,max=<bytes>]"))
+                        }
+                        r.maxBytes = n
+                    }
+                }
+                o.subset = r
+            case "--return-marker": o.returnByLookup = false
+            case "--no-inline-stores": o.inlineStores = false
+            case "--no-inline-closures": o.inlineClosures = false
+            default: rest.append(a)
+            }
+            i += 1
+        }
+        return .success((o, rest))
+    }
+
+    /// The options as `kajo aot` arguments (the cache keys and the reports).
+    package var arguments: [String] {
+        var a = ["--hot", hot.rawValue, sendHelper ? "--send-helper" : "--no-send-helper",
+                 sharedTails ? "--shared-tails" : "--no-shared-tails", coldMinsize ? "--cold-minsize" : "--no-cold-minsize"]
+        if let r = subset {
+            a += ["--subset", (r.callees ? ["callees"] : ["loops"]) .joined() + (r.noAccessors ? ",no-accessors" : "") + (r.maxBytes == .max ? "" : ",max=\(r.maxBytes)")]
+        }
+        return a
+    }
+}
+
+package struct AOTOptionError: Error, CustomStringConvertible {
+    package let reason: String
+    package var description: String { reason }
+}
+
+package enum HotForm: String, Sendable, CaseIterable {
+    case all, entryLoops = "entry-loops", entry, none
+}
+
+/// Lever f's static rules. A method is kept when it has a backward jump
+/// (`loops`), when its selector is sent from a kept method with a loop
+/// (`callees`), unless it is a trivial accessor (`noAccessors`) or longer
+/// than `maxBytes`; a block method is kept with its home method.
+package struct AOTSubset: Sendable {
+    package var callees = false
+    package var noAccessors = false
+    package var maxBytes = Int.max
+    package init(callees: Bool = false, noAccessors: Bool = false, maxBytes: Int = .max) {
+        self.callees = callees
+        self.noAccessors = noAccessors
+        self.maxBytes = maxBytes
+    }
+
+    /// The methods kept, in the input's order.
+    package func select(_ infos: [NativeMethodInfo]) -> [NativeMethodInfo] {
+        var byOop: [UInt64: Int] = [:]
+        for (k, m) in infos.enumerated() { byOop[m.oop] = k }
+        // A method's block methods (literals that are block methods), transitively.
+        func blocks(_ k: Int) -> [Int] {
+            var out: [Int] = [], work = [k]
+            while let j = work.popLast() {
+                for l in infos[j].literals {
+                    if let b = byOop[l], infos[b].isBlock, !out.contains(b) { out.append(b); work.append(b) }
+                }
+            }
+            return out
+        }
+        func loops(_ m: NativeMethodInfo) -> Bool { m.instructions.contains { $0.op.isJump && $0.a < 0 } }
+        var keep = [Bool](repeating: false, count: infos.count)
+        var looping: [Int] = []
+        for (k, m) in infos.enumerated() where !m.isBlock {
+            let family = [k] + blocks(k)
+            if family.contains(where: { loops(infos[$0]) }) { looping.append(k); for j in family { keep[j] = true } }
+        }
+        if callees {
+            var sent = Set<UInt64>()
+            for k in looping {
+                for j in [k] + blocks(k) {
+                    let m = infos[j]
+                    for i in m.instructions where i.op == .send && i.a < m.literals.count { sent.insert(m.literals[i.a]) }
+                }
+            }
+            for (k, m) in infos.enumerated() where !m.isBlock && sent.contains(m.selector) {
+                for j in [k] + blocks(k) { keep[j] = true }
+            }
+        }
+        func accessor(_ m: NativeMethodInfo) -> Bool {
+            guard m.primitive == 0, m.instructions.count <= 2 else { return false }
+            let ops = m.instructions.map(\.op)
+            if ops == [.returnSelf] { return true }
+            guard ops.count == 2, ops[1] == .returnTop else { return false }
+            switch ops[0] {
+            case .pushIvar, .pushSelf, .pushLiteral, .pushNil, .pushTrue, .pushFalse, .pushInt, .pushTemp: return true
+            default: return false
+            }
+        }
+        return infos.enumerated().compactMap { k, m in
+            guard keep[k] else { return nil }
+            if noAccessors && accessor(m) { return nil }
+            if m.codeLength > maxBytes { return nil }
+            return m
+        }
+    }
 }
 
 package enum AOTGenerator {
@@ -70,7 +245,14 @@ package enum AOTGenerator {
                                  options: AOTOptions = AOTOptions()) -> AOTOutput {
         var groups: [String: (info: NativeMethodInfo, key: (UInt64, UInt64))] = [:]
         var declined: [(String, String)] = []
-        for m in infos {
+        let chosen = options.subset.map { $0.select(infos) } ?? infos
+        let excluded = infos.count - chosen.count
+        var excludedNames: [String] = []
+        if excluded > 0 {
+            let kept = Set(chosen.map(\.oop))
+            excludedNames = infos.filter { !kept.contains($0.oop) }.map(\.name).sorted()
+        }
+        for m in chosen {
             if let r = declineReason(m) {
                 declined.append((m.name, r))
                 continue
@@ -104,13 +286,15 @@ package enum AOTGenerator {
             k += options.groupsPerFile
         }
         out.text = ""
-        out.tables(plans, resumeCount: nextResume, generated: infos.count - declined.count, declined: declined.count)
+        out.helpers()
+        out.tables(plans, resumeCount: nextResume, generated: chosen.count - declined.count, declined: declined.count)
         let tables = out.text
         var files = [("kajo_native.h", "#ifndef KAJO_NATIVE_H\n#define KAJO_NATIVE_H\n" + header + "#endif\n")]
         for (i, c) in chunks.enumerated() { files.append(("kajo_native_\(i).c", "#include \"kajo_native.h\"\n" + c)) }
         files.append(("kajo_native_tables.c", "#include \"kajo_native.h\"\n" + tables))
-        return AOTOutput(source: header + chunks.joined() + tables, files: files, methods: infos.count - declined.count,
-                         groups: plans.count, declined: declined, resumePoints: nextResume)
+        return AOTOutput(source: header + chunks.joined() + tables, files: files, methods: chosen.count - declined.count,
+                         groups: plans.count, declined: declined, resumePoints: nextResume, excluded: excluded,
+                         excludedNames: excludedNames)
     }
 
     /// How the generator emits an opcode (plain opcodes; a fused one is
@@ -187,6 +371,13 @@ struct MethodPlan {
                 }
             }
         }
+        switch options.hot {
+        case .all: break
+        case .entryLoops:
+            hot = hot.filter { pc in pc == 0 || info.instructions.contains { $0.op.isJump && $0.a < 0 && $0.offset + $0.length + $0.a == pc } }
+        case .entry: hot = hot.filter { $0 == 0 }
+        case .none: hot = []
+        }
         self.hot = hot.sorted()
         self.resumePCs = resume.sorted()
     }
@@ -206,6 +397,10 @@ struct MethodPlan {
     }
 
     var hasActivation: Bool { true }
+
+    /// The function the activation enters at pc 0 (the cold one, with b =
+    /// 0 its pc, when pc 0 has no hot function).
+    var entryFunction: String { hot.first == 0 ? "kn_R\(index)_0" : "kn_C\(index)" }
 }
 
 extension Opcode {
@@ -329,9 +524,45 @@ struct Emitter {
           u64 generated, declined;
         } KModule;
         /* Rule 6: after a call into the VM, fp, hdr and the value come from what it answered. */
-        #define KOUT(f) do { __attribute__((musttail)) return (f)(s, AT(s, W_OUT_FP, u64 *), AT(s, W_OUT_HDR, u64 *), AT(s, W_OUT_V, u64), AT(s, W_OUT_PC, u64), 0, 0); } while (0)
-        #define KGO(call) do { KF *f_ = (call); if (f_ == KCONT) break; if (!f_) return; KOUT(f_); } while (0)
         """)
+        if options.sharedTails {
+            // Lever d: one shared tail (`k_exit`, in the tables file) for every continuation.
+            line("KFN k_exit(KS *, u64 *, u64 *, u64, u64, u64, u64);")
+            line("#define KOUT(f) do { __attribute__((musttail)) return k_exit(s, 0, 0, (u64)(f), 0, 0, 0); } while (0)")
+            line("#define KGO(call) do { KF *f_ = (call); if (f_ != KCONT) KOUT(f_); } while (0)")
+        } else {
+            line("#define KOUT(f) do { __attribute__((musttail)) return (f)(s, AT(s, W_OUT_FP, u64 *), AT(s, W_OUT_HDR, u64 *), AT(s, W_OUT_V, u64), AT(s, W_OUT_PC, u64), 0, 0); } while (0)")
+            line("#define KGO(call) do { KF *f_ = (call); if (f_ == KCONT) break; if (!f_) return; KOUT(f_); } while (0)")
+        }
+        if options.sendHelper { line("KFN k_send(KS *, u64 *, u64 *, u64, u64, u64, u64);") }
+    }
+
+    /// The shared helpers of levers c and d, defined once in the tables file.
+    mutating func helpers() {
+        if options.sharedTails {
+            line("KFN k_exit(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
+            line("  (void)fp; (void)hdr; (void)b; (void)c; (void)d; KF *f_ = (KF *)a; if (!f_) return;")
+            line("  __attribute__((musttail)) return f_(s, AT(s, W_OUT_FP, u64 *), AT(s, W_OUT_HDR, u64 *), AT(s, W_OUT_V, u64), AT(s, W_OUT_PC, u64), 0, 0);")
+            line("}")
+        }
+        if options.sendHelper {
+            // a the selector, b the pc after the send << 8 | its length, c the
+            // caller's resume index, d the depth before the send << 8 | argc.
+            line("KFN k_send(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
+            line("  u64 sel_ = a, argc_ = d & 255, dep_ = d >> 8, next_ = b >> 8, len_ = b & 255;")
+            line("  if (UNLIKELY(k_due(s))) { KF *f_ = VT(s)->poll_send(s, next_, hdr + 4 + dep_, fp, hdr, len_); if (f_ != KCONT) { if (!f_) return; KOUT(f_); } }")
+            if !options.brokenNoSendCount { line("  AT(s, W_SENDS, u64)++;") }
+            line("  u64 *rp_ = hdr + 4 + dep_ - argc_; u64 cls_ = k_classof(s, *rp_);")
+            line("  const char *e_ = AT(s, W_CACHE, const char *) + ((((sel_ >> 4) ^ cls_) & (CACHE_ENTRIES - 1)) * CACHE_STRIDE);")
+            line("  u64 m_;")
+            line("  if (LIKELY(*(const u64 *)(e_ + CACHE_CLS) == cls_ && *(const u64 *)(e_ + CACHE_SEL) == sel_)) m_ = *(const u64 *)(e_ + CACHE_METHOD);")
+            line("  else m_ = VT(s)->lookup(s, cls_, sel_);")
+            line("  KF *act_ = *(KF *const *)(AT(s, W_NTAB, const char *) + m_);")
+            line("  if (UNLIKELY(!act_)) { KF *f_ = VT(s)->send_slow(s, next_, hdr + 4 + dep_, fp, hdr, sel_, argc_ | len_ << 8, m_); if (!f_) return; KOUT(f_); }")
+            line("  AT(s, W_NSENDS, u64)++;")
+            line("  __attribute__((musttail)) return act_(s, rp_, hdr, (u64)fp, m_, b, c);")
+            line("}")
+        }
     }
 
     mutating func declare(_ p: MethodPlan) {
@@ -377,7 +608,7 @@ struct Emitter {
         line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
         if options.returnByLookup { line("  (void)d;") }
         line("  h[0] = b; h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = \(options.returnByLookup ? "EMPTY_CONTEXT" : "TAG(MARKER_BASE + d)");")
-        line("  __attribute__((musttail)) return kn_R\(k)_0(s, fp, h, 0, 0, 0, 0);")
+        line("  __attribute__((musttail)) return \(p.entryFunction)(s, fp, h, 0, 0, 0, 0);")
         line("}")
     }
 
@@ -406,7 +637,7 @@ struct Emitter {
         line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
         line("  h[0] = k_slot(s, b, CLOSURE_METHOD); h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = EMPTY_CONTEXT;")
         line("  AT(s, W_CLOSURE_ACTIVATIONS, u64)++;")
-        line("  __attribute__((musttail)) return kn_R\(k)_0(s, fp, h, 0, 0, 0, 0);")
+        line("  __attribute__((musttail)) return \(p.entryFunction)(s, fp, h, 0, 0, 0, 0);")
         line("}")
     }
 
@@ -442,7 +673,7 @@ struct Emitter {
         var body = FunctionBody(plan: p, region: pcs)
         body.options = options
         for i in m.instructions where pcs.contains(i.offset) { body.instruction(i) }
-        line("KFN \(name)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
+        line("\(!hot && options.coldMinsize ? "__attribute__((minsize, cold)) " : "")KFN \(name)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
         line("  (void)s; (void)fp; (void)hdr; (void)a; (void)b; (void)c; (void)d;")
         if m.maxStack > 0 {
             line("  u64 " + (0..<m.maxStack).map { "x\($0) __attribute__((unused)) = 0" }.joined(separator: ", ") + ";")
@@ -508,6 +739,10 @@ struct Emitter {
         line("  0x\(hex(nativeModuleMagicWord))ULL, FORMAT_VERSION, LAYOUT_HASH0, LAYOUT_HASH1, NILV, TRUEV, FALSEV, \(plans.count),")
         line("  kajo_groups, \(resumeCount), kajo_resume, kajo_enter, \(generated), \(declined)")
         line("};")
+        // AOT 2: a module linked into an app is found by this section of the
+        // main image (`NativeModule.linkedInMainImage`); `used` keeps it (and
+        // so the whole module) through dead stripping and stripping.
+        line("__attribute__((used, section(\"__DATA_CONST,__kajo_native\"))) static const KModule *const kajo_native_ref = &kajo_native_module;")
     }
 }
 
@@ -709,6 +944,10 @@ struct FunctionBody {
         let dAfter = d - argc
         let ri = plan.resumeIndex(next)
         emit(flush(d))
+        if options.sendHelper {
+            emit("__attribute__((musttail)) return k_send(s, fp, hdr, \(sel), \(next << 8 | i.length), \(ri ?? 0), \(d << 8 | argc));")
+            return
+        }
         emit("if (UNLIKELY(k_due(s))) { KF *f_ = VT(s)->poll_send(s, \(next), \(sp(d)), fp, hdr, \(i.length)); if (f_ != KCONT) { if (!f_) return; KOUT(f_); } }")
         if !options.brokenNoSendCount { emit("AT(s, W_SENDS, u64)++;") }
         emit("{ u64 *rp_ = hdr + \(rcvAt); u64 cls_ = k_classof(s, *rp_);")

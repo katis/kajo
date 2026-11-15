@@ -1,4 +1,5 @@
 import Darwin
+import MachO
 
 // AOT 1 (docs/modules/aot.md, rule 10): binding a compiled module to an
 // image by content.
@@ -53,6 +54,21 @@ enum GroupOffset {
         }
         guard let d = unsafe dlsym(h, "kajo_native_module") else { return .failure(.cannotLoad("\(path): no kajo_native_module")) }
         return .success(unsafe NativeModule(descriptor: UnsafeRawPointer(d)))
+    }
+
+    /// AOT 2 (docs/modules/aot-product.md): the module linked into the
+    /// process's main executable, found by the section the generator emits
+    /// (`__DATA_CONST,__kajo_native`, one pointer to the descriptor), or nil
+    /// when the executable has none (a Debug build, the module off). No
+    /// symbol is looked up and no file opened: the module is code of the
+    /// signed binary.
+    public static func linkedInMainImage() -> NativeModule? {
+        guard let mh = unsafe _dyld_get_image_header(0) else { return nil }
+        var size: UInt = 0
+        let header = unsafe UnsafeRawPointer(mh).assumingMemoryBound(to: mach_header_64.self)
+        guard let p = unsafe getsectiondata(header, "__DATA_CONST", "__kajo_native", &size), size >= 8 else { return nil }
+        guard let d = unsafe UnsafeRawPointer(p).load(as: UnsafeRawPointer?.self) else { return nil }
+        return unsafe NativeModule(descriptor: d)
     }
 
     func word(_ off: Int) -> UInt64 { unsafe descriptor.load(fromByteOffset: off, as: UInt64.self) }

@@ -52,14 +52,20 @@ public struct AppProjectSpec: Sendable, Equatable {
     public var kajo: KajoSource
     /// The targets: a Mac app, an iPhone and iPad app, or both (the default).
     public var platforms: [AppPlatform]
+    /// AOT 2 (docs/modules/aot-product.md): the project's `KAJO_NATIVE`
+    /// setting, whether a Release build compiles the sealed image's methods
+    /// into the app (`kajo new --native`; off by default, open question 1).
+    /// Either way the project can turn it on or off without regenerating.
+    public var native: Bool
 
     public init(name: String, bundleIdentifier: String, team: String? = nil, kajo: KajoSource,
-                platforms: [AppPlatform] = AppPlatform.allCases) {
+                platforms: [AppPlatform] = AppPlatform.allCases, native: Bool = false) {
         self.name = name
         self.bundleIdentifier = bundleIdentifier
         self.team = team
         self.kajo = kajo
         self.platforms = platforms
+        self.native = native
     }
 
     func has(_ p: AppPlatform) -> Bool { platforms.contains(p) }
@@ -203,6 +209,7 @@ public enum AppProjectGenerator {
             GeneratedFile(path: "Sources/App.swift", text: t.mainSwift, executable: false),
             GeneratedFile(path: "project.yml", text: t.projectYML, executable: false),
             GeneratedFile(path: "scripts/build-images.sh", text: t.buildImages, executable: true),
+            GeneratedFile(path: "scripts/build-native.sh", text: t.buildNative, executable: true),
             GeneratedFile(path: "src/\(spec.name)App.class.st", text: t.appClass, executable: false),
             GeneratedFile(path: "src/\(spec.name)AppTest.class.st", text: t.appTest, executable: false),
             GeneratedFile(path: "src/package.st", text: t.packageST, executable: false),

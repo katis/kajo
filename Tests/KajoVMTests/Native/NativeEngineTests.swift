@@ -64,7 +64,7 @@ func switchProgram(_ version: Int) -> String {
 }
 
 /// The module generated from `src` loaded the way `Runtime` loads it.
-func moduleGenerated(from src: String, options: AOTOptions = AOTOptions(), edit: (String) -> String = { $0 }) throws -> NativeModule {
+func moduleGenerated(from src: String, options: AOTOptions = NativeTest.options, edit: (String) -> String = { $0 }) throws -> NativeModule {
     let rt = try Runtime(src, background: 1, start: false, native: false)
     let out = NativeTest.source(for: rt.image, options: options)
     rt.stop(verifyHeap: false)
@@ -144,7 +144,7 @@ func moduleGenerated(from src: String, options: AOTOptions = AOTOptions(), edit:
 /// A broken variant as a test switch: a generator that does not bump the
 /// send count. The drift detector above sees it.
 @Test func aSendNotCountedIsSeenByTheDriftDetector() throws {
-    var o = AOTOptions()
+    var o = NativeTest.options
     o.brokenNoSendCount = true
     let broken = try moduleGenerated(from: switchProgram(1), options: o)
     let rt = try Runtime(switchProgram(1), background: 1, native: false, module: broken)
@@ -209,7 +209,7 @@ end
 /// The broken variant: no flush before a backward jump's poll. A preempted
 /// Process resumes from the frame's stale slot and answers wrong.
 @Test func anOperandLeftInALocalAcrossAPollIsLost() throws {
-    var o = AOTOptions()
+    var o = NativeTest.options
     o.brokenNoFlushAtPoll = true
     let broken = try moduleGenerated(from: operandAcrossPolls, options: o)
     let rt = try Runtime(operandAcrossPolls, background: 1, configure: { $0.stress = .preemptEveryPoll }, native: false, module: broken)

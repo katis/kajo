@@ -21,7 +21,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--test Class>>selector]... [--list] [--junit path] [--workers N] [--heap MiB] [--sources dir]
-       kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS]
+       kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS] [--native]
        kajo aot <file.kasm>...|<image.img> -o <dir>
        kajo run ... --native <module.dylib>
        kajo version
@@ -63,12 +63,22 @@ local network), the build phase that makes a development image (Debug) or
 a release image (Release) with the checkout's prebuilt kajo, and the Xcode
 project when xcodegen is found. --kajo names a Kajo distribution checkout
 (Prebuilt/ with the Release frameworks and kajo; the Kajo app copies its
-own to Application Support, scripts/dist.sh makes one).
+own to Application Support, scripts/dist.sh makes one). --native turns the
+project's KAJO_NATIVE setting on: a Release build then compiles the sealed
+image's methods to native code linked into the app (AOT 2; the setting
+can be changed in the project without generating it again).
 
-aot (AOT 1): reads an image (or the kasm files `run` would load) and writes
-the native engine's C for every method to <dir> (kajo_native.h and the
-kajo_native_*.c files); compile them with clang into a dylib and pass it to
-`run --native` (or `test --native`).
+aot (AOT 1, AOT 2): reads an image (or the kasm files `run` would load) and
+writes the native engine's C to <dir> (kajo_native.h and the kajo_native_*.c
+files); compile them with clang into a dylib and pass it to `run --native`
+(or `test --native`), or into a static library an app links. The defaults
+are the product's configuration (AOT 2, compile at -O2): methods with a loop
+and the methods they send to (the rest run interpreted, named in
+excluded.txt), sends through one shared helper, the cold functions for size.
+--full is AOT 1's: every method, every send inline. The levers one by one:
+--hot all|entry-loops|entry|none, --[no-]send-helper, --[no-]shared-tails,
+--[no-]cold-minsize, --subset loops|callees[,no-accessors][,max=<bytes>],
+--no-subset.
 A method whose bytecodes changed since runs interpreted.
 
 seal: loads an image (every loader check), marks it a release image and
@@ -235,6 +245,7 @@ case "new":
         case "--team": spec.team = value()
         case "--kajo": path = value()
         case "--directory": directory = value()
+        case "--native": spec.native = true
         case "--platforms":
             let names = value().split(separator: ",").map(String.init)
             let ps = names.compactMap(AppPlatform.init(rawValue:))
@@ -302,26 +313,24 @@ func loadNative(_ path: String) -> NativeModule {
 func runAOT(_ args: [String]) {
     var out: String? = nil
     var paths: [String] = []
-    var options = AOTOptions()
+    let options: AOTOptions
+    let rest: [String]
+    switch AOTOptions.parse(args) {
+    case .success(let (o, r)):
+        options = o
+        rest = r
+    case .failure(let why): fail("kajo aot: \(why.reason)\n\(usage)")
+    }
     var i = 0
-    while i < args.count {
-        if args[i] == "-o" {
+    while i < rest.count {
+        if rest[i] == "-o" {
             i += 1
-            guard i < args.count else { fail(usage) }
-            out = args[i]
-        } else if args[i] == "--return-marker" {
-            options.returnByLookup = false
-        } else if args[i].hasPrefix("--no-") {
-            // Part 3's steps, each switchable for its measurement.
-            switch args[i] {
-            case "--no-inline-stores": options.inlineStores = false
-            case "--no-inline-closures": options.inlineClosures = false
-            default: fail("unknown option \(args[i])\n\(usage)")
-            }
-        } else if args[i].hasPrefix("-") {
-            fail("unknown option \(args[i])\n\(usage)")
+            guard i < rest.count else { fail(usage) }
+            out = rest[i]
+        } else if rest[i].hasPrefix("-") {
+            fail("unknown option \(rest[i])\n\(usage)")
         } else {
-            paths.append(args[i])
+            paths.append(rest[i])
         }
         i += 1
     }
@@ -358,9 +367,15 @@ func runAOT(_ args: [String]) {
         let path = (dir as NSString).appendingPathComponent(f.name)
         guard FileManager.default.createFile(atPath: path, contents: Data(f.text.utf8)) else { fail("kajo aot: cannot write \(path)", 1) }
     }
+    if !o.excludedNames.isEmpty {
+        let path = (dir as NSString).appendingPathComponent("excluded.txt")
+        guard FileManager.default.createFile(atPath: path, contents: Data((o.excludedNames.joined(separator: "\n") + "\n").utf8)) else {
+            fail("kajo aot: cannot write \(path)", 1)
+        }
+    }
     let path = "\(dir): \(o.files.count) files"
     for d in o.declined { FileHandle.standardError.write("declined: \(d.name): \(d.reason)\n".data(using: .utf8)!) }
-    print("\(path): methods=\(o.methods) groups=\(o.groups) declined=\(o.declined.count) resumePoints=\(o.resumePoints) bytes=\(o.source.utf8.count) readMs=\(Int(t1.timeIntervalSince(t0) * 1000)) generateMs=\(Int(t2.timeIntervalSince(t1) * 1000))")
+    print("\(path): options=\(options.arguments.joined(separator: "_")) methods=\(o.methods) groups=\(o.groups) declined=\(o.declined.count) excluded=\(o.excluded) resumePoints=\(o.resumePoints) bytes=\(o.source.utf8.count) readMs=\(Int(t1.timeIntervalSince(t0) * 1000)) generateMs=\(Int(t2.timeIntervalSince(t1) * 1000))")
 }
 
 /// `kajo run <image> --protocol <socket>`: serve until SIGINT or SIGTERM.

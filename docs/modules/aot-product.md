@@ -1,6 +1,6 @@
 # AOT 2: the product
 
-Status: briefed 2026-11-15 (the owner's "let's do AOT 2 after interning"
+Status: part 1 measured and parts 2 to 4 built 2026-11-15 (see As built); briefed 2026-11-15 (the owner's "let's do AOT 2 after interning"
 of the same day; the choices of 2026-11-11: C as the generator's output,
 Xcode's clang on Apple platforms, Zig only when a non-Apple target
 exists). Follows AOT 1 (`docs/modules/aot.md`, ADR 0015) and module 11b
@@ -220,3 +220,247 @@ as changed.
    AOT 3's profile.
 4. The module's place: in the app binary (recommended) or a framework of
    the app's own.
+
+## As built
+
+Built 2026-11-15 on the Mac mini (M2 Pro, 12 cores), swift.org 6.4.2 first
+on PATH for the Swift, Xcode 27.2's clang 21 (`xcrun clang`, the compiler a
+developer has) for every C compile of part 1, from 4127bb8. Raw files are in
+`~/kajo-scratch/aot-product/` (named below as `part1/...` and so on).
+
+### Part 1: the levers, measured
+
+**How.** Each configuration is a set of `kajo aot` options and a C flag
+(`part1/configs.txt`, `part1/configs2.txt`). Sizes (`scripts/size.sh`,
+`part1/sizes.txt`): the image's C generated, compiled with 12 parallel
+`xcrun clang <flag> -c`, linked with a stub `main` that references
+`kajo_native_module` into an executable, `strip -x`, then `size -m` (the
+`__text` section) and the file's bytes (code, the per-pc tables in
+`__TEXT,__const`, the descriptor and resume tables in `__DATA_CONST`: what
+an app gains). Compile seconds are the wall and CPU (user+sys) of the 12
+parallel compiles. Speed (`scripts/speed-build.sh`, `scripts/speed-run.sh`,
+`part1/speed.txt`): one release `kajo` built aligned
+(`-enable-testing`, `-align-all-nofallthru-blocks=5 -align-loops=32`) runs
+every configuration; each configuration's modules (the six kasm kernels,
+`st-sends`, `st-closures` and the comparison's five Smalltalk programs, each
+over the kernel image) are compiled with the configuration's flag plus
+`-mllvm -align-all-nofallthru-blocks=5 -falign-loops=32` into dylibs and
+bound with `--native`; five interleaved rounds (every configuration
+innermost), 1 and 8 workers, `--slice-ms 0`; checksums equal to full
+`-O2`'s in every run (`checksum mismatches: none`). Thermal state per run:
+1957 nominal and 1423 fair (the mini sat at fair through much of the
+afternoon; every configuration saw both, interleaved).
+
+The rule was written before any speed number was read (`part1/rule.txt`,
+13:02:58): the smallest stripped stub binary of the Sample's sealed image
+whose 1-worker geometric mean over the eight kernels is at least 0.9 of
+full `-O2` (8 workers at least 0.85).
+
+**Sizes** (MB, 10^6 bytes; `sample methods (excluded)`: methods generated and
+those a subset leaves to the interpreter; images: the kernel image, the
+Sample's sealed image (`kajo build-image --release kernel <fixture>/src`), and
+the 2000-class image as AOT 1 built it: kernel, tools, the shells' Smalltalk,
+devsession and 1806 generated classes of 11 methods):
+
+| cfg | kernel text MB | kernel file MB | kernel compile s (CPU s) | sample text MB | sample file MB | sample compile s (CPU s) | dev2000 text MB | dev2000 file MB | dev2000 compile s (CPU s) | sample methods (excluded) |
+|---|---|---|---|---|---|---|---|---|---|---|
+| o2 | 12.59 | 14.02 | 9.7 (90.8) | 12.62 | 14.06 | 11.4 (90.7) | 25.24 | 28.48 | 20.2 (219.8) | 3290 (0) |
+| os | 12.49 | 13.93 | 9.9 (91.0) | 12.52 | 13.96 | 11.6 (90.3) | 25.10 | 28.35 | 20.3 (219.2) | 3290 (0) |
+| oz | 5.90 | 7.30 | 9.0 (83.4) | 5.91 | 7.32 | 10.5 (82.7) | 12.94 | 16.13 | 19.5 (211.4) | 3290 (0) |
+| o2out | 7.37 | 8.77 | 10.3 (96.5) | 7.39 | 8.79 | 12.3 (95.9) | 14.86 | 18.03 | 21.4 (230.3) | 3290 (0) |
+| hotel | 7.59 | 8.95 | 6.3 (56.6) | 7.61 | 8.98 | 7.1 (56.7) | 18.52 | 21.66 | 15.1 (164.2) | 3290 (0) |
+| hote | 7.38 | 8.75 | 6.0 (55.2) | 7.40 | 8.77 | 7.0 (54.9) | 18.28 | 21.43 | 15.0 (161.9) | 3290 (0) |
+| hotn | 6.15 | 7.49 | 5.0 (47.0) | 6.16 | 7.51 | 6.1 (46.9) | 13.68 | 16.76 | 11.3 (122.2) | 3290 (0) |
+| sendh | 5.64 | 7.02 | 5.1 (45.6) | 5.65 | 7.03 | 5.7 (45.6) | 15.92 | 19.09 | 14.5 (155.9) | 3290 (0) |
+| tails | 12.63 | 14.07 | 9.1 (84.5) | 12.66 | 14.09 | 10.7 (83.7) | 25.49 | 28.74 | 19.3 (207.0) | 3290 (0) |
+| subl | 2.82 | 3.18 | 9.1 (17.2) | 2.82 | 3.18 | 8.2 (16.7) | 3.20 | 3.59 | 9.5 (19.3) | 330 (2960) |
+| subc | 4.78 | 5.35 | 6.4 (29.5) | 4.78 | 5.35 | 5.6 (29.6) | 5.45 | 6.09 | 5.8 (33.8) | 1048 (2242) |
+| subcna | 4.76 | 5.31 | 6.4 (29.4) | 4.76 | 5.31 | 5.5 (29.5) | 5.43 | 6.06 | 5.8 (33.5) | 949 (2341) |
+| sendh-oz | 3.26 | 4.61 | 4.9 (44.5) | 3.27 | 4.63 | 5.5 (44.3) | 9.00 | 12.11 | 14.6 (158.5) | 3290 (0) |
+| hotn-oz | 3.00 | 4.34 | 4.6 (41.9) | 3.01 | 4.34 | 5.4 (41.8) | 7.00 | 10.04 | 10.9 (116.9) | 3290 (0) |
+| hotel-sendh | 3.66 | 4.99 | 3.3 (29.3) | 3.67 | 5.00 | 3.6 (29.2) | 13.27 | 16.36 | 11.8 (126.8) | 3290 (0) |
+| hote-sendh | 3.54 | 4.87 | 3.1 (28.3) | 3.55 | 4.89 | 3.5 (28.1) | 13.14 | 16.23 | 11.8 (125.6) | 3290 (0) |
+| hotn-sendh | 3.06 | 4.37 | 2.7 (24.4) | 3.07 | 4.37 | 3.1 (24.2) | 9.55 | 12.56 | 8.7 (91.2) | 3290 (0) |
+| hotn-sendh-o2out | 2.04 | 3.32 | 2.8 (25.5) | 2.04 | 3.34 | 3.3 (25.4) | 5.55 | 8.52 | 9.1 (96.3) | 3290 (0) |
+| hotel-sendh-oz | 2.15 | 3.45 | 3.2 (28.2) | 2.15 | 3.47 | 3.4 (28.1) | 7.45 | 10.48 | 12.4 (132.1) | 3290 (0) |
+| hote-sendh-oz | 2.08 | 3.39 | 3.1 (27.3) | 2.08 | 3.39 | 3.3 (27.1) | 7.36 | 10.40 | 12.4 (131.7) | 3290 (0) |
+| hotn-sendh-oz | 1.81 | 3.10 | 2.7 (23.2) | 1.81 | 3.10 | 2.9 (23.4) | 5.21 | 8.19 | 9.0 (94.5) | 3290 (0) |
+| all-oz | 1.75 | 3.04 | 2.4 (21.8) | 1.76 | 3.05 | 2.7 (21.5) | 4.85 | 7.79 | 8.7 (91.6) | 3290 (0) |
+| subc-hns-oz | 0.72 | 1.23 | 1.6 (8.0) | 0.72 | 1.23 | 1.5 (8.0) | 0.84 | 1.41 | 1.6 (9.3) | 1048 (2242) |
+| subl-hns-oz | 0.40 | 0.73 | 2.2 (4.3) | 0.40 | 0.73 | 2.1 (4.3) | 0.46 | 0.81 | 2.4 (5.0) | 330 (2960) |
+| ozno | 10.97 | 12.41 | 8.3 (77.6) | 10.99 | 12.44 | 9.8 (77.3) | 23.07 | 26.32 | 18.4 (199.5) | 3290 (0) |
+| ozno-sendh | 5.22 | 6.60 | 4.6 (41.8) | 5.23 | 6.62 | 5.2 (41.8) | 15.33 | 18.51 | 13.9 (149.6) | 3290 (0) |
+| ozno-hotel-sendh | 3.36 | 4.69 | 3.0 (26.8) | 3.36 | 4.70 | 3.3 (26.6) | 12.86 | 15.96 | 11.4 (121.3) | 3290 (0) |
+| coldmin | 9.74 | 11.18 | 10.1 (93.8) | 9.76 | 11.19 | 11.8 (93.5) | 20.30 | 23.54 | 23.8 (262.4) | 3290 (0) |
+| coldmin-noout | 11.79 | 13.23 | 9.8 (91.7) | 11.82 | 13.27 | 11.5 (91.7) | 24.18 | 27.44 | 23.6 (258.0) | 3290 (0) |
+| coldmin-sendh | 4.75 | 6.11 | 5.8 (52.4) | 4.76 | 6.13 | 6.4 (52.2) | 13.41 | 16.56 | 18.6 (204.1) | 3290 (0) |
+| coldmin-hotel-sendh | 2.77 | 4.08 | 4.1 (35.9) | 2.77 | 4.10 | 4.3 (35.7) | 10.76 | 13.85 | 15.8 (173.7) | 3290 (0) |
+| subc-sendh | 2.44 | 2.98 | 3.5 (16.6) | 2.44 | 2.98 | 3.1 (16.7) | 2.81 | 3.43 | 3.3 (19.2) | 1048 (2242) |
+| subc-hotel-sendh | 1.55 | 2.07 | 2.1 (10.8) | 1.55 | 2.07 | 2.0 (10.8) | 1.80 | 2.40 | 2.1 (12.5) | 1048 (2242) |
+| subc-hote-sendh | 1.44 | 1.95 | 1.9 (9.9) | 1.44 | 1.95 | 1.8 (9.9) | 1.67 | 2.25 | 2.0 (11.5) | 1048 (2242) |
+| subc-hotn-sendh | 1.22 | 1.74 | 1.6 (8.5) | 1.22 | 1.74 | 1.6 (8.5) | 1.42 | 2.00 | 1.7 (9.8) | 1048 (2242) |
+| subc-coldmin-sendh | 2.05 | 2.59 | 3.8 (18.4) | 2.05 | 2.59 | 3.4 (18.6) | 2.37 | 2.99 | 3.6 (21.3) | 1048 (2242) |
+| subc-coldmin-hotel-sendh | 1.17 | 1.69 | 2.4 (12.5) | 1.17 | 1.69 | 2.3 (12.5) | 1.36 | 1.94 | 2.4 (14.5) | 1048 (2242) |
+| subcna-sendh | 2.41 | 2.95 | 3.5 (16.5) | 2.41 | 2.95 | 3.1 (16.6) | 2.79 | 3.40 | 3.3 (19.1) | 949 (2341) |
+
+**Speed at one worker** (median full `-O2` ms / median configuration ms,
+above 1 faster; `p-` the comparison's programs over the kernel image):
+
+| cfg | fib | sends | st-sends | arith | ivars | storeheavy | alloc | st-closures | geomean 8 | p-fib | p-dispatch | p-binarytrees | p-collections | p-arith | geomean 5 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| o2 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | **1.000** | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | **1.000** |
+| os | 0.918 | 1.009 | 0.987 | 0.924 | 0.994 | 0.996 | 0.999 | 0.991 | **0.977** | 0.940 | 1.003 | 0.999 | 0.997 | 0.941 | **0.976** |
+| hotel | 0.851 | 0.961 | 0.906 | 0.793 | 0.992 | 0.998 | 0.964 | 0.963 | **0.926** | 0.846 | 0.910 | 0.966 | 0.963 | 0.994 | **0.934** |
+| hote | 0.844 | 0.958 | 0.895 | 0.801 | 0.998 | 0.998 | 0.960 | 0.969 | **0.925** | 0.846 | 0.912 | 0.954 | 0.967 | 0.999 | **0.934** |
+| hotn | 0.707 | 0.952 | 0.864 | 0.790 | 0.991 | 1.000 | 0.942 | 0.946 | **0.893** | 0.713 | 0.878 | 0.944 | 0.955 | 0.671 | **0.823** |
+| sendh | 0.853 | 0.952 | 0.944 | 0.997 | 0.992 | 0.996 | 0.977 | 0.994 | **0.962** | 0.853 | 0.957 | 0.970 | 0.995 | 1.001 | **0.953** |
+| tails | 0.992 | 1.004 | 0.980 | 0.991 | 1.000 | 0.998 | 1.004 | 0.997 | **0.996** | 1.003 | 0.996 | 1.009 | 1.003 | 1.000 | **1.002** |
+| subc | 1.006 | 1.005 | 0.995 | 0.990 | 0.995 | 0.999 | 0.999 | 0.989 | **0.997** | 0.999 | 1.004 | 0.998 | 0.874 | 0.957 | **0.965** |
+| subcna | 1.000 | 0.996 | 0.983 | 0.999 | 0.991 | 1.000 | 1.002 | 0.994 | **0.996** | 1.000 | 1.004 | 0.994 | 0.808 | 0.956 | **0.949** |
+| hotel-sendh | 0.767 | 0.908 | 0.837 | 0.794 | 0.997 | 1.000 | 0.928 | 0.969 | **0.896** | 0.768 | 0.847 | 0.924 | 0.958 | 0.999 | **0.895** |
+| hote-sendh | 0.768 | 0.909 | 0.839 | 0.801 | 0.995 | 0.999 | 0.927 | 0.963 | **0.896** | 0.768 | 0.848 | 0.929 | 0.962 | 1.000 | **0.897** |
+| hotn-sendh | 0.651 | 0.907 | 0.807 | 0.799 | 0.992 | 1.001 | 0.899 | 0.953 | **0.868** | 0.689 | 0.817 | 0.903 | 0.948 | 0.670 | **0.797** |
+| ozno | 0.852 | 0.984 | 0.872 | 0.720 | 0.560 | 0.514 | 0.935 | 0.947 | **0.778** | 0.854 | 0.885 | 0.941 | 0.980 | 0.751 | **0.878** |
+| ozno-sendh | 0.854 | 0.944 | 0.926 | 0.720 | 0.559 | 0.514 | 0.932 | 0.948 | **0.780** | 0.853 | 0.938 | 0.955 | 0.975 | 0.751 | **0.890** |
+| ozno-hotel-sendh | 0.762 | 0.908 | 0.822 | 0.739 | 0.551 | 0.514 | 0.887 | 0.919 | **0.747** | 0.767 | 0.836 | 0.904 | 0.948 | 0.749 | **0.837** |
+| coldmin | 1.001 | 0.999 | 0.996 | 1.000 | 0.993 | 0.998 | 0.998 | 0.992 | **0.997** | 0.999 | 1.000 | 1.001 | 0.996 | 1.000 | **0.999** |
+| coldmin-noout | 0.985 | 1.005 | 0.982 | 0.981 | 0.994 | 0.998 | 0.996 | 0.992 | **0.992** | 0.999 | 1.000 | 0.999 | 1.003 | 0.997 | **1.000** |
+| coldmin-sendh | 0.853 | 0.955 | 0.946 | 0.988 | 0.994 | 0.997 | 0.976 | 0.993 | **0.962** | 0.851 | 0.957 | 0.984 | 0.987 | 1.000 | **0.954** |
+| coldmin-hotel-sendh | 0.588 | 0.846 | 0.552 | 0.406 | 0.992 | 0.997 | 0.850 | 0.850 | **0.729** | 0.626 | 0.586 | 0.844 | 0.811 | 0.999 | **0.758** |
+| subc-sendh | 0.851 | 0.950 | 0.939 | 0.998 | 0.993 | 0.998 | 0.977 | 0.994 | **0.961** | 0.853 | 0.957 | 0.981 | 0.872 | 0.958 | **0.922** |
+| subc-hotel-sendh | 0.765 | 0.900 | 0.838 | 0.797 | 0.995 | 0.998 | 0.920 | 0.963 | **0.893** | 0.770 | 0.847 | 0.925 | 0.851 | 0.955 | **0.867** |
+| subc-hote-sendh | 0.766 | 0.909 | 0.838 | 0.788 | 0.996 | 0.996 | 0.918 | 0.963 | **0.893** | 0.771 | 0.849 | 0.924 | 0.848 | 0.672 | **0.808** |
+| subc-hotn-sendh | 0.649 | 0.901 | 0.806 | 0.795 | 0.991 | 1.000 | 0.900 | 0.948 | **0.866** | 0.690 | 0.817 | 0.900 | 0.845 | 0.670 | **0.779** |
+| subc-coldmin-sendh | 0.855 | 0.955 | 0.946 | 0.985 | 0.993 | 0.997 | 0.975 | 0.997 | **0.962** | 0.856 | 0.960 | 0.982 | 0.867 | 0.956 | **0.923** |
+| subc-coldmin-hotel-sendh | 0.588 | 0.845 | 0.490 | 0.407 | 0.992 | 0.996 | 0.854 | 0.767 | **0.709** | 0.577 | 0.614 | 0.837 | 0.721 | 0.955 | **0.728** |
+| subcna-sendh | 0.858 | 0.943 | 0.940 | 0.982 | 0.991 | 0.999 | 0.977 | 0.990 | **0.959** | 0.855 | 0.952 | 0.984 | 0.804 | 0.955 | **0.907** |
+
+**At eight workers:**
+
+| cfg | fib | sends | st-sends | arith | ivars | storeheavy | alloc | st-closures | geomean 8 | p-fib | p-dispatch | p-binarytrees | p-collections | p-arith | geomean 5 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| o2 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | **1.000** | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | **1.000** |
+| os | 0.920 | 0.987 | 1.003 | 0.949 | 1.000 | 0.999 | 1.022 | 0.968 | **0.980** | 0.944 | 1.004 | 0.997 | 1.002 | 0.959 | **0.981** |
+| hotel | 0.838 | 0.953 | 0.908 | 0.778 | 0.994 | 1.000 | 0.986 | 0.977 | **0.926** | 0.846 | 0.919 | 0.959 | 0.977 | 1.003 | **0.939** |
+| hote | 0.847 | 0.942 | 0.908 | 0.781 | 1.000 | 0.994 | 1.000 | 0.973 | **0.927** | 0.848 | 0.887 | 0.956 | 0.976 | 0.974 | **0.927** |
+| hotn | 0.697 | 0.949 | 0.874 | 0.778 | 0.996 | 0.996 | 0.981 | 0.914 | **0.892** | 0.712 | 0.884 | 0.943 | 0.970 | 0.561 | **0.798** |
+| sendh | 0.839 | 0.919 | 0.952 | 1.000 | 0.917 | 0.999 | 0.991 | 1.008 | **0.951** | 0.853 | 0.960 | 0.960 | 0.997 | 1.004 | **0.953** |
+| tails | 0.990 | 0.984 | 0.992 | 1.000 | 0.980 | 0.997 | 1.050 | 0.973 | **0.995** | 1.002 | 0.939 | 0.982 | 1.005 | 0.963 | **0.978** |
+| subc | 1.002 | 0.963 | 0.977 | 0.886 | 0.982 | 0.978 | 1.014 | 0.960 | **0.969** | 1.005 | 0.997 | 0.986 | 0.913 | 0.971 | **0.974** |
+| subcna | 1.006 | 0.951 | 0.997 | 1.000 | 0.998 | 0.948 | 1.026 | 0.989 | **0.989** | 1.011 | 1.012 | 0.983 | 0.857 | 0.970 | **0.965** |
+| hotel-sendh | 0.759 | 0.849 | 0.738 | 0.781 | 0.996 | 0.944 | 0.968 | 0.944 | **0.867** | 0.768 | 0.855 | 0.920 | 0.971 | 1.004 | **0.899** |
+| hote-sendh | 0.770 | 0.900 | 0.846 | 0.776 | 0.998 | 0.991 | 0.950 | 0.969 | **0.896** | 0.766 | 0.797 | 0.907 | 0.971 | 0.961 | **0.876** |
+| hotn-sendh | 0.642 | 0.878 | 0.810 | 0.781 | 0.996 | 0.992 | 0.959 | 0.941 | **0.866** | 0.689 | 0.825 | 0.905 | 0.971 | 0.560 | **0.775** |
+| ozno | 0.830 | 0.974 | 0.882 | 0.703 | 0.535 | 0.499 | 0.968 | 0.910 | **0.766** | 0.853 | 0.890 | 0.939 | 0.992 | 0.766 | **0.885** |
+| ozno-sendh | 0.856 | 0.895 | 0.937 | 0.686 | 0.545 | 0.499 | 0.980 | 0.952 | **0.771** | 0.848 | 0.939 | 0.937 | 0.986 | 0.743 | **0.886** |
+| ozno-hotel-sendh | 0.763 | 0.893 | 0.835 | 0.729 | 0.555 | 0.503 | 0.956 | 0.897 | **0.749** | 0.766 | 0.803 | 0.904 | 0.961 | 0.766 | **0.836** |
+| coldmin | 1.004 | 0.988 | 0.997 | 1.000 | 1.000 | 1.000 | 1.013 | 0.990 | **0.999** | 0.981 | 0.997 | 0.977 | 1.008 | 1.005 | **0.994** |
+| coldmin-noout | 0.979 | 0.986 | 0.997 | 1.000 | 1.000 | 1.001 | 1.023 | 1.004 | **0.999** | 0.991 | 1.004 | 0.973 | 1.004 | 0.964 | **0.987** |
+| coldmin-sendh | 0.830 | 0.906 | 0.952 | 0.988 | 0.905 | 0.917 | 1.001 | 0.965 | **0.931** | 0.844 | 0.910 | 0.956 | 1.003 | 1.003 | **0.941** |
+| coldmin-hotel-sendh | 0.584 | 0.838 | 0.557 | 0.397 | 0.998 | 0.904 | 0.919 | 0.858 | **0.726** | 0.629 | 0.593 | 0.878 | 0.875 | 1.004 | **0.779** |
+| subc-sendh | 0.856 | 0.945 | 0.949 | 1.000 | 0.998 | 0.973 | 1.020 | 0.998 | **0.966** | 0.845 | 0.963 | 0.951 | 0.912 | 0.963 | **0.926** |
+| subc-hotel-sendh | 0.761 | 0.891 | 0.842 | 0.778 | 0.991 | 0.996 | 0.950 | 0.938 | **0.889** | 0.765 | 0.829 | 0.907 | 0.895 | 0.922 | **0.861** |
+| subc-hote-sendh | 0.767 | 0.855 | 0.844 | 0.778 | 0.998 | 0.996 | 0.979 | 0.973 | **0.894** | 0.761 | 0.837 | 0.906 | 0.891 | 0.564 | **0.781** |
+| subc-hotn-sendh | 0.649 | 0.901 | 0.817 | 0.778 | 0.996 | 0.988 | 0.952 | 0.915 | **0.867** | 0.688 | 0.830 | 0.890 | 0.890 | 0.558 | **0.759** |
+| subc-coldmin-sendh | 0.847 | 0.953 | 0.952 | 1.000 | 0.998 | 0.987 | 0.992 | 0.978 | **0.962** | 0.841 | 0.965 | 0.945 | 0.908 | 0.906 | **0.912** |
+| subc-coldmin-hotel-sendh | 0.585 | 0.839 | 0.494 | 0.395 | 0.943 | 0.987 | 0.932 | 0.774 | **0.710** | 0.579 | 0.586 | 0.868 | 0.801 | 0.972 | **0.745** |
+| subcna-sendh | 0.856 | 0.895 | 0.940 | 0.913 | 0.998 | 0.992 | 0.997 | 0.966 | **0.943** | 0.842 | 0.959 | 0.953 | 0.856 | 0.971 | **0.914** |
+
+**The machine outliner's configurations** (`-Oz`, `-O2` with
+`-enable-machine-outliner=always`, and every combination with them; and the
+`loops` subset) were 0.3 to 0.6 of full `-O2` in round one
+(`part1/speed-round1-partial.txt`), so they were moved to a run of their own
+(`part1/speed-out.txt`), stopped by hand after its first round's one-worker
+kernels and part of the programs to keep the afternoon: every run of them is
+0.3 to 0.65 of `-O2`:
+
+| cfg | fib | sends | st-sends | arith | ivars | storeheavy | alloc | st-closures | geomean 8 | p-fib | p-dispatch | p-binarytrees | p-collections | p-arith | geomean 5 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| o2 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | 1.000 | **1.000** | 1.000 | 1.000 | 1.000 | - | - | **1.000** |
+| oz | 0.378 | 0.551 | 0.426 | 0.552 | 0.286 | 0.300 | 0.673 | 0.641 | **0.454** | 0.390 | 0.428 | 0.668 | - | - | **0.481** |
+| o2out | 0.341 | 0.538 | 0.362 | 0.626 | 0.399 | 0.276 | 0.655 | 0.669 | **0.460** | 0.356 | 0.408 | 0.629 | - | - | **0.450** |
+| subl | 0.292 | 0.330 | 0.156 | 1.006 | 0.998 | 0.998 | 0.736 | 0.319 | **0.494** | 0.278 | 0.161 | 0.700 | - | - | **0.316** |
+| sendh-oz | 0.531 | 0.846 | 0.528 | 0.548 | 0.286 | 0.300 | 0.790 | 0.660 | **0.525** | 0.602 | 0.563 | 0.801 | - | - | **0.647** |
+| hotn-oz | 0.288 | 0.488 | 0.356 | 0.409 | 0.296 | 0.300 | 0.604 | 0.589 | **0.399** | 0.333 | 0.373 | 0.607 | - | - | **0.422** |
+| hotn-sendh-o2out | 0.404 | 0.718 | 0.438 | 0.374 | 0.285 | 0.260 | 0.722 | 0.621 | **0.446** | 0.494 | 0.452 | 0.722 | - | - | **0.544** |
+| hotel-sendh-oz | 0.453 | 0.723 | 0.463 | 0.411 | 0.286 | 0.299 | 0.749 | 0.645 | **0.475** | 0.524 | 0.481 | 0.751 | - | - | **0.574** |
+| hote-sendh-oz | 0.465 | 0.743 | 0.475 | 0.409 | 0.286 | 0.299 | 0.750 | 0.641 | **0.479** | 0.523 | 0.496 | 0.757 | - | - | **0.581** |
+| hotn-sendh-oz | 0.399 | 0.728 | 0.439 | 0.407 | 0.286 | 0.300 | 0.725 | 0.629 | **0.461** | 0.486 | 0.440 | 0.724 | - | - | **0.537** |
+| all-oz | 0.424 | 0.758 | 0.423 | 0.413 | 0.296 | 0.300 | 0.749 | 0.624 | **0.469** | 0.484 | 0.457 | - | - | - | **0.470** |
+| subc-hns-oz | 0.399 | 0.717 | 0.422 | 0.410 | 0.284 | 0.300 | 0.722 | 0.574 | **0.452** | 0.398 | 0.472 | - | - | - | **0.434** |
+| subl-hns-oz | 0.292 | 0.317 | 0.135 | 0.408 | 0.290 | 0.297 | 0.736 | 0.309 | **0.316** | 0.280 | 0.135 | - | - | - | **0.194** |
+
+**What each lever does.**
+
+- (a) `-Os` is 1 percent smaller and 2 percent slower: nothing. `-Oz` halves
+  the code (12.62 to 5.91 MB on the Sample) and runs at 0.45 to 0.47; the
+  halving and the loss are the machine outliner's (`-O2` with the outliner
+  always on: 7.39 MB at 0.46; `-Oz` with it never: 10.99 MB at 0.78). The
+  outliner turns the repeated flush, slow-path and send sequences into calls
+  inside the hot paths (`ivars` and `storeheavy` at 0.30). Per function
+  (`--cold-minsize`: the cold function `minsize, cold`, the hot ones at
+  `-O2`) is free (0.997) but saves only 2.9 MB of 12.6: the hot functions are
+  the bulk.
+- (b) The hot resume functions: entry and loop targets only 8.98 MB at
+  0.926, entry only 8.77 at 0.925, none 7.51 at 0.893. The cold function's
+  `switch` per return costs `fib` 15 to 30 percent and `p-arith` (whose
+  loop resumes after a send) 33 percent with no hot functions.
+- (c) The send helper (`--send-helper`): 12.62 to 7.03 MB at 0.962; `fib`
+  pays 15 percent (one more direct branch and the operands unpacked from two
+  words per send), the send-free kernels nothing. The largest single lever
+  that keeps speed.
+- (d) Shared tails (`--shared-tails`): nothing at `-O2` (clang already
+  merges the tails it can) and 1 percent at `-Oz`. Not kept.
+- (e) The linker: `-dead_strip` and `-no_deduplicate` change nothing
+  (`part1/sizes-probe.txt`: every function is reachable from the tables, and
+  ld-prime folds no identical function here). Generator-side merging of
+  identical groups already happens by content hash; identical functions
+  across groups were not built (no linker evidence that any exist in
+  number).
+- (f) The subset by static rule: `loops` (330 of 3290 methods) is 3.18 MB but
+  costs `fib` 3.4 times and `st-sends` 6 times (every call from a loop into a
+  method without one switches engines); `callees` (methods with a loop, their
+  blocks, and every method whose selector a loop method sends: 1048 of 3290)
+  is 5.35 MB at 0.997 on the kernels and 0.965 on the programs, of which
+  `collections` loses 13 percent (library code reached through sends the rule
+  does not follow); `no-accessors` changes 0.04 MB. On the 2000-class image
+  the generated classes have no loops, so it keeps 6.09 MB of 28.48.
+
+**The rule's choice: `--subset callees --cold-minsize --send-helper` at
+`-O2`.** The Sample's module 2.59 MB stripped (2.05 MB of code), against 14.06
+at full `-O2`; 0.962 of full `-O2` on the eight kernels at one worker and
+0.962 at eight, 0.923 and 0.912 on the programs; compile 3.4 s on 12 cores
+(18.6 s of CPU) against 11.4 (90.7).
+- Next smaller: `--subset callees --hot entry-loops --send-helper`, 2.07 MB at
+  0.893 (fails the bar by 0.007; `fib` 0.765, `arith` 0.797).
+- Next faster: `--subset callees` alone, 5.35 MB at 0.997; without a subset,
+  `--cold-minsize --send-helper` 6.13 MB at 0.962 (the same kernels' speed
+  as the choice, every method generated, `collections` 0.987 against 0.867).
+
+**Against the app's own binary.** The Sample's Release binary without a
+module is about 2.1 MB on the Mac and 2.0 on iOS (module 11b). No
+configuration that meets the bar brings the module under it: the choice is
+2.59 MB, about 1.2 times the rest of the app, so a Release app with the
+module is about 2.2 times the size without it (the measured binaries are in
+part 4). The only configurations under 2.1 MB are the subset with fewer hot
+functions (0.86 to 0.89) or the outliner (0.3 to 0.5). This is a result for
+the owner, not a failure: open question 2.
+
+**Where the brief was wrong or short.**
+- "`-Oz` with the machine outliner" is not a size lever for this code: it is
+  the one large size lever and it costs half the speed; the outliner
+  undoes the generator's straight-line paths.
+- Shared slow-path tails and link-time folding find nothing: clang already
+  merges the tails and ld-prime finds no identical functions to fold.
+- The brief's levers miss the per-pc tables: `RX` (i32) and `DP` (i16) for
+  every bytecode byte plus 16 bytes per resume point and 56 per group are
+  0.54 MB of the chosen 2.59 (1.29 MB of the 3.10 of `--hot none
+  --send-helper -Oz`, 3 MB of the 2000-class image's 8). Narrower tables
+  (an i16 resume offset per group and an i8 depth) would halve them; that
+  changes what the VM reads (the format version) and was not built (not
+  done, open question 5).
+- The subset was meant as the last resort; measured, it is the one lever
+  that costs the kernels nothing, because a static rule of loops and their
+  callees is what a benchmark exercises. Real apps reach library code
+  through paths the rule does not follow (`collections` 0.87): it is the
+  subset's cost to watch.

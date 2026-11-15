@@ -101,6 +101,10 @@ public struct KajoAppConfiguration: Sendable {
         // resumes an unhandled error stops its Process, the app's own
         // start-up included; a release build reports and ends it.
         o.stopsForDebugger = development != nil
+        // AOT 2 (docs/modules/aot-product.md): a Release build with the
+        // native module on links it into the executable; it is bound when
+        // the VM starts. None (Debug, the module off): interpreted.
+        o.native = NativeModule.linkedInMainImage()
         let rt: ShellRuntime
         do {
             rt = try ShellRuntime(imagePath: imagePath ?? configuration.imagePath, options: o, platform: platform,
@@ -110,6 +114,7 @@ public struct KajoAppConfiguration: Sendable {
             return false
         }
         runtime = rt
+        if o.native != nil { appLog(nativeBindLine(rt.vm)) }
         LaunchTrace.step("image-opened")
         rt.start()
         guard let p = rt.vm.spawn("open", receiver: configuration.appClass, main: true, priority: 2) else {
@@ -475,3 +480,13 @@ final class KajoRootController: UIViewController {
     }
 }
 #endif
+
+/// AOT 2: the launch's one line about the linked native module: how many of
+/// the image's methods it bound, the generator's own counts, the bind's time;
+/// or its refusal (the app then runs interpreted).
+func nativeBindLine(_ vm: ShellVM) -> String {
+    guard let r = vm.nativeBindReport else { return "native=none" }
+    if let why = r.refused { return "native=refused reason=\"\(why)\" (the image runs interpreted)" }
+    let g = vm.nativeGenerated
+    return "native=bound methods=\(r.methods) bound=\(r.bound) unbound=\(r.unboundNoMatch + r.unboundUnreadable) generated=\(g?.generated ?? 0) declined=\(g?.declined ?? 0) groups=\(r.groupsUsed) bind_ms=\(Double(r.bindNs / 1000) / 1000)"
+}
