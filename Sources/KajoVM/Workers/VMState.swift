@@ -103,11 +103,18 @@ import Synchronization
 struct InternState: Sendable {
     /// Symbols stored into the table.
     var inserted: UInt64 = 0
-    /// Symbols made for nothing: the second lookup found the bytes
-    /// (another worker's insert came first), or the bucket filled up
-    /// between the lock-free look and the lock. Each became a String.
+    /// Symbols made for nothing (made outside the lock, then the second
+    /// lookup found the bytes or the bucket needed growing): each became a
+    /// String. `bucketFilled`: a bucket filled between the lock-free look
+    /// and the lock.
     var madeForNothing: UInt64 = 0
     var bucketFilled: UInt64 = 0
+    /// Part 4: second lookups that found the bytes (another worker's
+    /// insert came after this worker's miss), and inserts whose Symbol the
+    /// allocation fast path could not make under the lock (made outside it
+    /// through `allocateOld`, a poll).
+    var foundUnderLock: UInt64 = 0
+    var slowAllocations: UInt64 = 0
     /// Buckets replaced by larger ones, and grown buckets thrown away
     /// because the table no longer named the bucket measured.
     var growths: UInt64 = 0

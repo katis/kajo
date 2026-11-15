@@ -420,7 +420,8 @@ public enum Headless {
         let ic = vm.internCounters
         report += [
             ("internInserted", "\(ic.inserted)"), ("internMadeForNothing", "\(ic.madeForNothing)"),
-            ("internBucketFilled", "\(ic.bucketFilled)"), ("internGrowths", "\(ic.growths)"),
+            ("internBucketFilled", "\(ic.bucketFilled)"), ("internFoundUnderLock", "\(ic.foundUnderLock)"),
+            ("internSlowAllocations", "\(ic.slowAllocations)"), ("internGrowths", "\(ic.growths)"),
             ("internGrowthRetries", "\(ic.growthRetries)"), ("internHolds", "\(ic.holds)"),
             ("internHoldMeanUs", ic.holds == 0 ? "-" : unsafe String(format: "%.3f", Double(ic.holdNs) / Double(ic.holds) / 1e3)),
             ("internHoldMaxUs", unsafe String(format: "%.3f", Double(ic.longestHoldNs) / 1e3)),

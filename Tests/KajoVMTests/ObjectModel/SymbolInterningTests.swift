@@ -166,34 +166,38 @@ private func duplicates(_ rt: Runtime, _ names: [String], _ answers: [[Oop]]) ->
     return dup
 }
 
-func internSymbolsRuntime(background: Int = 7, noSecondLookup: Bool = false, marker: Bool = true,
+func internSymbolsRuntime(background: Int = 7, noSecondLookup: Bool = false, marker: Bool = true, slowAllocation: Bool = false,
                           _ change: (inout VMConfig) -> Void = { _ in }) throws -> Runtime {
     try Runtime(internAllSrc, background: background, heapBlocks: 4096, configure: { c in
         c.verifySymbols = true
         c.marking.enabled = true
         c.marking.markerThread = marker
         c.testSwitches.internNoSecondLookup = noSecondLookup
+        c.testSwitches.internSlowAllocation = slowAllocation
         change(&c)
     })
 }
 
 /// N workers intern the same bytes and different bytes at once (rule 1).
 /// Rounds go on until the race was seen: a second lookup found a Symbol
-/// another worker had inserted after this one's miss (`madeForNothing`),
+/// another worker had inserted after this one's miss (`foundUnderLock`),
 /// at most 40 rounds. Every answer for the same bytes is one object, and
 /// the symbol-table verifier ran and found nothing.
-@Test func workersInterningTheSameBytesAtOnceGetOneSymbol() throws {
-    let rt = try internSymbolsRuntime()
+@Test(arguments: [false, true])
+func workersInterningTheSameBytesAtOnceGetOneSymbol(slowAllocation: Bool) throws {
+    let rt = try internSymbolsRuntime(slowAllocation: slowAllocation)
     var round = 0
     repeat {
         let names = (0..<300).map { "u\(round)_\($0)" } + (0..<100).map { "v\(round)_\($0 % 7)_\($0)" }
         let answers = internConcurrently(rt, names, processes: 8)
         #expect(duplicates(rt, names, answers) == 0, "round \(round)")
         round += 1
-    } while rt.vm.internCounters.madeForNothing == 0 && round < 40
+    } while rt.vm.internCounters.foundUnderLock == 0 && round < 40
     let ic = rt.vm.internCounters
-    #expect(ic.madeForNothing > 0, "no round saw two workers race for the same bytes in \(round) rounds")
-    print("same bytes at once: \(round) rounds, \(ic.inserted) inserted, \(ic.madeForNothing) made for nothing, "
+    #expect(ic.foundUnderLock > 0, "no round saw two workers race for the same bytes in \(round) rounds")
+    if slowAllocation { #expect(ic.slowAllocations > 0 && ic.inserted > 0) }
+    print("same bytes at once (slow allocation \(slowAllocation)): \(round) rounds, \(ic.inserted) inserted, \(ic.foundUnderLock) found under the lock, "
+          + "\(ic.madeForNothing) made for nothing, \(ic.slowAllocations) made outside the lock, "
           + "\(rt.vm.counters[.internContended]) contended, longest hold \(ic.longestHoldNs) ns")
     _ = rt.vm.scavenge()
     #expect(rt.vm.internCounters.verifies > 0)
@@ -227,8 +231,9 @@ func internSymbolsRuntime(background: Int = 7, noSecondLookup: Bool = false, mar
 /// rounds between cycles; every cycle frees the previous round's Symbols
 /// (nothing holds them) and the next round makes new ones. Uniqueness
 /// holds in every round and the verifiers find nothing.
-@Test func symbolsDroppedCollectedAndInternedAgainStayUnique() throws {
-    let rt = try internSymbolsRuntime(background: 3, marker: false)
+@Test(arguments: [false, true])
+func symbolsDroppedCollectedAndInternedAgainStayUnique(slowAllocation: Bool) throws {
+    let rt = try internSymbolsRuntime(background: 3, marker: false, slowAllocation: slowAllocation)
     let names = (0..<200).map { "again\($0)" }
     var previous: [Oop] = []
     var renewed = 0

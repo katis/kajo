@@ -79,6 +79,12 @@ public struct Configuration: Sendable {
     public var keepAliveFirstLookup = true
     public var keepAliveSecondLookup = true
     public var keepAliveGrowthCopy = true
+    /// The production order since part 4: the lock is taken first and the
+    /// Symbol allocated under it by the allocation fast path (no poll),
+    /// which may fail; then the lock is let go, the Symbol allocated by
+    /// the slow path (a poll) and the lock taken again. Off: the brief's
+    /// candidate, the Symbol always made before the lock.
+    public var allocateUnderLock = true
 
     public init(interners: [Int], reader: Int? = nil, firstCapacity: Int, preexisting: Int? = nil) {
         self.interners = interners
@@ -104,6 +110,7 @@ public struct Configuration: Sendable {
 /// `allocateBucket`, `stash`, `done`.
 enum PC: UInt8, Hashable {
     case lookup, allocate, fill, lock, secondLookup, publish, fillLate, unlock, stash, done
+    case allocateLocked, fillLocked, unlockToAllocate
     case unlockForGrowth, allocateBucket, lockForGrowth, check, copy, unlockAfterGrowth
     /// The reader's: read the table, a slot, a Symbol's bytes.
     case readTable, readSlot, readBytes
@@ -277,7 +284,7 @@ struct Model: ExplorableModel {
                     n.threads[t].pc = .stash
                     add("T\(t) lock-free lookup of \(x) finds S\(r.found)", n)
                 } else {
-                    n.threads[t].pc = .allocate
+                    n.threads[t].pc = c.allocateUnderLock ? .lock : .allocate
                     add("T\(t) lock-free lookup of \(x) misses", n)
                 }
             case .allocate:
@@ -293,6 +300,23 @@ struct Model: ExplorableModel {
                 n.mem.store(t, bytesAddress(sym), 0, .relaxed)
                 n.threads[t].pc = c.fillBeforePublish ? .fill : .lock
                 add("T\(t) allocates S\(sym) (old, pinned, read-only)", n)
+            case .allocateLocked:
+                // The allocation fast path under the lock: no poll.
+                guard th.allocations < Model.symsPerThread else {
+                    add("T\(t) allocates", n, Violation(claim: .everyoneFinishes, message: "T\(t) retried past the model's objects"))
+                    continue
+                }
+                let sym = 1 + t * Model.symsPerThread + Int(th.allocations)
+                n.symLife[sym] = .allocated
+                n.threads[t].sym = Int8(sym)
+                n.threads[t].allocations += 1
+                n.mem.store(t, bytesAddress(sym), 0, .relaxed)
+                n.threads[t].pc = c.fillBeforePublish ? .fillLocked : .publish
+                add("T\(t) allocates S\(sym) under the lock (fast path)", n)
+            case .fillLocked:
+                n.mem.store(t, bytesAddress(Int(th.sym)), x, .relaxed)
+                n.threads[t].pc = .publish
+                add("T\(t) fills S\(th.sym)'s bytes with \(x) under the lock", n)
             case .fill, .fillLate:
                 n.mem.store(t, bytesAddress(Int(th.sym)), x, .relaxed)
                 n.threads[t].pc = th.pc == .fill ? .lock : .unlock
@@ -313,15 +337,25 @@ struct Model: ExplorableModel {
                 if c.secondLookup && r.found >= 0 {
                     if c.keepAliveSecondLookup { keepAlive(&n, r.found) }
                     n.threads[t].answer = Int8(r.found)
-                    n.symLife[Int(th.sym)] = .discarded
+                    if th.sym >= 0 { n.symLife[Int(th.sym)] = .discarded }
                     n.threads[t].sym = -1
                     n.threads[t].pc = .unlock
-                    add("T\(t) second lookup finds S\(r.found); S\(th.sym) becomes a String", n)
-                } else if r.hole >= 0 {
+                    add("T\(t) second lookup finds S\(r.found); S\(th.sym) (if made) becomes a String", n)
+                } else if r.hole >= 0 && th.sym >= 0 {
                     n.threads[t].hole = Int8(r.hole)
                     n.threads[t].bucket = Int8(r.bucket)
                     n.threads[t].pc = .publish
                     add("T\(t) second lookup misses, hole \(r.hole) in B\(r.bucket)", n)
+                } else if r.hole >= 0 {
+                    // No Symbol yet: the fast allocation under the lock
+                    // succeeds, or fails and the slow path runs outside.
+                    n.threads[t].hole = Int8(r.hole)
+                    n.threads[t].bucket = Int8(r.bucket)
+                    n.threads[t].pc = .allocateLocked
+                    add("T\(t) second lookup misses, hole \(r.hole) in B\(r.bucket)", n)
+                    var f = s
+                    f.threads[t].pc = .unlockToAllocate
+                    add("T\(t) second lookup misses, hole \(r.hole), the fast allocation fails", f)
                 } else {
                     n.threads[t].bucket = Int8(r.bucket)
                     n.threads[t].pc = .unlockForGrowth
@@ -337,7 +371,7 @@ struct Model: ExplorableModel {
                     n.threads[t].pc = .fillLate
                 }
                 add("T\(t) stores S\(th.sym) into B\(th.bucket)[\(th.hole)] (\(publishOrder))", n)
-            case .unlock, .unlockForGrowth, .unlockAfterGrowth:
+            case .unlock, .unlockForGrowth, .unlockAfterGrowth, .unlockToAllocate:
                 // pthread_mutex_unlock: a release store of the lock word;
                 // the lock is free once it drains, after every store of
                 // the critical section.
@@ -345,10 +379,11 @@ struct Model: ExplorableModel {
                 switch th.pc {
                 case .unlock: n.threads[t].pc = .stash
                 case .unlockForGrowth:
-                    n.symLife[Int(th.sym)] = .discarded
+                    if th.sym >= 0 { n.symLife[Int(th.sym)] = .discarded }
                     n.threads[t].sym = -1
                     n.threads[t].pc = .allocateBucket
-                default: n.threads[t].pc = .allocate
+                case .unlockToAllocate: n.threads[t].pc = .allocate
+                default: n.threads[t].pc = c.allocateUnderLock ? .lock : .allocate
                 }
                 add("T\(t) lets the lock go", n)
             case .allocateBucket:

@@ -23,6 +23,12 @@ func check(_ name: String, _ c: Configuration) -> Report {
         sc.sequentiallyConsistent = true
         let r2 = check(name + " (sequentially consistent)", sc)
         #expect(r2.violations.isEmpty && r2.finishedRuns > 0, "\(name) sc")
+        // The brief's candidate order (the Symbol always made before the
+        // lock), modelled first and kept as a configuration.
+        var before = c
+        before.allocateUnderLock = false
+        let r3 = check(name + " (made before the lock)", before)
+        #expect(r3.violations.isEmpty && r3.finishedRuns > 0, "\(name) before")
     }
 }
 

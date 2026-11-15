@@ -149,6 +149,11 @@ struct VMTestSwitches: Sendable {
     var internNoSecondLookup = false
     var internPublishBeforeFill = false
     var internPauseUs = 0
+    /// Not a broken variant: the allocation fast path under the intern lock
+    /// always fails, so every insert makes its Symbol outside the lock
+    /// (`allocateOld`) and takes the lock again, the path a full context
+    /// takes; the tests run it too.
+    var internSlowAllocation = false
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no
