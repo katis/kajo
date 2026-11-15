@@ -1,4 +1,4 @@
-"A DevClient for the tools' tests (module 9c): no connection; each request is answered at once by the responder block, which gets the kind and the arguments (a JsonObject) and answers the result, or signals an error that becomes the error reply. Events are given with event:. Module 9d: a link that drops: hold: keeps requests unanswered (answer:with: answers one), lost: drops the link, the reconnect's timers are kept (fireTimer runs the next) and its connections counted (opened), sessionOpened answers the new session."
+"A DevClient for the tools' tests (module 9c): no connection; each request is answered at once by the responder block, which gets the kind and the arguments (a JsonObject) and answers the result, or signals an error that becomes the error reply. Events are given with event:. Module 9d: a link that drops: hold: keeps requests unanswered (answer:with: answers one), lost: drops the link, the reconnect's timers are kept (fireTimer runs the next) and its connections counted (opened), sessionOpened answers the new session. Gate speed's follow-up: the requests' timeouts are kept apart (requestTimers, {milliseconds. block. id}; fireRequestTimer: runs one), so a test fires a timeout without waiting for one."
 Class {
 	#name : #FakeDevClient,
 	#superclass : #DevClient,
@@ -7,7 +7,8 @@ Class {
 		'sent',
 		'holding',
 		'timers',
-		'opened'
+		'opened',
+		'requestTimers'
 	]
 }
 
@@ -46,6 +47,7 @@ FakeDevClient >> setFake: aBlock [
 	info := JsonObject new.
 	holding := false.
 	timers := OrderedCollection new.
+	requestTimers := OrderedCollection new.
 	opened := 0
 ]
 
@@ -66,8 +68,20 @@ FakeDevClient >> answer: anId with: aResult [
 ]
 
 { #category : #link }
+FakeDevClient >> cancelRequestTimer: aTimerOrNil [
+	requestTimers := (requestTimers reject: [:t | t == aTimerOrNil]) asOrderedCollection
+]
+
+{ #category : #link }
 FakeDevClient >> cancelTimer: aTimer [
 	timers := (timers reject: [:t | t == aTimer]) asOrderedCollection
+]
+
+{ #category : #link }
+FakeDevClient >> fireRequestTimer: aTimer [
+	"The request's timeout runs out now."
+	requestTimers := (requestTimers reject: [:t | t == aTimer]) asOrderedCollection.
+	(aTimer at: 2) value
 ]
 
 { #category : #link }
@@ -90,6 +104,20 @@ FakeDevClient >> openConnection [
 { #category : #link }
 FakeDevClient >> opened [
 	^ opened
+]
+
+{ #category : #link }
+FakeDevClient >> requestTimerAfter: milliseconds do: aBlock [
+	| t |
+	t := {milliseconds. aBlock. nextId}.
+	requestTimers add: t.
+	^ t
+]
+
+{ #category : #link }
+FakeDevClient >> requestTimers [
+	"{milliseconds. block. id of the latest request when it was armed} of every request timeout still armed."
+	^ requestTimers
 ]
 
 { #category : #link }

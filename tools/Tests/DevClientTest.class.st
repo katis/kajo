@@ -106,6 +106,84 @@ DevClientTest >> testARefusedSessionIsNotReconnected [
 ]
 
 { #category : #tests }
+DevClientTest >> testARequestNeverAnsweredEndsAfterItsSendLimit [
+	"Gate speed's follow-up: a request that outlives every dropped link and is never answered is sent at most sendLimit times; the next new session fails it instead of sending it, so it ends however often the link drops."
+	| c failed listId |
+	c := FakeDevClient on: [:k :a | nil].
+	c hold: true.
+	listId := c request: 'class.list' args: #() then: [:r | nil] else: [:e | failed := e].
+	DevClient sendLimit - 1 timesRepeat: [
+		c lost: 'dropped'.
+		c fireTimer.
+		c sessionOpened].
+	self assert: c pendingCount equals: 1.
+	self assert: (c sentKinds select: [:k | k = 'class.list']) size equals: DevClient sendLimit.
+	self assert: failed isNil.
+	c lost: 'dropped'.
+	c fireTimer.
+	c sessionOpened.
+	self assert: c pendingCount equals: 0.
+	self assert: c requestTimers isEmpty.
+	self assert: (c sentKinds select: [:k | k = 'class.list']) size equals: DevClient sendLimit.
+	self assert: (failed includesSubstring: 'no reply').
+	self assert: (failed includesSubstring: 'not sent again')
+]
+
+{ #category : #tests }
+DevClientTest >> testARequestSentAgainHasItsTimeoutReArmed [
+	"Gate speed's follow-up: a request's timeout counts from its latest send. The timeout armed at the first send keeps counting through the outage; the new session sends the request again and arms a new one in its place, which is the one that can fail it."
+	| c failed got listId first second |
+	c := FakeDevClient on: [:k :a | nil].
+	c hold: true.
+	listId := c request: 'class.list' args: #() then: [:r | got := r] else: [:e | failed := e].
+	self assert: c requestTimers size equals: 1.
+	first := c requestTimers first.
+	self assert: first first equals: 30000.
+	c lost: 'the target closed the connection'.
+	"The outage counts against the first send: its timeout is still armed."
+	self assert: c requestTimers asArray equals: {first}.
+	c fireTimer.
+	c sessionOpened.
+	self assert: c retried equals: 1.
+	"Sent again: the first send's timeout is gone, one armed at this send replaces it."
+	self assert: c requestTimers size equals: 1.
+	second := c requestTimers first.
+	self deny: second == first.
+	self assert: second first equals: 30000.
+	"The reconnect's answer still lands, within the new timeout."
+	c answer: listId with: #('Object').
+	self assert: got equals: #('Object').
+	self assert: failed isNil.
+	self assert: c requestTimers isEmpty.
+	"And the re-armed timeout fails a request that is not answered."
+	listId := c request: 'class.list' args: #() then: [:r | got := r] else: [:e | failed := e].
+	c lost: 'dropped again'.
+	c fireTimer.
+	c sessionOpened.
+	c fireRequestTimer: c requestTimers first.
+	self assert: (failed includesSubstring: 'no reply').
+	self assert: c pendingCount equals: 0
+]
+
+{ #category : #tests }
+DevClientTest >> testARequestTimesOutDuringAnOutage [
+	"Gate speed's follow-up: while the link is down the timeout of the last send keeps counting, so a request waiting through an outage longer than its timeout fails then, and the client goes on reconnecting."
+	| c failed |
+	c := FakeDevClient on: [:k :a | nil].
+	c hold: true.
+	c request: 'class.list' args: #() then: [:r | nil] else: [:e | failed := e].
+	c lost: 'dropped'.
+	c fireRequestTimer: c requestTimers first.
+	self assert: (failed includesSubstring: 'no reply').
+	self assert: c pendingCount equals: 0.
+	self assert: c state equals: #reconnecting.
+	c fireTimer.
+	c sessionOpened.
+	self assert: c state equals: #open.
+	self assert: c retried equals: 0
+]
+
+{ #category : #tests }
 DevClientTest >> testATimedOutRequestFails [
 	| c failed |
 	c := FakeDevClient on: [:k :a | nil].

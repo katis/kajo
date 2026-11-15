@@ -1,4 +1,4 @@
-"The development protocol's client in Smalltalk (module 9c, docs/modules/developer-ui.md): one connection to a target through the shell's transport (ClientTransport, primitive 164). Requests are messages, one per request of protocol.describe (the requests category; DevClient class>>requests maps each kind to its method and DevClientTest checks the map against DevProtocol describe), each taking the request's arguments and a block that gets the result; errors go to the error block given or to the client's error action. Replies come back as #line events on the UI's event loop, matched by id; the other lines are events (transcript, test.*, run.*, process.stopped, process.resumed) dispatched to whichever window registered for their kind (on:do:). A request that gets no reply within its timeout fails with an error (a timer event, never a wait in the UI). Module 9d: a connection that ends while its session was open (a dropped link: the phone left the network, the socket died) is the event 'connection.lost', and the client reconnects (timer events with backoff: 1, 2, 4, 8 s, up to a minute, until close): 'connection.reconnecting', then a new session as the same client in the same package and 'connection.open'; the requests pending at the loss are sent again, but for those that may not be (DevClient class>>notRetried: running them twice is not running them once), which fail as before. A refused session or close ends it for good. Each reply's round trip is kept for the measurements, a retried one's from its first send. The project directory (2026-11-11, docs/modules/project-directory.md): the client keeps no directory and names none; the host writes the files of its replies into the directory it holds for the target, and project asks the host which one that is."
+"The development protocol's client in Smalltalk (module 9c, docs/modules/developer-ui.md): one connection to a target through the shell's transport (ClientTransport, primitive 164). Requests are messages, one per request of protocol.describe (the requests category; DevClient class>>requests maps each kind to its method and DevClientTest checks the map against DevProtocol describe), each taking the request's arguments and a block that gets the result; errors go to the error block given or to the client's error action. Replies come back as #line events on the UI's event loop, matched by id; the other lines are events (transcript, test.*, run.*, process.stopped, process.resumed) dispatched to whichever window registered for their kind (on:do:). A request that gets no reply within its timeout fails with an error (a timer event, never a wait in the UI). Module 9d: a connection that ends while its session was open (a dropped link: the phone left the network, the socket died) is the event 'connection.lost', and the client reconnects (timer events with backoff: 1, 2, 4, 8 s, up to a minute, until close): 'connection.reconnecting', then a new session as the same client in the same package and 'connection.open'; the requests pending at the loss are sent again, but for those that may not be (DevClient class>>notRetried: running them twice is not running them once), which fail as before. A request's timeout counts from its latest send (gate speed's follow-up, 2026-11-15, docs/modules/gate-speed.md, The agreed follow-ups): sending it again on a new session re-arms it, an outage still counts against the send before it, and a request is sent at most DevClient class>>sendLimit times, after which the next new session fails it instead of sending it again, so one that is never answered ends however often the link drops. A refused session or close ends it for good. Each reply's round trip is kept for the measurements, a retried one's from its first send. The project directory (2026-11-11, docs/modules/project-directory.md): the client keeps no directory and names none; the host writes the files of its replies into the directory it holds for the target, and project asks the host which one that is."
 Class {
 	#name : #DevClient,
 	#superclass : #Object,
@@ -84,7 +84,7 @@ DevClient >> path [
 
 { #category : #accessing }
 DevClient >> pendingAt: anId put: anEntry [
-	"{kind. sent at. result block. error block. timer. line} (tests)."
+	"{kind. sent at. result block. error block. timer. line. sends} (tests)."
 	pending at: anId put: anEntry
 ]
 
@@ -186,7 +186,7 @@ DevClient >> endWith: aReason [
 	entries := pending values.
 	pending := Dictionary new.
 	entries do: [:e |
-		(e at: 5) ifNotNil: [:t | UIEventLoop cancelTimer: t].
+		self cancelRequestTimer: (e at: 5).
 		self fail: e with: 'the connection was lost: ' , aReason displayString].
 	self emit: 'connection.lost' with: aReason
 ]
@@ -216,7 +216,7 @@ DevClient >> lost: aReason [
 		pending keysAndValuesDo: [:id :e | (self class notRetried includes: (e at: 1)) ifTrue: [entries add: id]].
 		entries do: [:id | | e |
 			e := pending removeKey: id.
-			(e at: 5) ifNotNil: [:t | UIEventLoop cancelTimer: t].
+			self cancelRequestTimer: (e at: 5).
 			self fail: e with: 'the connection was lost (' , (e at: 1) , ' is not sent again): ' , aReason displayString].
 		self emit: 'connection.lost' with: aReason].
 	self emit: 'connection.reconnecting' with: backoffMs.
@@ -243,7 +243,7 @@ DevClient >> receive: aJsonObject [
 		self close.
 		^ self emit: 'connection.refused' with: (aJsonObject at: 'error')].
 	entry := pending removeKey: id ifAbsent: [^ nil].
-	(entry at: 5) ifNotNil: [:t | UIEventLoop cancelTimer: t].
+	self cancelRequestTimer: (entry at: 5).
 	"A request sent again after a dropped link is kept apart: its round trip counts from its first send, the outage included."
 	latencies add: {(retriedIds remove: id ifAbsent: [nil]) isNil ifTrue: [entry at: 1] ifFalse: [(entry at: 1) , ' (retried)'].
 		Smalltalk microsecondClock - (entry at: 2)}.
@@ -286,7 +286,7 @@ DevClient >> reconnect [
 
 { #category : #receiving }
 DevClient >> reopened [
-	"The new session is open: the requests that waited are sent again (on this connection, with their ids), the wait goes back to a second."
+	"The new session is open: the requests that waited are sent again (on this connection, with their ids), each with its timeout re-armed from this send, and the wait goes back to a second. A request already sent sendLimit times fails instead: it is not sent again."
 	| ids |
 	outages add: {Smalltalk microsecondClock - lostAt. pending size}.
 	backoffMs := 1000.
@@ -294,9 +294,18 @@ DevClient >> reopened [
 	ids do: [:id |
 		(state == #open and: [pending includesKey: id]) ifTrue: [ | e |
 			e := pending at: id.
-			retried := retried + 1.
-			retriedIds add: id.
-			self transmit: (e at: 6) kind: (e at: 1) id: id args: nil]]
+			self cancelRequestTimer: (e at: 5).
+			(e at: 7) >= self class sendLimit
+				ifTrue: [
+					pending removeKey: id.
+					retriedIds remove: id ifAbsent: [nil].
+					self fail: e with: (e at: 1) , ' got no reply in ' , (e at: 7) printString , ' sends across dropped links: not sent again']
+				ifFalse: [
+					e at: 5 put: (self armTimeoutFor: id).
+					e at: 7 put: (e at: 7) + 1.
+					retried := retried + 1.
+					retriedIds add: id.
+					self transmit: (e at: 6) kind: (e at: 1) id: id args: nil]]]
 ]
 
 { #category : #receiving }
@@ -470,6 +479,18 @@ DevClient >> after: milliseconds do: aBlock [
 ]
 
 { #category : #sending }
+DevClient >> armTimeoutFor: anId [
+	"The request's timeout from now: a timer event that fails it if no reply has come (its token, or nil headless)."
+	^ self requestTimerAfter: timeoutMs do: [self timedOut: anId]
+]
+
+{ #category : #sending }
+DevClient >> cancelRequestTimer: aTimerOrNil [
+	"A request's timeout, no longer wanted (tests give their own)."
+	aTimerOrNil isNil ifFalse: [UIEventLoop cancelTimer: aTimerOrNil]
+]
+
+{ #category : #sending }
 DevClient >> cancelTimer: aTimer [
 	UIEventLoop cancelTimer: aTimer
 ]
@@ -521,12 +542,20 @@ DevClient >> request: aKind args: anArray then: aBlock else: anErrorBlock [
 	nextId := nextId + 1.
 	id := nextId.
 	line := self lineFor: aKind id: id args: args.
-	entry := {aKind. Smalltalk microsecondClock. aBlock. anErrorBlock. nil. line}.
+	entry := {aKind. Smalltalk microsecondClock. aBlock. anErrorBlock. nil. line. 0}.
 	pending at: id put: entry.
-	entry at: 5 put: (UIEventLoop after: timeoutMs do: [self timedOut: id]).
-	"While reconnecting the request waits for the new session (reopened sends it)."
-	state == #reconnecting ifFalse: [self transmit: line kind: aKind id: id args: args].
+	entry at: 5 put: (self armTimeoutFor: id).
+	"While reconnecting the request waits for the new session (reopened sends it, re-arming the timeout armed here)."
+	state == #reconnecting ifFalse: [
+		entry at: 7 put: 1.
+		self transmit: line kind: aKind id: id args: args].
 	^ id
+]
+
+{ #category : #sending }
+DevClient >> requestTimerAfter: milliseconds do: aBlock [
+	"A request's timeout as a timer event (tests give their own)."
+	^ UIEventLoop after: milliseconds do: aBlock
 ]
 
 { #category : #sending }
@@ -624,4 +653,10 @@ DevClient class >> requests [
 		#('process.terminate' #processTerminate:then:)
 		#('protocol.describe' #protocolDescribe:)
 		#('test.run' #testRun:tag:then:))
+]
+
+{ #category : #requests }
+DevClient class >> sendLimit [
+	"How many times one request is sent at most, its first send included: each dropped link it outlives sends it again with its timeout re-armed, and a request already sent this often fails at the next new session instead, so a request that is never answered ends however often the link drops."
+	^ 4
 ]
