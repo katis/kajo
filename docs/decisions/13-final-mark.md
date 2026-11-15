@@ -57,3 +57,16 @@ wanted stop); with it the owner declared the VM core done on 2026-11-07 but
 for the interpreter-speed module (the send path, superinstructions, the
 special sends), after which gates are tiered by what a diff touches and the
 full set with the device matrix runs weekly on the mini (see Verification).
+
+Answered by the owner on 2026-11-15, asked one by one in the session
+(questions 1, 2 and 4 after an explanation, each then answered as the main
+session recommended):
+
+1. The bound's value: 16 384 units kept, as built.
+2. Eight give-ups, then an overrun: kept, the ninth attempt completes in
+   its stop, as built.
+3. `young=local` and the main worker: "Always offload." Local collection is
+   for background workers only and no mode lets the main thread collect.
+   This differs from what was built; it becomes a follow-up
+   (`docs/PLAN.md`), a change to module 7's protocol and its model.
+4. One collection for the main worker per wanted stop: kept, as built.

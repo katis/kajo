@@ -61,3 +61,14 @@ and 0.61, arith 0.74 and 0.76, binarytrees 0.97 and collections 0.88 of
 before, now ahead of Java `-Xint` on fib, level with Lua 5.4 on dispatch and
 within 3 percent of Ruby on arith, LuaJIT's interpreter 1.5 to 2.1 times
 faster where it was 2.3 to 2.6.
+
+Answered by the owner on 2026-11-15, asked one by one in the session:
+
+1. The image version: "There are no production users yet, do what is
+   easiest." Read by the main session as: version 6 kept, as built.
+2. The oracle ring row: closed. The allocation stalls of 2026-11-13
+   (`33-allocation-stalls.md`) removed the fallbacks the question was about
+   (the Mac's ring under `young=stw` at 0 fallbacks and 1 to 6 frames in
+   both engines).
+3. Fused sends: "Measure first." A follow-up (`docs/PLAN.md`) that bounds
+   the gain with a cheating build before anything is built.

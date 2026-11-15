@@ -1319,9 +1319,12 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/36-gate-speed-follow-ups.md`: Gate speed's follow-ups
  - `docs/decisions/37-aot-2.md`: AOT 2: the product
 
-Open questions the records say still await the owner: the final mark's
-four (`13-final-mark.md`), interpreter speed's three
-(`20-interpreter-speed.md`) and AOT 2's five (`37-aot-2.md`).
+No question awaits the owner: the final mark's four, interpreter speed's
+three and AOT 2's five were answered on 2026-11-15 (appended to
+`13-final-mark.md`, `20-interpreter-speed.md` and `37-aot-2.md`). Three
+answers change what is built and are rows of `docs/PLAN.md`: native code on
+by default in a Release build, the main worker always offloading its young
+collections, and fused sends measured first.
 
 ## Project structure
 
