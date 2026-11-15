@@ -26,6 +26,14 @@ We must find a way to make development smooth (no VM to UI thread delay), while 
  - "Modules hide decisions, not just data"
  - Use TDD wherever possible
 
+## Process
+
+How a module goes from a brief to a pushed, recorded commit (the roles of
+the owner, the main session and a build agent, the brief's shape, the
+constraints on every agent, verification from files, how this file and
+`docs/PLAN.md` are edited, the weekly run and the scratch directory) is
+`docs/PROCESS.md`. Read it before starting or verifying a module.
+
 ## Implementation language
 
 Swift, for the VM core and the native shells alike (ADR 0001). Smalltalk for
@@ -1790,6 +1798,8 @@ cover.
    loads and the demo, bundled as images by a build phase that uses the
    PATH toolchain.
  * `experiments/` throwaway spikes with a design brief and results each.
+ * `docs/PROCESS.md` the working process: briefs, build agents, hand-back
+   verification, recording, the machine's rules.
  * `docs/PLAN.md` the module order for building the production core from
    the experiments; `docs/modules/` one brief, later description, per module.
  * `models/` a separate SwiftPM package holding the exhaustive interleaving
