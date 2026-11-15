@@ -884,7 +884,7 @@ instruction ratios 0.998 to 1.000, checksums the same in every row.
 1817 lines each, identical instruction for instruction. **`just
 arc-check`** passes (no retain or release on the checked paths;
 `stringPrimitive`, `Machine.intern` ARC 0; the loop one jump table).
-**New `unsafe` lines**: 62 added and 8 removed in `Sources/KajoVM`
+**New `unsafe` lines**: 62 added and 6 removed in `Sources/KajoVM`
 (`git diff 9c5e984 c98d981`), all in the core (`Strings.swift`,
 `Symbols.swift`, `Safepoint.swift`, `VM.swift`, `VMState.swift`,
 `Headless.swift`); the clean build and `just ios-check` with 0 warnings.
