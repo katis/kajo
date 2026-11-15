@@ -8,7 +8,9 @@ let fuzzAOT = unsafe getenv("KAJO_FUZZ_AOT") != nil
 
 func generateAll(_ image: Image) {
     let o = AOTGenerator.generate(image.nativeMethodInfos(), nilOop: image.nilOop, trueOop: image.trueOop, falseOop: image.falseOop)
-    precondition(o.methods + o.declined.count > 0 || image.nativeMethodInfos().isEmpty)
+    // AOT 2: the default is the product's subset, which may leave every
+    // method of a small image to the interpreter (excluded, not declined).
+    precondition(o.methods + o.declined.count + o.excluded == image.nativeMethodInfos().count)
 }
 
 /// libFuzzer target for the kasm loader (`just fuzz kasm <seconds>`). Built

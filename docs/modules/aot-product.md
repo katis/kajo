@@ -464,3 +464,278 @@ the owner, not a failure: open question 2.
   callees is what a benchmark exercises. Real apps reach library code
   through paths the rule does not follow (`collections` 0.87): it is the
   subset's cost to watch.
+
+### Part 2: the generator's side
+
+- **Options of `kajo aot`** (`AOTOptions.parse`, `Sources/KajoAOT/Generator.swift`,
+  shared by the CLI and the tests' `KAJO_AOT_OPTIONS`): `--hot
+  all|entry-loops|entry|none` (default `all`), `--[no-]send-helper` (default
+  on: `k_send`, one shared tail-called helper per module holding the poll,
+  the count, the cache probe, the native activation and the VM's send),
+  `--[no-]shared-tails` (default off), `--[no-]cold-minsize` (default on:
+  `__attribute__((minsize, cold))` on every group's cold function), `--subset
+  loops|callees[,no-accessors][,max=<bytes>]` and `--no-subset` (default
+  `callees`), `--full` (AOT 1's configuration: every hot function, sends and
+  tails inline, every method). The defaults are the rule's choice; C at
+  `-O2` is the build's part (`scripts/build-native.sh`, `native-check.sh`).
+  `kajo aot` prints `options=` and `excluded=` on its line and names the
+  subset's complement in `<dir>/excluded.txt` (2242 names for the Sample).
+- **The hashes: unchanged, on purpose.** No lever changes what the VM reads
+  of a module (the descriptor, `KGroup`, `KResume`, `RX`/`DP`, the interface
+  table) or what a method's code assumes of the VM: they change which
+  functions a module has, where a send's probe sits and which methods have a
+  group. A method left out by a subset has no group of its hash and is
+  unbound by no match, AOT 1's path for a changed method. So the content
+  hash, the layout hash and `FORMAT_VERSION` are AOT 1's; nothing under
+  `Sources/KajoVM/Native/` that the layout hash covers changed. What did
+  change there: `NativeMethodInfo.selector` (the subset rule reads it; the
+  generated code does not) and `NativeModule.linkedInMainImage()` (part 3).
+- **Counted, not declined.** A subset's methods are `excluded`, not
+  `declined`: the descriptor's `methodsDeclined` stays 0 and its
+  `methodsGenerated` is the subset; at bind every generated method binds and
+  so does every method of equal content (the Sample: 1048 generated, 1433 of
+  3290 bound, 1857 interpreted).
+- **The native gates in both configurations.** `scripts/native-check.sh`
+  runs each mode twice, the product's (`kajo aot` defaults, `-O2`) and the
+  full one (`--full`, `-O2`; `NATIVE_CONFIGS` picks one). Product: the
+  golden kernels at their checksums with the interpreter's send counts, every
+  generated method bound and no more left unbound than the subset excluded;
+  the kernel tests 249 of 249 with 1433 of 3285 methods bound (1048
+  generated, 0 declined) and the tools' 295 of 295 with 1656 of 4089; the
+  C for macOS and iOS with 0 warnings under `-Wall -Wextra -Werror`. Full:
+  as AOT 1 (3285 of 3285, 4089 of 4089). `part2/native-golden.txt` (205 s),
+  `native-kernel-test.txt` (69 s), `native-cc.txt` (36 s).
+- **The broken variants still fail** in the product's configuration with
+  every method generated: `theBrokenVariantsFailInTheProductsConfiguration`
+  (the helper's uncounted sends seen by the drift detector, an operand left
+  in a local across a backward jump's poll answering wrong).
+- **Tests** (`Tests/KajoVMTests/Native/AOTProductTests.swift`):
+  `everyLeverAnswersWhatTheInterpreterAnswers` (12 configurations: `--full`,
+  the defaults, each hot form, the helper, shared tails, cold minsize, three
+  subsets, all levers at once; the answer and the interpreter's send count),
+  `theBrokenVariantsFailInTheProductsConfiguration`,
+  `aSubsetsLeftOutMethodsRunInterpretedBesideTheGeneratedOnes` (bound equals
+  generated, unbound equals excluded, engine switches both ways, 0
+  declined), `theOptionsParseAndRefuse`, `noModuleIsLinkedIntoTheTestProcess`.
+  The suite's own native modules (`NativeTest.options`) use the product's
+  code shape with every method generated (`--no-subset`: the suite counts
+  bound methods); `KAJO_AOT_OPTIONS` changes that. The random programs:
+  `randomProgramsAgreeWithTheirModelNatively` and
+  `randomProgramsResumeAcrossEngines` pass in the product's code shape (23
+  configurations at 100 seeds and 6 modes both ways, 252 s,
+  `part2/random-product.log`) and, with `KAJO_AOT_OPTIONS="--subset
+  callees"`, the subset's interpreted and native methods calling each other
+  in all 23 configurations (124 s, `part2/random-subset2.log`; the first
+  subset run failed only the harness's "every method bound" assertion, made
+  subset-aware in `RandomPrograms.swift`, `part2/random-subset.log`).
+- **The kasm fuzzer's generator mode with the product's options**
+  (`KAJO_FUZZ_AOT=1 scripts/fuzz.sh kasm 300`): the first run stopped in 51 s
+  on the fuzz target's own precondition (`methods + declined > 0`), false
+  under a subset that leaves every method of a small image to the
+  interpreter; the target now asserts `methods + declined + excluded ==
+  infos` (`Sources/fuzz-kasm/FuzzKasm.swift`). Again: "libFuzzer build: ok",
+  959 727 runs in 301 s, no crash (`part2/fuzz-kasm-aot.txt`,
+  `part2/fuzz-kasm-aot-first.txt`).
+
+### Part 3: the app's build
+
+**The shape (starting position 2): a script phase and a static library,
+tried before the generator wrote it.** A generated project gains:
+
+- `scripts/build-native.sh`, run as a pre-build script phase of both
+  targets. With `CONFIGURATION=Release` and the project's `KAJO_NATIVE=YES` it
+  makes the release image (`build-images.sh --image-only Release`, the same
+  cached `app-release.img` the post-build phase bundles), runs the checkout's
+  `Prebuilt/bin/kajo aot --subset callees --cold-minsize --send-helper`,
+  compiles every file with `xcrun --sdk $PLATFORM_NAME clang -target
+  <arch>-apple-$LLVM_TARGET_TRIPLE_OS_VERSION$LLVM_TARGET_TRIPLE_SUFFIX -O2`
+  in parallel, archives them with `libtool -static` (one per arch, `lipo`
+  when more than one), and keeps the library in
+  `.build/kajo/native/<key>/libkajo_native.a`, `<key>` the SHA-256 of the
+  image, `kajo`, the clang's version line, the options, the flags, the
+  platform, the archs and the target; a `stamp` beside it holds the library's
+  SHA-256, written last. `.build/kajo/native/$PLATFORM_NAME/libkajo_native.a`
+  links to the current key's library. Debug, or `KAJO_NATIVE=NO`: the link is
+  removed and nothing runs.
+- `project.yml`: the base settings `KAJO_NATIVE: NO` (`YES` with `kajo new
+  --native`), `KAJO_NATIVE_LDFLAGS_YES: -Wl,-force_load,$(PROJECT_DIR)/.build/kajo/native/$(PLATFORM_NAME)/libkajo_native.a`
+  and `KAJO_NATIVE_LDFLAGS_NO: ""`; each target's Release `OTHER_LDFLAGS`
+  adds `$(KAJO_NATIVE_LDFLAGS_$(KAJO_NATIVE))`; the pre-build phase declares
+  the library as its output file. The setting turns the module on or off
+  without generating the project again (new-check passes `KAJO_NATIVE=YES`
+  to `xcodebuild`).
+- `build-images.sh` gains `--image-only <config>`.
+
+What the trial found before the generator was final (`part3/new-check1.txt`):
+Xcode plans a `-force_load` file as an input of the link and fails a
+clean build ("Build input file cannot be found") unless a script phase
+declares it as an output, so the phase lists it; and a library named only by
+a flag is not a dependency Xcode tracks for a relink, so when the library is
+not the one the product was linked with (a `linked` stamp beside the link),
+the script removes the product's executable and the link runs again. The
+other shape, generated C files as sources of the target, was not tried: the
+number of files follows the image, and a source list fixed at generation
+time cannot follow it (a deviation: tried by reasoning only).
+
+**How the app finds the module (starting position 3): a section, not a
+symbol.** The generator adds `__attribute__((used,
+section("__DATA_CONST,__kajo_native"))) static const KModule *const
+kajo_native_ref = &kajo_native_module;` to the tables file;
+`NativeModule.linkedInMainImage()` (KajoVM, 5 `unsafe` lines) reads that
+section of the main executable with `getsectiondata` and answers its
+descriptor, or nil. `-force_load` takes every member of the library, `used`
+keeps the section (and through it the whole module) under dead stripping,
+and no symbol lookup survives or fails a strip. `KajoApplication.start` sets
+`Headless.Options.native` from it and prints one line after the VM starts
+(`native=bound methods=… bound=… unbound=… generated=… declined=… groups=…
+bind_ms=…`, or `native=refused reason="…" (the image runs interpreted)`);
+`ShellVM.nativeBindReport` and `nativeGenerated` are the host surface's.
+The explicit argument from `App.swift` was not built: the Swift would have
+to name a C symbol that exists only with the module on.
+
+**`dist.sh` carries nothing new**: the bundled `Prebuilt/bin/kajo` already
+links the generator, and the C compiler is the developer's Xcode. The
+checkout new-check builds (`dist.sh checkout`, 161 s) served every build
+below.
+
+### Part 4: the checks (`scripts/new-check.sh`)
+
+On the Release builds with the module off as before (the release checks
+now also require 0 `KajoAOT` symbols) and then, with `KAJO_NATIVE=YES`:
+
+- the Mac, the iPhone and the simulator Release binaries carry the
+  `__kajo_native` section, the off binaries do not (each other's positive
+  control), and every release symbol and string check holds with
+  `KajoAOT=0`;
+- the Mac app is launched and prints `native=bound methods=3290 bound=1433
+  unbound=1857 generated=1048 declined=0 groups=888 bind_ms=5.263`
+  (bound at least generated, bound plus unbound the image's methods, 0
+  declined);
+- an unchanged second build generates nothing (`generated_in_build=0`, 1 s);
+- a library truncated to 1000 bytes fails its stamp, is built again and the
+  launch binds;
+- a stale library (the same module with another layout hash, stamped as
+  whole, as an earlier Kajo would have left it) is linked, and the launch
+  prints `native=refused reason="its layout hash is not this VM's build" (the
+  image runs interpreted)`;
+
+`part3/new-check2.txt`: `new-check: ok`, every build 0 warnings.
+
+**Sizes from new-check** (unstripped Release binaries as Xcode builds them;
+the symbol table is part of it): Mac 2 196 384 bytes off, 5 044 976 on (app
+8 736 KiB off, 11 516 on); iPhone 2 085 960 off, 4 927 576 on (8 616 and 11
+392 KiB); simulator 4 967 560 on.
+
+**Measured by hand on the Sample made with `kajo new --native` from a
+checkout `dist.sh checkout` built (`part3/`):**
+
+- The layout hash across the boundary (starting position 4): the module
+  generated by the checkout's `Prebuilt/bin/kajo` binds against the same
+  checkout's prebuilt frameworks on the Mac (the launch above) and on the
+  iOS Simulator slice (an iPhone 17 simulator already on the machine, booted,
+  the Release simulator app installed, launched with `simctl launch
+  --console-pty`, then uninstalled and the simulator shut down):
+  `native=bound methods=3290 bound=1433 unbound=1857 generated=1048
+  declined=0 groups=888 bind_ms=5.752` (`part3/sim-launch.txt`). The iPhone
+  slice is part 5's (a device launch). A stale module: refused with its
+  reason, interpreted, never a crash (part 4).
+- Compile time (starting position 5), the build phase by hand
+  (`part3/compile-times.txt`, image already built): from clean 4.15 s
+  (macOS), 3.74 s (iOS), 4.20 s (simulator) on the mini's 12 cores;
+  unchanged 0.11 s each; the library 4.0 MB of objects. The whole Release
+  build with the module from clean: 10 s on the Mac, 7 s for the simulator
+  (`part3/build-macos.log`, `build-sim.log`), 0 warnings.
+- Size, stripped (`strip -x`, `part3/sizes-mac.txt`): the Mac Release binary
+  1 697 936 bytes off and 4 239 920 on (`__text` 1 246 244 and 3 275 728);
+  the module adds 2.54 MB, 1.5 times the rest of the app; the app bundle 8
+  736 KiB off, 11 516 KiB on (the image 6.6 MB of either).
+- With the module off, the Release binary is not byte for byte 11b's: KajoApp
+  gained `nativeBindLine` and the section lookup, KajoVM `linkedInMainImage`
+  and two `ShellVM` accessors (the prebuilt frameworks changed); the
+  project's link is the same, `KAJO_NATIVE_LDFLAGS_NO` being empty, and the
+  pre-build phase does nothing in that case.
+
+### Interpreter and gates of this sitting
+
+- `interpret` identical instruction for instruction against 4127bb8 (1816
+  lines each, only `adrp` page numbers differ: `ab/interpret-diff.txt`);
+  `just arc-check` passes (`part2/arc-check.txt`); the aligned A/B against
+  4127bb8 (`ab/table.md`, 325 s) 1.000 to 1.002 at one worker and 0.969 to
+  1.026 at eight, instruction ratios 0.993 to 1.000, checksums the same.
+- Fast checks on the code: `just ios-check` 16 s, 0 warnings; `just apps` 134
+  s, both shells 0 warnings; `native-check.sh golden|kernel-test|cc` (both
+  configurations) 205, 69 and 36 s; `new-check` passed
+  (`part3/new-check2.txt`); the new tests and `AppProjectTests`
+  (`part2/tests2.log`); the random programs (`part2/random*.log`); the kasm
+  fuzzer's generator mode (`part2/fuzz-kasm-aot.txt`).
+- New `unsafe`: 5 lines in `NativeBinding.swift` (`linkedInMainImage`).
+
+### Part 5: not this sitting
+
+Not run: the dmg-made Sample on the Mac, the iPhone and the iPad, Release
+with the module on against off in both orders (binary and bundle sizes, the
+Release build from clean and unchanged, cold launch to first frame, the bind
+time, `kajo-bench` fib, sends and alloc, the scenario columns, the kernel's
+tests through the Sample's engine). The bar's "first frame within 20 ms and
+no more frames missed on both devices" is therefore open; so is the iPhone
+slice's bind (the Mac's and the simulator's are shown above).
+
+### Deviations
+
+- Part 1's outliner configurations (`-Oz`, `-O2` with the outliner and
+  their combinations, and the `loops` subset) were measured for one round
+  of their one-worker kernels and part of the programs, not five, and the
+  first speed run was stopped after its first round (`speed-round1-partial.txt`)
+  to split them out: every one of their runs is 0.3 to 0.65 of `-O2`.
+- Two levers the brief did not list were measured and one is in the
+  product: `--cold-minsize` (lever a per function) and the combinations with
+  `-Oz` without the outliner.
+- The C of part 1 was compiled with Xcode's clang 21 (the developer's), AOT
+  1's tables with swift.org's; the speed modules with the alignment flags of
+  an A/B (`-mllvm -align-all-nofallthru-blocks=5 -falign-loops=32`), the size
+  modules without.
+- The test suite's own native modules use the product's code shape with
+  every method generated (`--no-subset`), because the suite counts bound
+  methods; the subset runs under `KAJO_AOT_OPTIONS="--subset callees"` (the
+  random programs) and in its own tests and the native gates.
+- Generated C files as sources of the target (the brief's second shape) were
+  not tried in Xcode: their number follows the image.
+- `new-check` launches the Mac Release app (a window for about a second) to
+  read its native line.
+
+### Not done
+
+- Part 5 (above) and the final `just check 4127bb8` core-tier run (below
+  if it ran this sitting).
+- Narrower per-pc tables (lever g, found here: 0.54 MB of the chosen 2.59).
+- Pruning of `.build/kajo/native/<key>/` libraries of earlier images (each
+  Release build after an image change adds one, 4 MB).
+- ADR 0015's Built (AOT 2) note is written; the brief's option of a
+  framework of the app's own (open question 4) was not tried.
+
+### Open questions (the brief's, with what was measured)
+
+1. **Native code in a Release build: opt-in (built, as recommended)**:
+   `KAJO_NATIVE: NO` unless `kajo new --native`; the module adds 2.54 MB
+   stripped to a 1.70 MB Mac binary (2.5 times) and makes the kernel tests 1.2
+   times slower than full native through engine switches (6.1 s against 4.9;
+   both 249 of 249) while the kernels run at 0.96 of full native.
+   Recommendation: keep opt-in until part 5's device numbers are in.
+2. **The size rule: 0.9 of full speed (built, as recommended).** The rule
+   chose 2.59 MB; the smallest configuration at all that is not 0.3 to 0.6
+   is 1.74 MB at 0.866 (`--subset callees --hot none --send-helper`); none
+   comes under the app's own 1.70 MB stripped. Recommendation: keep 0.9.
+3. **The subset by static rule: built, and in the default.** It is not the
+   only lever that reaches the app's size (none does at the bar), so the
+   brief's recommendation was "leave it", but the rule written before the
+   numbers counted it and it is the rule's choice: without it the smallest
+   at the bar is `--cold-minsize --send-helper` at 6.13 MB. Its cost:
+   `collections` 0.87 and engine switches on code the rule does not reach
+   (14 million in one kernel-test run against 800 without). Recommendation:
+   keep the subset in the default, and make AOT 3's profile its replacement;
+   the alternative default without it is one flag (`--no-subset`).
+4. **The module's place: in the app binary (built, as recommended)**: one
+   section, no file opened, the module code of the signed binary.
+5. **New: narrower per-pc tables** (a format change: `RX` as an i16 offset
+   per group, `DP` as i8), about 0.27 MB of 2.59. Recommendation: build it
+   with AOT 3, when the tables change anyway.

@@ -604,9 +604,12 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
     let v = rt.vm.result(of: root)
     if let e = rt.vm.error(of: root) { Issue.record("seed \(p.seed) \(config): \(e)") }
     if native {
-        // AOT 1: the native engine bound every method and ran them.
+        // AOT 1: the native engine bound every method and ran them; under
+        // a subset (AOT 2, KAJO_AOT_OPTIONS) the rest run interpreted beside
+        // them and are unbound by no match, never refused.
         let r = rt.vm.nativeReport
-        #expect(r?.refused == nil && r?.bound == r?.methods && (r?.bound ?? 0) > 0, "seed \(p.seed) \(config): \(String(describing: r))")
+        let all = NativeTest.options.subset == nil ? r?.bound == r?.methods : (r?.bound ?? 0) + (r?.unboundNoMatch ?? 0) == r?.methods
+        #expect(r?.refused == nil && all && (r?.bound ?? 0) > 0, "seed \(p.seed) \(config): \(String(describing: r))")
         let n = rt.vm.nativeCounters
         #expect(n.entries > 0 && n.nativeSends > 0, "seed \(p.seed) \(config): \(n)")
         randomNative.add(config, n)

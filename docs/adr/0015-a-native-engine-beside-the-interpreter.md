@@ -82,3 +82,19 @@ generated code sanitized, alone and under load. `docs/modules/aot.md`'s
   for 2573 groups; compiling it takes about 16 s on ten cores at -O2.
   Module 2 decides the product's flag and whether to compile only reached
   methods.
+
+## Built (AOT 2)
+
+`docs/modules/aot-product.md`, 2026-11-15. A generated app's Release build
+compiles its sealed image's methods with the developer's Xcode clang into a
+cached static library the link takes whole (`scripts/build-native.sh`, the
+project's `KAJO_NATIVE`, opt-in by `kajo new --native`); the app finds the
+module by one section of its main executable and binds it at launch, and a
+stale module is refused with its reason and the app runs interpreted. The
+product's configuration is part 1's rule's choice: methods with a loop and
+the methods they send to, sends through one shared helper, cold functions
+for size, `-O2`: the Sample's module 2.59 MB against 14.06 at AOT 1's full
+configuration, 0.962 of its speed on the eight kernels. No configuration at
+0.9 or better brings the module under the app's own binary (1.70 MB
+stripped on the Mac). The content and layout hashes did not change: the
+levers change only what is inside a module.
