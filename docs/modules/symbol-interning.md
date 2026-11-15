@@ -733,3 +733,170 @@ bytes proceed at once; it is an open question below, with these numbers.
 **The method cache** after the protocol: `cacheFlushes` 0 in every row
 (each intern stop flushed every worker's cache before); the stale-line
 test passes, on the argument of rule 8.
+
+### Deviations
+
+- **The order of the insert** (part 4): the Symbol is made under the
+  lock by the allocation fast path and only made outside it when that
+  has no room, where the brief's candidate always made it first; the
+  numbers that decided it are above, and the model has both orders.
+- **A full bucket is grown before the Symbol is made**, not after (part
+  1's paragraph), so no unpublished Symbol is ever held across a poll.
+- **The tests were written with the protocol**, not before it. The
+  hole's test was written first and failed on the code it was written
+  for (`hole/before-fix.txt`); every other rule's test shows its value
+  through its broken variant, run in the same test.
+- **The forced schedule for the hole** is the host worker calling
+  `internSlow` directly (the slow path with the lock-free lookup
+  skipped), not a test switch in the lookup's fast path, which would
+  have cost every hit a load.
+- **Part 4's matrix ran at thermal "fair"**, part 1's at nominal; the
+  after rows are the ones that could only have been slowed.
+- **Stress coverage of the new paths is the random programs'**: their
+  intern step runs in all 23 configurations (a stop and a preemption at
+  every poll, a collection at every allocation, marking always on,
+  relocation of every live block, the young barrier always on, the
+  slowed marker, the three young modes and the oracle, the exhausted
+  reserve), interpreted and, in the gate's `swift test`, natively; the
+  new unit tests run in the default configuration.
+
+### Not done
+
+- A lock per bucket (an open question below, with part 4's contention
+  numbers).
+- The bucket scan's cost at a million Symbols (4.4 µs a hit): the
+  table's shape is unchanged by rule 9; an open question.
+- The symbol-table verifier's own cost under load was not measured; it
+  is off in every product build and in `kajo run`, on in the tests and
+  the random programs.
+- The rule "no stop finds the lock held" has a verifier at every stop
+  but no broken variant: a poll inside the critical section would
+  deadlock the stop against the waiters, not fail a check.
+- The new unit tests under the native harness (`KAJO_NATIVE_HARNESS=1`);
+  the native random programs run the intern step.
+- No device row interns in a loop; the gate's iPhone matrix ran as
+  always.
+
+### Found, not this module's
+
+- `Image.insertSymbol`'s bucket growth copies a weak bucket with no
+  keep-alive barrier. It runs only with no VM (the loader, the image
+  build) or in module 2's standalone interpreter, where no cycle marks,
+  so it is not a hole today; a host insert into a running VM would need
+  `internSlow`.
+- The lock-free hit in `Machine.intern` calls `weakReadBarrier` out of
+  line on every hit (not `keepAliveRead`, which reads the flag word
+  first): a call per `asSymbol` hit with marking off. Not changed: the
+  fast path was to gain nothing.
+
+### Open questions
+
+1. **One lock or one per bucket?** At 8 workers the one lock is
+   contended 130 000 times a run of `collections` with 2.2 to 2.4 s of
+   waiting summed over eight workers (6 percent), the bar met at 1.18
+   and 1.35, the dictionary part alone at 1.45 and 1.72. Recommendation:
+   keep the one lock; a striped lock (the bucket index modulo a small
+   power of two) is a small change if a real program interns in
+   parallel at this rate, and part 4's rows are its baseline.
+2. **The bucket scan.** A hit at a million Symbols costs 4.4 µs (979
+   per bucket, three dependent loads each). Recommendation: no change
+   until an app holds more than about 100 000 Symbols (0.25 µs a hit
+   there); then a table that grows its bucket count, which changes the
+   image format and is a module of its own.
+3. **The `intern` stop kind.** It cannot occur any more.
+   Recommendation: keep it and its counters (they read 0) for a release
+   so the rows' readers see the zero, then remove them.
+
+### The gates
+
+`just check 9c5e984` ran once, on b478aaf (docs above the code commit
+f117715), the core tier's 20 gates with swift.org 6.4.2 first on PATH,
+into `~/kajo-scratch/symbol-interning/check/` (`gates.log`), 11 368 s.
+Against the previous module's tier on e8f9585
+(`~/kajo-scratch/stall-tests/check/gates.log`):
+
+| gate | result | s | baseline s |
+|---|---|--:|--:|
+| clean-build | pass | 19 | 20 |
+| swift-test-load | pass (456 + 162 tests) | 1169 | 965 |
+| tsan | **fail**, 0 reports | 3161 | 2997 |
+| tsan-load | **fail**, 0 reports | 3295 | 4103 (failed then too) |
+| ios-check | pass | 16 | 16 |
+| arc-check | pass | 58 | 58 |
+| golden | pass | 75 | 75 |
+| native-golden | pass | 97 | 96 |
+| native-kernel-test | pass (3280 of 3280 and 4057 of 4057 bound, 0 declined) | 46 | 46 |
+| native-cc | pass | 29 | 29 |
+| test-release | pass (451 + 162) | 119 | 117 |
+| model-check | pass | 21 | 20 |
+| soak | pass | 62 | 64 |
+| fuzz | pass, "libFuzzer build: ok" for each: kasm 2 076 676, snapshot 3 085 135, syntax 781 803, protocol 1 730 748 runs in 601 s | 664 | 662 |
+| apps | pass | 129 | 125 |
+| kernel-test | pass (249 of 249) | 107 | 107 |
+| new-check | pass | 253 | 251 |
+| ab | pass | 324 | 323 |
+| matrix-mac | pass | 823 | 822 |
+| matrix-iphone | pass | 901 | 900 |
+
+The two failures. `tsan-load` was this module's: the growth test's one
+Process filling a bucket to 4095 (quadratic: every insert scans the
+bucket) did not finish within 600 s in a debug build under the
+sanitizer and twelve loops, and the test's helper then read the
+unfinished Process's nil result as an Array and trapped the test
+process ("1 Processes still live", then "ObjectMemory.swift:208:
+Assertion failed"), so the rest of the VM suite did not run. Fixed in
+the test (c98d981): results are read only from Processes that answered,
+and under the sanitizer the bucket grows to 64 with the full fill and
+the refusal left to every other build. `tsan` failed in a test that is
+not this module's: `aRingLikeLoadStallsInsteadOfFallingBack(offload)`
+asserts that a stall happened and saw none ("stalls=0 ... cycles=2
+markerSlowSpins=2250"; its body took 236 s against 115 in the stall
+tests' own run). Its sanitizer runs have always been at the edge (2 to
+3 stalls in the x16 offload rows of `stall-tests/check2/tsan.txt` and
+`tsan-load.txt`), and this module's tests running beside it in the
+parallel suite (eight-worker interning, the growth test) slow the
+mutator that has to outrun the slowed marker. It is a test that
+asserts parallelism without running until it sees it (AGENTS.md); not
+changed here, handed back.
+
+Only test files changed after that run, and every other gate had
+passed, so the three test gates ran again alone on c98d981 through
+`scripts/gates-lib.sh`'s own definitions and `gl_gate`
+(`~/kajo-scratch/symbol-interning/tools/three-gates.sh`, the stall
+follow-up's driver with this PATH), into
+`~/kajo-scratch/symbol-interning/check2/gates.log`, 7961 s:
+swift-test-load pass in 1058 s (456 + 162 tests), tsan pass in 2969 s
+(0 reports; the ring test passed), tsan-load pass in 3934 s (0 reports).
+Against the stall follow-up's three gates on 2dc41e6 (917, 3010 and
+4053 s) the new tests cost about 140 s in `swift-test-load` and nothing
+measurable in the sanitizer gates (their own variation is larger); the
+VM suite's random programs, which now verify the symbol table at every
+stop after inserts, account for most of the plain gate's difference
+(the interpreted random programs ended at 762 s of the suite against
+593 in the tier's run).
+
+**The A/B** (the gate's, `check/ab.txt`, aligned `-enable-testing`
+builds of 9c5e984 and b478aaf, five interleaved runs): 0.995 to 1.000 at
+1 worker and 0.975 to 1.013 at 8 workers with overlapping ranges,
+instruction ratios 0.998 to 1.000, checksums the same in every row.
+**`interpret`** in the A/B's own objects (`check/ab/{base,head}-build/.../Dispatch.o`,
+`otool -tV` with the addresses stripped, `p4/interpret-{base,head}.txt`):
+1817 lines each, identical instruction for instruction. **`just
+arc-check`** passes (no retain or release on the checked paths;
+`stringPrimitive`, `Machine.intern` ARC 0; the loop one jump table).
+**New `unsafe` lines**: 62 added and 8 removed in `Sources/KajoVM`
+(`git diff 9c5e984 c98d981`), all in the core (`Strings.swift`,
+`Symbols.swift`, `Safepoint.swift`, `VM.swift`, `VMState.swift`,
+`Headless.swift`); the clean build and `just ios-check` with 0 warnings.
+
+**The matrices** (`check/matrix-mac.txt`, `check/matrix-iphone.txt`,
+`--bar` over every row): the Mac 156 rows, 0 launches failed, 0
+fallbacks, frames missed only in the hog rows with the budget off (1787,
+by design), 680 stalls (longest 24.55 ms) against the baseline's 668,
+the longest stop an 11.02 ms scavenge under `young=stw`; the iPhone at
+5 workers 156 rows, 0 fallbacks, 0 stalls, the hog rows by design, and
+the oracle's rows: the ring under `young=stw` 2, 6 and 1 frames (the
+baseline 5, 3 and 5) and one storm launch under `young=stw` 1 frame,
+each behind a stop-the-world scavenge of 13.8 to 16.2 ms (the oracle's
+own cost, as in every earlier matrix). No row interns in a loop; none
+moved for this module.
