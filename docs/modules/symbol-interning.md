@@ -900,3 +900,25 @@ baseline 5, 3 and 5) and one storm launch under `young=stw` 1 frame,
 each behind a stop-the-world scavenge of 13.8 to 16.2 ms (the oracle's
 own cost, as in every earlier matrix). No row interns in a loop; none
 moved for this module.
+
+## 2026-11-16: the race tests drive their race
+
+The weekly run of 2026-11-16 on 30e14bd failed `swift-test`,
+`swift-test-load` and `tsan` on two tests of this module:
+`workersInterningTheSameBytesAtOnceGetOneSymbol(slowAllocation: false)`
+saw no race in 40 rounds ("0 found under the lock, 0 contended") and
+`withoutTheSecondLookupTwoSymbolsOfTheSameBytesAppear` no duplicate in
+40. No answer was wrong and the VM was not the suspect: the eight
+Processes of a round were spawned one after another and raced only when
+a lagging one caught up with the leader, which beside the rest of the
+suite did not happen. Since 01d4580 every round starts at a gate (each
+Process marks its slot of an arrivals Array and spins until all have
+arrived, `internAll:arrivals:index:`), the assertions and the bound of
+40 rounds unchanged, and each test prints its body's own time. Before,
+beside the VM suite's random programs, the correct variant needed up to
+34 rounds and the broken variant failed once in 30; after, in 150 runs
+per test across five conditions (plain, twelve busy loops, the
+sanitizer, both, and beside the random programs), every run raced within
+3 rounds. The measurement and the tables are in
+`docs/modules/interning-tests.md`. The protocol, the model and the
+verifiers did not change.
