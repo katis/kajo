@@ -98,3 +98,9 @@ configuration, 0.962 of its speed on the eight kernels. No configuration at
 0.9 or better brings the module under the app's own binary (1.70 MB
 stripped on the Mac). The content and layout hashes did not change: the
 levers change only what is inside a module.
+
+*Note of 2026-11-16 (`docs/modules/native-by-default.md`):* the module is on
+by default in a generated project's Release build since then (the owner's
+answer of 2026-11-15 to AOT 2's first question): `KAJO_NATIVE: YES` unless
+`kajo new --no-native`, and a failed native step stops the Release build
+with a line naming `KAJO_NATIVE=NO`. The text above is not rewritten.

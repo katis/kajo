@@ -516,6 +516,15 @@ the iPhone, 129 ms on the iPad. The change was in `src/` and the rebuilt
 app started with it on every host; the Release app served nothing (no
 Bonjour service, no serving line, no listening socket on the Mac).
 
+*Note of 2026-11-16 (`docs/modules/native-by-default.md`):* since then a
+Release build also links the image's native module by default (the
+project's `KAJO_NATIVE`, YES unless `kajo new --no-native`), so a Release
+app is larger than the sizes above: the Sample's Mac Release binary 5 068 832
+bytes with the module and 2 236 672 without, the app 11 540 and 8 776 KiB;
+iOS 4 951 272 and 2 126 008 bytes, 11 412 and 8 656 KiB (unstripped, as
+Xcode builds them; `just new-check` prints both on every run). The Mac
+Release build from clean takes 9.5 s with the module.
+
 **A script finding**: in two of the three iPhone runs the rebuilt app's
 Bonjour name still resolved to the live launch's record (the old port),
 and the step failed with "Connection refused"; the third run, and the

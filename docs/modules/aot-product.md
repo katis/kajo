@@ -828,3 +828,12 @@ off on the Mac, 1236 ms off on the iPad.) Thermal state on every device line
 5. **New: narrower per-pc tables** (a format change: `RX` as an i16 offset
    per group, `DP` as i8), about 0.27 MB of 2.59. Recommendation: build it
    with AOT 3, when the tables change anyway.
+
+*Note of 2026-11-16:* the owner answered question 1 "on by default"
+(2026-11-15), and `docs/modules/native-by-default.md` built it: `kajo new`
+writes `KAJO_NATIVE: YES` (`--no-native` writes NO, `--native` is accepted),
+a failed native step stops the Release build with a line naming
+`KAJO_NATIVE=NO`, `build-native.sh` keeps one library per platform, and
+`new-check`'s plain Release rows are the native ones. The text above
+describes AOT 2 as built and is not rewritten. Part 5's open item, frames
+missed with the module on, is measured there (part 1).

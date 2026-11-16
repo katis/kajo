@@ -351,3 +351,122 @@ collector (iPhone storm, one frame in one of six rows; iPad ring, 28 frames
 in six rows against 10), both with 0 fallbacks. Nothing under the core
 directories or `Sources/KajoAOT/` is needed for the default; the brief's
 open question 4 applies (built: the default as answered, reported here).
+
+### Part 2: the default (f708fbd)
+
+- `AppProjectSpec.native` defaults to `true`
+  (`Sources/KajoGenerator/Generator.swift`); the template writes
+  `KAJO_NATIVE: YES` with the comment "YES (the default)"; the Kajo app's
+  New App… builds its spec without naming it and follows.
+- `kajo new` reads its arguments through `NewArguments.parse` (new, in
+  `KajoGenerator`, so a test reads them): `--no-native` writes NO,
+  `--native` is accepted as the default it is, the last of the two wins
+  (open question 1, built as recommended). The usage line names
+  `[--no-native]`; the help text says the module is on and how to turn it
+  off. Quoted runs (`part2/cli-runs.txt`, the repository's `kajo` against
+  the part 1 checkout): no flag `KAJO_NATIVE: YES`, `--native` YES,
+  `--no-native` NO; `--nativ` answers `unknown option --nativ` and the usage.
+- `build-native.sh`: the by-hand default is `${KAJO_NATIVE:-YES}`; every
+  step of its own that can fail (`kajo` missing, `kajo aot`, the compile per
+  arch, `libtool`, `lipo`) ends in one line (open question 2, built as
+  recommended). Quoted from `part2/failed-step-after.log` (the stub `kajo`
+  of part 1, whose `aot` exits 1, on a project from this commit's `kajo
+  new`):
+
+  ```
+  native module: generating and compiling (macosx arm64)
+  stub: kajo aot exits 1
+  error: the native module was not built: kajo aot failed. Set KAJO_NATIVE=NO (in project.yml, or on the xcodebuild line) to build the app without it; it then runs interpreted.
+  ** BUILD FAILED **
+  ```
+
+  The image's own failure keeps `build-images.sh`'s message: it would fail
+  the build with the module off too, so `KAJO_NATIVE=NO` is no answer to it.
+- The generated README gains a bullet: Release compiles the image's
+  methods to native code, and `KAJO_NATIVE=NO` turns it off.
+- Tests (`Tests/KajoCompilerTests/AppProjectTests.swift`):
+  `aSpecThatDoesNotNameTheModuleTurnsItOn` (a spec with no `native`
+  argument writes YES, `native: false` NO and differs in that line only;
+  the script's default and its failure line) fails on the starting
+  commit with four expectations (`part2/start-test.log`: 30e14bd's tree
+  from `git archive` with only this test added), and
+  `kajoNewTurnsTheModuleOnUnlessToldNo` (no flag, `--native`, `--no-native`
+  and both orders, each written and read back from `project.yml`; the
+  refusals); the fixture's `project.yml`, `README.md` and
+  `scripts/build-native.sh` follow, byte for byte
+  (`theOutputForAFixedInputIsTheFixtureByteForByte`). 17 of 17 in
+  `AppProjectTests` and `DistributionTests` (`part2/tests.log`).
+
+### Part 3: `new-check` (30c2298)
+
+The plain Release rows are now the native ones and every check keeps its
+pair (`scripts/new-check.sh`; run on its own, `part3/new-check.txt`,
+`new-check: ok`, every build 0 warnings):
+
+- `macos-release` (from clean, 9 s): the release symbol and string checks
+  with `KajoAOT=0`, `native_section=1`, the Mac launch `native=bound
+  methods=3290 bound=1433 unbound=1857 generated=1048 declined=0 groups=888
+  bind_ms=5.317`; `macos-release-again` `generated_in_build=0` (1 s);
+  `macos-release-truncated` rebuilt and bound; `macos-release-stale`
+  `native=refused reason="its layout hash is not this VM's build" (the image
+  runs interpreted)`; `macos-release-changed` (below).
+- The off rows, each the same product with `KAJO_NATIVE=NO` on the
+  `xcodebuild` line: `macos-release-off` `native_section=0
+  binary_bytes=2236672 on_bytes=5068832 no_files=1 app_bytes=8776KiB` (on:
+  11 540 KiB); `ios-release-off` 2 126 008 against 4 951 272 bytes (8 656
+  and 11 412 KiB); `ios-simulator-release-off` 2 126 136 against 4 974 936;
+  all three with the release checks, no section and no file under
+  `.build/kajo/native/<platform>/`. The iOS and simulator on rows carry the
+  section (`ios-simulator-release: platform=IOSSIMULATOR`).
+- The broken variant, by hand: the same script over a project made with
+  `kajo new --no-native` (`APP_PROJECT`, `part3/new-check-broken.txt`) fails
+  `macos-release: FAILED a plain Release binary has no module section`,
+  `ios-release: FAILED no module section`, `ios-simulator-release: FAILED
+  no module section` and the bind and cache rows, and ends `new-check:
+  FAILED` (exit 1).
+
+### Part 4: the cache (f708fbd)
+
+`build-native.sh` removes every `.build/kajo/native/<key>/` (24 hex
+characters) that no platform's `libkajo_native.a` link names, after its own
+link is set (open question 3, built as recommended: one library per
+platform). It prints `native module: libraries of earlier builds removed:
+<n>`. `new-check`'s `macos-release-changed` row edits the app's class
+comment and builds: `generated_in_build=1 keys_before=1 keys_after=1
+old_key_left=0 native module: libraries of earlier builds removed: 1`, and
+the launch binds. A platform turned off loses its link, so its library
+goes at the next on build of another platform.
+
+**Build times on the Mac, module on** (`part2/builds-mac.txt`, a project
+of this commit's `kajo new`, Release by `xcodebuild`): from clean (no
+DerivedData, no `.build`) 9.47 s (AOT 2: 10 s); unchanged 5.34 s the first
+time and 1.20 s after; a changed image 5.35 s (the module generated and
+compiled again, one library removed); `KAJO_NATIVE=NO` afterwards 1.72 s.
+The phase by hand (`part2/phase-times.txt`): 3.84 s compiling, 0.111 s
+unchanged (AOT 2: 3.7 to 4.2 and 0.11).
+
+### Debug builds and the round trip
+
+Debug products are unchanged in what they link (`new-check`'s debug rows
+as before). `scripts/app-roundtrip.sh mac` (`part3/roundtrip.txt`,
+`part3/roundtrip/roundtrip-mac.txt`; the Mac shell of part 1 for the
+tools): the Debug launches, the idle window (630 of 630 frames), the live
+window (1890 of 1890, `served_sessions=8 served_requests=17`, the Debug
+frames line in its old form through `FrameWindow`), the CLI and tools
+round trips, the rebuilt app starting with the change, and the Release
+app serving nothing all passed; the Release build from clean 9.2 s, 11 540
+KiB. One line failed: `FAILED host=mac step=bonjour (no Sample service
+seen; trying the address)`, the script then talking to the address as it
+is built to. The app advertised (`serving=tcp port=58602 …
+name=Sample_on_Joni’s_Mac_mini`), and `dns-sd -B _kajo-dev._tcp local` run
+by hand from this session printed nothing at all, not even its header:
+this session's process tree sees no Bonjour, as 9d's lesson on Local
+Network privacy describes. Not this module's (nothing on the Debug or
+serving path changed but the frames window).
+
+### Part 5: the docs
+
+This "As built"; dated notes (the text above them not rewritten) at the
+end of `docs/modules/aot-product.md` and of ADR 0015, and after the round
+trip's sizes in `docs/modules/distribution.md` (a Release app with the
+module and without).
