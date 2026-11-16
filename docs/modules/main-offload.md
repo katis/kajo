@@ -285,3 +285,149 @@ What the before matrices say:
   (starting position 6: it was counted already; only its longest was
   missing from the rows).
 
+
+### Part 2: the model (fad4e37, the same commit as part 3)
+
+`models/Sources/YoungCollectionModel/` and `docs/models/young-collection.md`
+(dated section "2026-11-16: the main worker always offloads"). Every place
+the model asked "is this the main worker" or "is this mode offload":
+`mainPasses` (`w == 0` in either mode, now `w == 0 && offloaded(0)`), the
+allocation's nursery, H1's new-half record, the snoop and T1's new-half
+scan (`config.mode == .offload`, now `offloaded(k)`, the VM's
+`isOffloaded`), and a new precondition in `Configuration.init` (only worker
+0 flips, only in `offload`, and there it never collects).
+
+Starting position 2 was wrong in one place. The model did not only lose a
+configuration: `mainOpensWhileWanted` had been checked only on the local
+ownership pair, whose worker 0 was the main worker collecting its own
+nursery. With that gone the switch changed nothing (the test now asserts
+equal state counts there: 171,691 and 128,527), so the pair was added in
+its offloaded form (W0 flips and C collects nursery 0, W1 collects nursery
+1, O snapshot and sweep or a full collection). Configurations before: nine,
+the ownership pair with a main worker that collects (213,969 and 170,836
+states). After: the same nine with no main worker in `local` (the pair at
+171,691 and 128,527) and the two offloaded ones (854,700 and 679,696). With
+`mainOpensWhileWanted` off the offloaded pair has 686,035 and 511,118
+states and holds. `deferredEntriesBelongToTheirNursery` off finds claim 5
+in the offloaded pair too ("C frees deferred entry H, but the old-space
+collector already freed it", 142 and 141 steps). Every other switch finds
+its violation as before, at the same state counts. `cd models && swift
+test -c release --filter YoungCollection`: 31 tests pass, 17.8 s
+(`~/kajo-scratch/main-offload/part2-model.txt`).
+
+### Part 3: the change (fad4e37)
+
+- `YoungMode` has `stw` and `offload`. `kajo run --young`, `kajo test
+  --young` and the shells' `young=` go through `Headless.configs`, which
+  answers any other name with `YoungMode.refusal`'s one line. A generated
+  app names no mode (it takes `Headless.Options`'s default, `offload`).
+- `isOffloaded(k)` is `k == 0` under `offload` (a young state exists only
+  under `offload`); `startYoungCollector`, the nursery's two halves and
+  `install` are unchanged in effect. Readers of what the mode configured
+  (the nursery's shape, the remembered sets, the verifiers' skip rules)
+  read the same values they read under `offload` before; none named the
+  mode but these.
+- The main-thread verifier, at the end of every young collection under the
+  safepoint mutex: a collection whose collector is worker 0 while the
+  collector thread runs counts `youngOnMainFailures` (on the run line's
+  counters) and traps in a build that traps. The single-thread test
+  configuration (no collector thread started) is its one exception. Broken
+  variant, the test switch `mainCollectsItsOwnNursery` (worker 0 takes the
+  owner's local path with the collector thread running):
+  `withTheMainWorkerCollectingItsOwnNurseryTheMainThreadVerifierFails`
+  prints `youngOnMainFailures=14 onMain=14 flips=0 own=14`; without the
+  switch the same run prints `youngOnMainFailures=0 onMain=0 flips=14
+  own=0`.
+- The refusal, quoted from `aNameThatIsNoModeIsRefusedWithTheModesThatExist`:
+  `--young: stw or offload, not local`. Written before the change; on
+  576eff0 it does not compile (`YoungMode.refusal` and the switch are new)
+  and its behaviour was the opposite: part 1's test ran the same load under
+  that name and counted worker 0's collections on the main thread.
+- Found and fixed on the way (`Headless.swift`, `mainLoad`): `kajo run
+  --main-ms` released a tick that had not finished in four frames, and
+  `waitUntilAllTerminated` then waited for that main-affine Process
+  forever, since only the main turns run it. The first full `swift test`
+  hung there on the new `mainLoadRun` tests (0 percent CPU,
+  `VM.waitUntilAllTerminated`, sampled); the turns now finish every such
+  tick before the run ends.
+
+Tests that ran under the removed mode:
+
+| test | what it named | what covers its claim now |
+|---|---|---|
+| `theMainWorkerOpensOneCollectionWhileAStopIsWanted` (FinalMarkTests) | worker 0 opening and collecting its own nursery while a stop is wanted | the same test under `offload` with the collector thread started: worker 0 flips while the stop is wanted (`opensWhileWanted == 1`, `flips == 1`, `ownCollections == 0`, nothing on the main worker) |
+| the ten `youngRuntime` tests of YoungCollectionTests, the five of FinalMarkTests | workers 1 and 2 collecting their own nurseries | unchanged under `offload`: background workers still collect locally |
+| `theYoungCollectionAndRoundLogsKeepTheirCapacityAndTotalEveryRecord` | the logs under local collections | under `offload` (background workers' collections) |
+| `aRingLikeLoadStallsInsteadOfFallingBack`, `immediatesAreNotReferencesInAnyCollector`, `readOnlyFlipsRaceNoYoungCollection`, `theImageIsWholeAfterTheVMEnds`, `sharedYoungObjectsAreClaimedOnceByParallelScavengers` | one argument each for the removed mode | their `stw` and `offload` arguments |
+| random programs `localCollection`, `exhaustedReserveLocal`, `youngBarrierAlwaysOn` | every nursery collected by its owner | `backgroundCollection` and `exhaustedReserveOffload` (offload, no main task: the background workers collect locally), `youngBarrierAlwaysOn` under offload; 100 seeds each, none failing |
+
+`swift test` on the part-3 tree: 466 and 164 tests pass
+(`~/kajo-scratch/main-offload/part3-swift-test2.txt`). The new and changed
+tests once under ThreadSanitizer with twelve busy loops: 6 pass, 0 reports
+(`part3-tsan-load.txt`). `just ios-check` 0 warnings, `just arc-check` OK.
+
+### Part 4: the scripts (5b72399)
+
+`shell-matrix.sh` runs `stw offload`: the matrix has 21 scenario rows a
+run of three instead of 30 (147 rows a matrix instead of 156).
+`shell-report.py --bar` prints a line naming the young modes the rows
+carry (an unknown value as unknown) and two columns: young collections on
+the main thread and the host's nursery's, each with the longest; rows
+without the counter read "?". `device-rows.sh` and `weekly.sh` needed no
+change (they call the two scripts). Each was run alone on the part-1 raw
+rows and on a file with an unknown mode
+(`~/kajo-scratch/main-offload/part4/unknown/`); `check-tier-test.sh`: 96
+checks, ok.
+
+### Part 5: measured again (5b72399)
+
+After matrices, `RUNS=3`, the same three devices and worker counts, raw
+rows in `~/kajo-scratch/main-offload/part5/matrix-{mac,ipad,iphone}/`,
+`shell-report.py --bar` in each `bar.md`. 147 rows each (156 before: the
+nine scenario rows of the removed mode are gone).
+
+| matrix | rows | failed | checksums not ok | frames missed outside hog (rows) | fallbacks | unjustified | young on the main thread | host's nursery | longest stop |
+|---|--:|--:|--:|---|--:|--:|--:|--:|---|
+| Mac before | 156 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 13.74 ms (`stw` scavenge) |
+| Mac after | 147 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 17.96 ms (`stw` scavenge) |
+| iPad before | 156 | 0 | 0 | 1 (1 row, `stw` ring) | 0 | 0 | 0 | 0 | 13.70 ms (`stw` scavenge) |
+| iPad after | 147 | 0 | 0 | 5 (2 rows, `stw` ring) | 0 | 0 | 0 | 0 | 14.87 ms (`stw` scavenge) |
+| iPhone before | 156 | 0 | 0 | 11 (4 rows, `stw`) | 0 | 0 | 0 | 0 | 16.56 ms (`stw` scavenge) |
+| iPhone after | 147 | 0 | 0 | 12 (4 rows, `stw`) | 0 | 0 | 0 | 0 | 15.78 ms (`stw` scavenge) |
+
+- **The new counter reads 0 in every row but the `stw` rows** (which read
+  "-") in all six matrices; the host's nursery was collected 0 times in
+  every row; the main worker waited for its collector 0 times.
+- **`offload` rows: 0 frames missed** in the 12 scenario rows (and the
+  events rows) of every matrix before and after, 0 fallbacks, 0 failed
+  launches; the weekly of 2026-11-16 had 0 as well. Every missed frame
+  outside the hog rows is a `stw` row behind its scavenge (the oracle, not
+  this module's, open question 3). Thermal state at the scenario rows'
+  starts: before, iPad nominal to serious and iPhone fair to serious;
+  after, iPad fair to serious and iPhone serious throughout. The blocks
+  ran one after the other on each device, before at 19:54 to 20:26 and
+  after at 21:35 to 22:03, not interleaved; the `offload` rows read 0
+  at every state, so the order does not decide the reading.
+- The hog rows miss frames by design (1785, 3576, 3576 after).
+
+The aligned A/B against 3c4ef9f (`scripts/ab.sh`, five interleaved runs,
+`part5/ab.txt`, raw lines in `part5/ab/bench.txt`), checksums the same in
+every row: at 1 worker every kernel within 0.993 to 1.011 of the base;
+at 8 workers 0.907 to 1.090, every head range overlapping the base's
+(st-closures 8: 451 to 568 against 487 to 582 ms). Instructions per run
+within 0.998 to 1.002. `interpret` disassembled from both builds
+(`part5/interpret-{base,head}.s`, 1816 lines each) differs only in four
+`adrp` page offsets (`part5/interpret.diff`): data moved, code identical.
+`just arc-check`: OK.
+
+The refusal of each option that takes a mode name
+(`part5/refusal/refusals.txt`):
+
+    $ kajo run fib.kasm --young local
+    kajo: --young: stw or offload, not local          (exit 1)
+    $ kajo test --young local
+    kajo test: --young: stw or offload, not local     (exit 2)
+    $ scripts/mac-shell.sh run ... mode=scenario young=local
+    ... scenario=storm FAILED=1 error=options:_--young:_stw_or_offload,_not_local
+
+A generated app names no mode.
