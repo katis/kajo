@@ -66,7 +66,7 @@ private func ringRuntime(young: YoungMode, marking: Bool) throws -> Runtime {
 }
 
 @Test func theYoungCollectionAndRoundLogsKeepTheirCapacityAndTotalEveryRecord() throws {
-    let rt = try ringRuntime(young: .local, marking: false)
+    let rt = try ringRuntime(young: .offload, marking: false)
     #expect(rt.runInt("churnLists:", 40) > 0)
     let yc = rt.vm.youngCounters, yt = rt.vm.youngTotals
     let log = rt.vm.youngLog, rounds = rt.vm.roundLog

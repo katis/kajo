@@ -140,7 +140,7 @@ private let immN: Int64 = 2000
 /// compaction, a concurrent marking cycle with relocation of every live
 /// block, and the young collections without stopping the world. Every
 /// verifier is on; nothing may be lost or misread.
-@Test(arguments: [YoungMode.stw, .local, .offload])
+@Test(arguments: [YoungMode.stw, .offload])
 func immediatesAreNotReferencesInAnyCollector(_ mode: YoungMode) throws {
     let rt = try Runtime(immediatesSrc, background: 1, heapBlocks: 2048, start: false, configure: { c in
         c.nursery.bytes = 1 << 20
@@ -372,7 +372,7 @@ end
 
 /// Read-only is set with an atomic or on the header while the young
 /// collector may compare-and-swap the same word: neither loses its bits.
-@Test(arguments: [YoungMode.local, .offload])
+@Test(arguments: [YoungMode.offload])
 func readOnlyFlipsRaceNoYoungCollection(_ mode: YoungMode) throws {
     // A small nursery collects often; under ThreadSanitizer a tenth of the
     // work (and a long wait).

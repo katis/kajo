@@ -301,7 +301,7 @@ per run with `thermal`, `footprint_mb`, `footprint_peak_mb`, `avail_mb`):
   line each with checksum, expected (at one worker), time and the workers'
   QoS.
 - `mode=scenario scenario=storm|ring|share|idle [gc=cm|stw]
-  [young=stw|local|offload] [workers=N] [seconds=10] [warmup=1]
+  [young=stw|offload] [workers=N] [seconds=10] [warmup=1]
   [events=1000] [hog=1] [budget=off] [mainalloc=20] [mainwork=60000]`:
   below.
 - `mode=demo`: below.

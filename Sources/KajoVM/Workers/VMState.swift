@@ -394,6 +394,10 @@ enum Counter: Int, CaseIterable {
     /// Part 2: intern-lock acquisitions that found it held and their
     /// wait, and the symbol-table verifier's failures.
     case internContended, internWaitNs, symbolVerifierFailures
+    /// The main worker always offloads (docs/modules/main-offload.md): young
+    /// collections the main worker ran itself while the collector thread
+    /// runs (the main-thread verifier; 0 but in the broken variant).
+    case youngOnMainFailures
 }
 
 /// A snapshot of the counters.

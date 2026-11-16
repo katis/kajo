@@ -2,7 +2,9 @@
 
 ## Status
 
-Briefed 2026-11-16, not built. The final mark's third open question asked
+Built 2026-11-16 (see As built); the owner answered the three open
+questions the same evening while the module ran (question 1 further than
+recommended). Briefed 2026-11-16. The final mark's third open question asked
 whether `young=local` should still let the main worker collect its own
 nursery. The owner, 2026-11-15: "Always offload." Recorded in
 `docs/decisions/13-final-mark.md`: local collection is for background
@@ -204,3 +206,82 @@ same commit.
    is the oracle the other modes are compared with, and a stopped main
    thread that does not copy only makes the stop longer), or the main
    worker waits out the scavenge without copying.
+
+## As built
+
+Toolchain: swift.org 6.4.2 (swiftly, first on PATH), Apple Swift version
+6.4.2 (swift-6.4.2-RELEASE). Work files under
+`~/kajo-scratch/main-offload/`.
+
+### The owner's answers (2026-11-16, given while the module ran)
+
+"no alias, no need to keep any references to a non existent modes, we
+don't have any users yet. agreed on others"
+(`~/kajo-scratch/main-offload/owner-answers-2026-11-16.md`).
+
+1. Further than the recommendation: `local` is simply a name that is no
+   mode. It gets the generic refusal that lists the modes that exist
+   (`--young: stw or offload, not local`); no special case and no
+   reference to the removed mode in code, comments, usage lines, tests,
+   scripts or reports. The reports need not read old raw files with
+   `local` rows (the brief's rule item on that is dropped); a value a
+   reader does not know is still counted as unknown, never as a pass or a
+   failure. This section and the dated sections name `local` only to say
+   what was removed.
+2. The single-thread test configuration is kept, tests only.
+3. The oracle `stw` is unchanged.
+
+### Part 1: the counter and the before matrices (576eff0)
+
+The run line (and the shells' rows, as `gc_` keys) gained:
+
+| key | what |
+|---|---|
+| `ycOnMain`, `ycOnMainMaxMs` | young collections of a nursery that ran on the main thread: collected by the main worker (worker 0: the shells' main thread, `kajo run --main-ms`'s calling thread) or on the process's main thread (`pthread_main_np`, where the shells' host calls run); the longest `totalNs` |
+| `ycOnMainW0`, `ycOnMainHost`, `ycOnMainOther` (with `MaxMs`) | the same by whose nursery: worker 0's, the host's, any other |
+| `ycHost`, `ycHostMs`, `ycHostMaxMs` | every collection of the host's nursery, on any thread |
+| `ycMainCollectorWaits`, `ycMainCollectorWaitMs`, `ycMainCollectorWaitMaxMs` | the main worker's waits for its collector before a flip (counted since module 7 as `collectorWaits`; the run line had them only with `--main-ms`, the shells' rows without the longest: the shells now print `main_collector_wait_max_ms`, `--main-ms` `mainCollectorWaitMaxMs`) |
+
+Under `young=stw` (no module 7) every one reads "-": the main worker copies
+in the stop-the-world scavenge, which `collectorNs` counts. The test
+`theMainThreadCounterSeesTheMainWorkersCollectionsUnderLocal` (part 1's
+commit, replaced in part 3) showed it counting worker 0's collections in the
+removed mode, and 0 under `offload`.
+
+Before matrices, `RUNS=3`, Mac (7 workers), iPad and iPhone (5 workers),
+156 rows each, raw rows in `part1/matrix-{mac,ipad,iphone}/`, bars in
+`part1/matrix-*/bar.md` (re-read with part 4's `shell-report.py --bar`):
+
+| matrix | rows | failed | frames missed outside hog (rows) | fallbacks | young on the main thread | host's nursery | main worker's collector waits | main flips |
+|---|--:|--:|---|--:|--:|--:|--:|--:|
+| Mac | 156 | 0 | 0 | 0 | 0 | 0 | 0 | 9 |
+| iPad | 156 | 0 | 1 (ring, `stw`) | 0 | 0 | 0 | 0 | 18 |
+| iPhone | 156 | 0 | 11 in 4 rows (storm 1 and ring 3, all `stw`) | 0 | 0 | 0 | 0 | 18 |
+
+The weekly of 2026-11-16 (30e14bd) had Mac 0, iPad 2, iPhone 10 outside the
+hog rows, all `stw`. The hog rows miss frames by design (1786, 3576,
+3576 here).
+
+What the before matrices say:
+- **Under `offload` the main thread collects nowhere**: 0 in every row of
+  all three.
+- **What the removed mode cost beside `offload` is not visible in the
+  matrix**: its rows never fill the main worker's 4 MiB nursery (the main
+  worker flipped 9 times on the Mac and 18 on each device, all in the
+  `events` rows, which run `offload` only; `main_own_collections` 0 in
+  every row). So part 1 added one interleaved block, storm with
+  `events=1000`, both modes in both orders, 3 runs a mode
+  (`part1/events-block/`): the Mac never filled the nursery in 10 s under
+  the removed mode and flipped once under `offload`; on both devices the
+  removed mode made one main-thread collection a launch, 0.64 to 0.69 ms
+  (iPad, nominal) and 0.72 to 0.95 ms (iPhone, fair to serious), and
+  `offload` 0 with two flips; no frame missed in either mode. At 5 workers
+  and this load the cost is under a millisecond a launch; the final
+  mark's 6 to 21 ms were at 7 workers on the iPhone behind background
+  acknowledgements.
+- **Starting position 4 holds**: the host's nursery was collected 0 times
+  in every row of the three matrices and the block, on any thread.
+- **The main worker's wait for its collector** was 0 in every row
+  (starting position 6: it was counted already; only its longest was
+  missing from the rows).
+

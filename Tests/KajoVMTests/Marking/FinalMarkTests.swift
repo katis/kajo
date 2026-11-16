@@ -16,7 +16,7 @@ import Testing
 /// work), and the work and its parts after the verifier.
 @Test func theFinalMarksRecordSplitsItsTimeToSafepoint() throws {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local, src: markingSrc, marking: true) { c in
+    let rt = try youngRuntime(.offload, src: markingSrc, marking: true) { c in
         hooks.install(&c.young.testSwitches)
         c.young.verify = false
     }
@@ -128,7 +128,7 @@ end
 /// The initial mark records the nurseries and leaves their scans owed; the
 /// marker's step does them (the stop scanned none).
 @Test func theInitialMarkLeavesTheYoungRootsOwed() throws {
-    let rt = try youngRuntime(.local, src: markingSrc, marking: true)
+    let rt = try youngRuntime(.offload, src: markingSrc, marking: true)
     rt.run("mkEmptyH")
     rt.run("mkO")
     rt.vm.collect()
@@ -153,7 +153,7 @@ end
 /// store records O; without it (`noOwedScanBarrier`) the scan, done in the
 /// final mark's stop, finds Y empty and the verifier reports O.
 private func storeIntoAnOwedNursery(barrier: Bool) throws -> UInt64 {
-    let rt = try youngRuntime(.local, src: moveSrc, marking: true) { c in
+    let rt = try youngRuntime(.offload, src: moveSrc, marking: true) { c in
         c.marking.testSwitches.markerSkipsRootScans = true
         c.marking.testSwitches.unboundedFinalMark = true
         c.marking.testSwitches.noOwedScanBarrier = !barrier
@@ -191,7 +191,7 @@ private func storeIntoAnOwedNursery(barrier: Bool) throws -> UInt64 {
 /// O); with `collectBeforeRootScan` Y is freed unscanned and the verifier
 /// reports O.
 private func collectionOfAnOwedNursery(scanFirst: Bool) throws -> UInt64 {
-    let rt = try youngRuntime(.local, src: markingSrc, marking: true) { c in
+    let rt = try youngRuntime(.offload, src: markingSrc, marking: true) { c in
         c.marking.testSwitches.markerSkipsRootScans = true
         c.marking.testSwitches.unboundedFinalMark = true
         c.marking.testSwitches.collectBeforeRootScan = !scanFirst
@@ -230,7 +230,7 @@ private func collectionOfAnOwedNursery(scanFirst: Bool) throws -> UInt64 {
 /// finds a scan owed and gives up, until the cycle's give-ups run out and
 /// one does the scans in its stop (an overrun, counted).
 private func finalMarksWithOwedScans(skip: Bool) throws -> (giveUps: UInt64, overruns: UInt64, inStop: UInt64) {
-    let rt = try youngRuntime(.local, src: markingSrc, marking: true) { c in
+    let rt = try youngRuntime(.offload, src: markingSrc, marking: true) { c in
         c.marking.testSwitches.markerSkipsRootScans = skip
     }
     rt.run("mkEmptyH")
@@ -267,15 +267,16 @@ private func finalMarksWithOwedScans(skip: Bool) throws -> (giveUps: UInt64, ove
 
 /// Worker 1 (the test thread) collects; during it (hook point 1) a host
 /// thread asks for a stop, which waits for the collection (`stwWanted`).
-/// The main worker then needs a collection of its own: it opens it while
-/// the stop is wanted (once), before worker 1's collection ends (it cannot
+/// The main worker then needs a collection of its own: it opens it (a
+/// flip: the young collector thread collects it) while the stop is wanted
+/// (once), before worker 1's collection ends (the collector thread cannot
 /// finish it then: its rounds wait for worker 1, held in the hook). As
 /// module 7 built it the main worker waited with the stop (the broken
 /// variant, `mainWaitsForWantedStops`, run by hand: the second collection
 /// never opens inside the hook; docs/modules/final-mark.md).
 @Test func theMainWorkerOpensOneCollectionWhileAStopIsWanted() throws {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local, src: youngSrc + """
+    let rt = try youngRuntime(.offload, src: youngSrc + """
     method UndefinedObject scavengeNow temps=0
       push_nil
       send scavenge 0
@@ -289,6 +290,7 @@ private func finalMarksWithOwedScans(skip: Bool) throws -> (giveUps: UInt64, ove
         c.young.verify = false
     }
     let vm = rt.vm
+    vm.startYoungCollectorOnly()
     let p = rt.spawn("scavengeNow", main: true)
     let stopped = Flag(), ran = Flag()
     var r: TestThread? = nil, b: TestThread? = nil
@@ -312,6 +314,8 @@ private func finalMarksWithOwedScans(skip: Bool) throws -> (giveUps: UInt64, ove
     b?.join()
     #expect(rt.result(p) == 7)
     #expect(vm.youngWorkerCounters(0).opensWhileWanted == 1)
+    #expect(vm.youngWorkerCounters(0).flips == 1 && vm.youngWorkerCounters(0).ownCollections == 0)
+    #expect(vm.youngCounters.onMain.main == 0 && vm.youngCounters.offloadedInline == 0)
     #expect(rt.verifierFailures == 0)
     rt.stop()
 }

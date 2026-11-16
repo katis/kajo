@@ -81,19 +81,37 @@ func holds(_ r: Report) {
         #expect(r.witnesses > 0)
     }
 
-    /// The final mark on the devices: the configurations above run with
-    /// worker 0 as the main worker that may open one collection while O
-    /// wants its stop (the default); with module 7's rule, every opener
-    /// waiting while a stop is wanted, they hold as well, in fewer states.
+    /// Claim 5 with nursery 0 the main worker's, offloaded to C (the main
+    /// worker always offloads, docs/modules/main-offload.md), against a
+    /// snapshot and a lazy sweep, and against a full collection.
+    @Test func forDeferredEntriesWithTheMainWorkersNurseryOffloaded() {
+        for steps in [[OldSpaceStep.snapshot, .sweep], [.fullCollection]] {
+            let r = check(Configuration.ownershipOffloaded(steps).name, .ownershipOffloaded(steps))
+            holds(r)
+            if steps == [.snapshot, .sweep] { #expect(r.witnesses > 0) }
+        }
+    }
+
+    /// The final mark on the devices: worker 0, the main worker, may open
+    /// one collection (a flip, since the main worker always offloads) while
+    /// O wants its stop (the default); with module 7's rule, every opener
+    /// waiting while a stop is wanted, the configurations hold as well, in
+    /// fewer states. Until the main worker always offloaded this ran on the
+    /// local `ownership` pair, whose worker 0 collected its own nursery; in
+    /// the local form no worker is the main worker now, and the switch
+    /// changes nothing there.
     @Test func withTheMainWorkersOpenWhileAStopIsWanted() {
         for steps in [[OldSpaceStep.snapshot, .sweep], [.fullCollection]] {
-            var off = Configuration.ownership(steps)
+            var off = Configuration.ownershipOffloaded(steps)
             off.mainOpensWhileWanted = false
-            let on = check("ownership, main opens while wanted", .ownership(steps))
-            let without = check("ownership, every opener waits", off)
+            let on = check("ownership offloaded, main opens while wanted", .ownershipOffloaded(steps))
+            let without = check("ownership offloaded, every opener waits", off)
             holds(on)
             holds(without)
             #expect(on.states > without.states, "\(on.states) against \(without.states)")
+            var local = Configuration.ownership(steps)
+            local.mainOpensWhileWanted = false
+            #expect(check("ownership, switch off", local).states == check("ownership", .ownership(steps)).states)
         }
     }
 }
@@ -909,6 +927,16 @@ func holds(_ r: Report) {
         var c = Configuration.ownership([.fullCollection])
         c.deferredEntriesBelongToTheirNursery = false
         expectViolation("deferred entry freed by a full collection", c, .oneOwnerPerEntry)
+    }
+
+    /// The same rule with the main worker's nursery offloaded: each old-space
+    /// step finds its violation there too.
+    @Test func claim5WithTheMainWorkersNurseryOffloadedTheRuleIsStillNeeded() {
+        for steps in [[OldSpaceStep.snapshot, .sweep], [.fullCollection]] {
+            var c = Configuration.ownershipOffloaded(steps)
+            c.deferredEntriesBelongToTheirNursery = false
+            expectViolation(c.name + ", rule off", c, .oneOwnerPerEntry)
+        }
     }
 
     // Found by the explorer (shortest interleaving, breadth-first), "relaxed remembered-word load, no post-store reload":

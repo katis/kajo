@@ -23,8 +23,11 @@ amendments, RESULTS, DIAGNOSIS-parallel-scavenge), ported by its tests.
 | mode | nursery 0 (main) | background and host nurseries |
 |---|---|---|
 | `stw` | module 4's stop-the-world scavenge of every nursery (the oracle) | the same |
-| `local` | collected by the main worker itself | each by its owner |
 | `offload` (the default, the policy) | two eden halves; a full half is flipped to the young collector thread | each by its owner |
+
+The main worker always offloads (dated section at the end,
+docs/modules/main-offload.md): no mode lets the main thread collect a
+nursery.
 
 Without a nursery, or when the object memory was made without
 `nurseryRegionBytes` (the nursery region mapped twice), the mode is `stw`.
@@ -928,3 +931,48 @@ The scripts (one line per run with `key=value` pairs from `kajo run`):
 ```
 
 - Allocation stalls (allocation stalls, 2026-11-12: docs/modules/allocation-stalls.md): `openYoungCollection(belowSoftLimit:)` promises a background owner room below the soft limit only and the owner stalls when refused; `afterYoungCollection` requests no full collection past the soft limit where a marker thread runs.
+
+## 2026-11-16: the main worker always offloads
+
+The owner's answer to the final mark's third question, "Always offload."
+(docs/decisions/13-final-mark.md), built in docs/modules/main-offload.md.
+
+- `YoungMode` has two cases, `stw` (the oracle) and `offload` (the
+  policy); the third, `local` (every nursery, the main worker's included,
+  collected by its owner), was removed. Any other name given to `kajo run
+  --young`, `kajo test --young` or the shells' `young=` is refused with the
+  one generic line `YoungMode.refusal` makes ("--young: stw or offload, not
+  local"); by the owner's answer of 2026-11-16 nothing aliases or names the
+  removed mode.
+- Background workers and the host still collect their own nurseries
+  locally; worker 0's nursery is still the two-half one the collector
+  thread collects. The protocol is unchanged; the model lost the
+  configuration in which the main worker collects its own nursery and
+  gained the ownership pair with nursery 0 offloaded
+  (docs/models/young-collection.md, dated section).
+- The single-thread test configuration (`collectorThread = false`, or a VM
+  before `VM.start`) stays: there the owner collects its offloaded nursery
+  right after its flip (`offloadedInline`). It is the one place worker 0
+  collects, and tests only reach it.
+- The main-thread verifier: a young collection whose collector is worker 0
+  while the collector thread runs counts `youngOnMainFailures` (and traps
+  in a build that traps). Its broken variant is the test switch
+  `mainCollectsItsOwnNursery` (worker 0 takes the owner's local path).
+- The run line and the shells' rows (as `gc_` keys) carry `ycOnMain*`
+  (collections on the main thread: by the main worker or on the process's
+  main thread, by nursery: worker 0's, the host's, other; with the
+  longest), `ycHost*` (every collection of the host's nursery) and
+  `ycMainCollectorWait*` (the main worker's waits for its collector); all
+  "-" under `stw`. In the before and after matrices on the Mac, the iPad
+  and the iPhone every `offload` row reads 0 collections on the main
+  thread, 0 of the host's nursery, and 0 waits for the collector.
+- Tests that ran under `local` now run under `offload`: those that
+  collect a background worker's nursery (workers 1 and 2) keep their
+  coverage unchanged; the one that named worker 0 under `local`
+  (`theMainWorkerOpensOneCollectionWhileAStopIsWanted`) now has the main
+  worker flip with the collector thread started. The random programs'
+  `localCollection` and `exhaustedReserveLocal` became
+  `backgroundCollection` and `exhaustedReserveOffload` (offload, the
+  background workers collecting locally), and `youngBarrierAlwaysOn` runs
+  under offload.
+

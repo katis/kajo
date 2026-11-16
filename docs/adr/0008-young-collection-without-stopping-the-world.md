@@ -444,3 +444,20 @@ world for module 4's scavenge, and `afterYoungCollection` no longer
 requests a full collection past the soft limit where a marker thread runs.
 The main worker's collections keep the reserve. With the marker stalling
 nobody, the shipping modes' rows are unchanged (docs/modules/allocation-stalls.md).
+
+## Built (the main worker always offloads) (2026-11-16)
+
+The owner answered the final mark's third question "Always offload.": the
+mode `local`, in which the main worker collected its own nursery between
+two frames (6 to 21 ms on the iPhone at 7 workers, docs/modules/
+final-mark.md), is removed (its name is refused like any name that is no
+mode); no mode lets the main thread collect a nursery. Local collection stays for background workers
+and the host, the oracle `stw` stays as it is, and the single-thread test
+configuration (no collector thread) is the one place worker 0 still
+collects. A verifier counts any collection the main worker runs while the
+collector thread runs, and a counter on the run line and in the shells'
+rows counts young collections on the main thread by whose nursery: it read
+0 in every `offload` row of the Mac, iPad and iPhone matrices before and
+after, as did the host's nursery and the main worker's waits for its
+collector (docs/modules/main-offload.md).
+

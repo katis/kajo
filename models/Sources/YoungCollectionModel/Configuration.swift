@@ -84,9 +84,13 @@ public struct ObjectSpec: Sendable {
 
 public enum Mode: Sendable {
     /// Every worker collects its own nursery (SPEC Part 1); worker n owns
-    /// nursery n.
+    /// nursery n. Since the main worker always offloads (docs/modules/
+    /// main-offload.md) these are background workers: no worker is the main
+    /// worker, and none may open a collection while a stop is wanted.
     case local
-    /// Worker 0 flips and a collector thread C collects (SPEC Part 2).
+    /// Worker 0 is the main worker: it flips and a collector thread C
+    /// collects its nursery 0 (SPEC Part 2); any other worker collects its
+    /// own nursery, as a background worker does.
     case offload
 }
 
@@ -178,6 +182,14 @@ public struct Configuration: Sendable {
             return inside ? program + [.leave] : program
         }
         self.oldSpace = oldSpace
+        // The main worker always offloads: only worker 0 flips, and only in
+        // `offload`; there it never collects its own nursery.
+        for (w, program) in programs.enumerated() {
+            for i in program {
+                precondition(i != .flip && i != .waitDone || (mode == .offload && w == 0), "\(name): worker \(w) flips in \(mode)")
+                precondition(i != .collect || !(mode == .offload && w == 0), "\(name): the main worker collects its own nursery")
+            }
+        }
     }
 
     var workers: Int { programs.count }
@@ -333,6 +345,32 @@ extension Configuration {
             registers: [[nil], [1]],
             programs: [
                 [.collect, .collect, .alloc(reg: 0, object: 0, slotFrom: nil)],
+                [.collect],
+            ],
+            oldSpace: oldSpace)
+    }
+
+    /// `ownership` with nursery 0 the main worker's, offloaded: W0 flips
+    /// (C collects nursery 0) where the local form collects, waits for each
+    /// collection to be done as the next flip does, and then allocates into
+    /// H's entry in its new half; W1 collects nursery 1 as a background
+    /// worker. The main worker always offloads (docs/modules/
+    /// main-offload.md): this is the configuration in which worker 0 is the
+    /// main worker and may open one collection while O wants its stop
+    /// (`mainOpensWhileWanted`); in the local form no worker is main. Claim
+    /// 5.
+    public static func ownershipOffloaded(_ oldSpace: [OldSpaceStep]) -> Configuration {
+        Configuration(
+            name: oldSpace == [.fullCollection] ? "ownership offloaded, full collection" : "ownership offloaded, snapshot and sweep",
+            mode: .offload, nurseries: 2,
+            objects: [
+                ObjectSpec("H", .young(0), slots: [1], rememberedFor: [1]),
+                ObjectSpec("Y", .young(1)),
+            ],
+            workerNames: ["W0", "W1"],
+            registers: [[nil], [1]],
+            programs: [
+                [.flip, .waitDone, .flip, .waitDone, .alloc(reg: 0, object: 0, slotFrom: nil)],
                 [.collect],
             ],
             oldSpace: oldSpace)

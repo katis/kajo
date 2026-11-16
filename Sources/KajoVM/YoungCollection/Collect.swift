@@ -254,6 +254,12 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
     unsafe y.pointee.log.pointee.onMain.note(nursery: k, collector: c.pointee.index, hostIndex: vm.pointee.workerCount &- 1,
                                              onMainThread: onMainThread, ns: st.totalNs)
+    // The main worker always offloads (docs/modules/main-offload.md): a
+    // collection the main worker ran while the collector thread runs is the
+    // main-thread verifier's failure (counted; a trap in a build that
+    // traps). Without a collector thread (the single-thread test
+    // configuration) the owner collects its offloaded nursery after its flip.
+    let mainCollected = unsafe c.pointee.index == 0 && y.pointee.thread.pointee.started
     if k == 0 { unsafe y.pointee.log.pointee.promotedMainBytes &+= st.promotedBytes }
     unsafe vm.pointee.safepoint.pointee.ycActive -= 1
     unsafe y.pointee.done[k].store(true, ordering: .releasing)
@@ -262,6 +268,10 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe logCollection(y, st)
     unsafe pthread_cond_broadcast(vm.pointee.safepointCond)
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
+    if mainCollected {
+        unsafe verifierFailed(vm, .youngOnMainFailures,
+                              "young: the main worker collected nursery \(k) on its own thread while the collector thread runs")
+    }
     return st
 }
 

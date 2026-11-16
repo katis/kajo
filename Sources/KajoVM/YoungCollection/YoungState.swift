@@ -413,9 +413,14 @@ extension UnsafeMutablePointer where Pointee == YoungShared {
     func work(_ i: Int) -> UnsafeMutablePointer<CollectorWork> { unsafe pointee.work[i] }
     @inline(__always)
     func counters(_ i: Int) -> UnsafeMutablePointer<YoungWorkerCounters> { unsafe pointee.counters[i] }
-    /// The nursery `k` collection is offloaded to the collector thread.
+    /// The nursery `k` collection is offloaded to the collector thread: the
+    /// main worker's, always (docs/modules/main-offload.md; installed only
+    /// under `offload`). The test switch `mainCollectsItsOwnNursery` is the
+    /// broken variant.
     @inline(__always)
-    func isOffloaded(_ k: Int) -> Bool { unsafe pointee.mode == .offload && k == 0 }
+    func isOffloaded(_ k: Int) -> Bool {
+        unsafe pointee.mode == .offload && k == 0 && !pointee.config.testSwitches.mainCollectsItsOwnNursery
+    }
 }
 
 /// Is `w` a round participant: a worker of the table, or the young

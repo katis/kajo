@@ -264,6 +264,11 @@ struct Model {
 
     func owner(_ n: Int) -> Int { n } // worker n owns nursery n (offload: worker 0, nursery 0)
 
+    /// Nursery `k` is collected by C (`isOffloaded` in the VM): in
+    /// `offload`, worker 0's, the main worker's; every other nursery is
+    /// collected by its owner (docs/modules/main-offload.md).
+    func offloaded(_ k: Int) -> Bool { config.mode == .offload && k == 0 }
+
     func isFinished(_ s: State) -> Bool {
         s.workers.indices.allSatisfy { s.workers[$0].pc == config.programs[$0].count }
             && s.collector == nil && s.queue.isEmpty
@@ -410,7 +415,7 @@ struct Model {
                 did.append("publishes del \(names(n.workers[w].del[k]))")
                 n.workers[w].del[k] = []
             }
-            if kind == .h1 && config.mode == .offload && w == owner(k) {
+            if kind == .h1 && offloaded(k) && w == owner(k) {
                 let range = n.objects.indices.filter { youngIn(n, $0) == k && !n.objects[$0].inY }
                 n.nurseries[k].newHalf = range
                 did.append("records new half \(names(range))")
@@ -546,7 +551,7 @@ struct Model {
             }
 
         case let .alloc(r, o, from):
-            let k = config.mode == .offload ? 0 : w
+            let k = owner(w)
             if s.objects[o].entry != .free {
                 n.workers[w].regs[r] = -1
                 complete(&n, w)
@@ -568,7 +573,7 @@ struct Model {
             if v >= 0 { n.memory.store(w, L.slot(o, 0), v, .relaxed) }
             n.workers[w].regs[r] = o
             complete(&n, w)
-            emit("\(tag) \(name(o)) young in nursery \(k)\(config.mode == .offload ? ", new half" : "")\(v >= 0 ? ", s0 := \(name(v)) (relaxed, no barrier)" : "")",
+            emit("\(tag) \(name(o)) young in nursery \(k)\(offloaded(k) ? ", new half" : "")\(v >= 0 ? ", s0 := \(name(v)) (relaxed, no barrier)" : "")",
                  n, useAfterFree(s, who, v))
 
         case .flip, .collect:
@@ -577,7 +582,10 @@ struct Model {
                 collectorSteps(s, c, participant: w, emit)
                 return
             }
-            let mainPasses = config.mainOpensWhileWanted && w == 0 && !s.mainOpenedWhileWanted
+            // The main worker always offloads (docs/modules/main-offload.md):
+            // worker 0 is the main worker only where it flips; in `local`
+            // every worker is a background worker.
+            let mainPasses = config.mainOpensWhileWanted && w == 0 && offloaded(0) && !s.mainOpenedWhileWanted
             let ready = (!s.stwWanted || mainPasses) && !s.nurseries[k].active
             guard waitSteps(s, w, ready: ready, tag, emit), s.memory.isDrained(w) else { return }
             if s.stwWanted { n.mainOpenedWhileWanted = true }
@@ -724,7 +732,7 @@ struct Model {
                 did += ", collecting[\(k)] (acquire) -> 1: del[\(k)] += \(name(old))"
             }
             n.workers[w].step = 3
-            if config.mode == .offload && config.snoop, let k = youngIn(s, v), youngIn(s, h) == k,
+            if config.snoop, let k = youngIn(s, v), offloaded(k), youngIn(s, h) == k,
                s.objects[v].inY, !s.objects[h].inY, s.memory.load(w, L.collecting(k), .acquire)! != 0 {
                 n.workers[w].step = 2
                 did += "; snoop: \(name(v)) in Y_\(k) into new-half \(name(h)): remember \(name(h))"
@@ -883,7 +891,7 @@ struct Model {
                     emit("\(tag) H0 complete", n, nil)
                 case .h1:
                     // T1: the new-half range, the carried list (SPEC step 3).
-                    c2.newHalf = config.mode == .offload && config.newHalfScan ? s.nurseries[k].newHalf : []
+                    c2.newHalf = offloaded(k) && config.newHalfScan ? s.nurseries[k].newHalf : []
                     c2.carried = s.nurseries[k].carried
                     n.nurseries[k].carried = []
                     advanceTo(&c2, .newHalf)

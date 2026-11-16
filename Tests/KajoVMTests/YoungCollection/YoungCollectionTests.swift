@@ -21,7 +21,7 @@ import Testing
 /// published in the drain round, keeps Y. Answers (verifier failures, Y x).
 private func stealDuringCollection(_ change: (inout YoungTestSwitches) -> Void) throws -> (UInt64, Int64?) {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local) { c in
+    let rt = try youngRuntime(.offload) { c in
         hooks.install(&c.young.testSwitches)
         change(&c.young.testSwitches)
     }
@@ -65,7 +65,7 @@ private func stealDuringCollection(_ change: (inout YoungTestSwitches) -> Void) 
 /// from global 9. Collecting nursery 1 must find Y through H's remembered
 /// bit for nursery 1.
 private func crossNursery(_ on: Bool) throws -> (UInt64, Int64?) {
-    let rt = try youngRuntime(.local) { $0.young.testSwitches.crossNurseryBarrier = on }
+    let rt = try youngRuntime(.offload) { $0.young.testSwitches.crossNurseryBarrier = on }
     rt.spawn("mkY")
     rt.runOn(1)
     rt.spawn("hold")
@@ -101,7 +101,7 @@ private func crossNursery(_ on: Bool) throws -> (UInt64, Int64?) {
 /// A thread acting as worker 2 runs a Process that takes Y off global 8 and
 /// spins (polling) with Y only on its stack while worker 1 collects.
 private func stackOnly(_ scan: Bool) throws -> (UInt64, Int64?) {
-    let rt = try youngRuntime(.local) { $0.young.testSwitches.handshakeStackScan = scan }
+    let rt = try youngRuntime(.offload) { $0.young.testSwitches.handshakeStackScan = scan }
     rt.spawn("mkY")
     rt.runOn(1)
     let p = rt.spawn("spinHolding")
@@ -144,7 +144,7 @@ private func stackOnly(_ scan: Bool) throws -> (UInt64, Int64?) {
 /// read, whether the collection finished while the address was held).
 private func peekAcross(_ epoch: Bool) throws -> (Int64, Bool) {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local) { c in
+    let rt = try youngRuntime(.offload) { c in
         c.young.testSwitches.epochRule = epoch
         // A stop after the collection would wait for the blocking worker.
         c.young.verify = false
@@ -203,7 +203,7 @@ private func peekAcross(_ epoch: Bool) throws -> (Int64, Bool) {
 /// Collection 1 scans O, Y survives (age 1) and O must stay remembered:
 /// collection 2 finds Y only through O.
 private func carried(_ carry: Bool) throws -> (UInt64, Int64?) {
-    let rt = try youngRuntime(.local, age: 3) { $0.young.testSwitches.carryHolders = carry }
+    let rt = try youngRuntime(.offload, age: 3) { $0.young.testSwitches.carryHolders = carry }
     rt.spawn("mkO")
     rt.runOn(1)
     rt.vm.collect()                           // O old
@@ -323,7 +323,7 @@ private func newHalf(scan: Bool) throws -> UInt64 {
 /// collection: H's entry is used, dead, and in no young log.
 private func keptDeferredHolder(_ change: (inout VMConfig) -> Void = { _ in }) throws -> (Runtime, Oop, YoungHooks) {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local, marking: true) { c in
+    let rt = try youngRuntime(.offload, marking: true) { c in
         hooks.install(&c.young.testSwitches)
         change(&c)
     }
@@ -466,7 +466,7 @@ private func deferredAcrossAFullCollection(own: Bool) throws -> (failures: UInt6
 /// next collection frees X under G. Answers (failures, G at: 2's x).
 private func copyAcrossTheScan(ordered: Bool) throws -> (UInt64, Int64?) {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local) { c in
+    let rt = try youngRuntime(.offload) { c in
         c.young.testSwitches.arrayCopyOrdering = ordered
         hooks.install(&c.young.testSwitches)
     }
@@ -549,7 +549,7 @@ let copyWindowThunk: @convention(c) (UnsafeMutableRawPointer?, Int) -> Void = { 
 /// epoch would reuse an eden under the offset. Answers the smallest
 /// participant word the hook saw and the epoch before.
 private func wakeWindow(zero: Bool) throws -> (seen: UInt64, epoch: UInt64) {
-    let rt = try youngRuntime(.local) { $0.young.testSwitches.quiescentWakeZero = zero }
+    let rt = try youngRuntime(.offload) { $0.young.testSwitches.quiescentWakeZero = zero }
     let vm = rt.vm
     let seen = Atomic<UInt64>(0)
     let probe = EpochProbe { seen.store(vm.minimumEpoch, ordering: .relaxed) }
@@ -594,7 +594,7 @@ let epochProbeThunk: @convention(c) (UnsafeMutableRawPointer?, Int) -> Void = { 
 /// marked; without it the final mark's verifier reports O reachable and
 /// unmarked.
 private func youngRootAtSnapshot(scan: Bool) throws -> UInt64 {
-    let rt = try youngRuntime(.local, src: markingSrc, marking: true) { $0.young.testSwitches.youngRoots = scan }
+    let rt = try youngRuntime(.offload, src: markingSrc, marking: true) { $0.young.testSwitches.youngRoots = scan }
     rt.run("mkEmptyH")
     rt.run("mkO")
     rt.vm.collect()                           // H, O old
@@ -681,7 +681,7 @@ private func youngRootAtSnapshot(scan: Bool) throws -> UInt64 {
 /// the interleaving likely; the assertions do not depend on it.
 @Test func aStopWakesAnOpenerThatWaitsForIt() throws {
     let hooks = YoungHooks()
-    let rt = try youngRuntime(.local, src: youngSrc + """
+    let rt = try youngRuntime(.offload, src: youngSrc + """
     method UndefinedObject scavengeNow temps=0
       push_nil
       send scavenge 0

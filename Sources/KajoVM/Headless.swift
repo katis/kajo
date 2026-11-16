@@ -62,8 +62,8 @@ public enum Headless {
         /// Sample old space in use every this many ms (0: never); the
         /// samples are in the report (`oldSamples`).
         public var sampleMs = 0
-        /// Module 7: how nurseries are collected (`stw`, `local`,
-        /// `offload`: the policy) and its stress flags (`everyhalf`,
+        /// Module 7: how nurseries are collected (`stw`, the oracle, or
+        /// `offload`, the policy) and its stress flags (`everyhalf`,
         /// `everypoll`).
         public var young = "offload"
         public var youngStress = ""
@@ -309,7 +309,7 @@ public enum Headless {
         vc.relocation.stress = RelocationStress(parsing: options.relocationStress)
         vc.relocation.threshold = options.relocationThreshold
         vc.relocation.cap = options.relocationCap
-        guard let mode = YoungMode(name: options.young) else { return .failure(.unsupported("--young: stw, local or offload")) }
+        guard let mode = YoungMode(name: options.young) else { return .failure(.unsupported(YoungMode.refusal(options.young))) }
         vc.young.mode = mode
         vc.young.stress = YoungStress(parsing: options.youngStress)
         vc.young.verify = options.verify
@@ -446,7 +446,7 @@ public enum Headless {
         ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
                               "stopperQoSRaises", "internStops", "internStopNs", "internTtspNs", "internContended", "internWaitNs",
-                              "symbolVerifierFailures"].contains($0.name) },
+                              "symbolVerifierFailures", "youngOnMainFailures"].contains($0.name) },
         report: report)
     }
 }
@@ -951,6 +951,7 @@ private func mainLoad(_ vm: VM, _ image: Image, _ options: Headless.Options, wor
     let end = options.mainMs > 0 ? t0 + UInt64(options.mainMs) * 1_000_000 : UInt64.max
     let y0 = vm.youngWorkerCounters(0)
     var next = t0
+    var unfinished: [Oop] = []
     while clock_gettime_nsec_np(CLOCK_UPTIME_RAW) < end && (options.mainMs > 0 || workers.contains { vm.state(of: $0) != .terminated }) {
         guard let p = vm.spawn(receiver: image.nilObject, selector: "mainTick:work:",
                                arguments: [Oop(smallInteger: Int64(options.mainAlloc)), Oop(smallInteger: Int64(options.mainWork))],
@@ -968,12 +969,27 @@ private func mainLoad(_ vm: VM, _ image: Image, _ options: Headless.Options, wor
             m.waitNs &+= st.enterWaitNs &+ st.leaveWaitNs
             spent &+= st.ns
         } while vm.state(of: p) != .terminated && spent < frameNs * 4
-        vm.release(p)
+        if vm.state(of: p) == .terminated { vm.release(p) } else { unfinished.append(p) }
         next &+= frameNs
         let now = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         if now > next { m.late += 1; next = now } else { usleep(UInt32((next - now) / 1000)) }
     }
     m.ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - t0) / 1e6
+    // A tick still running after its four frames is main-affine: only these
+    // turns run it, so it is finished here (the main worker always
+    // offloads, docs/modules/main-offload.md: under load a tick outlived
+    // its frames and `waitUntilAllTerminated` then waited for it forever).
+    while unfinished.contains(where: { vm.state(of: $0) != .terminated }) {
+        let st = vm.runMain(budgetNs: frameNs)
+        m.turns += 1
+        m.inVMNs &+= st.ns
+        m.cpuNs &+= st.cpuNs
+        m.parkNs &+= st.parkNs
+        m.stopNs &+= st.stopNs
+        m.collectorNs &+= st.collectorNs
+        m.waitNs &+= st.enterWaitNs &+ st.leaveWaitNs
+    }
+    for p in unfinished { vm.release(p) }
     let y1 = vm.youngWorkerCounters(0)
     m.young = YoungWorkerCounters(
         acksOwn: y1.acksOwn &- y0.acksOwn, acksOwnNs: y1.acksOwnNs &- y0.acksOwnNs, acksOther: y1.acksOther &- y0.acksOther,

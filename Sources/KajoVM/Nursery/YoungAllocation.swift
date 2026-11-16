@@ -337,6 +337,8 @@ extension NurseryShared {
         let young = unsafe vm.pointee.config.young
         let concurrent = young.mode != .stw && om.heap.extraBytes >= config.stride * count
         let half = young.stress.contains(.collectAtEveryHalf) ? 64 << 10 : 0
+        // The main worker always offloads: with young collection without
+        // stopping the world, nursery 0 is the two-half one.
         let n = unsafe NurseryShared.make(config, om: om, workers: count, offloaded: concurrent && young.mode == .offload,
                                           youngHolders: concurrent && young.testSwitches.crossNurseryBarrier,
                                           concurrent: concurrent, deferredOwnership: young.testSwitches.deferredOwnership,

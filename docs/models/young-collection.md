@@ -156,7 +156,7 @@ finished is a violation. Livelock is not checked.
 |---|---|
 | `Sources/ModelKit/MemoryModel.swift` | the shared memory model (moved from `RelocationModel`), with the extension below |
 | `Sources/ModelKit/Explorer.swift` | the shared breadth-first explorer, generic over `ExplorableModel` |
-| `Sources/YoungCollectionModel/Configuration.swift` | instructions, the switches, the nine configurations |
+| `Sources/YoungCollectionModel/Configuration.swift` | instructions, the switches, the eleven configurations (nine until the main worker always offloaded) |
 | `Sources/YoungCollectionModel/YoungCollection.swift` | claims, memory layout, state, every thread's steps |
 | `Tests/YoungCollectionModelTests/YoungCollectionModelTests.swift` | the claims hold; each rule is needed (traces in comments); probes; the memory-model extension |
 
@@ -212,9 +212,11 @@ pointer between instructions; a worker still in the VM at its end leaves):
 - `alloc r := o`: into a free entry, young in the worker's nursery (in
   offload, in the new half: not in Y), slot 0 initialised with a plain
   relaxed store and no barrier (amendment 13).
-- `flip` (offload) and `collect` (local): wait while `stwWanted` or the
+- `flip` (the offloaded owner, worker 0) and `collect` (any other owner):
+  wait while `stwWanted` or the
   nursery's collection is active (servicing rounds, quiescent); worker 0,
-  the main worker, waits while `stwWanted` only after it has opened one
+  the main worker (in `offload` only, where it flips: the main worker
+  always offloads, below), waits while `stwWanted` only after it has opened one
   collection since O set it (`mainOpensWhileWanted`, the final mark on the
   devices; cleared at O's stop); under the
   mutex set `collecting[k]`, raise the barrier word, `ycActive += 1`, Y_k :=
@@ -376,7 +378,17 @@ machine; they are indicative.
 | ownership, snapshot and sweep: nurseries 0 and 1 local, H deferred and re-armed, O snapshot and sweep | 213,969 | 594,806 | 155 | 6 | 1.87 s |
 | ownership, full collection | 170,836 | 449,005 | 154 | 6 | 1.47 s |
 
-All claims hold in all nine; no deadlock. The two ownership rows are the
+Since the main worker always offloads (2026-11-16, below) the two ownership
+rows have no main worker: 171,691 and 128,527 states, what the final mark
+measured with `mainOpensWhileWanted` off. Two configurations were added,
+the ownership pair with nursery 0 the main worker's, offloaded:
+
+| configuration | states | transitions | longest trace | finished states | time |
+|---|--:|--:|--:|--:|--:|
+| ownership offloaded, snapshot and sweep: W0 flips (C collects nursery 0) and waits for each collection, W1 collects nursery 1, O snapshot and sweep | 854,700 | 2,742,912 | 158 | 6 | 5.1 s |
+| ownership offloaded, full collection | 679,696 | 2,076,497 | 157 | 6 | 3.7 s |
+
+All claims hold in all eleven; no deadlock. Until 2026-11-16 the two ownership rows were the
 final mark on the devices' (2026-11-07, docs/modules/final-mark.md):
 worker 0 is the main worker and may open one collection while O wants its
 stop (`mainOpensWhileWanted`, on by default); with module 7's rule, every
@@ -410,6 +422,8 @@ shortest violating trace in a comment above it in
 | `waitersAreQuiescent` off | epochs | deadlock | W waits for its collection with epoch 0; C's epoch wait needs W's word above 0. Amendment 14's deadlock. 66 steps. |
 | `deferredEntriesBelongToTheirNursery` off | ownership, snapshot | 5 | Amendment 17's bug as diagnosed: W1 scans H from its carried list and keeps it (pending); W0's sweep defers H; W1's `foldCarried` re-arms it; W0 keeps it; O's snapshot includes H; W0's next collection frees it; W0 allocates into it; O's sweep frees the live object. 143 steps. Also found: the sweep frees H first and the nursery frees it again (140 steps). |
 | same | ownership, full collection | 5 | The full collection frees the deferred H; W0's next collection frees it again. 139 steps. |
+| same | ownership offloaded, snapshot and sweep | 5 | C (nursery 0's collector) frees the deferred H after the old-space collector already freed it. 142 steps. |
+| same | ownership offloaded, full collection | 5 | The same shape after the full collection. 141 steps. |
 | `rememberLoadOrder = .relaxed`, `postStoreReload` off | remembered | 1 | M's relaxed load of G's remembered word overtakes its buffered store of X into G and sees the bit; W's `fetch_and` clears it and reads G's slot as nil; G is not kept; X survives on M's stack; the second collection frees X while G names it. 95 steps. |
 | `newHalfScan` and `snoop` off | new half | 1 | W stores X into N (same nursery, no insertion barrier) and drops X; W's H1 scan finds only N, not in Y; C frees X. 52 steps. |
 
@@ -483,3 +497,38 @@ shortest violating trace in a comment above it in
 - **`violationsByMessage`**: the explorer keeps the shortest trace per
   distinct message as well as per claim, so claim 5's two shapes each have
   a trace.
+
+## 2026-11-16: the main worker always offloads
+
+The owner's answer to the final mark's third question ("Always offload."),
+built in docs/modules/main-offload.md: no mode lets the main thread collect
+a nursery, and the VM's mode `local` is gone. The protocol itself is
+unchanged: an owner still collects its own nursery (a background worker,
+the host), and worker 0's nursery is still offloaded to the collector
+thread. What changed is which configurations exist, and the model was
+made to say so in the same commit.
+
+Every place the model asked "is this the main worker" or "is this mode
+offload", before and after:
+
+| where | before | after |
+|---|---|---|
+| `mainPasses` in `.flip, .collect` | `w == 0` in either mode: the local ownership pair's W0 was the main worker and collected its own nursery while O wanted a stop | `w == 0 && offloaded(0)`: the main worker exists only where it flips; in `local` every worker is a background worker |
+| `.alloc`'s nursery | `mode == .offload ? 0 : w` | `owner(w)`, the new half when `offloaded(k)` |
+| H1's new-half record, the snoop, T1's new-half scan | `config.mode == .offload` | `offloaded(k)`: nursery 0 in `offload` (the VM's `isOffloaded`), so a second nursery in `offload` is collected by its owner as in the VM |
+| `Configuration.init` | nothing | a precondition: only worker 0 flips or waits for done, only in `offload`, and there it never `collect`s |
+
+The starting position "the model loses configurations and gains none" was
+wrong in one place: `mainOpensWhileWanted` was checked only on the local
+ownership pair, whose worker 0 collected its own nursery, a configuration
+that no longer exists. With it gone the switch changed nothing (the test
+now asserts equal state counts there), so the pair was added in its
+offloaded form, where the main worker flips while O wants its stop: 854,700
+states against 686,035 with every opener waiting (snapshot and sweep), and
+679,696 against 511,118 (full collection). Each switch off still finds its
+violation; `deferredEntriesBelongToTheirNursery` off finds claim 5 in the
+offloaded pair as well (142 and 141 steps). The configurations before: the
+nine of the Results table with the ownership pair's worker 0 as the main
+worker; after: the same nine with no main worker in `local`, and the two
+offloaded ones.
+

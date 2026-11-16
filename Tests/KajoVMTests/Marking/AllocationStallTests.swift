@@ -113,7 +113,7 @@ private let ringReference: Int64? = {
 /// against the other modes' 112).
 private func ringSlowdown(_ young: String) -> Int { young == "stw" ? 16 : 64 }
 
-@Test(arguments: ["stw", "local", "offload"])
+@Test(arguments: ["stw", "offload"])
 func aRingLikeLoadStallsInsteadOfFallingBack(_ young: String) throws {
     let endBody = bodyTimer("aRingLikeLoadStallsInsteadOfFallingBack \(young)")
     defer { endBody() }

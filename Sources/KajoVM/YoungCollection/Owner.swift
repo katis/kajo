@@ -8,8 +8,10 @@ import Synchronization
 // space is past its soft limit, an initial mark when a cycle is due).
 
 /// Owner `w`'s eden is full (allocation slow path, registers flushed,
-/// `held` the oop the slow path keeps): collect its nursery locally, or
-/// flip (offload). Answers after the eden has room again. When the
+/// `held` the oop the slow path keeps): a background worker or the host
+/// collects its nursery locally; the main worker flips (offload) and never
+/// collects its own nursery but in the single-thread test configuration
+/// (docs/modules/main-offload.md). Answers after the eden has room again. When the
 /// collection's promotion room cannot be promised (the reserve's rule) it
 /// stops the world for module 4's scavenge instead, which keeps what finds
 /// no block in place and asks for the full collection that makes room.
@@ -174,7 +176,10 @@ func youngCollectorLoop(_ vm: VMPointer, _ y: YoungPointer) {
     unsafe pthread_mutex_unlock(vm.pointee.safepointLock)
 }
 
-/// Start the young collector thread at its QoS (`VM.start`): offload only.
+/// Start the young collector thread at its QoS (`VM.start`): whenever young
+/// collection without stopping the world is installed (the main worker
+/// always offloads), unless the single-thread test configuration turned it
+/// off.
 func startYoungCollector(_ vm: VMPointer) {
     guard let y = unsafe vm.pointee.young, unsafe y.pointee.mode == .offload && y.pointee.config.collectorThread else { return }
     var attr = pthread_attr_t()

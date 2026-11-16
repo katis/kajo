@@ -231,8 +231,8 @@ import Testing
     rt.stop()
 }
 
-/// Module 7: in every mode (the stop-the-world scavenge, local collection,
-/// the offload policy); the suite also runs under load and under
+/// Module 7: in every mode (the stop-the-world scavenge and the offload
+/// policy); the suite also runs under load and under
 /// ThreadSanitizer. Without stopping the world each worker collects its own
 /// nursery while the others take its objects (cross-nursery holders, the
 /// deletion barrier, rounds), and the young verifier runs after every

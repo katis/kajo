@@ -1,11 +1,11 @@
 import Darwin
 
 /// How nurseries are collected (docs/modules/young-collection.md, ADR 0008).
+/// The main worker always offloads (docs/modules/main-offload.md): no mode
+/// lets the main thread collect a nursery.
 enum YoungMode: UInt8, Sendable, CaseIterable {
     /// Module 4's stop-the-world scavenge of every nursery: the oracle.
     case stw
-    /// Every nursery is collected by its owner while the others run.
-    case local
     /// The policy: the main worker's nursery (two eden halves) is collected
     /// by the young collector thread while the main worker runs on in the
     /// other half; background workers (and the host) collect locally.
@@ -14,13 +14,24 @@ enum YoungMode: UInt8, Sendable, CaseIterable {
     init?(name: String) {
         switch name {
         case "stw": self = .stw
-        case "local": self = .local
         case "offload": self = .offload
         default: return nil
         }
     }
 
-    var name: String { ["stw", "local", "offload"][Int(rawValue)] }
+    var name: String {
+        switch self {
+        case .stw: "stw"
+        case .offload: "offload"
+        }
+    }
+
+    /// The one line an option that takes a mode name answers for a name
+    /// that is none (`kajo run --young`, `kajo test --young`, the shells'
+    /// `young=`): the modes that exist.
+    static func refusal(_ name: String) -> String {
+        "--young: " + allCases.map(\.name).joined(separator: " or ") + ", not \(name)"
+    }
 }
 
 /// Young collection's configuration. Part of `VMConfig`; fixed once the VM
@@ -31,7 +42,10 @@ struct YoungConfig: Sendable {
     var mode = YoungMode.offload
     /// Offload: the young collector thread is started with the VM. Off (or
     /// before `VM.start`), an offloaded nursery is collected by its owner
-    /// right after its flip (tests that drive workers from one thread).
+    /// right after its flip (tests that drive workers from one thread): the
+    /// single-thread test configuration, the one place the main worker
+    /// collects its own nursery (docs/modules/main-offload.md, open question
+    /// 2). No command line, shell or app turns it off.
     var collectorThread = true
     /// The collector thread's QoS (ADR 0008's device policy: user-initiated;
     /// the marker at utility, module 5).
@@ -127,6 +141,11 @@ typealias YoungHook = @convention(c) (UnsafeMutableRawPointer?, Int, Int) -> Voi
     /// The initial mark scans every nursery's young bodies as roots (off:
     /// module 5's lost object comes back).
     var youngRoots = true
+    /// The main worker always offloads, the broken variant: worker 0 takes
+    /// the owner's local path (it collects its own nursery on its own
+    /// thread) although the collector thread runs. The main-thread verifier counts every such collection
+    /// (`youngOnMainFailures`, docs/modules/main-offload.md).
+    var mainCollectsItsOwnNursery = false
     var hook: YoungHook? = nil
     var hookContext: UnsafeMutableRawPointer? = nil
 

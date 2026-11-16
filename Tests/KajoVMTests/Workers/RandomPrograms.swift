@@ -340,22 +340,23 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     case cycleEveryScavenge, markingAlwaysOn
     case relocateEveryLiveBlock
     /// Module 7: the stop-the-world scavenge (the oracle; every other
-    /// configuration runs the default offload policy), every nursery
-    /// collected locally, the offload policy with even tasks on the main
-    /// worker (driven by the test thread's turns), and a round at every
-    /// poll; tiny nurseries, perturbation, the young verifier after every
-    /// collection.
-    case stwScavenge, localCollection, offloadCollection, roundEveryPoll
+    /// configuration runs the default offload policy), the background
+    /// workers' collections of their own nurseries with no main task, the
+    /// offload policy with even tasks on the main worker (driven by the test
+    /// thread's turns), and a round at every poll; tiny nurseries,
+    /// perturbation, the young verifier after every collection.
+    case stwScavenge, backgroundCollection, offloadCollection, roundEveryPoll
     /// The promotion reserve's fallback (docs/modules/reserve-and-depth.md):
     /// a heap one block larger than the image, no promotion reserve, no
     /// concurrent marking (only full collections free old space), tiny
     /// nurseries; the stop-the-world scavenge keeps what finds no block,
-    /// and local collection is refused its promotion room and stops the
-    /// world for that scavenge.
-    case exhaustedReserve, exhaustedReserveLocal
+    /// and a background worker's collection of its own nursery is refused
+    /// its promotion room and stops the world for that scavenge.
+    case exhaustedReserve, exhaustedReserveOffload
     /// Collectors review, finding 4: the young stress flag `barrierAlwaysOn`
     /// (every store takes the young deletion barrier's slow path) with a
-    /// marking cycle at every scavenge, local young collections, tiny
+    /// marking cycle at every scavenge, the background workers' young
+    /// collections, tiny
     /// nurseries; the stop verifier checks the shared barrier word at every
     /// stop, and the slow path must still be taken.
     case youngBarrierAlwaysOn
@@ -376,8 +377,8 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         switch self {
         case .oneWorker, .tinyNurseries: 1
         case .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock: 4
-        case .localCollection, .offloadCollection, .roundEveryPoll: 4
-        case .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn, .slowedMarker: 4
+        case .backgroundCollection, .offloadCollection, .roundEveryPoll: 4
+        case .exhaustedReserve, .exhaustedReserveOffload, .youngBarrierAlwaysOn, .slowedMarker: 4
         default: 8
         }
     }
@@ -386,25 +387,25 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
     /// objects past the header's count field (16 MiB + 1003 bytes) in their
     /// large-object step, with a heap of 128 MiB to hold a few at once: one
     /// and eight workers (the ordinary paths), a cycle at every scavenge
-    /// (marking and the lazy sweep over them) and local young collection
-    /// (module 7 beside them). The others keep the step's ByteArray at 4100
+    /// (marking and the lazy sweep over them) and the background workers'
+    /// young collections (module 7 beside them). The others keep the step's ByteArray at 4100
     /// bytes: their heaps (8 MiB, or the exhausted reserve's few blocks)
     /// cannot hold one, and the stress modes (a collection at every
     /// allocation, a stop at every poll) would spend their time zeroing.
-    var longBytes: Bool { [.oneWorker, .eightWorkers, .cycleEveryScavenge, .localCollection].contains(self) }
+    var longBytes: Bool { [.oneWorker, .eightWorkers, .cycleEveryScavenge, .backgroundCollection].contains(self) }
 
     func runtime(_ p: RandomProgram, native: Bool = false) throws -> Runtime {
         let verify = [.oneWorker, .eightWorkers, .perturbed, .noNursery, .tinyNurseries, .promoteAll,
                       .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
-                      .stwScavenge, .localCollection, .offloadCollection, .roundEveryPoll,
-                      .exhaustedReserve, .exhaustedReserveLocal, .youngBarrierAlwaysOn, .slowedMarker].contains(self)
+                      .stwScavenge, .backgroundCollection, .offloadCollection, .roundEveryPoll,
+                      .exhaustedReserve, .exhaustedReserveOffload, .youngBarrierAlwaysOn, .slowedMarker].contains(self)
         let source = (self == .offloadCollection ? mainTasks(p.source) : p.source) + longBytesSource(long: longBytes)
         var stress: StressFlags = []
         if self == .collectEveryAllocation { stress = .collectAtEveryAllocation }
         if self == .tinyEntryChunks { stress = .tinyEntryChunks }
         var switches = TestSwitches()
         switches.noFusion = self == .plainBytecodes
-        let exhausted = self == .exhaustedReserve || self == .exhaustedReserveLocal
+        let exhausted = self == .exhaustedReserve || self == .exhaustedReserveOffload
         let heapBlocks = exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2
             : self == .slowedMarker ? slowedHeapBlocks + 2 * p.tasks : longBytes ? 4096 : 256
         return try Runtime(source, background: workers, heapBlocks: heapBlocks,
@@ -443,20 +444,20 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                    }
                                case .scavengeEveryAllocation: c.nursery.stress = .scavengeAtEveryAllocation
                                case .stwScavenge: c.young.mode = .stw
-                               case .localCollection, .offloadCollection, .roundEveryPoll:
+                               case .backgroundCollection, .offloadCollection, .roundEveryPoll:
                                    c.nursery.bytes = 24 << 10
                                    c.nursery.survivorBytes = 2 << 10
-                                   c.young.mode = self == .offloadCollection ? .offload : .local
+                                   c.young.mode = .offload
                                    c.young.verify = true
                                    if self == .roundEveryPoll { c.young.stress = .roundAtEveryPoll }
                                    c.perturb = Perturbation(seed: p.seed, probability: 0.02, maxSleepUs: 30)
-                               case .exhaustedReserve, .exhaustedReserveLocal:
+                               case .exhaustedReserve, .exhaustedReserveOffload:
                                    c.nursery.bytes = 24 << 10
                                    c.nursery.survivorBytes = 2 << 10
                                    c.nursery.testSwitches.promotionReserveBlocks = 0
                                    c.nursery.stress = .promoteAll
                                    c.marking.enabled = false
-                                   c.young.mode = self == .exhaustedReserve ? .stw : .local
+                                   c.young.mode = self == .exhaustedReserve ? .stw : .offload
                                    c.young.verify = true
                                case .slowedMarker:
                                    c.nursery.bytes = 24 << 10
@@ -465,7 +466,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
                                case .youngBarrierAlwaysOn:
                                    c.nursery.bytes = 24 << 10
                                    c.nursery.survivorBytes = 2 << 10
-                                   c.young.mode = .local
+                                   c.young.mode = .offload
                                    c.young.verify = true
                                    c.young.stress = .barrierAlwaysOn
                                    c.marking.stress = .cycleAtEveryScavenge
@@ -669,7 +670,7 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         #expect(rt.vm.markingCounters.missed == 0 && r.parksWhileRelocating == 0 && r.verifierFailures == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     case .stwScavenge: #expect(!rt.vm.hasYoungCollection)
-    case .exhaustedReserve, .exhaustedReserveLocal:
+    case .exhaustedReserve, .exhaustedReserveOffload:
         randomScavenges.add(config, rt.vm.nurseryCounters.exhaustedScavenges)
     case .slowedMarker:
         // Stalls started (asserted over the configuration's seeds, not per
@@ -683,7 +684,7 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         #expect(calls > 0, "seed \(p.seed)")
         randomScavenges.add(config, rt.vm.markingCounters.cycles)
         #expect(rt.vm.markingCounters.missed == 0)
-    case .localCollection, .offloadCollection, .roundEveryPoll:
+    case .backgroundCollection, .offloadCollection, .roundEveryPoll:
         let yc = rt.vm.youngCounters
         randomScavenges.add(config, yc.collectionsLocal + yc.collectionsOffloaded)
         if ProcessInfo.processInfo.environment["KAJO_RANDOM_DEBUG"] != nil {
@@ -724,7 +725,7 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     }
     print("random programs \(config): \(randomSeedCount(config)) seeds from \(randomSeedBase), failing \(failed)")
     if [.tinyNurseries, .promoteAll, .cycleEveryScavenge, .markingAlwaysOn, .relocateEveryLiveBlock,
-        .localCollection, .offloadCollection, .roundEveryPoll, .exhaustedReserve, .exhaustedReserveLocal,
+        .backgroundCollection, .offloadCollection, .roundEveryPoll, .exhaustedReserve, .exhaustedReserveOffload,
         .youngBarrierAlwaysOn, .slowedMarker].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
         // cycle, or moves an object), the configuration must.

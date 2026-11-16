@@ -96,7 +96,7 @@ func runKeep(_ image: Image, mode: YoungMode, workers: Int, _ selector: String, 
 }
 
 @Suite(.serialized) struct VMEndTests {
-    static let cases: [(YoungMode, Int)] = [(.stw, 1), (.stw, 8), (.local, 1), (.local, 8), (.offload, 1), (.offload, 8)]
+    static let cases: [(YoungMode, Int)] = [(.stw, 1), (.stw, 8), (.offload, 1), (.offload, 8)]
 
     @Test(arguments: cases)
     func theImageIsWholeAfterTheVMEnds(_ mode: YoungMode, _ workers: Int) throws {
