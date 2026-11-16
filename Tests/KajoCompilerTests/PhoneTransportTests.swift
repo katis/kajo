@@ -184,6 +184,13 @@ final class TestClock: Sendable {
         let end = ShellVM.now() + 30_000_000_000
         while ShellVM.now() < end && !host.listedTargets.contains(where: { $0.name == name }) { usleep(10_000) }
         #expect(host.listedTargets.contains { $0.name == name && $0.path == "bonjour:\(name)" })
+        // The browser updates its list before its change callback posts the
+        // event, so the event is waited for, long (a wait for something
+        // that must come); read at once it was missed under the sanitizer
+        // and twelve loops (`tsan-load` on a89dd0e). The assertion is
+        // unchanged.
+        let eventEnd = ShellVM.now() + 120 * 1_000_000_000
+        while ShellVM.now() < eventEnd && !events.withLock({ $0.contains { $0.kind == .targets } }) { usleep(10_000) }
         #expect(events.withLock { $0.contains { $0.kind == .targets } })
         // Listed without a token until one is known for the address.
         let lines = host.callback(ViewCall(op: "targets", handle: 0, arguments: []))?.string ?? ""
