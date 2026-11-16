@@ -431,3 +431,23 @@ The refusal of each option that takes a mode name
     ... scenario=storm FAILED=1 error=options:_--young:_stw_or_offload,_not_local
 
 A generated app names no mode.
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/main-offload/check just check 3c4ef9f` on
+a89dd0e (the code of 5b72399 and this doc): the core tier, 10,884 s against
+11,307 s for the last core-tier run (1f7828f). 22 of 23 gates `rc=0`;
+**`tsan-load` failed** (3,653 s against 3,770): 466 VM tests pass, and in
+the compiler tests `PhoneTransportTests.bonjourFindsAListenerTheTestStarts`
+failed one expectation, `events.withLock { $0.contains { $0.kind ==
+.targets } }`, the line after `host.listedTargets` already held the
+advertised name; 0 sanitizer reports. The test polls `listedTargets` (read
+from the browser's service list) and then reads the `targets` event at
+once, but `BonjourBrowser` updates its list before its change callback
+posts the event, so under the sanitizer and twelve loops the event can
+come after the check: a race in the test, in code this module does not
+touch (`Sources/KajoDev/ClientHost.swift`). Not run again; handed back.
+Gate times otherwise: `swift-test-load` 811 s (825), `tsan` 2,898 s
+(2,924), `matrix-mac` 670 s (826) and `matrix-iphone` 738 s (900) with
+the matrix at 147 rows instead of 156. The gate matrices read 0 young
+collections on the main thread and 0 of the host's nursery in every row.
