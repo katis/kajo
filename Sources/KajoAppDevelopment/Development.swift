@@ -31,7 +31,7 @@ import UIKit
     public private(set) var pairing: PairingPresenter?
     /// The advertised name.
     public private(set) var serviceName = ""
-    var frames: FrameMonitor?
+    var frames: FrameWindow?
 
     /// `store`: where the token lives (Application Support by default);
     /// `port` 0 lets the system pick; `presenter` replaces the platform's
@@ -89,8 +89,14 @@ import UIKit
         }
         // The port and the name go to the console (the token never does).
         appLog("serving=tcp port=\(s.port ?? 0) addresses=\(localAddresses().joined(separator: ",")) name=\(serviceName.replacingOccurrences(of: " ", with: "_"))")
-        if let a = CommandLine.arguments.first(where: { $0.hasPrefix("kajo-frames=") }), let secs = Double(a.dropFirst(12)) {
-            frames = FrameMonitor(seconds: secs, server: s)
+        if let secs = FrameWindow.requested() {
+            // The round trip's measurement (module 11a): the frames beside
+            // what the server served meanwhile.
+            var base = ServerStats.Values()
+            frames = FrameWindow(seconds: secs, build: "debug", begin: { base = s.stats.values }, extra: {
+                let v = s.stats.values
+                return " served_sessions=\(v.sessions - base.sessions) served_requests=\(v.requests - base.requests)"
+            })
         }
     }
 
@@ -115,69 +121,5 @@ import UIKit
         #else
         return nil
         #endif
-    }
-}
-
-/// `kajo-frames=<seconds>` among a development build's launch arguments:
-/// the display's frames counted for that long after a second's warmup, one
-/// result line (frames missed, what the server served meanwhile), then the
-/// app quits. The round trip's measurement (module 11a); the frames are
-/// counted beside the app, which runs as it always does.
-@MainActor final class FrameMonitor: NSObject {
-    let seconds: Double
-    let server: ProtocolServer
-    var link: CADisplayLink?
-    var times: [Double] = []
-    var start = 0.0
-    var base = ServerStats.Values()
-    let nominal: Double
-    var activity: NSObjectProtocol?
-
-    init(seconds: Double, server: ProtocolServer) {
-        self.seconds = seconds
-        self.server = server
-        #if os(macOS)
-        nominal = Double(NSScreen.main?.maximumFramesPerSecond ?? 60)
-        #else
-        nominal = Double(UIScreen.main.maximumFramesPerSecond)
-        #endif
-        super.init()
-        #if os(macOS)
-        // The window is measured as a developer would see it: the display
-        // stays on and App Nap does not throttle the app's display link
-        // while another app (the tools) is in front of it.
-        activity = ProcessInfo.processInfo.beginActivity(options: [.idleDisplaySleepDisabled, .userInitiated, .latencyCritical],
-                                                         reason: "Kajo frame measurement")
-        AppKitHost.wakeDisplay()
-        guard let l = NSScreen.main?.displayLink(target: self, selector: #selector(frame(_:))) else { return }
-        #else
-        // The screen stays on for the window (a locked screen has no frames).
-        UIApplication.shared.isIdleTimerDisabled = true
-        let l = CADisplayLink(target: self, selector: #selector(frame(_:)))
-        #endif
-        l.preferredFrameRateRange = CAFrameRateRange(minimum: Float(nominal), maximum: Float(nominal), preferred: Float(nominal))
-        l.add(to: .main, forMode: .common)
-        link = l
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-            MainActor.assumeIsolated {
-                self.start = CACurrentMediaTime()
-                self.base = server.stats.values
-                appLog("frames=start")
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1 + seconds) { MainActor.assumeIsolated { self.end() } }
-    }
-
-    @objc func frame(_ l: CADisplayLink) {
-        if start > 0 { times.append(l.timestamp) }
-    }
-
-    func end() {
-        let stop = CACurrentMediaTime()
-        link?.invalidate()
-        let fa = FrameAccount(timestamps: times.filter { $0 >= start && $0 <= stop }, start: start, end: stop, nominalHz: nominal)
-        let v = server.stats.values
-        appLog("mode=app run=frames build=debug seconds=\(f3(stop - start)) nominal_hz=\(f2(nominal)) frames=\(fa.frames) expected=\(fa.expected) missed=\(fa.missed) drops=\(fa.drops) gap_p99_ms=\(f3(fa.gapP99Ms)) gap_max_ms=\(f3(fa.gapMaxMs)) served_sessions=\(v.sessions - base.sessions) served_requests=\(v.requests - base.requests) thermal=\(ProcessInfo.processInfo.thermalState.rawValue)")
-        exit(0)
     }
 }

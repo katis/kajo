@@ -297,6 +297,8 @@ public enum KajoApplication {
     /// The running app, once its host exists.
     @MainActor public private(set) static var current: KajoAppRunner?
     @MainActor static var pending: (KajoAppConfiguration, AppDevelopment?)?
+    /// A release build's frames window (`kajo-frames=`), while it runs.
+    @MainActor static var frames: FrameWindow?
 
     /// Run the app: the platform's application object, the host, the
     /// runtime, the app class opened after the first frame. `development`
@@ -334,6 +336,9 @@ public enum KajoApplication {
             MainActor.assumeIsolated {
                 guard r.start() else { return }
                 LaunchReport.arm(build: d == nil ? "release" : "debug")
+                // `kajo-frames=<s>`: a release build counts its frames from
+                // here (a development build counts them beside its server).
+                if d == nil, let secs = FrameWindow.requested() { frames = FrameWindow(seconds: secs, build: "release") }
                 // The window first: the development half (serving, its
                 // name, its token, Bonjour) starts once the app's first
                 // frame is on the screen, at the second frame, or after a
