@@ -423,7 +423,11 @@ pair (`scripts/new-check.sh`; run on its own, `part3/new-check.txt`,
   `macos-release: FAILED a plain Release binary has no module section`,
   `ios-release: FAILED no module section`, `ios-simulator-release: FAILED
   no module section` and the bind and cache rows, and ends `new-check:
-  FAILED` (exit 1).
+  FAILED` (exit 1). That first run also wrote two files (`.cut`, `stamp`)
+  into the directory it ran from, the cache rows having no library to
+  name; the script now points them into its scratch directory, and the
+  run again (`part3/new-check-broken2.txt`) fails the same rows and leaves
+  nothing behind.
 
 ### Part 4: the cache (f708fbd)
 

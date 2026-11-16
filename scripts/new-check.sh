@@ -173,6 +173,9 @@ again=$(generated macos-release-again)
 print "macos-release-again: generated_in_build=$again"
 [[ $again == 0 ]] || { print "macos-release-again: FAILED an unchanged build compiled the module again"; fail=1; }
 nlib=$(readlink $proj/.build/kajo/native/macosx/libkajo_native.a)
+# No library (a project with the module off): the rows below fail, and
+# their files stay in the scratch directory.
+[[ -n $nlib ]] || { nlib=$work/no-library/libkajo_native.a; mkdir -p ${nlib:h}; }
 ndir=${nlib:h}
 # A truncated library: its stamp no longer matches, so it is built again.
 head -c 1000 $nlib > $nlib.cut && mv $nlib.cut $nlib
