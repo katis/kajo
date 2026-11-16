@@ -204,3 +204,150 @@ Projects that already exist are not touched. Nothing rewrites a
 4. If part 1 finds frames missed with the module on in some row: keep the
    default as answered and report (recommended; the answer is the
    owner's), or hold the default until the row is explained.
+
+## As built
+
+Built 2026-11-16 by the build agent from 30e14bd. Every number names its
+file under `~/kajo-scratch/native-by-default/` (here `part1/`, `part3/`,
+`check/`). Toolchain: swiftly's swift.org 6.4.2 and its clang first on PATH
+(`part1/env.txt`); a generated project's native module is compiled by Xcode
+27.2's clang (`xcrun clang`); the shells' modules by the PATH clang, as
+`apps/Shared/build-images.sh` has done since AOT 1.
+
+### Part 1: measured before the generator changed
+
+The rule was written first (`part1/rule.txt`, 2026-11-16 05:32:43 EET,
+before any number of this part was read).
+
+**Starting position 3 was wrong: the Sample could not report frames.**
+`kajo-frames=` lived in `KajoAppDevelopment` (a Debug build's
+`FrameMonitor`, which also reads the server's counters), so a Release app
+ignored it. The smallest addition (commit b8d6459): the frames window and
+`FrameAccount` move to `KajoApp` (`Sources/KajoApp/Frames.swift`,
+`FrameWindow`); a Release app launched with `kajo-frames=<s>` prints
+`mode=app run=frames build=release seconds=… nominal_hz=… frames=…
+expected=… missed=… drops=… gap_p99_ms=… gap_max_ms=… thermal=…` after a
+1 s warmup and quits; a Debug build's line is unchanged (the window's extra
+fields carry `served_sessions` and `served_requests`). Nothing in
+`KajoDev` moved; the Release symbol checks still read 0.
+
+**Starting position 2 was right in fact and wrong in effect.**
+`build-images.sh` runs `kajo aot` with no options, and since AOT 2 those
+are the product's configuration (every shell module has an `excluded.txt`;
+`.build/apps-image/aot/shell/excluded.txt` names 2251 methods; the shell
+image's module is 3.0 MB against AOT 1's full ones). So AOT 1's native rows
+were made with AOT 1's full configuration and no native row existed for the
+product's; the matrices were run again (below).
+
+**The shells' matrix, native=1 (product configuration) against
+interpreted.** The shell built once per platform with `KAJO_SHELL_AOT=1`
+and launched with and without `native=1` (`scripts/mac-matrices.sh`,
+`scripts/device-matrices.sh`; 156 rows a matrix; `--bar` over every raw
+row in `part1/<matrix>-bar.md`, the per-kind comparison of rule 3 by
+`scripts/compare.py` in `part1/<device>-compare.md`):
+
+| matrix | order | rows | failed | checksums not ok | frames missed (rows) | fallbacks | unjustified | stalls (longest ms) | longest stop ms | thermal |
+|---|---|--:|--:|--:|---|--:|--:|---|---|---|
+| Mac, 7 workers, interpreted | 1st | 156 | 0 | 0 | 1788 (3, the hog with the budget off) | 0 | 0 | 631 (20.98) | 11.75 scavenge, ring stw | 230 nominal, 41 fair |
+| Mac, native | 2nd | 156 | 0 | 0 | 1786 (3, the same) | 0 | 0 | 775 (39.41) | 18.19 scavenge, ring stw | 271 fair |
+| iPhone, 5 workers, interpreted | A | 156 | 0 | 0 | 3618 (6: ring stw 6, 1, 35 and the hog off) | 0 | 0 | 0 | 18.98 scavenge, ring stw | 73 nominal, 86 fair, 112 serious |
+| iPhone, native | A | 156 | 0 | 0 | 3635 (6: ring stw 21, 20, 17 and the hog off) | 0 | 0 | 16 (34.93) | 25.60 scavenge, ring stw | 271 serious |
+| iPhone, native | B | 156 | 0 | 0 | 3630 (7: ring stw 14, 27, 12, storm stw 1, the hog off) | 0 | 0 | 31 (25.68) | 23.88 scavenge, ring stw | 271 serious |
+| iPhone, interpreted | B | 156 | 0 | 0 | 3671 (6: ring stw 29, 35, 31 and the hog off) | 0 | 0 | 0 | 22.89 scavenge, ring stw | 271 serious |
+| iPad, 5 workers, interpreted | A | 156 | 0 | 0 | 3576 (3, the hog off) | 0 | 0 | 0 | 13.92 scavenge, ring stw | 223 nominal, 8 fair, 40 serious |
+| iPad, native | A | 156 | 0 | 0 | 3588 (6: ring stw 3, 3, 7 and the hog off) | 0 | 0 | 0 | 17.08 scavenge, ring stw | 271 serious |
+| iPad, native | B | 156 | 0 | 0 | 3591 (6: ring stw 7, 3, 5 and the hog off) | 0 | 0 | 0 | 17.29 scavenge, ring stw | 271 serious |
+| iPad, interpreted | B | 156 | 0 | 0 | 3586 (6: ring stw 3, 4, 3 and the hog off) | 0 | 0 | 0 | 15.63 scavenge, ring stw | 271 serious |
+
+(Rows `part1/mac-interp`, `mac-native`, `iphone-A-interp`, … `ipad-B-interp`;
+the logs `part1/*-matrices.log`. The hog with the budget off misses 1191 to
+1193 of 1200 on the devices and 595 to 596 of 600 on the Mac in every
+matrix by design. The golden rows bind natively: `fib` 22 of 34 methods,
+the st kernels about 1437 of 3289.)
+
+Rule 3's verdict, per row kind (`part1/*-compare.md`):
+
+- **Mac: met in every row kind.** 0 frames missed and 0 fallbacks outside
+  the hog with the budget off, in both engines. The native matrix ran at
+  thermal "fair" throughout, the interpreted one mostly nominal; native
+  counts 775 allocation stalls (longest 39.41 ms; no frame missed with
+  them) against 631 (longest 20.98), and 11 sweep stops (longest 0.91 ms) where the
+  interpreted rows had none.
+- **iPhone: not met in one row kind, storm under `young=stw`**: one frame
+  (one 16.7 ms gap) in native order B run 2, behind a 13.05 ms scavenge,
+  with 0 fallbacks; 0 in the other 11 storm-stw rows of both engines and in
+  the weekly's three (`~/kajo-weekly/2026-11-16/matrix-iphone`). The ring
+  under `young=stw` (the oracle row) missed fewer natively: 111 frames in
+  six rows (max 27) against 137 (max 35) interpreted, with 0 fallbacks in
+  every row (AOT 1's full configuration had 109 frames behind 2 fallbacks).
+- **iPad (first matrix on the iPad): not met in one row kind, the ring
+  under `young=stw`**: 28 frames in six native rows (3 to 7) against 10 in
+  six interpreted (0, 0, 0 in order A, then 3, 4, 3 with the iPad at
+  serious), 0 fallbacks and 0 stalls in every row; each miss is a
+  stop-the-world scavenge of 14 to 17 ms (`--bar`'s longest stop column).
+  Every other kind: 0 frames, 0 fallbacks.
+- **Both rows that miss are the stop-the-world young mode**, whose
+  scavenge on the main thread is longer than a 120 Hz frame by
+  construction; no row of the product's default young mode (`offload`)
+  or of `local` missed a frame on any device, in either engine. No
+  fallback, no unjustified fallback and no failed launch in 1560 rows.
+  The devices ran at "serious" for every native row, so the interpreted
+  order-B blocks are the like-for-like comparison.
+
+**The Sample, Release, `KAJO_NATIVE=NO` against `YES`** (a `dist.sh
+checkout` of b8d6459, `part1/ck`; `kajo new` with and without `--native`
+by the checkout's own `kajo`, `part1/sample-off`, `part1/sample-on`; the
+Mac's builds by `xcodebuild`, the devices' through `scripts/device.sh`;
+every launch `kajo-launch-report kajo-frames=10`; five launches a side, off
+then on (A) and on then off (B); `scripts/sample-mac.sh`,
+`scripts/sample-device.sh`; raw lines `part1/sample-mac.txt`,
+`sample-iphone.txt`, `sample-ipad.txt`; table `part1/sample-table.md` by
+`scripts/sample-table.py`):
+
+| device | order | module | first frame ms median | range | frames missed per launch | bind ms |
+|---|---|---|--:|---|---|---|
+| Mac | A | off | 246.6 | 205.2–688.5 | 0 0 0 0 0 | – |
+| Mac | A | on | 247.3 | 212.9–539.4 | 0 0 0 0 0 | 5.22–5.39 |
+| Mac | B | on | 250.2 | 239.8–258.3 | 0 0 0 0 0 | 5.19–5.26 |
+| Mac | B | off | 237.9 | 207.2–254.2 | 0 0 0 0 0 | – |
+| iPhone | A | off | 106.3 | 101.3–124.5 | 0 0 0 0 0 | – |
+| iPhone | A | on | 107.9 | 106.3–140.1 | 0 0 0 0 0 | 5.55–6.19 |
+| iPhone | B | on | 118.7 | 104.3–120.6 | 0 0 0 0 0 | 5.52–6.04 |
+| iPhone | B | off | 104.1 | 97.8–122.0 | 0 0 0 0 0 | – |
+| iPad | A | off | 249.9 | 233.9–862.4 | 2 0 0 0 0 | – |
+| iPad | A | on | 245.9 | 228.9–282.6 | 0 0 0 0 0 | 8.53–8.99 |
+| iPad | B | on | 247.4 | 240.1–249.5 | 0 0 0 0 0 | 8.57–9.46 |
+| iPad | B | off | 235.4 | 234.2–248.8 | 0 0 0 0 0 | – |
+
+Each window 10.5 s: 630 frames expected on the Mac (60 Hz), 1260 on the
+devices (120 Hz). Thermal 0 (nominal) on every Sample line. Every on launch
+printed `native=bound methods=3290 bound=1433 unbound=1857 generated=1048
+declined=0 groups=888`; an off launch prints no native line. Binaries:
+iPhone 2 149 376 bytes off, 4 980 160 on (app 8 736 and 11 500 KiB); the
+first launch after an install is the slowest on either side (Mac off 688.5
+ms, iPad off 862.4 ms with the only 2 frames missed of the 60 launches).
+
+Rules 1 and 2: **met on all three**. Frames: the on launches missed 0
+everywhere; the off launches' maximum is 0 (Mac, iPhone) and 2 (iPad).
+First frame, on minus off by order: Mac +0.7 and +12.3 ms, iPhone +1.6 and
++14.6, iPad −4.0 and +12.0, all within 20 ms. (The Sample's idle window is
+what the brief asked; it carries no load of its own, so the matrices above
+are where a faster mutator could show.)
+
+**Starting position 4: what a failed step does today** (`part1/failed-step-before.log`):
+with `kajo aot` exiting 1 (a stub in place of the checkout's `kajo` that
+runs the real one for every other command), the old `build-native.sh`
+printed `native module: generating and compiling (macosx arm64)`, the
+stub's own stderr, and Xcode's `Command PhaseScriptExecution failed with a
+nonzero exit code`, then `** BUILD FAILED **` (exit 65). The build stops,
+and nothing says how to build without the module; a compile failure printed
+`error: the native module did not compile`, libtool and lipo failures
+nothing of their own.
+
+**Verdict.** The rule's Sample items are met on the Mac, the iPhone and
+the iPad. The matrices meet rule 3 on the Mac in every row and on the
+devices in every row but two kinds under the stop-the-world young
+collector (iPhone storm, one frame in one of six rows; iPad ring, 28 frames
+in six rows against 10), both with 0 fallbacks. Nothing under the core
+directories or `Sources/KajoAOT/` is needed for the default; the brief's
+open question 4 applies (built: the default as answered, reported here).
