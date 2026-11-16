@@ -131,12 +131,55 @@ done:
   push_temp 2
   return_top
 end
+; nil internAll: strings arrivals: a index: i -- the start gate: marks slot
+; i of a, spins until every slot of a is marked (the last Process to
+; arrive opens the gate for all), then interns the strings
+method UndefinedObject internAll:arrivals:index: temps=1
+  push_temp 1
+  push_temp 2
+  push_int 1
+  send at:put: 2
+  pop
+again:
+  push_int 1
+  store_temp 3
+check:
+  push_temp 3
+  push_temp 1
+  size
+  gt
+  jump_if_true go
+  push_temp 1
+  push_temp 3
+  send at: 1
+  push_nil
+  identical
+  jump_if_true again
+  push_temp 3
+  push_int 1
+  add
+  store_temp 3
+  jump check
+go:
+  push_nil
+  push_temp 0
+  send internAll: 1
+  return_top
+end
 """
 
 /// `processes` Processes each intern `names` (each from its own Strings)
-/// at once; answers each Process's Symbols, in `names` order.
-private func internConcurrently(_ rt: Runtime, _ names: [String], processes: Int) -> [[Oop]] {
-    let ps = (0..<processes).map { _ in rt.spawn("internAll:", [rt.vm.newStringArray(names)]) }
+/// at once; answers each Process's Symbols, in `names` order. With `gate`
+/// every Process waits at a start gate until all have arrived, so they
+/// begin interning together instead of in the order they were spawned: a
+/// round is then a race for the same bytes from its first name on (the
+/// interning tests' drive, docs/modules/interning-tests.md).
+private func internConcurrently(_ rt: Runtime, _ names: [String], processes: Int, gate: Bool = false) -> [[Oop]] {
+    let arrivals = gate ? rt.vm.newArray(processes) : .none
+    let ps = (0..<processes).map { i in
+        gate ? rt.spawn("internAll:arrivals:index:", [rt.vm.newStringArray(names), arrivals, int(Int64(i + 1))])
+             : rt.spawn("internAll:", [rt.vm.newStringArray(names)])
+    }
     // A result is read only from a Process that answered (an unfinished
     // one's slot is nil: reading it as the Array trapped a debug build
     // under the sanitizer and twelve loops, `tsan-load` on b478aaf).
@@ -187,14 +230,18 @@ func internSymbolsRuntime(background: Int = 7, noSecondLookup: Bool = false, mar
 /// Rounds go on until the race was seen: a second lookup found a Symbol
 /// another worker had inserted after this one's miss (`foundUnderLock`),
 /// at most 40 rounds. Every answer for the same bytes is one object, and
-/// the symbol-table verifier ran and found nothing.
+/// the symbol-table verifier ran and found nothing. Each round starts its
+/// Processes at a gate, so the race is driven, not waited for (spawned one
+/// after another they were in step only by chance and the weekly of
+/// 2026-11-16 saw no race in 40 rounds).
 @Test(arguments: [false, true])
 func workersInterningTheSameBytesAtOnceGetOneSymbol(slowAllocation: Bool) throws {
+    let t0 = now()
     let rt = try internSymbolsRuntime(slowAllocation: slowAllocation)
     var round = 0
     repeat {
         let names = (0..<300).map { "u\(round)_\($0)" } + (0..<100).map { "v\(round)_\($0 % 7)_\($0)" }
-        let answers = internConcurrently(rt, names, processes: 8)
+        let answers = internConcurrently(rt, names, processes: 8, gate: true)
         #expect(duplicates(rt, names, answers) == 0, "round \(round)")
         round += 1
     } while rt.vm.internCounters.foundUnderLock == 0 && round < 40
@@ -209,17 +256,20 @@ func workersInterningTheSameBytesAtOnceGetOneSymbol(slowAllocation: Bool) throws
     #expect(rt.vm.counters[.symbolVerifierFailures] == 0, "\(rt.image.om.verifierReports.prefix(3))")
     #expect(rt.vm.counters[.internStops] == 0)
     rt.stop()
+    print("same bytes at once (slow allocation \(slowAllocation)): body \(Double(now() - t0) / 1e9) s")
 }
 
 /// The broken variant: without the second lookup two workers that both
 /// missed insert two Symbols of the same bytes; the duplicates come back to
-/// the Processes and the symbol-table verifier reports them.
+/// the Processes and the symbol-table verifier reports them. The rounds
+/// start at a gate, as above.
 @Test func withoutTheSecondLookupTwoSymbolsOfTheSameBytesAppear() throws {
+    let t0 = now()
     let rt = try internSymbolsRuntime(noSecondLookup: true)
     var round = 0, dup = 0
     repeat {
         let names = (0..<300).map { "d\(round)_\($0)" }
-        dup += duplicates(rt, names, internConcurrently(rt, names, processes: 8))
+        dup += duplicates(rt, names, internConcurrently(rt, names, processes: 8, gate: true))
         round += 1
     } while dup == 0 && round < 40
     #expect(dup > 0, "no duplicate in \(round) rounds")
@@ -229,6 +279,7 @@ func workersInterningTheSameBytesAtOnceGetOneSymbol(slowAllocation: Bool) throws
     #expect(rt.vm.counters[.symbolVerifierFailures] > 0)
     #expect(rt.image.om.verifierReports.contains { $0.contains("two Symbols in the table") })
     rt.stop(verifyHeap: false)
+    print("broken variant internNoSecondLookup: body \(Double(now() - t0) / 1e9) s")
 }
 
 /// Symbols dropped, collected and interned again across marking cycles:
