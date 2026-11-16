@@ -134,3 +134,14 @@ with 4 expectations (`part2/start-test.log`).
    are reported (recommended), or the default is held until they are
    explained. The same rows run cool, both engines interleaved, would
    settle how much is the engine.
+
+Answered by the owner on 2026-11-16, after asking what the two
+stop-the-world rows mean for a real app (they are the oracle mode, not the
+default; the devices were hot): "Ok, then I accept all four as recommended".
+
+1. `--native` stays an accepted flag of `kajo new`, as recommended.
+2. A failed native step stops the Release build and names `KAJO_NATIVE=NO`,
+   as recommended.
+3. The cache keeps one library per platform, as recommended.
+4. The default stays on, as recommended. A cool, interleaved run of the two
+   row kinds was offered and is not planned.
