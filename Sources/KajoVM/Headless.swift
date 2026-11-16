@@ -933,6 +933,7 @@ struct MainLoad {
             ("mainOwnCollections", "\(y.ownCollections)"), ("mainOwnMsPer10s", p10(y.ownNs)),
             ("mainOwnMaxMs", f(Double(y.ownMaxNs) / 1e6)),
             ("mainCollectorWaits", "\(y.collectorWaits)"), ("mainCollectorWaitMsPer10s", p10(y.collectorWaitNs)),
+            ("mainCollectorWaitMaxMs", f(Double(y.collectorWaitMaxNs) / 1e6)),
             ("mainEdenWaits", "\(y.edenWaits)"), ("mainEdenWaitMsPer10s", p10(y.edenWaitNs)),
             ("mainStopWaitMsPer10s", p10(y.stopWaitNs)), ("mainDrainWaitMsPer10s", p10(y.drainWaitNs)),
         ]
@@ -994,7 +995,7 @@ private func mainLoad(_ vm: VM, _ image: Image, _ options: Headless.Options, wor
 /// records, deferred frees pending and released, snapshot exclusions,
 /// fallbacks by cause, the young-root scan, the collector's QoS and CPU.
 func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
-    guard vm.hasYoungCollection else { return [("young", "stw")] }
+    guard vm.hasYoungCollection else { return [("young", "stw")] + mainThreadYoungReport(nil, nil) }
     let c = vm.youngCounters
     // Percentiles over the records the logs kept; sums and maxima over
     // every collection and round.
@@ -1053,6 +1054,30 @@ func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
         ("collectorWakeups", "\(c.collectorWakeups)"),
         ("ycVerifies", "\(c.verifierRuns)"),
         ("ycLogDropped", "\(totals.droppedCollections)"), ("roundLogDropped", "\(totals.droppedRounds)"),
+    ] + mainThreadYoungReport(c.onMain, vm.youngWorkerCounters(0))
+}
+
+/// The main worker always offloads (docs/modules/main-offload.md, part 1):
+/// young collections of a nursery that ran on the main thread (by the main
+/// worker, or on the process's main thread) by whose nursery, with the
+/// longest; every collection of the host's nursery; the main worker's
+/// waits for its collector (the price of never collecting itself). Under
+/// `young=stw` (no module 7) every value is "-": the main worker copies in
+/// the stop-the-world scavenge, which `collectorNs` counts.
+func mainThreadYoungReport(_ m: MainThreadCollections?, _ w0: YoungWorkerCounters?) -> [(String, String)] {
+    func msS(_ ns: UInt64) -> String { unsafe String(format: "%.3f", Double(ns) / 1e6) }
+    guard let m, let w0 else {
+        return ["ycOnMain", "ycOnMainMaxMs", "ycOnMainW0", "ycOnMainW0MaxMs", "ycOnMainHost", "ycOnMainHostMaxMs",
+                "ycOnMainOther", "ycHost", "ycHostMs", "ycHostMaxMs", "ycMainCollectorWaits", "ycMainCollectorWaitMs",
+                "ycMainCollectorWaitMaxMs"].map { ($0, "-") }
+    }
+    return [
+        ("ycOnMain", "\(m.total)"), ("ycOnMainMaxMs", msS(max(m.mainMaxNs, m.hostMaxNs, m.otherMaxNs))),
+        ("ycOnMainW0", "\(m.main)"), ("ycOnMainW0MaxMs", msS(m.mainMaxNs)),
+        ("ycOnMainHost", "\(m.host)"), ("ycOnMainHostMaxMs", msS(m.hostMaxNs)), ("ycOnMainOther", "\(m.other)"),
+        ("ycHost", "\(m.hostAll)"), ("ycHostMs", msS(m.hostAllNs)), ("ycHostMaxMs", msS(m.hostAllMaxNs)),
+        ("ycMainCollectorWaits", "\(w0.collectorWaits)"), ("ycMainCollectorWaitMs", msS(w0.collectorWaitNs)),
+        ("ycMainCollectorWaitMaxMs", msS(w0.collectorWaitMaxNs)),
     ]
 }
 

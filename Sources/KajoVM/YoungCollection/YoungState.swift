@@ -166,6 +166,49 @@ struct YoungTotals: Sendable {
     var droppedRounds: UInt64 = 0
 }
 
+/// Young collections of a nursery that ran on the main thread: run by the
+/// main worker (worker 0, the shells' main thread and `kajo run
+/// --main-ms`'s calling thread), or on the process's main thread
+/// (`pthread_main_np`; the shells' host calls). By whose nursery: worker
+/// 0's, the host's, any other. And every collection of the host's nursery,
+/// on any thread. Counts and the longest `totalNs`. Under the safepoint
+/// mutex.
+struct MainThreadCollections: Sendable {
+    var main: UInt64 = 0
+    var mainMaxNs: UInt64 = 0
+    var host: UInt64 = 0
+    var hostMaxNs: UInt64 = 0
+    var other: UInt64 = 0
+    var otherMaxNs: UInt64 = 0
+    /// Every collection of the host's nursery, wherever it ran.
+    var hostAll: UInt64 = 0
+    var hostAllMaxNs: UInt64 = 0
+    var hostAllNs: UInt64 = 0
+
+    var total: UInt64 { main &+ host &+ other }
+
+    /// A collection of nursery `k` by participant `collector` ended;
+    /// `onMainThread` the collecting thread was the process's main thread.
+    mutating func note(nursery k: Int, collector: Int, hostIndex: Int, onMainThread: Bool, ns: UInt64) {
+        if k == hostIndex {
+            hostAll &+= 1
+            hostAllNs &+= ns
+            if ns > hostAllMaxNs { hostAllMaxNs = ns }
+        }
+        guard collector == 0 || onMainThread else { return }
+        if k == 0 {
+            main &+= 1
+            if ns > mainMaxNs { mainMaxNs = ns }
+        } else if k == hostIndex {
+            host &+= 1
+            if ns > hostMaxNs { hostMaxNs = ns }
+        } else {
+            other &+= 1
+            if ns > otherMaxNs { otherMaxNs = ns }
+        }
+    }
+}
+
 /// Guarded by the safepoint mutex.
 struct YoungLog {
     /// The last `VMConfig.logCapacity` collections and rounds.
@@ -190,6 +233,9 @@ struct YoungLog {
     var collectorQoS: UInt32 = 0
     /// Collections an offloaded nursery's owner ran itself (no collector thread).
     var offloadedInline: UInt64 = 0
+    /// The main worker always offloads (docs/modules/main-offload.md, part
+    /// 1): collections that ran on the main thread, by whose nursery.
+    var onMain = MainThreadCollections()
 
     init(logCapacity: Int) {
         records = RecordRing(capacity: logCapacity)

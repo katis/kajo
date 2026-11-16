@@ -205,14 +205,18 @@ public struct MainThreadCounters: Sendable {
     public var stopWaitMaxNs: UInt64 = 0
     /// Collections the main worker opened while a stop was wanted.
     public var opensWhileWanted: UInt64 = 0
+    /// The main worker always offloads, part 1: the longest single wait
+    /// for its collector (cumulative maximum, kept by `since`).
+    public var collectorWaitMaxNs: UInt64 = 0
 
     public init() {}
 
     init(acksOwn: UInt64, acksOwnNs: UInt64, acksOther: UInt64, acksOtherNs: UInt64, ackMaxNs: UInt64, serviceNs: UInt64,
          ownCollections: UInt64, ownNs: UInt64, ownMaxNs: UInt64, flips: UInt64, flipNs: UInt64, flipMaxNs: UInt64,
          collectorWaits: UInt64, collectorWaitNs: UInt64, edenWaits: UInt64, edenWaitNs: UInt64, stopWaitNs: UInt64,
-         drainWaitNs: UInt64, stopWaitMaxNs: UInt64 = 0, opensWhileWanted: UInt64 = 0) {
+         drainWaitNs: UInt64, stopWaitMaxNs: UInt64 = 0, opensWhileWanted: UInt64 = 0, collectorWaitMaxNs: UInt64 = 0) {
         self.stopWaitMaxNs = stopWaitMaxNs
+        self.collectorWaitMaxNs = collectorWaitMaxNs
         self.opensWhileWanted = opensWhileWanted
         self.acksOwn = acksOwn; self.acksOwnNs = acksOwnNs; self.acksOther = acksOther; self.acksOtherNs = acksOtherNs
         self.ackMaxNs = ackMaxNs; self.serviceNs = serviceNs; self.ownCollections = ownCollections; self.ownNs = ownNs
@@ -590,7 +594,7 @@ public final class ShellVM: @unchecked Sendable {
             ownMaxNs: y.ownMaxNs, flips: y.flips, flipNs: y.flipNs, flipMaxNs: y.flipMaxNs,
             collectorWaits: y.collectorWaits, collectorWaitNs: y.collectorWaitNs, edenWaits: y.edenWaits,
             edenWaitNs: y.edenWaitNs, stopWaitNs: y.stopWaitNs, drainWaitNs: y.drainWaitNs, stopWaitMaxNs: y.stopWaitMaxNs,
-            opensWhileWanted: y.opensWhileWanted)
+            opensWhileWanted: y.opensWhileWanted, collectorWaitMaxNs: y.collectorWaitMaxNs)
     }
 
     /// Every stop so far (the last 65 536).

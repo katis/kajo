@@ -167,6 +167,9 @@ struct YoungCounters: Sendable {
     var collectorWakeups: UInt64 = 0
     var promotedBytes: UInt64 = 0
     var promotedObjects: UInt64 = 0
+    /// The main worker always offloads, part 1: collections on the main
+    /// thread by whose nursery, and the host's nursery's.
+    var onMain = MainThreadCollections()
 }
 
 extension VM {
@@ -185,7 +188,7 @@ extension VM {
             youngRootScanMaxNs: l.youngRootScanMaxNs, youngRootWords: l.youngRootWords, collectorCpuNs: l.collectorCpuNs,
             collectorQoS: l.collectorQoS, collectorWakeups: y.pointee.collectorWaits.pointee.load(ordering: .relaxed),
             promotedBytes: y.pointee.promotedBytes.pointee.load(ordering: .relaxed),
-            promotedObjects: y.pointee.promotedObjects.pointee.load(ordering: .relaxed))
+            promotedObjects: y.pointee.promotedObjects.pointee.load(ordering: .relaxed), onMain: l.onMain)
     }
 
     /// The last collections and rounds (`VMConfig.logCapacity` of each),

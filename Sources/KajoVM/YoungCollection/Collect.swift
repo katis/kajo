@@ -249,8 +249,11 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     unsafe y.pointee.promotedBytes.pointee.wrappingAdd(st.promotedBytes, ordering: .relaxed)
     unsafe y.pointee.promotedObjects.pointee.wrappingAdd(st.promotedObjects, ordering: .relaxed)
     unsafe work.pointee.busy = false
+    let onMainThread = pthread_main_np() != 0
 
     unsafe pthread_mutex_lock(vm.pointee.safepointLock)
+    unsafe y.pointee.log.pointee.onMain.note(nursery: k, collector: c.pointee.index, hostIndex: vm.pointee.workerCount &- 1,
+                                             onMainThread: onMainThread, ns: st.totalNs)
     if k == 0 { unsafe y.pointee.log.pointee.promotedMainBytes &+= st.promotedBytes }
     unsafe vm.pointee.safepoint.pointee.ycActive -= 1
     unsafe y.pointee.done[k].store(true, ordering: .releasing)
