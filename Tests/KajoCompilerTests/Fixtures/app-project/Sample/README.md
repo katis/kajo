@@ -18,6 +18,11 @@ bundled image to Kajo.
   no development code; it does not serve.
 - The images are built by `scripts/build-images.sh` in a build phase,
   with the checkout's prebuilt `kajo`.
+- Release also compiles the release image's methods to native code
+  linked into the app (`scripts/build-native.sh`, with this Xcode's
+  clang). The project's setting `KAJO_NATIVE` turns it off: `NO` in
+  `project.yml`, or `KAJO_NATIVE=NO` on one `xcodebuild` line, and the
+  app runs its methods interpreted. Debug is interpreted either way.
 
 Develop live from the Mac: run the Debug build, read the token off its
 pairing screen, and connect the tools or the CLI to `bonjour:<name>`;

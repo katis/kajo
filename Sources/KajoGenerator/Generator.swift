@@ -54,12 +54,14 @@ public struct AppProjectSpec: Sendable, Equatable {
     public var platforms: [AppPlatform]
     /// AOT 2 (docs/modules/aot-product.md): the project's `KAJO_NATIVE`
     /// setting, whether a Release build compiles the sealed image's methods
-    /// into the app (`kajo new --native`; off by default, open question 1).
-    /// Either way the project can turn it on or off without regenerating.
+    /// into the app. On by default since the native-by-default follow-up
+    /// (docs/modules/native-by-default.md, the owner's answer of 2026-11-15;
+    /// `kajo new --no-native` turns it off). Either way the project can turn
+    /// it on or off without regenerating.
     public var native: Bool
 
     public init(name: String, bundleIdentifier: String, team: String? = nil, kajo: KajoSource,
-                platforms: [AppPlatform] = AppPlatform.allCases, native: Bool = false) {
+                platforms: [AppPlatform] = AppPlatform.allCases, native: Bool = true) {
         self.name = name
         self.bundleIdentifier = bundleIdentifier
         self.team = team
@@ -69,6 +71,62 @@ public struct AppProjectSpec: Sendable, Equatable {
     }
 
     func has(_ p: AppPlatform) -> Bool { platforms.contains(p) }
+}
+
+/// `kajo new`'s arguments (the ones after `new`), read into a spec, the
+/// checkout and the directory. The native-by-default follow-up: the module
+/// is on unless `--no-native`; `--native` is accepted as the default it is
+/// (scripts that pass it keep working); the last of the two wins.
+public struct NewArguments: Equatable, Sendable {
+    public var spec = AppProjectSpec(name: "", bundleIdentifier: "", kajo: .path(""))
+    /// `--kajo`, as given.
+    public var checkout: String?
+    /// `--directory`, as given.
+    public var directory: String?
+
+    /// Why the arguments are refused: the message, and whether the usage
+    /// should follow it.
+    public struct Refusal: Error, Equatable, Sendable {
+        public let message: String
+        public let showUsage: Bool
+    }
+
+    public static func parse(_ args: [String]) -> Result<NewArguments, Refusal> {
+        var a = NewArguments()
+        var i = 0
+        while i < args.count {
+            let arg = args[i]
+            func value() -> String? {
+                i += 1
+                return i < args.count ? args[i] : nil
+            }
+            switch arg {
+            case "--bundle-id", "--team", "--kajo", "--directory", "--platforms":
+                guard let v = value() else { return .failure(Refusal(message: "\(arg) needs a value", showUsage: true)) }
+                switch arg {
+                case "--bundle-id": a.spec.bundleIdentifier = v
+                case "--team": a.spec.team = v
+                case "--kajo": a.checkout = v
+                case "--directory": a.directory = v
+                default:
+                    let names = v.split(separator: ",").map(String.init)
+                    let ps = names.compactMap(AppPlatform.init(rawValue:))
+                    guard ps.count == names.count else {
+                        return .failure(Refusal(message: "kajo new: --platforms takes macOS, iOS or macOS,iOS", showUsage: false))
+                    }
+                    a.spec.platforms = AppPlatform.allCases.filter(ps.contains)
+                }
+            case "--native": a.spec.native = true
+            case "--no-native": a.spec.native = false
+            case let o where o.hasPrefix("-"): return .failure(Refusal(message: "unknown option \(o)", showUsage: true))
+            default:
+                guard a.spec.name.isEmpty else { return .failure(Refusal(message: "one name", showUsage: true)) }
+                a.spec.name = arg
+            }
+            i += 1
+        }
+        return .success(a)
+    }
 }
 
 /// Why the generator refuses. Each is a value the caller shows.

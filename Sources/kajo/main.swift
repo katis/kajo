@@ -21,7 +21,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
        kajo test [image.img] [--filter pattern] [--tag tag] [--test Class>>selector]... [--list] [--junit path] [--workers N] [--heap MiB] [--sources dir]
-       kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS] [--native]
+       kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS] [--no-native]
        kajo aot <file.kasm>...|<image.img> -o <dir>
        kajo run ... --native <module.dylib>
        kajo version
@@ -63,10 +63,13 @@ local network), the build phase that makes a development image (Debug) or
 a release image (Release) with the checkout's prebuilt kajo, and the Xcode
 project when xcodegen is found. --kajo names a Kajo distribution checkout
 (Prebuilt/ with the Release frameworks and kajo; the Kajo app copies its
-own to Application Support, scripts/dist.sh makes one). --native turns the
-project's KAJO_NATIVE setting on: a Release build then compiles the sealed
-image's methods to native code linked into the app (AOT 2; the setting
-can be changed in the project without generating it again).
+own to Application Support, scripts/dist.sh makes one). A Release build
+compiles the sealed image's methods to native code linked into the app
+(the project's KAJO_NATIVE setting, YES by default since the
+native-by-default follow-up); --no-native writes NO, and the app's methods
+run interpreted (--native, the default, is accepted). The setting can be
+changed in the project, or with KAJO_NATIVE=NO on an xcodebuild line,
+without generating the project again.
 
 aot (AOT 1, AOT 2): reads an image (or the kasm files `run` would load) and
 writes the native engine's C to <dir> (kajo_native.h and the kajo_native_*.c
@@ -231,33 +234,13 @@ case "build-image":
         fail("kajo build-image: \(error)", 1)
     }
 case "new":
-    var spec = AppProjectSpec(name: "", bundleIdentifier: "", kajo: .path(""))
-    var path: String? = nil, directory: String? = nil
-    var i = 0
-    func value() -> String {
-        i += 1
-        guard i < args.count else { fail("\(args[i - 1]) needs a value\n\(usage)") }
-        return args[i]
+    let parsed: NewArguments
+    switch NewArguments.parse(args) {
+    case .success(let a): parsed = a
+    case .failure(let r): fail(r.showUsage ? "\(r.message)\n\(usage)" : r.message)
     }
-    while i < args.count {
-        switch args[i] {
-        case "--bundle-id": spec.bundleIdentifier = value()
-        case "--team": spec.team = value()
-        case "--kajo": path = value()
-        case "--directory": directory = value()
-        case "--native": spec.native = true
-        case "--platforms":
-            let names = value().split(separator: ",").map(String.init)
-            let ps = names.compactMap(AppPlatform.init(rawValue:))
-            guard ps.count == names.count else { fail("kajo new: --platforms takes macOS, iOS or macOS,iOS") }
-            spec.platforms = AppPlatform.allCases.filter(ps.contains)
-        case let a where a.hasPrefix("-"): fail("unknown option \(a)\n\(usage)")
-        default:
-            guard spec.name.isEmpty else { fail("one name\n\(usage)") }
-            spec.name = args[i]
-        }
-        i += 1
-    }
+    var spec = parsed.spec
+    let path = parsed.checkout, directory = parsed.directory
     guard !spec.name.isEmpty, !spec.bundleIdentifier.isEmpty else { fail(usage) }
     guard let p = path else { fail("kajo new: where Kajo comes from: --kajo <checkout>") }
     // A relative checkout is taken from the current directory.

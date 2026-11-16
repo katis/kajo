@@ -230,6 +230,48 @@ func scratchDirectory(_ tag: String) -> String {
         #expect(!fm.fileExists(atPath: none))
     }
 
+    // The native-by-default follow-up (docs/modules/native-by-default.md):
+    // a spec that does not name the module turns it on; `native: false`
+    // writes NO, and the setting is the only line of the project that
+    // differs. The build script's by-hand default follows the setting's.
+    @Test func aSpecThatDoesNotNameTheModuleTurnsItOn() throws {
+        let on = try #require(try generated(fixtureSpec).first { $0.path == "project.yml" }).text
+        #expect(on.contains("\n    KAJO_NATIVE: YES\n"))
+        var spec = fixtureSpec
+        spec.native = false
+        let off = try #require(try generated(spec).first { $0.path == "project.yml" }).text
+        #expect(off.contains("\n    KAJO_NATIVE: NO\n"))
+        let a = on.split(separator: "\n", omittingEmptySubsequences: false), b = off.split(separator: "\n", omittingEmptySubsequences: false)
+        #expect(a.count == b.count)
+        #expect(zip(a, b).filter { $0 != $1 }.map { String($0.0) } == ["    KAJO_NATIVE: YES"])
+        let script = try #require(try generated(fixtureSpec).first { $0.path == "scripts/build-native.sh" }).text
+        #expect(script.contains("${KAJO_NATIVE:-YES} != YES"))
+        // A failed step names the setting that turns the module off.
+        #expect(script.contains("Set KAJO_NATIVE=NO (in project.yml, or on the xcodebuild line)"))
+    }
+
+    // `kajo new` with no flag, `--native` and `--no-native`: the project's
+    // setting read back from the written project.yml.
+    @Test func kajoNewTurnsTheModuleOnUnlessToldNo() throws {
+        let base = ["Notes", "--bundle-id", "com.example.notes", "--kajo", "/path/to/kajo"]
+        for (flags, want) in [([String](), "YES"), (["--native"], "YES"), (["--no-native"], "NO"),
+                              (["--no-native", "--native"], "YES"), (["--native", "--no-native"], "NO")] {
+            let a = try NewArguments.parse(base + flags).get()
+            #expect(a.checkout == "/path/to/kajo" && a.directory == nil && a.spec.name == "Notes")
+            var spec = a.spec
+            spec.kajo = .path(try #require(a.checkout))
+            let d = scratchDirectory("native")
+            defer { try? FileManager.default.removeItem(atPath: d) }
+            _ = try AppProjectGenerator.write(spec, into: d).get()
+            let yml = try String(contentsOfFile: d + "/project.yml", encoding: .utf8)
+            #expect(yml.contains("\n    KAJO_NATIVE: \(want)\n"), "\(flags)")
+        }
+        #expect(NewArguments.parse(base + ["--natve"]) == .failure(.init(message: "unknown option --natve", showUsage: true)))
+        #expect(NewArguments.parse(["--kajo"]) == .failure(.init(message: "--kajo needs a value", showUsage: true)))
+        #expect(NewArguments.parse(base + ["--platforms", "tvOS"]).map(\.spec) == .failure(.init(message: "kajo new: --platforms takes macOS, iOS or macOS,iOS", showUsage: false)))
+        #expect(try NewArguments.parse(base + ["--platforms", "iOS", "--team", "T", "--directory", "x"]).get().spec.platforms == [.iOS])
+    }
+
     @Test func theGeneratedAppCompilesWithTheKernelAndItsTestPasses() throws {
         let d = scratchDirectory("tonel")
         defer { try? FileManager.default.removeItem(atPath: d) }
