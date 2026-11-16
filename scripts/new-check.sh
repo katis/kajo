@@ -18,6 +18,9 @@
 # product holds the prebuilt framework's symbols). The
 # image build phase is timed first and incremental (nothing changed, then
 # one source touched). The scratch project and its DerivedData are removed.
+# Since the native-by-default follow-up the plain Release builds carry the
+# image's native module (the project's default) and each Release product is
+# built again with KAJO_NATIVE=NO, the module's negative control.
 #
 #   scripts/new-check.sh [outdir]      (DD overrides the DerivedData root)
 #   KAJO_CHECKOUT=<dir> scripts/new-check.sh [outdir]
@@ -120,39 +123,19 @@ print "macos-debug: kajo_modules_compiled=$compiled prebuilt_vm_symbols=$vmsyms"
 build Sample-macOS Debug macos-debug-again
 touch $proj/src/SampleApp.class.st
 build Sample-macOS Debug macos-debug-touched
-build Sample-macOS Release macos-release
-mac=$DD/Build/Products/Release/Sample.app/Contents
-check macos-release $mac/MacOS/Sample $mac/Info.plist $mac/Resources/kajo/app.img release
-print "macos-release: app_bytes=$(du -sk $DD/Build/Products/Release/Sample.app | cut -f1)KiB"
-build Sample-iOS Debug ios-debug -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
-ios=$DD/Build/Products/Debug-iphoneos/Sample.app
-check ios-debug $ios/Sample.debug.dylib $ios/Info.plist $ios/kajo/app.img debug
-# The simulator-slices follow-up (docs/modules/simulator-slices.md): the
-# iOS target's Debug build for the iOS Simulator links the prebuilt
-# frameworks' ios-arm64-simulator slice; the product is a simulator binary
-# (LC_BUILD_VERSION platform IOSSIMULATOR) with the Debug product's checks.
-build Sample-iOS Debug ios-simulator-debug -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
-sim=$DD/Build/Products/Debug-iphonesimulator/Sample.app
-simbin=$sim/Sample.debug.dylib
-[[ -f $simbin ]] || simbin=$sim/Sample
-check ios-simulator-debug $simbin $sim/Info.plist $sim/kajo/app.img debug
-simplatform=$(vtool -show-build $simbin 2>/dev/null | awk '/platform/ {print $2; exit}')
-print "ios-simulator-debug: platform=$simplatform"
-[[ $simplatform == IOSSIMULATOR ]] || { print "ios-simulator-debug: FAILED not a simulator binary"; fail=1; }
-build Sample-iOS Release ios-release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
-ios=$DD/Build/Products/Release-iphoneos/Sample.app
-check ios-release $ios/Sample $ios/Info.plist $ios/kajo/app.img release
-print "ios-release: app_bytes=$(du -sk $ios | cut -f1)KiB"
-# AOT 2 (docs/modules/aot-product.md): the Release builds again with the
-# project's KAJO_NATIVE setting on (an xcodebuild override: the project is
-# not generated again). Each Release binary with the module has the
-# descriptor's section and no generator (KajoAOT) or development symbol; the
-# binaries above, built with it off, have no section (the positive control
-# of the section check is this pair). The Mac app is launched and must bind
-# every method of its image with 0 declined. The cache: an unchanged second
-# build compiles nothing; a truncated library is rebuilt, never linked; a
-# stale library (another layout hash, as after a Kajo update) is linked,
-# refused at launch with its reason, and the app runs interpreted.
+# The native-by-default follow-up (docs/modules/native-by-default.md): a
+# project from `kajo new` has KAJO_NATIVE = YES, so the plain Release
+# builds are the native ones. Each Release binary has the descriptor's
+# section and no generator (KajoAOT) or development symbol; the Mac app is
+# launched and must bind every method its module generated with 0 declined.
+# The same products built with KAJO_NATIVE=NO on the xcodebuild line (the
+# project is not generated again) are the off rows: no section, nothing
+# under .build/kajo/native/<platform>/, their size beside the on one; each
+# side is the other's control. The cache: an unchanged second build
+# compiles nothing; a truncated library is rebuilt, never linked; a stale
+# library (another layout hash, as after a Kajo update) is linked, refused
+# at launch with its reason, and the app runs interpreted; a changed image
+# builds a new library and the earlier ones go (one library per platform).
 section() { otool -l $1 2>/dev/null | grep -c "sectname __kajo_native" }
 launch() { # <binary> <out>: run the app until it prints its native line (bounded)
   ( gtimeout 30 $1 > $2 2>&1 & ); local i=0
@@ -160,36 +143,44 @@ launch() { # <binary> <out>: run the app until it prints its native line (bounde
   sleep 0.5; pkill -f "^$1" 2>/dev/null; sleep 0.3
   grep -m1 '^native=' $2 || print "native=none"
 }
+generated() { grep -c 'native module: generating' $out/build-$1.log }
+keys() { # the cached libraries' key directories
+  local n=0 d
+  for d in $proj/.build/kajo/native/*(N/); do [[ ${#${d:t}} == 24 ]] && n=$((n + 1)); done
+  print $n
+}
+# off <platform dir>: whether .build/kajo/native/<platform>/ holds no file
+nofiles() { [[ -z $(find $proj/.build/kajo/native/$1 -type f -o -type l 2>/dev/null) ]] && print 1 || print 0 }
+bound() { # <tag> <native line>: bound at least generated, bound plus unbound the image's methods, 0 declined
+  local nl=$2 n b u g dcl
+  n=$(print -- $nl | sed -n 's/.* methods=\([0-9]*\).*/\1/p'); b=$(print -- $nl | sed -n 's/.* bound=\([0-9]*\).*/\1/p')
+  u=$(print -- $nl | sed -n 's/.* unbound=\([0-9]*\).*/\1/p'); g=$(print -- $nl | sed -n 's/.* generated=\([0-9]*\).*/\1/p')
+  dcl=$(print -- $nl | sed -n 's/.* declined=\([0-9]*\).*/\1/p')
+  [[ $nl == native=bound* && -n $n && -n $g && $b -ge $g && $(( b + u )) == $n && $dcl == 0 ]] \
+    || { print "$1: FAILED the bind (bound $b of $n, generated $g, declined $dcl)"; fail=1; }
+}
 macbin=$DD/Build/Products/Release/Sample.app/Contents/MacOS/Sample
-offsection=$(section $macbin)
-offbytes=$(stat -f %z $macbin)
-print "macos-release: native_section=$offsection (module off)"
-[[ $offsection == 0 ]] || { print "macos-release: FAILED a module-off binary has the section"; fail=1; }
-build Sample-macOS Release macos-release-native KAJO_NATIVE=YES
+build Sample-macOS Release macos-release
 mac=$DD/Build/Products/Release/Sample.app/Contents
-check macos-release-native $mac/MacOS/Sample $mac/Info.plist $mac/Resources/kajo/app.img release
+check macos-release $mac/MacOS/Sample $mac/Info.plist $mac/Resources/kajo/app.img release
+onbytes=$(stat -f %z $macbin)
 nl=$(launch $macbin $out/launch-native.txt)
-print "macos-release-native: native_section=$(section $macbin) binary_bytes=$(stat -f %z $macbin) off_bytes=$offbytes app_bytes=$(du -sk $DD/Build/Products/Release/Sample.app | cut -f1)KiB generated_in_build=$(grep -c 'native module: generating' $out/build-macos-release-native.log) $nl"
-# Every method the generator wrote binds (and every method of equal
-# content with it); the rest, the subset's complement, run interpreted.
-n=$(print -- $nl | sed -n 's/.* methods=\([0-9]*\).*/\1/p'); b=$(print -- $nl | sed -n 's/.* bound=\([0-9]*\).*/\1/p')
-u=$(print -- $nl | sed -n 's/.* unbound=\([0-9]*\).*/\1/p'); g=$(print -- $nl | sed -n 's/.* generated=\([0-9]*\).*/\1/p')
-dcl=$(print -- $nl | sed -n 's/.* declined=\([0-9]*\).*/\1/p')
-[[ $(section $macbin) == 1 && -n $n && -n $g && $b -ge $g && $(( b + u )) == $n && $dcl == 0 ]] \
-  || { print "macos-release-native: FAILED the section or the bind (bound $b of $n, generated $g, declined $dcl)"; fail=1; }
-build Sample-macOS Release macos-release-native-again KAJO_NATIVE=YES
-again=$(grep -c 'native module: generating' $out/build-macos-release-native-again.log)
-print "macos-release-native-again: generated_in_build=$again"
-[[ $again == 0 ]] || { print "macos-release-native-again: FAILED an unchanged build compiled the module again"; fail=1; }
+print "macos-release: native_section=$(section $macbin) app_bytes=$(du -sk $DD/Build/Products/Release/Sample.app | cut -f1)KiB generated_in_build=$(generated macos-release) $nl"
+[[ $(section $macbin) == 1 ]] || { print "macos-release: FAILED a plain Release binary has no module section"; fail=1; }
+bound macos-release $nl
+build Sample-macOS Release macos-release-again
+again=$(generated macos-release-again)
+print "macos-release-again: generated_in_build=$again"
+[[ $again == 0 ]] || { print "macos-release-again: FAILED an unchanged build compiled the module again"; fail=1; }
 nlib=$(readlink $proj/.build/kajo/native/macosx/libkajo_native.a)
 ndir=${nlib:h}
 # A truncated library: its stamp no longer matches, so it is built again.
 head -c 1000 $nlib > $nlib.cut && mv $nlib.cut $nlib
-build Sample-macOS Release macos-release-native-truncated KAJO_NATIVE=YES
+build Sample-macOS Release macos-release-truncated
 nl=$(launch $macbin $out/launch-truncated.txt)
-print "macos-release-native-truncated: generated_in_build=$(grep -c 'native module: generating' $out/build-macos-release-native-truncated.log) $nl"
-[[ $(grep -c 'native module: generating' $out/build-macos-release-native-truncated.log) == 1 && $nl == native=bound* ]] \
-  || { print "macos-release-native-truncated: FAILED a truncated library was not rebuilt"; fail=1; }
+print "macos-release-truncated: generated_in_build=$(generated macos-release-truncated) $nl"
+[[ $(generated macos-release-truncated) == 1 && $nl == native=bound* ]] \
+  || { print "macos-release-truncated: FAILED a truncated library was not rebuilt"; fail=1; }
 # A stale library: the same module with another layout hash, stamped as
 # whole, as a library left by an earlier Kajo would be.
 rm -rf $work/stale && mkdir -p $work/stale
@@ -197,21 +188,43 @@ $ck/Prebuilt/bin/kajo aot $proj/.build/kajo/app-release.img -o $work/stale/c > /
 sed -i '' 's/FORMAT_VERSION, LAYOUT_HASH0, LAYOUT_HASH1/FORMAT_VERSION, LAYOUT_HASH0 ^ 1, LAYOUT_HASH1/' $work/stale/c/kajo_native_tables.c
 (cd $work/stale/c && for f in kajo_native_*.c; do xcrun clang -O2 -target arm64-apple-macos15.0 -c $f -o $f.o || exit 1; done && libtool -static -o $nlib *.o) \
   && shasum -a 256 $nlib | cut -d' ' -f1 > $ndir/stamp
-build Sample-macOS Release macos-release-native-stale KAJO_NATIVE=YES
+build Sample-macOS Release macos-release-stale
 nl=$(launch $macbin $out/launch-stale.txt)
-opened=$(grep -c 'step=image-opened\|native=refused' $out/launch-stale.txt)
-print "macos-release-native-stale: $nl"
-[[ $nl == *"native=refused"*"layout hash"* ]] || { print "macos-release-native-stale: FAILED a stale module was not refused with its reason"; fail=1; }
-rm -rf $ndir
-build Sample-iOS Release ios-release-native -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO KAJO_NATIVE=YES
+print "macos-release-stale: $nl"
+[[ $nl == *"native=refused"*"layout hash"* ]] || { print "macos-release-stale: FAILED a stale module was not refused with its reason"; fail=1; }
+# A changed image (the app's class comment edited): a new key, a new
+# library linked and bound, and the earlier one (the stale) removed.
+before=$(keys)
+sed -i '' '1s/^"/"Changed by new-check. /' $proj/src/SampleApp.class.st
+build Sample-macOS Release macos-release-changed
+nl=$(launch $macbin $out/launch-changed.txt)
+after=$(keys)
+print "macos-release-changed: generated_in_build=$(generated macos-release-changed) keys_before=$before keys_after=$after old_key_left=$([[ -d $ndir ]] && print 1 || print 0) $(grep -m1 'libraries of earlier builds removed' $out/build-macos-release-changed.log) $nl"
+[[ $(generated macos-release-changed) == 1 && $before == 1 && $after == 1 && ! -d $ndir ]] \
+  || { print "macos-release-changed: FAILED a changed image left more than one library"; fail=1; }
+bound macos-release-changed $nl
+build Sample-macOS Release macos-release-off KAJO_NATIVE=NO
+check macos-release-off $mac/MacOS/Sample $mac/Info.plist $mac/Resources/kajo/app.img release
+print "macos-release-off: native_section=$(section $macbin) binary_bytes=$(stat -f %z $macbin) on_bytes=$onbytes no_files=$(nofiles macosx) app_bytes=$(du -sk $DD/Build/Products/Release/Sample.app | cut -f1)KiB"
+[[ $(section $macbin) == 0 && $(nofiles macosx) == 1 ]] || { print "macos-release-off: FAILED a KAJO_NATIVE=NO build has the section or a library"; fail=1; }
+build Sample-iOS Release ios-release -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO
 ios=$DD/Build/Products/Release-iphoneos/Sample.app
-check ios-release-native $ios/Sample $ios/Info.plist $ios/kajo/app.img release
-print "ios-release-native: native_section=$(section $ios/Sample) binary_bytes=$(stat -f %z $ios/Sample) app_bytes=$(du -sk $ios | cut -f1)KiB"
-[[ $(section $ios/Sample) == 1 ]] || { print "ios-release-native: FAILED no module section"; fail=1; }
-build Sample-iOS Release ios-simulator-release-native -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO KAJO_NATIVE=YES
+check ios-release $ios/Sample $ios/Info.plist $ios/kajo/app.img release
+ionbytes=$(stat -f %z $ios/Sample)
+print "ios-release: native_section=$(section $ios/Sample) app_bytes=$(du -sk $ios | cut -f1)KiB generated_in_build=$(generated ios-release)"
+[[ $(section $ios/Sample) == 1 ]] || { print "ios-release: FAILED no module section"; fail=1; }
+build Sample-iOS Release ios-release-off -destination generic/platform=iOS CODE_SIGNING_ALLOWED=NO KAJO_NATIVE=NO
+check ios-release-off $ios/Sample $ios/Info.plist $ios/kajo/app.img release
+print "ios-release-off: native_section=$(section $ios/Sample) binary_bytes=$(stat -f %z $ios/Sample) on_bytes=$ionbytes no_files=$(nofiles iphoneos) app_bytes=$(du -sk $ios | cut -f1)KiB"
+[[ $(section $ios/Sample) == 0 && $(nofiles iphoneos) == 1 ]] || { print "ios-release-off: FAILED a KAJO_NATIVE=NO build has the section or a library"; fail=1; }
+build Sample-iOS Release ios-simulator-release -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO
 sim=$DD/Build/Products/Release-iphonesimulator/Sample.app
-print "ios-simulator-release-native: native_section=$(section $sim/Sample) platform=$(vtool -show-build $sim/Sample 2>/dev/null | awk '/platform/ {print $2; exit}') binary_bytes=$(stat -f %z $sim/Sample)"
-[[ $(section $sim/Sample) == 1 ]] || { print "ios-simulator-release-native: FAILED no module section"; fail=1; }
+snbytes=$(stat -f %z $sim/Sample)
+print "ios-simulator-release: native_section=$(section $sim/Sample) platform=$(vtool -show-build $sim/Sample 2>/dev/null | awk '/platform/ {print $2; exit}') binary_bytes=$snbytes generated_in_build=$(generated ios-simulator-release)"
+[[ $(section $sim/Sample) == 1 ]] || { print "ios-simulator-release: FAILED no module section"; fail=1; }
+build Sample-iOS Release ios-simulator-release-off -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO KAJO_NATIVE=NO
+print "ios-simulator-release-off: native_section=$(section $sim/Sample) binary_bytes=$(stat -f %z $sim/Sample) on_bytes=$snbytes no_files=$(nofiles iphonesimulator)"
+[[ $(section $sim/Sample) == 0 && $(nofiles iphonesimulator) == 1 ]] || { print "ios-simulator-release-off: FAILED a KAJO_NATIVE=NO build has the section or a library"; fail=1; }
 # The image build phase alone: first (no kajo built for the project yet),
 # again with nothing changed, and with one source touched.
 phase() {
