@@ -17,6 +17,14 @@ all, and the rows that missed a frame, fell back or delivered no frames
 disagreed, 0 otherwise (missed frames and fallbacks are reported, not
 judged).
 
+The main worker always offloads (docs/modules/main-offload.md): --bar adds
+the young collections that ran on the main thread (gc_ycOnMain, its longest
+gc_ycOnMainMaxMs; 0 in every row but the stw rows, whose value is "-") and
+the host's nursery's collections (gc_ycHost, gc_ycHostMaxMs), and a line
+naming every young mode the rows carry: stw and offload, and any other
+value counted as unknown (never as a pass or a failure). Rows without the
+counter read "?" in those columns.
+
 The warm-up launch (docs/modules/first-launch.md): shell-matrix.sh runs one
 idle launch before its first row into warmup.txt; it is never a row of a
 table or of the bar, and both outputs print it on a line of its own before
@@ -119,6 +127,55 @@ def kind_stops(r, kind):
     return 0, None
 
 
+YOUNG_MODES = {"stw": "the oracle", "offload": "the policy"}
+
+
+def young_modes(rows_by_file):
+    """One line naming every young mode the scenario rows carry, with row
+    counts: the known ones, the rest as unknown."""
+    count = defaultdict(int)
+    for rows in rows_by_file:
+        for r in rows:
+            if r.get("mode") == "scenario" or "scenario" in r:
+                count[r.get("young", "-")] += 1
+    if not count:
+        return None
+    parts = []
+    for y in sorted(count):
+        what = YOUNG_MODES.get(y, "UNKNOWN young mode")
+        parts.append(f"{y} {count[y]} ({what})")
+    return "young modes in the rows: " + ", ".join(parts)
+
+
+def on_main(rows):
+    """(collections on the main thread, longest ms, rows with the counter,
+    stw rows, rows without it) over rows; and the host's (collections,
+    longest ms)."""
+    n = 0.0
+    mx = None
+    have = stw = absent = 0
+    hn = 0.0
+    hmx = None
+    for r in rows:
+        v = r.get("gc_ycOnMain")
+        if v is None:
+            absent += 1
+            continue
+        if v == "-":
+            stw += 1
+            continue
+        have += 1
+        n += num(v) or 0
+        m = num(r.get("gc_ycOnMainMaxMs"))
+        if m is not None and (num(v) or 0) > 0:
+            mx = m if mx is None else max(mx, m)
+        hn += num(r.get("gc_ycHost")) or 0
+        hm = num(r.get("gc_ycHostMaxMs"))
+        if hm is not None and (num(r.get("gc_ycHost")) or 0) > 0:
+            hmx = hm if hmx is None else max(hmx, hm)
+    return n, mx, have, stw, absent, hn, hmx
+
+
 def row_name(r):
     keys = ["mode", "kernel", "kind", "workers", "scenario", "young", "events", "hog", "budget", "run"]
     return " ".join(f"{k}={r[k]}" for k in keys if k in r)
@@ -145,8 +202,12 @@ def bar(d):
     if w:
         print(w)
         print()
-    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | longest stop ms | longest wait for a safepoint ms (kind, last parker/how it parked) |")
-    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|")
+    ym = young_modes([lines(d / f"{f}.txt") for f in files])
+    if ym:
+        print(ym)
+        print()
+    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | young on the main thread (longest ms) | host's nursery (longest ms) | longest stop ms | longest wait for a safepoint ms (kind, last parker/how it parked) |")
+    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|")
     tot = defaultdict(float)
     worst = None
     worst_wait = None
@@ -191,15 +252,23 @@ def bar(d):
                 ww = (s[0], s[1], s[2], r)
         if ww and (worst_wait is None or ww[0] > worst_wait[0]):
             worst_wait = (ww[0], ww[1], ww[2], ww[3], f)
+        om_n, om_max, om_have, _, _, host_n, host_max = on_main(ok_rows)
+        if om_max is not None:
+            tot["onmainmax"] = max(tot["onmainmax"], om_max)
+        if host_max is not None:
+            tot["hostmax"] = max(tot["hostmax"], host_max)
+        tot["onmainhave"] += om_have
         for k, v in [("rows", len(rows)), ("failed", failed), ("sums", bad_sum), ("missing", len(missing)), ("missed", missed),
                      ("noframes", len(noframes)), ("falling", len(falling)), ("fallbacks", fallbacks), ("sweeps", sweep_n),
-                     ("unjust", unjust), ("stalls", stall_n)]:
+                     ("unjust", unjust), ("stalls", stall_n), ("onmain", om_n), ("host", host_n)]:
             tot[k] += v
         stop = f"{fw[0]:.2f} ({fw[1]})" if fw else "-"
         sw = f"{sweep_n} ({sweep_max:.2f})" if sweep_max is not None else f"{sweep_n}"
         st = f"{stall_n:.0f} ({stall_max:.2f})" if stall_max is not None else "-"
         wait = f"{ww[0]:.2f} ({ww[1]}, {ww[2]})" if ww else "-"
-        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {stop} | {wait} |")
+        om = "?" if not om_have else (f"{om_n:.0f} ({om_max:.2f})" if om_max is not None else f"{om_n:.0f}")
+        ho = "?" if not om_have else (f"{host_n:.0f} ({host_max:.2f})" if host_max is not None else f"{host_n:.0f}")
+        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {om} | {ho} | {stop} | {wait} |")
         for r in rows:
             if r.get("_failed"):
                 notes.append(f"- {f}: launch failed: {' '.join(k + '=' + v for k, v in r.items() if not k.startswith('_'))}")
@@ -213,11 +282,16 @@ def bar(d):
             notes.append(f"- {f}: {r.get('gc_fallbacks')} fallbacks: {row_name(r)} record {r.get('gc_fallbackLog', '-')}")
         for r in [r for r in ok_rows if (num(r.get("gc_unjustifiedFallbacks")) or 0) > 0]:
             notes.append(f"- {f}: UNJUSTIFIED fallbacks {r.get('gc_unjustifiedFallbacks')}: {row_name(r)} record {r.get('gc_fallbackLog', '-')}")
+        for r in [r for r in ok_rows if (num(r.get("gc_ycOnMain")) or 0) > 0]:
+            notes.append(f"- {f}: {r.get('gc_ycOnMain')} young collections on the main thread (longest {r.get('gc_ycOnMainMaxMs')} ms;"
+                         f" worker 0's {r.get('gc_ycOnMainW0')}, the host's {r.get('gc_ycOnMainHost')}): {row_name(r)}")
     stop = f"{worst[0]:.2f} ({worst[1]}, {worst[3]}: {row_name(worst[2])})" if worst else "-"
     sw = f"{tot['sweeps']:.0f} ({tot['sweepmax']:.2f})" if tot["sweeps"] else "0"
     stt = f"{tot['stalls']:.0f} ({tot['stallmax']:.2f})" if tot["stalls"] else "0"
     wait = f"{worst_wait[0]:.2f} ({worst_wait[1]}, {worst_wait[2]}, {worst_wait[4]}: {row_name(worst_wait[3])})" if worst_wait else "-"
-    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {stop} | {wait} |")
+    omt = "?" if not tot["onmainhave"] else (f"{tot['onmain']:.0f} ({tot['onmainmax']:.2f})" if tot["onmain"] else "0")
+    hot = "?" if not tot["onmainhave"] else (f"{tot['host']:.0f} ({tot['hostmax']:.2f})" if tot["host"] else "0")
+    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {omt} | {hot} | {stop} | {wait} |")
     if notes:
         print()
         print("\n".join(notes))

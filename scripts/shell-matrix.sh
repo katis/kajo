@@ -54,8 +54,10 @@ for part in ${=parts}; do
     scenarios)
       for run in $(seq $RUNS); do
         one $out/scenarios.txt mode=scenario scenario=idle young=offload workers=$W seconds=$SECS run=$run
+        # The young modes (docs/modules/main-offload.md: the main worker
+        # always offloads).
         for s in storm ring share; do
-          for y in stw local offload; do
+          for y in stw offload; do
             one $out/scenarios.txt mode=scenario scenario=$s young=$y workers=$W seconds=$SECS run=$run
           done
         done
