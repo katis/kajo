@@ -474,3 +474,64 @@ This "As built"; dated notes (the text above them not rewritten) at the
 end of `docs/modules/aot-product.md` and of ADR 0015, and after the round
 trip's sizes in `docs/modules/distribution.md` (a Release app with the
 module and without).
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/native-by-default/check just check 30e14bd`
+on the final code commit 0f3c282 (swiftly's swift.org 6.4.2 and its clang
+first on PATH, `check-env.txt`), the Swift tier, chosen by the 16 files
+under `Sources/KajoApp`, `Sources/KajoAppDevelopment`,
+`Sources/KajoGenerator`, `Sources/kajo`, `Tests/KajoCompilerTests` and
+`scripts/new-check.sh` (no fuzzer reads any of them); every gate passed in
+4295 s (`check/gates.log`):
+
+```
+2026-11-16 08:36:01 0f3c282 end clean-build rc=0 20s
+2026-11-16 08:48:52 0f3c282 end swift-test rc=0 771s
+2026-11-16 09:38:59 0f3c282 end tsan rc=0 3007s
+2026-11-16 09:40:45 0f3c282 end kernel-test rc=0 106s
+2026-11-16 09:42:52 0f3c282 end apps rc=0 127s
+2026-11-16 09:47:16 0f3c282 end new-check rc=0 264s
+2026-11-16 09:47:16 0f3c282 check-tier done swift failed=0 4295s
+```
+
+461 + 164 tests in both test gates (the two new ones), ThreadSanitizer 0
+reports; the weekly run of 2026-11-16 on 30e14bd took 21, 744, 3094, 108,
+127 and 302 s for the same gates. Its two failing Symbol-interning tests
+(`workersInterningTheSameBytesAtOnceGetOneSymbol`,
+`withoutTheSecondLookupTwoSymbolsOfTheSameBytesAppear`) passed in both test
+gates of this run. 249 of 249 kernel tests; both shells 0 warnings;
+`new-check: ok`.
+
+### Deviations
+
+- Part 1 added code (b8d6459, the Release frames line), as the brief
+  allows for the smallest addition, and the Samples were generated from a
+  checkout of that commit with the generator unchanged.
+- The Mac matrix ran in one order (interpreted, then native); the devices
+  in both. The iPad matrix, "if time allows", was run in both orders.
+- The shells' native modules are compiled by the PATH clang (swift.org's)
+  and the generated project's by Xcode's, as before this module.
+- Part 2's CLI test reads the flags through `NewArguments` (new in
+  `KajoGenerator`) and a written `project.yml`; the real `kajo new` was run
+  by hand for each flag (`part2/cli-runs.txt`).
+
+### Not done
+
+- `app-roundtrip.sh mac`'s Bonjour step (`FAILED host=mac step=bonjour`):
+  this session sees no Bonjour (above); every other step passed.
+- Release build times on the devices' side; a native `kajo-bench` and the
+  kernel's tests through the Sample (not in this module).
+
+### Open questions (the brief's, with what was built)
+
+1. `--native` kept and accepted (built, as recommended).
+2. A failed native step fails the Release build with one line naming
+   `KAJO_NATIVE=NO` (built, as recommended).
+3. One library per platform (built, as recommended).
+4. Part 1 found frames missed with the module on in two device row kinds,
+   both under the stop-the-world young collector and with 0 fallbacks:
+   the iPhone's storm (1 frame in 1 of 6 rows) and the iPad's ring (28
+   frames in 6 rows against 10). Built: the default as answered, reported
+   here (as recommended). Recommendation: no hold; the default young mode
+   (`offload`) missed nothing in either engine on any device.
