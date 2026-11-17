@@ -1,7 +1,10 @@
 "The experiment's measurements, run by `kajo run <image> --sources <dir>` (UndefinedObject>>run:of: reads the file `command` in that directory and sends its first word to this class). The side files are read from <dir>/annotations/<Class>.types and every report is written to <dir>/out/. Each report is plain text, one fact per line, with the numbers RESULTS.md quotes."
 Class {
 	#name : #OTMeasure,
-	#superclass : #Object
+	#superclass : #Object,
+	#classVars : [
+		'Completing'
+	]
 }
 
 { #category : #files }
@@ -256,4 +259,174 @@ OTMeasure class >> scripting [
 	(rechecked asArray sort: [:a :b | a key <= b key]) do: [:mc |
 		s nextPutAll: 'v2 '; nextPutAll: mc key; nextPutAll: ' : '; print: mc inferredResult; nextPutAll: ' '; print: (mc diagnostics collect: [:d | d text]) asArray; nextPutAll: String lf].
 	self write: s contents to: 'scripting.txt'
+]
+
+{ #category : #proposals }
+OTMeasure class >> proposalFor: aClass index: i checker: aChecker [
+	"{type proposed from the values the instance variable holds in every instance (at most 3000). instances}"
+	| insts t |
+	insts := aClass allSubInstances: 3000.
+	t := nil.
+	insts := insts select: [:o | (Smalltalk instanceVariableNamesOf: o class) size >= i].
+	insts do: [:o | | v ok |
+		ok := true.
+		v := [o instVarAt: i] on: Error do: [:e | ok := false. e return: nil].
+		ok ifTrue: [t := aChecker join: t with: (v isNil ifTrue: [OTType nilType] ifFalse: [OTType of: v class])] ifFalse: [aChecker count: 'unreadable ' , o class name]].
+	^ {t. insts size}
+]
+
+{ #category : #proposals }
+OTMeasure class >> proposals [
+	"Question 6: for every instance variable of the annotated slice and of the tools' client slice, the type its live values propose, beside the type the side file declares; and how homogeneous the image's collections are; then the argument classes the kernel's collection, number and stream tests pass to traced methods, beside the signatures. out/proposals.txt."
+	| ann checker s tally homog |
+	ann := self annotations.
+	checker := OTChecker on: ann.
+	s := WriteStream on: String new.
+	tally := Dictionary new.
+	((self classesByName select: [:c | (ann infoFor: c) notNil]) , self toolsSlice) do: [:c |
+		(Smalltalk instanceVariableNamesOf: c) doWithIndex: [:n :i | | p written verdict |
+			p := self proposalFor: c index: i checker: checker.
+			written := ann ivarTypeOf: n asString in: c.
+			verdict := (p last = 0 or: [p first isNil])
+				ifTrue: [#noInstances]
+				ifFalse: [written isNil
+					ifTrue: [#unannotated]
+					ifFalse: [((checker isSubtype: p first of: written) and: [checker isSubtype: written of: p first])
+						ifTrue: [#same]
+						ifFalse: [(checker isSubtype: p first of: written)
+							ifTrue: [#proposalNarrower]
+							ifFalse: [(checker isSubtype: written of: p first) ifTrue: [#proposalWider] ifFalse: [#disagree]]]]].
+			tally at: verdict put: (tally at: verdict ifAbsent: [0]) + 1.
+			s nextPutAll: c name; nextPutAll: '.'; nextPutAll: n; nextPutAll: ' instances='; print: p last;
+				nextPutAll: ' proposed='; print: p first; nextPutAll: ' written='; print: written; nextPutAll: ' '; nextPutAll: verdict; nextPutAll: String lf]].
+	s nextPutAll: 'unreadable: '; print: checker counts; nextPutAll: String lf.
+	s nextPutAll: 'instance variables:'.
+	(tally keys asArray sort: [:a :b | a <= b]) do: [:k | s nextPutAll: ' '; nextPutAll: k; nextPutAll: '='; print: (tally at: k)].
+	s nextPutAll: String lf.
+	{OrderedCollection. Array. Set. Dictionary} do: [:c |
+		homog := Dictionary new.
+		(c allInstances: 3000) do: [:col | | t k |
+			t := nil.
+			col do: [:e | t := checker join: t with: (e isNil ifTrue: [OTType nilType] ifFalse: [OTType of: e class])].
+			k := t isNil ifTrue: [#empty] ifFalse: [
+				(t isClassType and: [t cls ~~ Object]) ifTrue: [(col allSatisfy: [:e | e class == t cls]) ifTrue: [#oneClass] ifFalse: [#commonSuperclass]] ifFalse: [
+				(t isUnion and: [t includesNil and: [t withoutNil isClassType and: [t withoutNil cls ~~ Object]]]) ifTrue: [#oneClassAndNil] ifFalse: [#mixed]]].
+			homog at: k put: (homog at: k ifAbsent: [0]) + 1].
+		s nextPutAll: 'elements of '; nextPutAll: c name; nextPutAll: ':'.
+		(homog keys asArray sort: [:a :b | a <= b]) do: [:k | s nextPutAll: ' '; nextPutAll: k; nextPutAll: '='; print: (homog at: k)].
+		s nextPutAll: String lf].
+	self write: s contents to: 'proposals.txt'.
+	self traceRun: ann checker: checker
+]
+
+{ #category : #proposals }
+OTMeasure class >> traceRun: ann checker: checker [
+	"Question 6, second half: trace the annotated methods (with arguments) of a few classes, run the kernel's tests of those classes, compare the classes seen with the signatures' parameter types. out/trace.txt."
+	| s traced suite result tally |
+	s := WriteStream on: String new.
+	traced := 0.
+	{Association. Interval. OrderedCollection. Dictionary. Set. Fraction. Character. Integer. String. WriteStream. ReadStream} do: [:c |
+		(ann infoFor: c) methods keysDo: [:sel | (OTTrace trace: sel in: c) ifTrue: [traced := traced + 1]]].
+	suite := TestSuite named: 'trace'.
+	#(#ArrayTest #DictionaryTest #IntervalTest #OrderedCollectionTest #SetTest #StreamTest #StringTest #FractionTest #IntegerTest #CharacterTest #SymbolTest)
+		do: [:n | (Smalltalk classNamed: n) suite tests do: [:t | suite addTest: t]].
+	result := suite run.
+	s nextPutAll: 'traced methods='; print: traced; nextPutAll: ' tests='; print: suite tests size;
+		nextPutAll: ' passed='; print: result passed size; nextPutAll: ' failures='; print: result failures size; nextPutAll: ' errors='; print: result errors size; nextPutAll: String lf.
+	tally := Dictionary new.
+	(OTTrace seen keys asArray sort: [:a :b | a <= b]) do: [:k | | i cls sel sig classes |
+		i := k indexOfSubstring: '>>'.
+		cls := Smalltalk classNamed: (k copyFrom: 1 to: i - 1).
+		sel := (k copyFrom: i + 2 to: k byteSize) asSymbol.
+		sig := (ann infoFor: cls) methods at: sel ifAbsent: [nil].
+		sig notNil ifTrue: [
+			classes := OTTrace seen at: k.
+			1 to: classes size do: [:j | | p seenT verdict |
+				p := sig last argTypes at: j.
+				seenT := nil.
+				(classes at: j) ifNotNil: [:set | set do: [:x | seenT := checker join: seenT with: (x == UndefinedObject ifTrue: [OTType nilType] ifFalse: [OTType of: x])]].
+				verdict := seenT isNil ifTrue: [#notSeen] ifFalse: [
+					| hasVar | hasVar := false. p varsDo: [:v | hasVar := true].
+					(hasVar or: [p isBlockType or: [p isDynamic]]) ifTrue: [#genericOrBlock] ifFalse: [
+					(checker isSubtype: seenT of: p)
+						ifTrue: [(checker isSubtype: p of: seenT) ifTrue: [#same] ifFalse: [#declaredWider]]
+						ifFalse: [#seenOutsideDeclared]]].
+				tally at: verdict put: (tally at: verdict ifAbsent: [0]) + 1.
+				s nextPutAll: k; nextPutAll: ' arg'; print: j; nextPutAll: ' declared='; print: p; nextPutAll: ' seen='; print: seenT; nextPutAll: ' '; nextPutAll: verdict; nextPutAll: String lf]]].
+	s nextPutAll: 'arguments:'.
+	(tally keys asArray sort: [:a :b | a <= b]) do: [:k | s nextPutAll: ' '; nextPutAll: k; nextPutAll: '='; print: (tally at: k)].
+	s nextPutAll: String lf.
+	self write: s contents to: 'trace.txt'
+]
+
+{ #category : #completion }
+OTMeasure class >> percentiles: aCollection into: aStream label: aString [
+	| a |
+	a := aCollection asArray sort: [:x :y | x <= y].
+	a isEmpty ifTrue: [^ self].
+	aStream nextPutAll: aString; nextPutAll: ' n='; print: a size;
+		nextPutAll: ' p50='; print: (a at: (a size + 1) // 2);
+		nextPutAll: ' p90='; print: (a at: ((a size * 9 + 9) // 10 min: a size));
+		nextPutAll: ' max='; print: a last; nextPutAll: String lf
+]
+
+{ #category : #completion }
+OTMeasure class >> selectorsFor: aType [
+	"Question 8: what a completion popup lists for a receiver of aType: each selector it answers, with its signature when one is written (an Array of {selector. signature or nil})."
+	| out c seen |
+	out := OrderedCollection new.
+	seen := IdentitySet new.
+	aType isClassType ifFalse: [^ #()].
+	c := aType cls.
+	[c notNil] whileTrue: [
+		c selectors do: [:sel | (seen includes: sel) ifFalse: [
+			seen add: sel.
+			out add: {sel. (Completing signaturesFor: sel meta: false from: aType cls) ifNotNil: [:f | f last last]}]].
+		c := c superclass].
+	^ out asArray
+]
+
+
+{ #category : #completion }
+OTMeasure class >> completion [
+	"Question 8: the questions a browser, a completion popup and an MCP client would ask, timed in microseconds on the tools' client slice with the kernel's side files: the type of every expression of a method (one check with types recorded), the type at a source offset (a lookup in that record), the selectors a receiver answers, the diagnostics of a class, the dependents of a change. out/completion.txt."
+	| ann checker s methodUs lookupUs selectorUs classUs depUs counts types |
+	ann := self annotations.
+	Completing := ann.
+	checker := OTChecker on: ann.
+	checker recordTypes: true.
+	s := WriteStream on: String new.
+	methodUs := OrderedCollection new. lookupUs := OrderedCollection new. selectorUs := OrderedCollection new.
+	classUs := OrderedCollection new. depUs := OrderedCollection new. counts := OrderedCollection new.
+	types := OrderedCollection new.
+	self toolsSlice do: [:c | | t0 |
+		t0 := Smalltalk microsecondClock.
+		checker checkClass: c.
+		classUs add: Smalltalk microsecondClock - t0].
+	self toolsSlice do: [:c | c selectors do: [:sel | | t0 mc |
+		t0 := Smalltalk microsecondClock.
+		mc := checker check: sel in: c.
+		methodUs add: Smalltalk microsecondClock - t0.
+		(mc types anySatisfy: [:r | r first notNil]) ifTrue: [ | off |
+			off := (mc types detect: [:r | r first notNil]) first + 1.
+			t0 := Smalltalk microsecondClock.
+			(mc types inject: nil into: [:best :r | (((r first notNil and: [r first <= off]) and: [off < (r at: 2)]) and: [best isNil or: [(r at: 2) - r first < ((best at: 2) - best first)]]) ifTrue: [r] ifFalse: [best]]).
+			lookupUs add: Smalltalk microsecondClock - t0].
+		mc types do: [:r | (r at: 3) isClassType ifTrue: [types add: (r at: 3)]]]].
+	(types asArray copyFrom: 1 to: (types size min: 300)) do: [:t | | t0 sels |
+		t0 := Smalltalk microsecondClock.
+		sels := self selectorsFor: t.
+		selectorUs add: Smalltalk microsecondClock - t0.
+		counts add: sels size].
+	checker index keysDo: [:k | | t0 |
+		t0 := Smalltalk microsecondClock.
+		checker dependentsOf: k.
+		depUs add: Smalltalk microsecondClock - t0].
+	self percentiles: methodUs into: s label: 'typesOfAMethodUs'.
+	self percentiles: lookupUs into: s label: 'typeAtOffsetUs'.
+	self percentiles: selectorUs into: s label: 'selectorsOfAReceiverUs'.
+	self percentiles: counts into: s label: 'selectorsListed'.
+	self percentiles: classUs into: s label: 'diagnosticsOfAClassUs'.
+	self percentiles: depUs into: s label: 'dependentsOfAChangeUs'.
+	self write: s contents to: 'completion.txt'
 ]
