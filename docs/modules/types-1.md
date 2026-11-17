@@ -545,6 +545,44 @@ debug margin of 1.25 (319 KB). 33 levels are refused in both compilers
 | the pragma rule without the capital test (a capital after `<` read as a pragma) | the kernel image build: "Array.class.st:12: expected [ after the method's pattern" |
 | the kernel's parser accepts a capitalized pragma the bootstrap refuses | `TypesTests.bothParsersReadTheTableAlike` (3 differ) and `bothCompilersAgreeOnTheCorpus` (2 of 186: "the bootstrap refused it and this compiler accepted it") |
 
+### Other checks
+
+- `scripts/canonical-tonel.sh --check` lists nothing (the typed kernel and
+  every new file are in the form the image writes).
+- The experiment's 24 tests pass on an image built as its RESULTS.md says
+  (`kajo build-image --with tools --with experiments/optional-types/OptionalTypes`,
+  `kajo test ot.img --filter OT`: 24 of 24); the development image's 301
+  tests pass (debug build, `~/kajo-scratch/types-1/work/`).
+- The new suites under ThreadSanitizer with twelve busy loops
+  (`TypesTests`, the stack tests, `TonelRoundTripTests`, the corpus,
+  `theToolsDevelopTheImageTheyRunIn`): 12 tests passed, 0 reports, 723 s
+  (`work/tsan-load.txt`).
+- The syntax fuzzer, both modes, 120 s each on db78bc3 with "libFuzzer
+  build: ok (Apple Swift version 6.4.2)": 90 837 runs (plain) and 3 763
+  runs (kernel mode, every input compiled by both compilers), no crash, no
+  disagreement (`work/fuzz-syntax.txt`, `work/fuzz-syntax-kernel.txt`).
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/types-1/check just check e28c961` on
+bef504a (db78bc3, the last code commit, and this doc): the Swift tier
+(Sources/KajoCompiler changed; nothing under the core directories), 7
+gates, every one `rc=0`, 4 333 s (`~/kajo-scratch/types-1/check/gates.log`;
+the last Swift-tier run, 1a038bf, 4 193 s):
+
+| gate | s | 1a038bf |
+|---|---|---|
+| clean-build | 21 | 20 |
+| swift-test (466 + 168 tests) | 716 | 771 (466 + 164) |
+| tsan (0 reports) | 2 962 | 2 903 |
+| kernel-test (255 tests) | 119 | 106 |
+| apps | 127 | 129 |
+| new-check | 265 | 264 |
+| fuzz (syntax, 93 841 runs, build ok) | 123 | (no fuzzer chosen) |
+
+The new tests cost about 13 s in `kernel-test` (TypeSyntaxTest's slow
+test) and nothing visible in `swift-test`.
+
 ### Deviations
 
 - The brief's 15 overloaded selectors are 6 (part 1), and none of them
