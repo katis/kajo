@@ -27,7 +27,7 @@ case $1 in
   test) gtimeout 600 $KAJO test $WORK/ot.img --filter OT | tail -1 ;;
   all)
     one image memberwiseNil; mv $OUT/image.txt $OUT/image-memberwise.txt; mv $OUT/image-diagnostics.txt $OUT/image-memberwise-diagnostics.txt
-    for c in slice matrix image live proposals completion scripting; do one $c; done
+    for c in slice matrix image live proposals completion scripting footprint; do one $c; done
     python3 $REPO/experiments/optional-types/scripts/syntax-scan.py $REPO > $OUT/syntax-scan.txt
     python3 $REPO/experiments/optional-types/scripts/features.py $REPO/experiments/optional-types/annotations > $OUT/features.txt ;;
   *) one "$@" ;;
