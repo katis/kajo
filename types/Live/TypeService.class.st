@@ -226,7 +226,7 @@ TypeService class >> diagnosticsOf: aClassName selector: aSelector side: aSide [
 		cls isBehavior ifFalse: [^ self error: aClassName , ' is not a class']].
 	(aSelector notNil and: [aSelector isString not]) ifTrue: [^ self error: 'selector is a String'].
 	self start.
-	(self waitUntilIdleFor: 3600000) ifFalse: [^ self error: 'the type checker did not catch up in an hour'].
+	self waitUntilIdle.
 	checkLock critical: [
 		aClassName isNil
 			ifTrue: [keys := checker resultKeys reject: [:k | (k indexOfSubstring: '>>') = 0]]
@@ -310,17 +310,22 @@ TypeService class >> stop [
 ]
 
 { #category : #running }
-TypeService class >> waitUntilIdleFor: milliseconds [
-	"Wait until every change heard so far is checked; false when that took longer than milliseconds (a wait for something that must come, long everywhere). The timer that bounds the wait exists only while someone waits."
-	| s timer timedOut |
+TypeService class >> waitUntilIdle [
+	"Wait until every change heard so far is checked. Untimed: the wait ends when a check leaves nothing queued (drain signals the waiters from its ensure: block, a failed check included) or when the service stops (stop signals them). No Delay bounds it: a Delay whose waiter goes before it fires leaves the VM's timer armed, and a VM destroyed meanwhile is signalled by it (found by this module, docs/modules/types-2.md)."
+	| s |
 	s := Semaphore new.
 	(lock critical: [
 		(pending isEmpty and: [busy not])
 			ifTrue: [true]
-			ifFalse: [waiters add: s. false]]) ifTrue: [^ true].
-	timedOut := false.
-	timer := [(Delay forMilliseconds: milliseconds) wait. timedOut := true. s signal] forkAt: ProcessorScheduler userInterruptPriority.
-	s wait.
-	timer terminate.
-	^ timedOut not
+			ifFalse: [waiters add: s. false]]) ifTrue: [^ self].
+	s wait
+]
+
+{ #category : #running }
+TypeService class >> waitUntilIdleFor: milliseconds [
+	"waitUntilIdle; answers whether it took at most milliseconds (a bound that is read, not a timer)."
+	| t0 |
+	t0 := Smalltalk microsecondClock.
+	self waitUntilIdle.
+	^ Smalltalk microsecondClock - t0 <= (milliseconds * 1000)
 ]

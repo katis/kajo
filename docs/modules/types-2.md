@@ -558,8 +558,11 @@ final code (`build/head`, the A/B flags), one worker, headless.
   checks the image and rechecks after each change; a `changesDuring:`
   bracket is one recheck; idle, its Process waits on its Semaphore,
   untimed; two locks (the queue's, held to add or take; the checker's, held
-  through a check and by a reader). `waitUntilIdleFor:` is the bounded wait
-  a request makes (an hour; its timer exists only while someone waits).
+  through a check and by a reader). A request waits untimed for the checker to
+  catch up (`waitUntilIdle`: a check's ensure: block and `stop` signal every
+  waiter); `waitUntilIdleFor:` reads the time it took against a bound. A
+  Delay-bounded wait was built first and is what the found item below is
+  about.
   `startCheckingAll: false` starts it without the first whole check, for
   the live tests. Counters: `passes`, `lastRechecked`, `lastPassUs`,
   `events`.
