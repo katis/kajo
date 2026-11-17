@@ -120,3 +120,65 @@ The form of overloads (by position with `;`) and of method variables
 (`:X`) was the brief's first open question and was built as measured; the
 owner has not seen it and can change it while no kernel method uses an
 overload.
+
+## 2026-11-17, the owner's answer to question 1
+
+After asking what the 45 were, whether `Self` could help and what option 1
+meant: "Use the Self type where possible, then do option 3, the form without
+for a signature without a method, design a consistent syntax."
+
+So, for the 45:
+
+1. `Self` on the method the lookup finds, where it says the truth:
+   `Number >> + aNumber <Self; Number> ^<Self; Number>` (and `-`, `*`, `\\`),
+   `Number >> negated ^<Self>` and `abs`, `Magnitude >> max: aMagnitude
+   <Self; Magnitude> ^<Self; Magnitude>` and `min:`. Where `Self` is wrong
+   the class's own method says so: SmallInteger and the large integers
+   (a sum can change class) carry `<Integer; Number> ^<Integer; Number>`,
+   Fraction `^<Number>`.
+2. The 15 of `Object class` go on Behavior's own methods (`Behavior >> new
+   ^<Instance>`), which is where the lookup ends.
+3. `Integer>>//` is dropped: Number's `//` answers Integer already.
+4. What is left gets a signature without a method: Integer's `bitAnd:`,
+   `bitOr:`, `bitXor:` and `bitShift:` (no method above SmallInteger),
+   `SequenceableCollection>>at:` and `at:put:` (Object's method cannot say
+   `E`), `Array>>collect:`, `Interval>>select:`, Number's four comparisons
+   (the argument narrowed to Number) and `ArrayedCollection class>>new:`.
+
+Not measured: the experiment's checker read the side files, so the count of
+diagnostics with `Self` on Number is not known; it is compared with the side
+files' 21 before anything relies on it.
+
+## 2026-11-17, the main session's proposal for the form (awaiting the owner)
+
+A signature without a method is a method entry with no body: the same
+metadata, the same `Class >> pattern` with its types, and no brackets.
+
+    { #category : #'bit manipulation' }
+    Integer >> bitAnd: anInteger <Integer> ^<Integer>
+
+    { #category : #accessing }
+    SequenceableCollection >> at: index <Integer> ^<E>
+
+- One grammar: the pattern is the method pattern of this module, so
+  overloads (`;`), method variables (`:X`), `Self` and `Instance` are
+  written as they are on a method. Nothing new is learned.
+- One place: it stands among the class's methods, in the canonical order
+  by selector, under its category, on either side (`Foo class >> ...`).
+- Told apart by one token: after the pattern a `[` starts a method's body;
+  the next entry's `{`, a comment string or the end of the file ends a
+  signature; anything else is refused in both readers.
+- A class has a method or a signature for a selector, never both: a method
+  carries its own types.
+- It is nothing to the VM and nothing in a release image: no
+  CompiledMethod, no entry in the method dictionary, `respondsTo:`
+  unchanged; it is text in the class's `ClassTypes`, with its category,
+  which a release build does not fill.
+- What it means to the checker: its lookup, upward from the type's class,
+  takes the first method or signature it meets.
+
+Open in the proposal: in the browser a method's text has no brackets, so a
+pattern alone is today a method with an empty body. Recommended: the kind
+is decided by the command ("New signature", shown apart in the selector
+list), never by the text. And whether a signature that narrows an inherited
+method is checked against it; recommended: yes, in the checker's module.
