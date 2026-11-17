@@ -615,6 +615,79 @@ Prior art, read from memory (none of it is in `references/`):
 - Typed Racket shows what soundness at the boundaries costs at run time.
   Kajo's VM never trusts a type, so it pays none of that.
 
+## The image's size
+
+Image files, from `kajo build-image` on this commit's sources (sizes with
+`ls -l`, in `~/kajo-scratch/optional-types/`):
+
+| image | classes, methods | file bytes |
+|---|---|---|
+| the kernel | 178, 2199 | 6 631 352 |
+| the kernel with the checker's package, nothing checked | 206, 2588 | 7 854 896 |
+| the development image (kernel and tools) | 208, 2651 | 8 052 184 |
+| the development image with the package | 236, 3044 | 9 292 800 |
+
+The package adds 28 classes and 389 methods: 89 KB of method objects and
+110 KB of recorded source (`results/footprint.txt`). The file grows by 1.2
+MB. AGENTS.md's lesson says an image's size follows the entry table's
+high-water mark during the build, not the live objects. The rest of the
+growth was not investigated.
+
+What the checker holds once the annotated slice is read and its 672
+methods are checked (`OTMeasure class>>footprint`, `results/footprint.txt`).
+These are estimates from a walk of the objects: two header words, eight
+bytes a slot. Classes, methods, Symbols and immediates are the kernel's
+and are not counted.
+
+| part | objects | bytes |
+|---|---|---|
+| the type objects: side-file tables, 622 signatures, their types | 6 607 | 348 552 |
+| the dependency index | 3 432 | 218 320 |
+| the inferred-result cache | 249 | 14 320 |
+| the diagnostics (21, but a collection per method, mostly empty) | 1 406 | 92 280 |
+| the rest of the per-method check records (counts, sets of keys, recorded types) | 8 215 | 538 344 |
+| total | 19 909 | about 1.2 MB |
+
+**An extrapolation, not a measurement**, to the whole kernel annotated
+(2199 methods, about one signature each), at the slice's rates:
+- type objects about 560 bytes a signature: about 1.2 MB;
+- the index about 325 bytes a method: about 0.7 MB;
+- the per-method records about 800 bytes a method: about 1.8 MB, which a
+  module would cut to the diagnostics and the keys.
+
+That is about 2 to 4 MB in a development image of 8 MB.
+
+**What is a cache.** Everything above but the type objects can be dropped
+at a save and rebuilt by a check in the background after the resume: the
+dependency index, the inferred results, the diagnostics and the check
+records. The whole image is checked in 1.3 s (question 5). The type objects
+can be rebuilt as well, from the sources: from the side files in this
+experiment, and from the methods' recorded source and the class
+definitions in the final design.
+
+**What would leave type data in a release image** built from the same
+sources without the checker's package, so the final design can avoid it:
+- Nothing in this experiment. The side files are outside the image, and
+  the package is not loaded.
+- Inline types in a method's source. They compile to nothing, but the
+  recorded source string keeps their text. The kernel slice's types are
+  about 24 KB of text (the side files' bytes). A release image keeps
+  sources only if the release build keeps them, and that is the decision
+  for this, not the types.
+- Types as pragmas (`<returns: #Integer>`) would be literals in each
+  method's literal frame and pragma index, in every image, release
+  included. **Avoid.** The Strongtalk-style syntax the owner chose does not
+  have this cost.
+- Types in class definitions stored as class metadata (a slot in the class
+  or in the image format) would ship in a release image. **Keep them in the
+  definition's text** (the Tonel keys) and build the checker's tables from
+  it only when the checker is loaded.
+- Protocols made by code (question 9) live only where the bridge that made
+  them runs.
+
+So a release image built without the checker carries no type objects. The
+only type text left is in the recorded sources, if those are kept.
+
 ## Decisions for the owner
 
 1. **Nil explicit or nil in every type?**

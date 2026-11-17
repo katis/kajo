@@ -431,3 +431,56 @@ OTMeasure class >> completion [
 	self percentiles: depUs into: s label: 'dependentsOfAChangeUs'.
 	self write: s contents to: 'completion.txt'
 ]
+
+{ #category : #footprint }
+OTMeasure class >> walk: aRoot strings: aBoolean into: aSet [
+	"{objects. bytes} reachable from aRoot not yet in aSet: an estimate (two header words, eight bytes a slot, a byte object's bytes rounded up to words). Classes, methods, Symbols and immediates are the kernel's and stop the walk; Strings stop it too unless aBoolean."
+	| todo n bytes o |
+	todo := OrderedCollection with: aRoot.
+	n := 0.
+	bytes := 0.
+	[todo isEmpty] whileFalse: [
+		o := todo removeLast.
+		(o isNil or: [o == true or: [o == false or: [o isInteger or: [o isCharacter or: [o isFloat or: [o isSymbol or: [o isBehavior or: [o isCompiledMethod or: [aSet includes: o]]]]]]]]])
+			ifFalse: [
+				(o isString and: [aBoolean not]) ifFalse: [
+					aSet add: o.
+					n := n + 1.
+					(o isString or: [o class == ByteArray])
+						ifTrue: [bytes := bytes + 16 + ((o isString ifTrue: [o byteSize] ifFalse: [o size]) + 7 // 8 * 8)]
+						ifFalse: [
+							bytes := bytes + 16 + ((Smalltalk instanceVariableNamesOf: o class) size + o basicSize * 8).
+							1 to: (Smalltalk instanceVariableNamesOf: o class) size do: [:i | todo add: (o instVarAt: i)].
+							1 to: o basicSize do: [:i | todo add: (o basicAt: i)]]]]].
+	^ {n. bytes}
+]
+
+{ #category : #footprint }
+OTMeasure class >> footprint [
+	"The image's size question: what the checker holds after the annotated slice is read and checked, split into the type objects, the dependency index, the inferred-result cache, the diagnostics and the rest of the per-method records; and the package's own code. Estimates by walking (walk:strings:into:). out/footprint.txt."
+	| ann checker s seen line code src diags |
+	ann := self annotations.
+	checker := OTChecker on: ann.
+	self check: (self classesByName select: [:c | (ann infoFor: c) notNil]) with: checker.
+	s := WriteStream on: String new.
+	seen := IdentitySet new.
+	line := [:label :r | s nextPutAll: label; nextPutAll: ' objects='; print: r first; nextPutAll: ' bytes='; print: r last; nextPutAll: String lf].
+	line value: 'types (side files: infos, signatures, type objects)' value: (self walk: ann strings: true into: seen).
+	line value: 'dependency index' value: (self walk: checker index strings: true into: seen).
+	line value: 'inferred-result cache' value: (self walk: {checker instVarAt: 7. checker instVarAt: 12} strings: true into: seen).
+	diags := OrderedCollection new.
+	checker results do: [:mc | diags add: mc diagnostics].
+	line value: 'diagnostics' value: (self walk: diags strings: true into: seen).
+	line value: 'per-method check records (the rest)' value: (self walk: checker results strings: false into: seen).
+	s nextPutAll: 'methods checked='; print: checker results size; nextPutAll: ' signatures='; print: ann signatureCount; nextPutAll: String lf.
+	code := {0. 0}.
+	src := 0.
+	(self classesByName select: [:c | c name beginsWith: 'OT']) do: [:c | {c. c class} do: [:b |
+		b methodsDo: [:m | | r |
+			r := self walk: m literals strings: true into: seen.
+			code := {code first + 1 + r first. code last + r last + 16 + (m bytecodes size + 7 // 8 * 8)}.
+			src := src + (m sourceCode ifNil: [0] ifNotNil: [:x | x byteSize])]]].
+	line value: 'the package''s methods (bytecodes, literals)' value: code.
+	s nextPutAll: 'the package''s recorded source bytes='; print: src; nextPutAll: String lf.
+	self write: s contents to: 'footprint.txt'
+]

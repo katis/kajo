@@ -1,0 +1,8 @@
+types (side files: infos, signatures, type objects) objects=6607 bytes=348552
+dependency index objects=3432 bytes=218320
+inferred-result cache objects=249 bytes=14320
+diagnostics objects=1406 bytes=92280
+per-method check records (the rest) objects=8215 bytes=538344
+methods checked=672 signatures=622
+the package's methods (bytecodes, literals) objects=1501 bytes=89208
+the package's recorded source bytes=110060
