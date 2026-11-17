@@ -470,3 +470,229 @@ LargePositiveInteger's carry `^<Integer>` on their own methods (a negation
 can change class, as a sum can), but `abs` of SmallInteger minVal and of a
 large negative integer changes class too and has no method of its own in
 those classes to say so.
+
+## As built (2026-11-17)
+
+Built on the mini with swiftly's swift.org 6.4.2 first on PATH. Work files in
+`~/kajo-scratch/types-2/` (`part1/`, `measure/`, `broken/`, `work/`,
+`check/`, `scripts/`). Speed numbers are from an aligned release `kajo` of the
+final code (`build/head`, the A/B flags), one worker, headless.
+
+### What was built
+
+- **The signature without a method** (part 2). Both Tonel readers
+  (`Sources/KajoCompiler/Tonel.swift`, `TonelReader>>readMethodInto:`) decide
+  by the token after the pattern, comments skipped: `[` a body, `{` or the
+  end of the file a signature, anything else "expected [ after the method's
+  pattern". A signature writes at least one type, is one per selector and
+  side, never beside a method of its selector (refused in a file, and across
+  files in the image build), and keeps its text (from the selector to the
+  pattern's end), its category and its package. `TonelSignature` and
+  `TonelClass.signatures`; `TonelDocument>>signatures`. The image build
+  hands them over as `Smalltalk recordSignatures:` unless it builds a
+  release image; `ClassTypes` keeps them by side and selector
+  (`signature:category:package:at:meta:`, `signatureAt:meta:`,
+  `removeSignatureAt:meta:`, `signatureSelectorsMeta:`,
+  `keepSignaturesOf:except:`), `Smalltalk noteSignature:...`,
+  `forgetSignatureOf:in:`, `signatureOf:in:`. The writer
+  (`TonelWriter>>methodsOf:package:`, `signature:in:category:`) puts each
+  among the methods in the canonical order; `hasMethodsOf:package:` counts
+  them. `TonelLoader` gives a class its file's signatures (an extension
+  package's stay while no method of their selector came with the file) and
+  an extension file's signatures go through `Behavior>>signature:classified:`.
+  In the image: `Behavior>>signature:classified:` (refused where a method
+  stands, without a type, or as more than a pattern), `removeSignature:`,
+  `signatureAt:`; `compile:` of a method where a signature stands replaces it
+  and files it under the signature's category (open question 2). The project
+  write-back needs nothing of its own: `DevSession>>filesFor:` writes
+  `TonelWriter`'s text, signatures included.
+- **The change hook** (part 5's half in the kernel): `Smalltalk
+  changeListener:`, `noteChange:of:in:` (kinds `#method`, `#methodRemoved`,
+  `#signature`, `#class`, `#classRemoved`), `changesDuring:`; called from
+  `Behavior>>compile:classified:`, `removeSelector:`, `signature:classified:`,
+  `removeSignature:`, `ClassBuilder` (a new class, a redefinition, a
+  removal, with the removed class's old name) and `TonelLoader` (a file is
+  one bracket). Nil costs one test; a listener's error is printed, never the
+  changer's.
+- **The 45 placed** (part 3) by `experiments/optional-types/scripts/place45.py`
+  (its output `work/place45.txt`): 16 by Self (Number's `+ - * \\` as
+  `<Self; Number> ^<Self; Number>`, `negated` and `abs` `^<Self>`,
+  Magnitude's `max:` and `min:` as `<Self; Magnitude> ^<Self; Magnitude>`),
+  15 on Behavior's own methods, 1 dropped (`Integer>>//`), 13 signatures
+  without a method (Integer's four bit operations, SequenceableCollection's
+  `at:` and `at:put:`, `Array>>collect:`, `Interval>>select:`, Number's four
+  comparisons, `ArrayedCollection class>>new:`); SmallInteger's and
+  LargePositiveInteger's `+ - * \\` carry `<Integer; Number> ^<Integer;
+  Number>` and their `negated` `^<Integer>`, Fraction's `+ - *` answer
+  Number. Checked by hand on three rows of the script's count: `Integer >>
+  bitAnd: anInteger <Integer> ^<Integer>` is a signature in
+  `kernel/Numbers/Integer.class.st` under `#bits`; `Number >> + aNumber
+  <Self; Number> ^<Self; Number>` stands for Integer's two `+`
+  (`kernel/Numbers/Number.class.st`); `ArrayedCollection class >> new: size
+  <Integer> ^<Instance>` is a class-side signature between `new` and
+  `new:withAll:`. The side files and the experiment's checker are unchanged.
+- **The checker as a package** (part 4), `types/` (package Types, tags
+  `Model/`, `Checker/`, `Live/`, `Tests/`, and `DevSession.extension.st`):
+  the classes of part 1's names. `TypeTable` reads a class's types when
+  first needed: each method's pattern through the kernel's
+  `Parser>>parsePattern` (the TypeNodes), the class's `ClassTypes` (the
+  class-level texts through `Parser class>>parseClassType:`, the signatures
+  through `parsePattern`), an overload being one `TypeSignature` per
+  alternative; `refresh:in:` reads one changed entry again. No side file
+  and no type parser of its own (`OTTypeParser` is gone). The lookup is
+  part 1's rule, through the metaclass chain into Behavior. `TypeChecker`
+  keeps per method only `{diagnostics. dependency keys}`; inferred results
+  are cached by method key with the method itself (a recompiled method is
+  inferred again and the old one is not held). Three things beyond the
+  experiment: `self class new` on the instance side is Self with free type
+  arguments (the experiment's limit), a value typed as some Behavior
+  (`species ^<Behavior>`) makes Dynamic instances, and a signature without a
+  method is checked as itself (`MethodTypeCheck>>runSignature`: a
+  `#signature` diagnostic when nothing answers it, open question 3, or when
+  it contradicts what it narrows). A method the checker fails on gets one
+  `#checker` diagnostic instead of stopping the check. The experiment's
+  `Measure/` and side-file reader stay in the experiment.
+- **Live** (part 5), `TypeService` (class side, one per image): nothing runs
+  until `TypeService start` or the first `diagnostics` request; then it is
+  the change listener and its Process at the user background priority (0)
+  checks the image and rechecks after each change; a `changesDuring:`
+  bracket is one recheck; idle, its Process waits on its Semaphore,
+  untimed; two locks (the queue's, held to add or take; the checker's, held
+  through a check and by a reader). `waitUntilIdleFor:` is the bounded wait
+  a request makes (an hour; its timer exists only while someone waits).
+  `startCheckingAll: false` starts it without the first whole check, for
+  the live tests. Counters: `passes`, `lastRechecked`, `lastPassUs`,
+  `events`.
+- **The protocol** (part 6): `DevSession>>diagnostics:selector:side:` in the
+  Types package (`types/DevSession.extension.st`), so request `diagnostics`
+  with arguments `className`, `selector`, `side`; the answer
+  `{count, checked, diagnostics: [{kind, class, side, selector, line,
+  start, end, text}]}` (start and end byte offsets in the method's source,
+  from 0, end exclusive, nil for the whole method; line 0 for a diagnostic
+  of the whole method or signature). Event `diagnostics.changed` `{count,
+  pass, methods, diagnostics}` (at most 200 and 500, `truncated`) after a
+  recheck that changed the set. A target without the package answers
+  "unknown request diagnostics: protocol.describe lists the requests". The
+  MCP server offers it with no change of its own. `DevClient>>diagnostics:
+  selector:side:then:` keeps `DevClientTest`'s table whole.
+- **Where it is built in** (part 7): `just dev-image`, the Smalltalk tier's
+  `dev-image` gate, `canonical-tonel.sh` (it writes `types/` back too), the
+  Mac shell's `dev.img` and `dev2000.img`, the Kajo app's product `dev.img`,
+  and a generated app's Debug image (`Templates.swift` build-images:
+  `--with $kajo_root/types` for Debug only, and `types/` in its rebuild
+  test); `dist.sh` needs nothing (the checkout is the tree). `kajo new`
+  refuses an app named Types. `check-tier.sh` puts `types/` in the
+  Smalltalk tier. `new-check.sh` counts `checker_classes` and
+  `signature_text` in each image: 0 and 0 in a Release one, more in a
+  Debug one.
+- **Tests**: `Tests/KajoCompilerTests/SignatureTests.swift` (18 reader
+  cases through both readers, the refusals' lines and reasons equal; a
+  signature is not compiled and the corpus holds none; the canonical probe
+  round trip byte for byte and read back into the image; a release build
+  drops the signatures; the live API), `TypeCheckerTests.swift` (the
+  package's 31 SUnit tests in the development image, the request's scopes,
+  malformed requests, the event after a change, the target without the
+  package, MCP on the same target, a release image's bytes), `types/Tests/` (`TypeCheckerTest`
+  28: the experiment's 24 on inline types less its side-file reader's own,
+  plus Self in an argument place with an overload, a SmallInteger sum, a
+  signature without a method found by the lookup, a narrowing signature,
+  `self class new`; `ProtocolTypeTest` 1; `TypeServiceTest` 2), seeds
+  `signature.class.st` and `signature-end.class.st` (syntax) and
+  `diagnostics.json` (protocol). `ToolsTests`' development image holds
+  `types/` and is written back byte for byte with it.
+
+### The starting positions, answered
+
+1. **Wrong as written, right for the checker built.** Part 1 measured 30
+   (against 20 on this commit and the experiment's 21). The package's
+   checker gives the 27 classes **24** (`measure/new-image-1/image.txt`
+   `slice27`, `slice-diagnostics.txt`), within the bar's 30. Each one:
+   - 19 of the experiment's 20, as it classified them: limits of
+     OrderedCollection's nil slots (8), `Interval[N]` without a bound (5),
+     `Collection>>sum` (1), String>>splitOn:'s union (2), the stream's
+     `byteSize` (1), `coerce:`'s `asFraction` (1), and
+     `OrderedCollection>>add:beforeIndex:` (1). The 20th, Dictionary>>select:
+     ("Instance where Self is declared"), is gone with `self class new`
+     typed as Self.
+   - 3 limits of Self from arithmetic: `Number>>negated`, `Float>>negated`,
+     `Fraction>>negated`.
+   - 1 limit of a method variable without a bound: `Interval
+     class>>from:to:by:` passes its `:X` to `setFrom:to:by:`'s Number (now
+     visible because `basicNew ^<Instance>` applies).
+   - 1 found by the narrowing check: `Interval>>select:` answers
+     `Array[N]` where `SequenceableCollection>>select:` says `Self`. Both say
+     the truth of their class; the inherited signature cannot, which is the
+     experiment's "species is not Self" (no `Self[X]` in the language).
+   The whole image has 81 (`measure/classes-image.txt`): the slice's 24, 22
+   in the checker's own samples on purpose, 30 in kernel and tools tests
+   (faults on purpose, methods compiled at run time, five `arity` in
+   `BlockClosureTest>>testIfError` that name a wrong annotation:
+   `BlockClosure>>ifError:` types its block `[^Dynamic]` and takes blocks
+   of one and two arguments), and 5 elsewhere (ByteArray's E, 2; three
+   `lookupSelector:` results sent `hasPragma:` or `pragmas` unguarded,
+   `CompiledMethod | Nil` now that Behavior's 15 apply).
+2. **Right** (part 1, 2754 of 2754 refused); built and tested (the table's
+   three forgotten-bracket cases, both readers, the same line and reason).
+3. **Right, with the plain hook of part 1.** No primitive, no file under the
+   core directories (`git diff --stat 1e8f324` names none).
+4. **Wrong by 14 to 17 percent for the whole image, right for a body.** Five
+   interleaved runs (`measure.txt`): the experiment's checker 1463 to 1479
+   ms for 3111 methods, the package's 1703 to 1726 ms for 3180 (more
+   methods: the package and its samples; per method 0.54 against 0.47 ms;
+   reading every pattern through the Parser is the difference, the
+   dependency index has 3201 keys and 14 718 edges against 2581 and 13 088).
+   A body changed rechecks 1 method in 145 to 1014 µs, the invalidation
+   included (`measure/new-live/live.txt`; the experiment's 87 to 935 µs did
+   not count it, `measure/exp-live/live.txt`); the first build of that
+   measure rebuilt the class's whole table at each change and took 0.6 to
+   5 ms, which `TypeTable>>refresh:in:` answered (79ae93f). The ten
+   signature changes recheck 1 to 711 methods in 0.27 to 758 ms (the
+   experiment: 6 to 607 in 0.96 to 599 ms). Some signatures have many more
+   dependents in the package (480 for `Collection>>do:` against 17, 313 for
+   `Object>>printString` against 50) and one has fewer (`Object>>=`, 1
+   against 167, its types unchanged by the measure's edit and so read as a
+   body change); why `do:` gains so many was not investigated (the
+   lookup's rule for untyped overrides is the likely difference).
+5. **Right: 2.9 MB.** The experiment's walk over what the checker holds
+   after the whole image is checked (`measure/new-footprint/footprint.txt`):
+   type table 543 240 bytes, dependency index 1 077 680, inferred results
+   755 080, diagnostics 131 912, the rest of the per-method records 437 888;
+   2 945 800 in all, against the experiment's 4 789 328 on the same image
+   kind (`measure/exp-footprint/footprint-image.txt`), the per-method records
+   cut from 2.6 MB to 0.44 MB. In a generated app's Debug image (the kernel
+   and the package, no tools): 2 438 280 (`measure/app-footprint/`).
+
+### Sizes (`measure/sizes.txt`, `work/new-check-alone.txt`)
+
+| image | bytes |
+|---|---|
+| kernel, release, 1e8f324 | 6 929 840 |
+| kernel, release, after part 2 (c1fe7c3) | 6 998 104 |
+| kernel, release, after part 3 (37521e1) | 6 999 544 |
+| kernel, release, final | 6 999 568 |
+| kernel, plain, final | 7 031 264 |
+| kernel and types/ (a Debug app's image without its src/) | 8 246 176 |
+| development image without types/ | 8 440 736 |
+| development image | 9 701 944 |
+
+A release image grows 69 728 bytes: 68 264 for part 2's kernel code (the
+readers', the writer's and the hook's 20 methods and their sources), 1 440
+for the 45's type text in method sources, 24 for a comment. It holds no
+signature's text and no checker class (`TypeCheckerTests.aReleaseImage...`,
+new-check's `checker_classes=0 signature_text=0`). The generated Sample's
+Release app against the Types 1 gate run of the same code as the starting
+commit (`~/kajo-scratch/types-1/check/new-check.txt`): Mac binary 5 220 736 →
+5 241 312 (+20 576, the native module of 20 more kernel methods), image
+6 944 672 → 7 014 376 (+69 704); iOS binary 5 102 424 → 5 123 840, image
+6 944 720 → 7 014 424. The Debug image 6 965 632 → 8 253 136: the checker,
+1.29 MB of file.
+
+### Broken variants (run by hand, `~/kajo-scratch/types-2/scripts/broken.sh`, outputs in `broken/`)
+
+| variant | the check that failed |
+|---|---|
+| the reader takes a missing `[` as a signature (a `^`, an identifier or a `]` after the pattern ends one) | `SignatureTests.bothReadersReadAndRefuseTheTableAlike`: the refused cases read, the reasons differ, the readers disagree |
+| the lookup skips signatures (the table never adds a signature without a method) | `TypeCheckerTest>>testASignatureWithoutAMethodIsFoundByTheLookup` ("nil does not understand #last") and `testANarrowingSignatureIsCheckedAgainstWhatItNarrows` ("Expected 1 but was 0") |
+| Self in an argument place read as the declared class (Number) when the overload is chosen | `TypeCheckerTest>>testSelfInAnArgumentPlaceWithAnOverload`: "3 + 4.5: argument 1 of #+ is Float, expected Integer" |
+| no recheck after a signature change (every method change taken as a body change) | `TypeServiceTest>>testLiveRechecks` ("Assertion failed": the caller is not rechecked) |
+| the release build handed the signatures | `SignatureTests.theProbeRoundTripsAndAReleaseBuildDropsItsSignatures` and `TypeCheckerTests.aReleaseImageHoldsNoCheckerAndNoSignature` |

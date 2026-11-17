@@ -1,4 +1,4 @@
-"The checker live (Types 2, docs/modules/types-2.md, part 5), through the one TypeService of the image, started and stopped by each test: a file loaded is one recheck, a method body changed rechecks that method alone, a signature changed rechecks what read it, a class removed takes its diagnostics with it; and an idle service holds no timer, and work after idling is checked within a bound."
+"The checker live (Types 2, docs/modules/types-2.md, part 5), through the one TypeService of the image, started without the first check of the whole image (startCheckingAll: false; the development protocol's tests check it whole) and stopped by each test: a file loaded is one recheck, a method body changed rechecks that method alone, a signature changed rechecks what read it, a class removed takes its diagnostics with it; and an idle service holds no timer, and work after idling is checked within a bound."
 Class {
 	#name : #TypeServiceTest,
 	#superclass : #TestCase
@@ -59,7 +59,7 @@ TypeServiceTest >> tearDown [
 TypeServiceTest >> testIdleHoldsNoTimerAndWorkAfterIdlingIsChecked [
 	| delays passes |
 	delays := Delay pendingCount.
-	TypeService start.
+	TypeService startCheckingAll: false.
 	self waitIdle.
 	"idle: the service's Process waits on its Semaphore, untimed; no Delay of its own is pending"
 	self assert: Delay pendingCount equals: delays.
@@ -75,10 +75,9 @@ TypeServiceTest >> testIdleHoldsNoTimerAndWorkAfterIdlingIsChecked [
 { #category : #tests }
 TypeServiceTest >> testLiveRechecks [
 	| passes |
-	TypeService start.
+	TypeService startCheckingAll: false.
 	self waitIdle.
-	self assert: TypeService passes equals: 1.
-	self assert: TypeService lastRechecked > 1000.
+	self assert: TypeService passes equals: 0.
 	"a file of twenty-one methods loaded: one recheck"
 	passes := TypeService passes.
 	Smalltalk readTonel: self probeText.

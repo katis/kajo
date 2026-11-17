@@ -226,7 +226,7 @@ TypeService class >> diagnosticsOf: aClassName selector: aSelector side: aSide [
 		cls isBehavior ifFalse: [^ self error: aClassName , ' is not a class']].
 	(aSelector notNil and: [aSelector isString not]) ifTrue: [^ self error: 'selector is a String'].
 	self start.
-	(self waitUntilIdleFor: 600000) ifFalse: [^ self error: 'the type checker did not catch up in 600 s'].
+	(self waitUntilIdleFor: 3600000) ifFalse: [^ self error: 'the type checker did not catch up in an hour'].
 	checkLock critical: [
 		aClassName isNil
 			ifTrue: [keys := checker resultKeys reject: [:k | (k indexOfSubstring: '>>') = 0]]
@@ -275,11 +275,17 @@ TypeService class >> run [
 { #category : #running }
 TypeService class >> start [
 	"Start checking the image (nothing when it already is): the checker, the change listener, the Process at the user background priority, and the first check of the whole image, queued. Not in a release image (no type checker is built into one; this refuses if one was)."
+	^ self startCheckingAll: true
+]
+
+{ #category : #running }
+TypeService class >> startCheckingAll: aBoolean [
+	"start, with the first check of the whole image when aBoolean, else without it: only what changes from now on is checked, the rest of the image read where a recheck needs it (the live tests: a whole check takes longer than any bound under the sanitizer and load)."
 	Smalltalk isReleaseImage ifTrue: [^ self error: 'a release image does not check types'].
 	process notNil ifTrue: [^ self].
 	lock := Mutex new.
 	checkLock := Mutex new.
-	pending := OrderedCollection with: #all.
+	pending := aBoolean ifTrue: [OrderedCollection with: #all] ifFalse: [OrderedCollection new].
 	depth := 0.
 	busy := false.
 	waiters := OrderedCollection new.
@@ -289,7 +295,7 @@ TypeService class >> start [
 	semaphore := Semaphore new.
 	Smalltalk changeListener: self.
 	process := [self run] forkAt: ProcessorScheduler userBackgroundPriority.
-	semaphore signal
+	aBoolean ifTrue: [semaphore signal]
 ]
 
 { #category : #running }

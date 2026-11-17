@@ -19,7 +19,7 @@ let typesProjectImage: [UInt8] = {
 
 /// A wait for the checker to have checked the whole image (the first
 /// request does it): long everywhere, longer under the sanitizer.
-let typesWait: Double = compilerTestsUnderThreadSanitizer ? 1800 : 600
+let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
 
 @Suite(.serialized) struct TypeCheckerTests {
     @Test func theTypesPackageBuildsAndItsTestsPass() throws {
@@ -82,7 +82,8 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 1800 : 600
             #expect(e["count"]?.int != nil && e["pass"]?.int != nil)
         }
         let after = try c.request("diagnostics", [("className", .string("TypeCheckerSample")), ("selector", .string("badReturn"))], timeout: typesWait)
-        #expect(after["count"]?.int == 0)
+        #expect(after["count"]?.int == 0)        // the MCP server offers the request (on the same target: one whole check)
+        try mcpOffersTheRequest(t)
     }
 
     @Test func aTargetWithoutTheCheckerRefusesTheRequest() throws {
@@ -95,9 +96,8 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 1800 : 600
         #expect(!kinds.contains("diagnostics") && kinds.contains("method.compile"))
     }
 
-    @Test func theMCPServerOffersTheRequest() throws {
-        let t = try RunningTarget(typesProjectImage)
-        defer { t.close() }
+    /// The MCP server lists the request as a tool and a call of it answers.
+    func mcpOffersTheRequest(_ t: RunningTarget) throws {
         var o = try ClientOptions(["--target", t.path, "--token", t.target.server.token, "--client", "agent:types-mcp"])
         o.timeout = typesWait
         var out: [JSONValue] = []
@@ -109,7 +109,7 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 1800 : 600
         let script = [
             #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}"#,
             #"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
-            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"diagnostics","arguments":{"className":"TypeCheckerSample","selector":"badReturn"}}}"#,
+            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"diagnostics","arguments":{"className":"TypeCheckerSample","selector":"badAssign"}}}"#,
         ]
         var k = 0
         _ = server.serve { k < script.count ? { k += 1; return script[k - 1] }() : nil }
@@ -120,7 +120,7 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 1800 : 600
         let call = out.first { $0["id"] == .int(3) }?["result"]
         #expect(call?["isError"] == .bool(false))
         let text = call?["content"]?.array?.first?["text"]?.string ?? ""
-        #expect(text.contains("\"returnType\"") && text.contains("badReturn"), "\(text)")
+        #expect(text.contains("\"assignType\"") && text.contains("badAssign"), "\(text)")
     }
 
     /// A release image (the kernel alone, as a generated app's Release
