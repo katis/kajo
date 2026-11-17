@@ -156,3 +156,39 @@ The first module would be "Types 1": both compilers and both Tonel readers
 take the Strongtalk-style types and write them back byte for byte, the
 checker moves to `tools/` and runs on a background Process, diagnostics go
 out over the development protocol, and the slice's signatures move inline.
+
+## 2026-11-17, the owner's answers
+
+"Accept, fix ifError". All five as recommended:
+
+1. `Nil` is explicit (`T | Nil`), with the flow rules.
+2. Overloads are in: several signatures for one selector, first fit.
+3. Class tests narrow, for a fixed list of the kernel's testers; no
+   predicates declared by users.
+4. A class's type parameters and its instance variables' types are new keys
+   in the Tonel class definition, kept as text and never as class metadata;
+   the keys' form is decided with the syntax module.
+5. Protocol types are made by code only.
+
+`BlockClosure>>ifError:` was fixed by the main session the same day
+(b35192f, two kernel files): `Exception>>receiver` answers the receiver of
+the method that signalled (the first frame below the signal that is not the
+exception's own, nil before a signal), as MessageNotUnderstood's own
+`receiver` already did for its case; `ifError:` itself is unchanged.
+`BlockClosureTest>>testIfError` failed before the fix with "Error: boom does
+not understand #receiver" and passes after it. Both files are in the
+canonical form (`scripts/canonical-tonel.sh --check` lists nothing). Gates:
+`just check db96d5c` on b35192f, the Smalltalk tier, swift.org 6.4.2, 447 s: six of seven gates `rc=0` (250 kernel tests pass) and
+`compiler-tests` `rc=1` on one tools test,
+`ToolsTests.aClassDefinedIntoATagFromTheBrowserMovesWithItsTag`, whose
+removal of its probe class was refused once ("another Process holds
+ToolsTagProbe on its stack: try again when it has let go") and which does
+not try again. Not the fix's: nothing on that path sends `receiver` to an
+exception. The test passed 3 times of 3 alone and the gate passed twice when
+run again through `gates-lib.sh`'s own definition (70 s each,
+`~/kajo-scratch/iferror/check-rerun1` and `check-rerun2`). No tier run has
+every gate at `rc=0` in one log; the test is thin and is named here for
+whoever next sees it fail
+(`~/kajo-scratch/iferror/check/gates.log`).
+
+Next is the brief of Types 1.
