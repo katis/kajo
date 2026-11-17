@@ -136,7 +136,7 @@ we don't have any users yet. agreed on others".
    0.007 ms, the offloaded collection 0.2 to 1.1 ms, 0 waits for the
    collector, 0 frames missed). Nothing was built from the answer.
 
-One question awaits the owner in its place:
+One question took its place:
 
 5. One or two flips a launch show the policy's price at a light load and
    give its percentiles one or two samples. No row makes the main worker
@@ -146,3 +146,9 @@ One question awaits the owner in its place:
    allocates enough to flip a hundred times or more a launch
    (recommended; a small module in the Swift tier, three more rows a
    matrix), or leave the matrix as it is.
+
+## 2026-11-17, the owner's answer to question 5
+
+"Yes, build it". Briefed the same day as `docs/modules/main-flips.md`: a
+row kind in which the main worker allocates on every frame on top of the
+storm; a measurement module that changes no collector code.

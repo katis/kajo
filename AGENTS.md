@@ -1379,8 +1379,9 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/39-interning-tests.md`: The interning tests drive their race
  - `docs/decisions/40-main-offload.md`: The main worker always offloads its young collections
 
-Awaiting the owner: main offload's question 5 (`40-main-offload.md`: a
-scenario in which the main worker flips its nursery often). Native by default's four questions were
+Awaiting the owner: nothing. Main offload's question 5 was answered on
+2026-11-17 ("Yes, build it", appended to `40-main-offload.md`; the brief is
+`docs/modules/main-flips.md`). Native by default's four questions were
 answered as recommended on 2026-11-16 (appended to
 `38-native-by-default.md`). The final mark's four, interpreter speed's three and AOT 2's five were
 answered on 2026-11-15 (appended to `13-final-mark.md`,
