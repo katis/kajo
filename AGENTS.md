@@ -1285,6 +1285,16 @@ Safety:
    rule's file was corrected after the device rows and its mtime moved
    past them. A rule written before the numbers is committed, or copied
    with its time, before the numbers are run.
+ - A rule's clause is no tighter than the measurement's own spread. "No
+   kernel slower by more than 1 percent at 1 or 8 workers" could not be met
+   at 8 workers by any build: one side's five runs of `floats` spanned
+   0.969 to 1.175 in cycles. Measure the base against itself first, and
+   write the rule's bounds from that spread.
+ - Twenty-four instructions in the dispatch loop are enough to move its
+   registers. Fused sends that jumped into the one existing send spilled
+   `true` and a base register; a path that is shared is not a path that is
+   free. Read the spills in the disassembly for every case added, the
+   small ones too.
 
 ## Verification
 
@@ -1394,8 +1404,10 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/39-interning-tests.md`: The interning tests drive their race
  - `docs/decisions/40-main-offload.md`: The main worker always offloads its young collections
  - `docs/decisions/41-main-flips.md`: The main worker's flips under load, a matrix row
+ - `docs/decisions/42-fused-sends.md`: Fused sends, measured first (stopped at the bound)
 
-Awaiting the owner: nothing. Main flips' two questions were answered as
+Awaiting the owner: fused sends' one question (`42-fused-sends.md`: close
+it as measured). Main flips' two questions were answered as
 recommended on 2026-11-17 (appended to `41-main-flips.md`). Main
 offload's question 5 was answered on
 2026-11-17 ("Yes, build it", appended to `40-main-offload.md`; built as
@@ -1406,7 +1418,8 @@ answered on 2026-11-15 (appended to `13-final-mark.md`,
 `20-interpreter-speed.md` and `37-aot-2.md`). Three answers change what is
 built and are rows of `docs/PLAN.md`: native code on by default in a Release
 build (built 2026-11-16), the main worker always offloading its young
-collections (built 2026-11-17), and fused sends measured first.
+collections (built 2026-11-17), and fused sends measured first (measured
+2026-11-17: under the rule, not built).
 
 ## Project structure
 
