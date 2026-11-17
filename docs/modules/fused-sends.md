@@ -7,6 +7,11 @@ third question (`docs/decisions/20-interpreter-speed.md`): "Measure first."
 The owner on 2026-11-17, asked whether to brief and start it: "Yes, start
 it".
 
+**Stopped after part 2, 2026-11-17: nothing passes the rule.** The best
+cheating build gains 4.4 percent of cycles on `sends`, 2.9 on `st-sends`
+and 0.6 on the kernel tests; nothing is built (sections "Part 2" and "The
+bound" at the end).
+
 ## What it is
 
 The interpreter fuses 17 pairs of bytecodes (opcodes 50 to 66). None ends
@@ -313,3 +318,187 @@ Decision.
  4. A build that passes here is built for real and must meet the same
     threshold in the committed build, not only in the cheating one.
 ```
+
+## Part 2: the cheating builds (measured after the rule's commit)
+
+The rule's commit is 78e8ff0 at 15:06:04; the cheating builds were made
+from `git archive 78e8ff0` in `~/kajo-scratch/fused-sends/part2/src-{a,b}`
+by `scripts/cheat-patch.py` (the patches as diffs:
+`part2/cheat-{a,b}.diff`) and first measured at 15:09:59 (the first line
+of `part2/ab-all4.txt`). Nothing of them was committed or put in the
+working tree.
+
+Both fuse the four candidates through the existing peephole: four opcodes
+after 66 in `Opcode`, with `fusedParts` (`push_temp`, `push_self`,
+`push_lit`, `push_ivar` with `send`) and a mnemonic, so `fuseBytecodes`
+and the verifier's second-part rule took them as they are; every checksum
+and all 249 kernel tests agreed on every side and run.
+
+- **(a) the shared send path**: the plain `send` case and each fused case
+  set a flag and leave the `switch`; after it one inline send reads the
+  send's operands at `pc`. The compiler threaded the flag: `interpret` has
+  one inline send (one call site each of `pollAndSend`, `lookupMiss`,
+  `doesNotUnderstand`, `primitiveSend` and `stackOverflow`, as the base).
+- **(b) a second inline copy**: each fused case pushes and runs its own
+  inline send (`send(..., 3, poll: true)`, so a poll or an error rewinds to
+  the intact plain send after the push, as the plain code would).
+
+The disassembly of `interpret` in each aligned build
+(`scripts/disasm.sh`, arc-check's reading; `part2/disasm/{base,a,b}.s`):
+
+| build | instructions | indirect branches | jump tables | inline sends | ARC | stack-relative accesses | registers |
+|---|--:|--:|--:|--:|--:|--:|---|
+| base (78e8ff0) | 1816 | 1 | 1 | 1 | 0 | 349 | `true` x28, `false` x23, both +8 bases in registers |
+| (a) shared | 1840 | 1 | 1 | 1 | 0 | 362 | `true` spilled (7 reloads from the stack), one +8 base spilled (2 reloads), the other base word reloaded 5 times |
+| (b) second copy | 2680 | 1 | 1 | 5 | 0 | 488 | `true` and `false` both spilled (3 reloads each) |
+
+So the loop kept one jump table and one indirect branch in both builds,
+and lost registers in both: the shared path is not free of the register
+cost either (starting position 3 was wrong), the copies cost more.
+
+The aligned A/B (`scripts/part2-ab.sh`, raw lines `part2/ab-all4.txt`,
+table `part2/table-all4.md` by `scripts/part2-table.py`): base, (a) and (b)
+from the same source tree, `-c release -Xswiftc -enable-testing` with
+`-align-all-nofallthru-blocks=5 -align-loops=32`, five runs, the three
+sides interleaved with their order rotated each run, `--slice-ms 0`,
+2026-11-17 15:10 to 15:20, no thermal or performance warning recorded at
+either end (`pmset -g therm`). Kernels: the workers' cycles; the kernel
+tests: the `kajo test` process's cycles (`/usr/bin/time -l`). Ratios are
+medians against the base's median; the cycles ratio's range is the
+variant's five runs.
+
+| workload | workers | base ms | base cycles | (a) cycles ratio | (a) instructions | (b) cycles ratio | (b) instructions |
+|---|--:|--:|--:|--:|--:|--:|--:|
+| alloc | 1 | 2893 | 9.69 G | **0.976** (0.972-0.978) | 0.987 | **0.960** (0.959-0.968) | 0.983 |
+| arith | 1 | 1823 | 6.12 G | 1.004 (1.002-1.005) | 1.000 | 1.000 (1.000-1.001) | 1.000 |
+| closures | 1 | 3147 | 10.57 G | 0.998 (0.996-1.004) | 1.000 | **1.041** (1.038-1.042) | 1.000 |
+| fib | 1 | 1380 | 4.63 G | 0.998 (0.997-1.000) | 0.996 | 0.997 (0.996-1.001) | 0.995 |
+| floats | 1 | 3228 | 10.83 G | 0.985 (0.984-0.987) | 1.000 | 1.006 (1.003-1.016) | 1.035 |
+| ivars | 1 | 1819 | 6.10 G | 0.997 (0.997-0.999) | 1.003 | 0.997 (0.996-0.999) | 1.003 |
+| sends | 1 | 1684 | 5.65 G | **0.956** (0.948-0.958) | 0.978 | **0.968** (0.968-0.972) | 0.975 |
+| storeheavy | 1 | 2117 | 7.09 G | 0.997 (0.993-0.998) | 1.000 | 0.996 (0.993-0.997) | 1.000 |
+| walk | 1 | 3589 | 12.04 G | 0.996 (0.992-0.999) | 0.985 | 1.008 (0.999-1.049) | 0.985 |
+| st-closures | 1 | 3229 | 10.84 G | 0.998 (0.995-1.000) | 1.000 | 0.994 (0.993-0.995) | 1.000 |
+| st-ivars | 1 | 1816 | 6.09 G | 0.995 (0.992-0.997) | 1.003 | 0.997 (0.995-0.999) | 1.003 |
+| st-sends | 1 | 1400 | 4.69 G | **0.971** (0.970-0.978) | 0.982 | **0.968** (0.967-0.970) | 0.973 |
+| kernel tests | 1 | 6540 | 14.92 G | 0.994 (0.991-0.994) | 0.996 | 0.997 (0.994-0.999) | 0.995 |
+| alloc | 8 | 454 | 10.95 G | 0.966 (0.957-0.987) | 0.983 | 0.960 (0.951-0.966) | 0.985 |
+| arith | 8 | 246 | 6.09 G | 1.010 (1.003-1.018) | 1.001 | 1.006 (1.000-1.018) | 1.001 |
+| closures | 8 | 426 | 10.63 G | 0.992 (0.979-1.003) | 1.000 | 1.040 (1.026-1.053) | 1.000 |
+| fib | 8 | 185 | 4.66 G | 0.986 (0.985-1.016) | 0.995 | 0.992 (0.986-1.014) | 0.995 |
+| floats | 8 | 438 | 11.12 G | 1.046 (0.969-1.175) | 1.001 | 1.052 (0.980-1.526) | 1.001 |
+| ivars | 8 | 253 | 6.17 G | 0.988 (0.980-1.015) | 1.001 | 0.984 (0.980-1.002) | 1.001 |
+| sends | 8 | 232 | 5.71 G | 0.960 (0.937-0.971) | 0.978 | 0.957 (0.954-0.987) | 0.974 |
+| storeheavy | 8 | 271 | 7.05 G | 1.010 (0.996-1.024) | 1.001 | 1.003 (0.996-1.016) | 1.000 |
+| walk | 8 | 471 | 11.81 G | 0.993 (0.981-1.007) | 0.988 | 1.015 (0.991-1.018) | 0.987 |
+| st-closures | 8 | 438 | 10.94 G | 0.995 (0.983-0.997) | 1.000 | 0.985 (0.972-0.996) | 0.999 |
+| st-ivars | 8 | 233 | 6.06 G | 1.015 (0.998-1.024) | 1.004 | 1.016 (0.997-1.019) | 1.004 |
+| st-sends | 8 | 181 | 4.67 G | 0.990 (0.976-1.003) | 0.984 | 0.971 (0.967-0.977) | 0.974 |
+
+The rule applied (`part2-table.py`'s last lines):
+
+- **(a)**: gains at one worker `sends` 4.39 percent, `st-sends` 2.85,
+  `fib` 0.20, `closures` 0.23, the kernel tests 0.64; none at 5 percent.
+  Its worst golden ratio is `floats` at 8 workers, 1.046, whose five runs
+  span 0.969 to 1.175 (the 8-worker rows are noisy; at one worker nothing
+  is above 1.004). **Does not pass.**
+- **(b)**: `sends` 3.18, `st-sends` 3.22, `fib` 0.33, `closures` -4.12
+  (the spilled `true` and `false`: `closures` is compares and conditional
+  jumps), the kernel tests 0.25; none at 5 percent, `closures` 1.041 at
+  one worker. **Does not pass.**
+
+By the rule's step 2, with the all-four (a) build failing no pair was
+measured alone: a pair alone removes a subset of the same dispatches, and
+the two workloads that came closest owe all of theirs to `push_temp send`.
+Step 3 does not arise: (b) does not pass either.
+
+Per removed dispatch: in `sends` (a) saved 0.022 of 26.8 G instructions,
+7.4 instructions for each of the 80 M fused pairs, which is the
+dispatch's seven; and 3.1 cycles each (4.39 percent of 5.65 G over 80 M);
+`st-sends` 3.3 cycles, the kernel tests 2.7 (0.64 percent of 14.9 G
+process cycles over the 36.0 M dispatches the four pairs remove) per
+removed dispatch. That is above part 1's ceiling (ii) (1.5 to 1.9 cycles,
+seven instructions at the mean IPC) and well under ceiling (i).
+
+## The bound (the module's result)
+
+Fusing a push with the send after it, for every pair that matters
+(`push_temp`, `push_self`, `push_lit`, `push_ivar`), removes 3.7 percent
+of the kernel tests' dispatches and 10 percent of `sends`', and gains at
+most **4.4 percent of cycles on `sends`, 2.9 on `st-sends`, 2.4 to 4.0 on
+`alloc`, 0.6 on the kernel tests and nothing on `fib` or `closures`**, in a
+build that ignores everything a real fused send must keep. The shared send
+path is the better of the two shapes and still moves `true` and a base
+register to the stack. The rule needed 5 percent on two of the five
+workloads; the best build reaches it on none. Nothing is built.
+
+Where the time goes instead: a send in the kernel tests is 13.2
+dispatches apart from the next, and the pair before it is one of them; the
+workloads are send-bound (their sends' lookups, activations and returns),
+not bound by the dispatch between a push and a send.
+
+## Starting positions
+
+1. "Sends after `push_temp`, `push_self` or `push_lit` are under 10
+   percent of dispatches; the ceiling from removed dispatches is a few
+   percent of cycles." **Held for the kernel tests (4.07 percent with
+   `push_ivar`) and most kernels; wrong for `sends` (10.17), `alloc`
+   (12.12, `push_lit` and `push_ivar`) and `walk` (12.15).** The ceiling
+   held: 4.4 percent at most measured.
+2. "The gain is the removed dispatch and nothing else." **Held for
+   instructions** (7.4 removed per pair in `sends`, the dispatch's
+   seven); **in cycles a removed dispatch was worth 2.7 to 3.3**, more
+   than its seven instructions at the mean IPC (1.5 to 1.9), so the
+   indirect branch's prediction is part of it. The send's own work did not
+   shrink.
+3. "A fused send through the one send path keeps the loop's register
+   allocation; a second inline copy does not." **Wrong in its first half**:
+   (a) kept one send, one jump table and one indirect branch but spilled
+   `true` and one base register; (b) spilled `true` and `false` and cost
+   `closures` 4 percent. Neither shape is free.
+4. "The static counts overstate the dynamic share." **Held**: `push_temp
+   send` is 4.97 percent of the kernel image's instructions and 2.02 of
+   the kernel tests' dispatches, `push_lit send` 3.90 against 0.17;
+   `push_ivar send` is the exception (0.38 against 0.75).
+5. "The workloads that matter are send-bound, not bound by the dispatch
+   between a push and a send." **Held**: 0.6 percent on the kernel tests
+   at best.
+
+## Deviations from the brief
+
+- The kernel tests' cycles are the whole `kajo test` process's
+  (`/usr/bin/time -l`; `kajo test` has no workers' counters line), image
+  load and harness included, on both sides alike. Their gain is therefore
+  diluted by the harness; at 4.07 percent of dispatches fused their
+  ceiling (i) was already under 5 percent.
+- The tools' tests were counted (the kernel and tools tests row of part
+  1) but not in part 2's A/B: the rule names the kernel tests, and the
+  two rows of part 1 agree within 0.05 percent.
+- The disassembly reading is `scripts/disasm.sh`, which applies `just
+  arc-check`'s counts (indirect branches, jump-table loads, ARC calls) to
+  `interpret` of each build; `just arc-check` itself builds the working
+  tree and was not run on the cheating trees.
+- The runtime comparison's Kajo rows and the matrices (part 4) were not
+  run: nothing was built.
+
+## Not done
+
+- Each pair alone was not measured: the rule's step 2 says not to after
+  the all-four build failed.
+- Triples ending in a send (none above 0.4 percent of the tests'
+  dispatches) and `push_closure send` (0.65 percent, an out-of-line push)
+  were not tried; the brief keeps triples out.
+- No device run: there is nothing to compare on a device.
+
+## Open questions
+
+None of the brief's three arises as a decision: the threshold was not met
+by either shape, so open questions 2 and 3 have nothing to choose between.
+One for the owner, with a recommendation:
+
+1. **Close fused sends as measured?** The bound above (4.4 percent on the
+   kernel that is nothing but these sends, 0.6 on the kernel tests) is
+   below the rule, and the native engine runs Release apps. Recommended:
+   close it; reopen only if a workload where the interpreter matters
+   (the developer's session, a Debug app) is measured to be dispatch-bound
+   between pushes and sends.
