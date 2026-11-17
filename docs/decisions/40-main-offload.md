@@ -29,7 +29,8 @@ its collector with the longest (`ycMainCollectorWait*`).
 - Under `offload` the main thread collected nothing in any row of the three
   before matrices, the host's nursery was collected 0 times on any thread,
   and the main worker never waited for its collector.
-- The matrix never filled the main worker's nursery under `local`: the brief
+- The matrix never filled the main worker's nursery under `local` (its
+  events and hog rows, which do fill it, ran `offload` only): the brief
   expected the `local` rows to show the cost, and they showed none. The agent
   added a block (the storm with 1000 events, both modes, both orders, three
   runs each, `~/kajo-scratch/main-offload/part1/events-block/`): `local` made
@@ -125,9 +126,23 @@ we don't have any users yet. agreed on others".
    recommended.
 3. The stop-the-world oracle: unchanged, as recommended.
 
-One new question awaits the owner:
+4. Asked by the main session on 2026-11-17 on a wrong premise: "the regular
+   matrix never fills the main worker's nursery; add a scenario that does,
+   for example the storm with 1000 events". The owner answered "sure".
+   The premise was wrong and the example is a row the matrix has: the
+   events and hog rows with `events=1000` flip the main worker's nursery
+   once a launch on the Mac and twice on each device under `offload`
+   (`part5/matrix-*/events.txt`: `main_flips` 1 and 2, the flip at most
+   0.007 ms, the offloaded collection 0.2 to 1.1 ms, 0 waits for the
+   collector, 0 frames missed). Nothing was built from the answer.
 
-4. The regular matrix never fills the main worker's nursery, so the policy's
-   price (flips, waits for the collector) never shows in its rows. Add a
-   scenario that does, for example the storm with 1000 events as in part 1's
-   block (recommended; six more rows a matrix), or leave the matrix as it is.
+One question awaits the owner in its place:
+
+5. One or two flips a launch show the policy's price at a light load and
+   give its percentiles one or two samples. No row makes the main worker
+   fill a half before the collector has finished the other, so the wait
+   for the collector, the one way the policy can hold the main thread, has
+   read 0 in every row ever run. Add a scenario in which the main worker
+   allocates enough to flip a hundred times or more a launch
+   (recommended; a small module in the Swift tier, three more rows a
+   matrix), or leave the matrix as it is.

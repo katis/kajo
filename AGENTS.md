@@ -1249,10 +1249,11 @@ Safety:
    after table.
  - A row that is meant to show a cost is checked to reach the cost. The
    brief took the matrix's `local` rows as the price of the main worker's
-   own collections; in no row did the main worker's nursery fill, in any
-   mode, so 156 rows a matrix had said nothing about it since module 7. A
-   counter of the thing itself (collections on the main thread, flips) in
-   every row is what showed it.
+   own collections; the only rows that fill the main worker's nursery (the
+   events and hog rows, one or two flips a launch) ran `offload` only, so
+   no row of the removed mode had collected on the main thread since
+   module 7. A counter of the thing itself (collections on the main
+   thread, flips) in every row is what showed it.
  - When a configuration goes, each switch of the model is checked to still
    change something. `mainOpensWhileWanted` had only ever been exercised by
    the configuration that was removed; on and off gave equal state counts
@@ -1262,6 +1263,13 @@ Safety:
    the first reads the second with a wait of its own. The Bonjour browser
    updates its list and then posts the event, and the test's second check
    lost that gap once under the sanitizer and twelve loops.
+ - A question to the owner is checked against the rows as a claim is. The
+   main session asked for a scenario "that fills the main worker's
+   nursery" and named the storm with 1000 events; that row was in the
+   matrix already, flipping once or twice a launch, and the module's doc
+   said so. The owner answered a question whose example was a no-op.
+   Before a question leaves, read the rows for the thing it says is
+   missing.
 
 ## Verification
 
@@ -1371,8 +1379,8 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/39-interning-tests.md`: The interning tests drive their race
  - `docs/decisions/40-main-offload.md`: The main worker always offloads its young collections
 
-Awaiting the owner: main offload's one question (`40-main-offload.md`: a
-matrix scenario that fills the main worker's nursery). Native by default's four questions were
+Awaiting the owner: main offload's question 5 (`40-main-offload.md`: a
+scenario in which the main worker flips its nursery often). Native by default's four questions were
 answered as recommended on 2026-11-16 (appended to
 `38-native-by-default.md`). The final mark's four, interpreter speed's three and AOT 2's five were
 answered on 2026-11-15 (appended to `13-final-mark.md`,
