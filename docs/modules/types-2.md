@@ -279,3 +279,194 @@ diagnostics classified, gates, deviations, not done, found); work files in
    the kernel's and the tools' names.
 5. **A switch to leave the checker out of a Debug app.** Recommended: not
    yet; measure first what it costs on the devices.
+
+## Part 1: measured and decided (2026-11-17, 1e8f324)
+
+Measured on the mini with swiftly's swift.org 6.4.2 first on PATH, with an
+aligned release `kajo` of the starting commit
+(`-align-all-nofallthru-blocks=5 -align-loops=32`). Raw files in
+`~/kajo-scratch/types-2/part1/`, scripts in `~/kajo-scratch/types-2/scripts/`
+(`place45-sidefiles.py`, `ot-run.sh`, `part1-ot.sh`, `scan-sp2.py`,
+`T2Measure/`, a scratch extension of the experiment's `OTMeasure` with one
+measurement, `footprintImage`). Nothing was built.
+
+Before anything changed, the gates the Swift tier skips were run on the
+starting commit: `just golden` passed every kernel (`golden-1e8f324.txt`,
+rc=0) and the Mac shell's tests mode passed 255 of 255
+(`mac-tests-1e8f324.txt`).
+
+### The starting positions
+
+1. **Wrong: the placing gives the slice 30 diagnostics, not at most 21.**
+   The experiment's checker over its own side files on this commit gives the
+   slice (its 27 classes) 20 diagnostics, not 21, and the whole image 42, not
+   37 (the image has 3111 methods now, Types 1's code among them;
+   `ot-orig/slice.txt`, `ot-orig/image.txt`). The placing, written in the
+   side files' own form (`place45-sidefiles.py`: Number's `+ - * \\` as
+   `<Self> ^<Self>` then `<Number> ^<Number>`, `negated` and `abs` `^<Self>`,
+   Magnitude's `max:` and `min:` the same with Magnitude, Integer's 15 lines
+   removed, side files for SmallInteger and LargePositiveInteger with
+   `<Integer; Number>` on `+ - * \\` and `^<Integer>` on `negated`, Fraction's
+   `+ - *` answering Number, Object's 15 class-side lines moved to Behavior's
+   instance side), gives the same 27 classes 30 (`ot-placed/slice.txt`; 30 over
+   all 30 annotated classes, the 3 new side files add none) and the image 56.
+   The 10 more, each classified (`ot-placed/slice-diagnostics.txt` against
+   `ot-orig/`):
+   - 7 **limit: `self species new:` answers Instance where Self is declared**
+     (Collection>>select:, SequenceableCollection>>`,`, `copyFrom:to:` twice,
+     `copyWith:`, `reversed`, `select:`). This is the experiment's own
+     limit "`self class new` is Instance, not Self" (Dictionary>>select:, 1
+     of the 20). It appears now because the 15 class-side signatures apply
+     for the first time: the experiment's checker never looked a class-side
+     send up in Behavior, and its rule that an unannotated override voids
+     the signature above it voided every one of Object's 15 (their methods
+     are Behavior's, which had no side file). With the 15 left as Object's
+     `meta` lines the placing gives 23 (`ot-placed-meta/`).
+   - 3 **limit: Self cannot be shown from arithmetic**: `Number>>negated`
+     (`^ 0 - self`), `Float>>negated` and `Fraction>>negated` answer Number,
+     Float and Fraction where `^<Self>` is declared. True at run time (but
+     for SmallInteger minVal and a large negative's `abs`, said below), not
+     provable by the checker.
+   - The image's 4 more besides these: 2 dnu of a method a test compiles at
+     run time (`CompiledMethod >> #developmentExtensionSample`, now typed
+     through Behavior's `compiledMethodAt:`), 2 maybeNil in the same kind of
+     test code (`lookupSelector:` answers `CompiledMethod | Nil`).
+   None is a wrong annotation and none a fault. The checker of part 4 types
+   `self class` and `self species` instance creation inside an instance
+   method as Self (the receiver's class makes an instance of the receiver's
+   class), which answers the first 7 and the experiment's Dictionary>>select:
+   (part 4 says what it measured). The bar's "no more than part 1 measured
+   for the placing" is 30 for the slice.
+2. **Right, with the rule taken as "the token after the pattern decides"**
+   (`scan-sp2.txt`). Over the 216 class files of `kernel/`, `tools/` and
+   `apps/Shared/smalltalk`, all 2754 methods have `[` right after the
+   pattern. With each one's `[` taken away, the body's first character is a
+   comment for 762, `]` for 2 (empty bodies) and a statement or pragma for
+   1990; no body starts with `{`. Read as the brief's words ("a comment
+   string ends a signature"), 762 forgotten brackets would be read as a
+   signature and the reader would then fail at the next entry, on another
+   line with another reason. Read with comments skipped, as the Parser's
+   scanner skips them, the token after the pattern is `]` or a statement in
+   all 2754, and every one is refused at the pattern with "expected [ after
+   the method's pattern" and its line. So the rule built is: after the
+   pattern, comments skipped, a `[` starts a body; a `{` (the next entry's
+   metadata) or the end of the file ends a signature; anything else is
+   refused. A comment between a signature and the next entry is allowed and
+   not kept (the canonical form writes none there).
+3. **Right in substance, with one plain Smalltalk hook.** Nothing the
+   checker reads needs a primitive: classes and method dictionaries,
+   `Smalltalk sourceOf:`, `Smalltalk typesOf:` and the kernel's `Parser`
+   (`parsePattern` gives the types of a pattern without the body). What the
+   kernel has for changes is `DevProtocol noteChangeOf:in:`, called by
+   `Behavior>>compile:classified:` alone (not by removal, class definition,
+   redefinition or removal, or a change of a class's types), and it is
+   about packages. So part 5 adds one hook in `Smalltalk`, a listener that
+   is nil unless the checker set one, called from those places, and a
+   bracket `Smalltalk changesDuring:` that the Tonel loader puts around a
+   file so that a file is one change. No file under the core directories.
+4. **Baselines on the starting commit** (the experiment's checker, the
+   aligned release `kajo`, one worker, headless): the whole image (3111
+   methods) checked in 1434, 1441 and 1449 ms in three runs
+   (`ot-orig/image.txt`, `footprint-image.txt`, `live.txt`), dependency index
+   2559 keys and 12 955 edges; a changed method body rechecks 1 method in 91
+   to 928 µs; a changed signature rechecks 6 to 591 methods in 0.96 to 570
+   ms (`ot-orig/live.txt`). Part 4's number is compared with these, on the
+   same kind of build.
+5. **Baseline, and the brief's number is low for the whole image.** The
+   experiment's estimate (a walk: two header words and eight bytes a slot)
+   of what its checker holds after checking the whole image, not the slice
+   (`ot-orig/footprint-image.txt`): type objects 348 552 bytes, dependency
+   index 872 408, inferred-result cache 486 080, diagnostics 445 648, the rest
+   of the per-method records 2 604 424; about 4.76 MB in all, against 1.2 MB
+   for the slice (`ot-orig/footprint.txt`, the experiment's number again).
+   The image files: the development image 8 360 888 bytes, the kernel
+   6 950 800, the kernel's release image 6 929 840, the development image
+   with the experiment's package (and the scratch measurement) 9 602 872
+   (`work/`, built by the same `kajo`). Part 4 keeps per method only its
+   diagnostics and its dependency keys, as the experiment proposed, and
+   measures again.
+
+### The rules of the signature form this brief left open
+
+- **The token rule** (starting position 2): after the pattern, comments
+  skipped, `[` a body, `{` or the end of the file a signature, anything else
+  refused with "expected [ after the method's pattern".
+- **A signature writes at least one type.** `Foo >> bar` followed by the next
+  entry is a method whose body was forgotten, not a statement about types;
+  both readers refuse it: "a signature writes at least one type".
+- **One per selector and side.** A file with a method and a signature for one
+  selector on one side is refused in both readers ("Foo>>bar is both a method
+  and a signature"); so is a signature written twice ("a signature for
+  Foo>>bar twice").
+- **Its category** is its metadata's, as a method's; none is
+  `as yet unclassified`. **Its package** is its file's: a signature may stand
+  in an `Extension` file as a method may, and is written back into that
+  package's extension file.
+- **Its text** is the pattern as written, from the selector to the pattern's
+  end (the Parser's `lastEnd`), kept in the class's `ClassTypes` by side and
+  selector with its category and package; the writer puts it in its
+  category in the canonical order by selector, `{ #category : ... }` on its
+  line and `Class [class] >> <text>` on the next, so the round trip is byte
+  for byte. A release build hands none over (the image build does not send
+  them, as it sends no class-level type), so a release image holds no
+  signature's text.
+- **Open question 2, as recommended**: in a class file a method and a
+  signature for one selector are refused (above); in the image a method
+  compiled where a signature stands replaces it (`Behavior>>compile:`
+  forgets the signature), so the class's file written back has the method.
+  A signature added where a method stands is refused (`Behavior>>signature:
+  classified:` answers a ClassDefinitionError); the browser has no command
+  for it in this module.
+- **Open question 3, as recommended**: a signature for a selector that
+  nothing in its class's superclass chain or subclasses answers gets one
+  diagnostic of the kind `signature` on the signature, nothing more.
+- **A narrowing signature is checked against what it narrows** (the brief's
+  decided rule, the owner's "Approve"): the first method or signature above
+  the signature's class for the same selector. It contradicts it when its
+  result is not a subtype of the inherited result, or when an argument's type
+  is neither a subtype nor a supertype of the inherited argument's (Self
+  read as the signature's class on both sides). Arguments are compared both
+  ways, as TypeScript compares method parameters, because the owner's
+  placing narrows four on purpose: Number's comparisons take a Number where
+  Magnitude's take a Magnitude. A contradiction is a diagnostic of the kind
+  `signature` on the signature.
+- **The lookup** (the brief's "the first method or signature it meets"),
+  with the experiment's rule for a method without types kept: upward from
+  the receiver's class (for a class-side send, from its metaclass through
+  `Object class`, `Class`, `ClassDescription` and `Behavior`), a signature or
+  a typed method of a class is the answer; a method with no type is the
+  answer (none: its result is inferred) when its class carries no type at
+  all, and is passed over when the class carries any (a typed method, a
+  signature or a class-level type), as an unannotated override in an
+  annotated class kept its superclass's signature in the experiment.
+- **Open question 4, decided against the kernel's and the tools' names**
+  (none of these names occurs in `kernel/`, `tools/`, `apps/Shared/smalltalk`
+  or a Swift source; `ClassTypes` is the kernel's, so the experiment's class
+  type is not `ClassType`): `Type`, `NominalType` (OTClassType), `MetaType`,
+  `UnionType`, `BlockType`, `SelfType`, `SelfClassType`, `InstanceType`,
+  `TypeVariable`, `TypeVariableClass`, `DynamicType`, `UnassignedType`,
+  `ProtocolType`, `TypeProtocol` (OTProtocolInfo), `TypeSignature`,
+  `TypedClass` (OTClassInfo), `TypeTable` (OTAnnotations, reading the image
+  instead of side files), `TypeChecker`, `MethodTypeCheck`, `TypeScope`
+  (OTEnv), `TypeDiagnostic`, and `TypeService` (the live part, new), with the
+  tests `TypeCheckerTest`, `TypeCheckerSample`, `ProtocolTypeTest` and
+  `TypeServiceTest`. The package is `types/` (package Types). `Types`
+  joins the names `kajo new` refuses for an app, beside `Kernel` and
+  `Tools`.
+- **When the checker runs.** It is loaded in a development image but checks
+  nothing until it is first asked: the first `diagnostics` request (or
+  `TypeService start` from Smalltalk) checks the whole image on its
+  background Process and from then on rechecks after every change. A
+  development app that no client asks pays the classes' memory and nothing
+  else, and the shells' scenario images, which the matrices measure, are
+  not changed (the development images are; part 7).
+- **Open question 5, as recommended**: no switch.
+
+The placing of the 45 is built as the brief writes it (part 3), with the 7
+Instance diagnostics answered in the checker (part 4) and the 3 negated ones
+left as a limit. Two more places where Self is not the whole truth are kept as
+the owner's words put them and written down: SmallInteger's `negated` and
+LargePositiveInteger's carry `^<Integer>` on their own methods (a negation
+can change class, as a sum can), but `abs` of SmallInteger minVal and of a
+large negative integer changes class too and has no method of its own in
+those classes to say so.
