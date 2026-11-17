@@ -94,13 +94,14 @@ OTMeasure class >> configure: aChecker as: aSymbol [
 	aSymbol == #noOverloads ifTrue: [aChecker overloads: false].
 	aSymbol == #covariant ifTrue: [aChecker covariant: true].
 	aSymbol == #noInference ifTrue: [aChecker inferReturns: false].
+	aSymbol == #noTypeTests ifTrue: [aChecker typeTests: false].
 	^ aChecker
 ]
 
 { #category : #measures }
 OTMeasure class >> slice [
 	"Question 3: the annotated kernel slice, every method of every class with a side file, with the proposed language; the diagnostics in full in out/slice-diagnostics.txt."
-	| ann s checks t0 t1 |
+	| ann s checks t0 t1 checker |
 	ann := self annotations.
 	s := WriteStream on: String new.
 	s nextPutAll: 'files='; print: ann infos size; nextPutAll: ' annotationLines='; print: ann lineCount;
@@ -108,9 +109,13 @@ OTMeasure class >> slice [
 		nextPutAll: ' annotationErrors='; print: ann errors size; nextPutAll: String lf.
 	ann errors do: [:e | s print: e; nextPutAll: String lf].
 	t0 := Smalltalk microsecondClock.
-	checks := self check: (self classesByName select: [:c | (ann infoFor: c) notNil]) with: (OTChecker on: ann).
+	checker := OTChecker on: ann.
+	checks := self check: (self classesByName select: [:c | (ann infoFor: c) notNil]) with: checker.
 	t1 := Smalltalk microsecondClock.
 	self tally: checks into: s label: 'slice'.
+	s nextPutAll: 'narrowing counts (question 1):'.
+	(checker counts keys asArray sort: [:a :b | a <= b]) do: [:k | s nextPutAll: ' ['; nextPutAll: k; nextPutAll: ']='; print: (checker counts at: k)].
+	s nextPutAll: String lf.
 	s nextPutAll: 'checkMs='; print: (t1 - t0) // 1000; nextPutAll: String lf.
 	self dump: checks to: 'slice-diagnostics.txt'.
 	self write: s contents to: 'slice.txt'
@@ -123,7 +128,7 @@ OTMeasure class >> matrix [
 	ann := self annotations.
 	slice := self classesByName select: [:c | (ann infoFor: c) notNil].
 	s := WriteStream on: String new.
-	#(#base #noGenericMethods #nilLoose #noOverloads #covariant #noInference) do: [:k |
+	#(#base #noGenericMethods #nilLoose #noOverloads #covariant #noInference #noTypeTests) do: [:k |
 		t0 := Smalltalk microsecondClock.
 		self tally: (self check: slice with: (self configure: (OTChecker on: ann) as: k)) into: s label: 'slice ' , k.
 		self tally: (self check: self toolsSlice with: (self configure: (OTChecker on: ann) as: k)) into: s label: 'tools ' , k.
@@ -151,6 +156,9 @@ OTMeasure class >> image [
 	checker index do: [:set | edges := edges + set size. biggest := biggest max: set size].
 	s nextPutAll: 'checkMs='; print: (t1 - t0) // 1000; nextPutAll: ' indexKeys='; print: checker index size;
 		nextPutAll: ' indexEdges='; print: edges; nextPutAll: ' largestDependents='; print: biggest; nextPutAll: String lf.
+	s nextPutAll: 'narrowing counts (question 1):'.
+	(checker counts keys asArray sort: [:a :b | a <= b]) do: [:k | s nextPutAll: ' ['; nextPutAll: k; nextPutAll: ']='; print: (checker counts at: k)].
+	s nextPutAll: String lf.
 	(checker index keys asArray sort: [:a :b | (checker index at: a) size >= (checker index at: b) size]) readStream in: [:rs |
 		1 to: 15 do: [:i | | k | k := rs next. s nextPutAll: 'top '; nextPutAll: k; nextPutAll: ' '; print: (checker index at: k) size; nextPutAll: String lf]].
 	self dump: checks to: 'image-diagnostics.txt'.

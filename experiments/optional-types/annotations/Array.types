@@ -4,4 +4,4 @@ method asArray ^<Self>
 method isArray ^<Boolean>
 method isLiteral ^<Boolean>
 method collect: <[E, ^X]> ^<Array[X]>
-method printOn: <WriteStream[String]> ^<Self>
+method printOn: <WriteStream> ^<Self>

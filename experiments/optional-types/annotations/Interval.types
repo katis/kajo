@@ -1,18 +1,18 @@
-# An Interval of Integers in practice; its collect: and select: answer Arrays (species).
-class Interval
-super SequenceableCollection[Integer]
-ivar start <Number>
+# An Interval of the receiver of to: (1 to: 5 is an Interval[Integer], 1 to: 2 by: 0.5 an Interval[Number]);
+# its collect: and select: answer Arrays (species).
+class Interval[N]
+ivar start <N>
 ivar stop <Number>
 ivar step <Number>
-method at: <Integer> ^<Integer>
-method collect: <[Integer, ^X]> ^<Array[X]>
-method select: <[Integer, ^Boolean]> ^<Array[Integer]>
-method do: <[Integer, ^Dynamic]> ^<Self>
-method first ^<Integer>
-method last ^<Integer>
+method at: <Integer> ^<N>
+method collect: <[N, ^X]> ^<Array[X]>
+method select: <[N, ^Boolean]> ^<Array[N]>
+method do: <[N, ^Dynamic]> ^<Self>
+method first ^<N>
+method last ^<N>
 method increment ^<Number>
 method size ^<Integer>
 method species ^<Behavior>
 method setFrom: <Number> to: <Number> by: <Number> ^<Self>
-meta from: <Number> to: <Number> ^<Instance>
-meta from: <Number> to: <Number> by: <Number> ^<Instance>
+meta from: <X> to: <Number> ^<Instance[X]>
+meta from: <X> to: <Number> by: <Number> ^<Instance[X]>

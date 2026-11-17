@@ -6,6 +6,7 @@ Class {
 		'parent',
 		'vars',
 		'narrowed',
+		'kinds',
 		'depth'
 	]
 }
@@ -55,6 +56,29 @@ OTEnv >> narrow: aName to: aType [
 ]
 
 { #category : #accessing }
+OTEnv >> narrow: aName to: aType kind: aSymbol [
+	"A narrowing that says how it was made (#nilFlow, #typeTest), for the counts of question 1."
+	narrowed at: aName put: aType.
+	kinds at: aName put: aSymbol
+]
+
+{ #category : #accessing }
+OTEnv >> narrowingKindOf: aName [
+	| e |
+	e := self.
+	[e notNil] whileTrue: [
+		(e narrowed includesKey: aName) ifTrue: [^ e kinds at: aName ifAbsent: [#assignment]].
+		(e vars includesKey: aName) ifTrue: [^ nil].
+		e := e parent].
+	^ nil
+]
+
+{ #category : #accessing }
+OTEnv >> kinds [
+	^ kinds
+]
+
+{ #category : #accessing }
 OTEnv >> narrowed [
 	^ narrowed
 ]
@@ -80,7 +104,8 @@ OTEnv >> setParent: anEnv depth: n [
 	parent := anEnv.
 	depth := n.
 	vars := Dictionary new.
-	narrowed := Dictionary new
+	narrowed := Dictionary new.
+	kinds := Dictionary new
 ]
 
 { #category : #accessing }

@@ -2,7 +2,7 @@
 # (C <: SequenceableCollection[E]) that the language leaves out; next and peek are Dynamic.
 class PositionableStream[C]
 super Object
-ivar collection <C>
+ivar collection <Dynamic>  "a String or, for a text stream being written, a ByteArray"
 ivar position <Integer>
 ivar readLimit <Integer>
 ivar isText <Boolean>

@@ -5,7 +5,7 @@ method description ^<String>
 method isResumable ^<Boolean>
 method messageText ^<String>
 method messageText: <String> ^<Self>
-method printOn: <WriteStream[String]> ^<Self>
+method printOn: <WriteStream> ^<Self>
 method outer ^<Dynamic>
 method pass ^<Dynamic>
 method resume ^<Dynamic>

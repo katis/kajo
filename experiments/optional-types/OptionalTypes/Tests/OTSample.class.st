@@ -199,3 +199,14 @@ OTSample >> okLoopNarrowing [
 	[s notNil] whileTrue: [s := s asUppercase. s := nil].
 	^ count
 ]
+
+{ #category : #samples }
+OTSample >> okTypeTest: anObject [
+	(anObject isKindOf: String) ifFalse: [^ 0].
+	^ anObject asUppercase
+]
+
+{ #category : #samples }
+OTSample >> okTypeTestOr: anObject [
+	^ (anObject isString | anObject isInteger) ifTrue: [anObject printString] ifFalse: ['']
+]

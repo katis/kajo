@@ -1,0 +1,90 @@
+# The 71 diagnostics of the whole image with the side files as first written (first/image-diagnostics.txt),
+# each classified by hand: real (a fault the code has at run time), intended (a test that provokes the fault on
+# purpose), annotation (the side file was wrong), limit:<what> (the code is right and the type language or the
+# checker cannot say why), checker-sample (OTSample methods that must fail). Number, class, diagnostic, source line.
+ 1 limit:type-test              dnu Association>>=:2 Object does not understand #key    | ^ (anObject isKindOf: Association) and: [key = anObject key and: [value = anObject value]]
+ 2 real                         dnu BlockClosure>>ifError::2 Error does not understand #receiver    | ^ self on: Error do: [:e | aBlock cull: e messageText cull: e receiver]
+ 3 intended                     arity BlockClosureTest>>testValues:10 a block of 1 arguments sent #value    | self should: [[:x | x] value] raise: Error
+ 4 limit:unannotated-subclass   argType ByteArray>>hashOfBytes:5 argument 1 of #bitXor: is E, expected Integer    | self do: [:b | h := ((h bitXor: b) * 16r100000001B3) bitAnd: 16rFFFFFFFFFFFFFFFF].
+ 5 limit:unannotated-subclass   argType ByteArray>>utf8ScalarAt::5 argument 1 of #value: is E, expected Integer    | b < 16r80 ifTrue: [^ Character value: b].
+ 6 limit:bounded-generic        argType Collection>>sum:2 argument 1 of #+ is E, expected Number    | ^ self inject: 0 into: [:a :b | a + b]
+ 7 limit:type-test              dnu Dictionary>>=:5 Object does not understand #at:ifAbsent:    | self keysAndValuesDo: [:k :v | (aDictionary at: k ifAbsent: [^ false]) = v ifFalse: [^ false]].
+ 8 annotation                   dnu Dictionary>>keyOf::2 Object does not understand #key    | ^ entry key
+ 9 limit:self-class-new         returnType Dictionary>>select::5 answers Instance where Self is declared    | ^ out
+10 intended                     dnu ExceptionTest>>testExceptionDescription:4 Nil does not understand #foo    | self assert: ([nil foo] on: MessageNotUnderstood do: [:e | e messageText]) = 'nil does not understand #foo'
+11 intended                     dnu ExceptionTest>>testHandlerSelection:7 Nil does not understand #foo    | r := [nil foo] on: ZeroDivide, MessageNotUnderstood do: [:e | #set].
+12 annotation                   argType Float>>=:3 argument 2 of #retry:coercing: is Object, expected Number    | ^ self retry: #= coercing: aNumber
+13 annotation                   returnType Float>>negated:2 answers Float where Self is declared    | ^ 0.0 - self
+14 annotation                   argType Float>>~=:3 argument 2 of #retry:coercing: is Object, expected Number    | ^ self retry: #~= coercing: aNumber
+15 limit:type-test              dnu Fraction>>*:3 Number does not understand #numerator    | ^ (Fraction numerator: numerator * aNumber numerator denominator: denominator * aNumber denominator) normalized
+16 limit:type-test              dnu Fraction>>*:3 Number does not understand #denominator    | ^ (Fraction numerator: numerator * aNumber numerator denominator: denominator * aNumber denominator) normalized
+17 limit:type-test              dnu Fraction>>+:3 Number does not understand #denominator    | ^ (Fraction numerator: numerator * aNumber denominator + (aNumber numerator * denominator)
+18 limit:type-test              dnu Fraction>>+:3 Number does not understand #numerator    | ^ (Fraction numerator: numerator * aNumber denominator + (aNumber numerator * denominator)
+19 limit:type-test              dnu Fraction>>+:4 Number does not understand #denominator    | denominator: denominator * aNumber denominator) normalized
+20 limit:type-test              dnu Fraction>>-:3 Number does not understand #denominator    | ^ (Fraction numerator: numerator * aNumber denominator - (aNumber numerator * denominator)
+21 limit:type-test              dnu Fraction>>-:3 Number does not understand #numerator    | ^ (Fraction numerator: numerator * aNumber denominator - (aNumber numerator * denominator)
+22 limit:type-test              dnu Fraction>>-:4 Number does not understand #denominator    | denominator: denominator * aNumber denominator) normalized
+23 limit:type-test              dnu Fraction>>/:4 Number does not understand #denominator    | ^ (Fraction numerator: numerator * aNumber denominator denominator: denominator * aNumber numerator) normalized
+24 limit:type-test              dnu Fraction>>/:4 Number does not understand #numerator    | ^ (Fraction numerator: numerator * aNumber denominator denominator: denominator * aNumber numerator) normalized
+25 limit:type-test              dnu Fraction>><:3 Number does not understand #denominator    | ^ numerator * aNumber denominator < (aNumber numerator * denominator)
+26 limit:type-test              dnu Fraction>><:3 Number does not understand #numerator    | ^ numerator * aNumber denominator < (aNumber numerator * denominator)
+27 annotation                   argType Fraction>>=:3 argument 2 of #retry:coercing: is Object, expected Number    | aNumber isFraction | aNumber isInteger ifFalse: [^ self retry: #= coercing: aNumber].
+28 limit:type-test              dnu Fraction>>=:4 Object does not understand #numerator    | ^ numerator = aNumber numerator and: [denominator = aNumber denominator]
+29 limit:type-test              dnu Fraction>>=:4 Object does not understand #denominator    | ^ numerator = aNumber numerator and: [denominator = aNumber denominator]
+30 limit:protocol               dnu Fraction>>coerce::2 Number does not understand #asFraction    | ^ aNumber asFraction
+31 annotation                   returnType Fraction>>negated:2 answers Fraction where Self is declared    | ^ Fraction numerator: numerator negated denominator: denominator
+32 limit:value-dependent        dnu FractionTest>>testCreation:5 Number does not understand #numerator    | self assert: (1 / -2) numerator = -1.
+33 limit:value-dependent        dnu FractionTest>>testCreation:6 Number does not understand #denominator    | self assert: (1 / -2) denominator = 2
+34 limit:type-test              argType Integer>>/:4 argument 2 of #numerator:denominator: is Number, expected Integer    | ^ (Fraction numerator: self denominator: aNumber) normalized].
+35 limit:value-dependent        dnu IntegerTest>>testOverflowIntoLargeIntegers:11 Number does not understand #bitAnd:    | self assert: ((2 raisedTo: 100) bitAnd: (2 raisedTo: 100) - 1) = 0.
+36 annotation                   returnType Interval>>at::3 answers Number where Integer is declared    | ^ start + (step * (index - 1))
+37 annotation                   argType Interval>>do::5 argument 1 of #value: is Number, the block takes Integer    | ifTrue: [[i <= stop] whileTrue: [aBlock value: i. i := i + step]]
+38 annotation                   argType Interval>>do::6 argument 1 of #value: is Number, the block takes Integer    | ifFalse: [[i >= stop] whileTrue: [aBlock value: i. i := i + step]]
+39 annotation                   returnType Interval>>first:2 answers Number where Integer is declared    | ^ start
+40 annotation                   returnType Interval>>last:2 answers Number where Integer is declared    | ^ stop - ((stop - start) \\ step)
+41 limit:live-code              dnu LiveCompileTest>>testInstanceVariablesBlocksAndTheClassSide:7 LiveSample class does not understand #liveMade    | s := LiveSample liveMade.
+42 annotation                   returnType Number>>negated:2 answers Number where Self is declared    | ^ 0 - self
+43 checker-sample               dnu OTSample>>badHandler:2 ZeroDivide does not understand #zork    | ^ [count foo] on: ZeroDivide do: [:e | e zork]
+44 checker-sample               dnu OTSample>>badInferredDnu:2 String does not understand #zork    | ^ self okInferred zork
+45 checker-sample               dnu OTSample>>badTempFlow:4 Integer does not understand #,    | ^ t , 'x'
+46 checker-sample               dnu OTSample>>badUnionMember:5 String (of Integer | String) does not understand #+    | ^ t + 1
+47 intended                     dnu ObjectTest>>testDoesNotUnderstand:3 Integer does not understand #fooBar:    | r := [3 fooBar: 4] on: MessageNotUnderstood do: [:e |
+48 intended                     dnu ObjectTest>>testDoesNotUnderstand:9 Integer does not understand #fooBar    | r := [3 fooBar] on: MessageNotUnderstood do: [:e | e resume: 7].
+49 limit:no-bottom              dnu ObjectTest>>testNilHandling:5 Nil does not understand #+    | self assert: (nil ifNotNil: [:x | x + 1]) isNil.
+50 limit:nil-in-generic         argType OrderedCollection>>add:beforeIndex::2 argument 1 of #addLast: is Nil, expected E    | self addLast: nil.
+51 limit:representation         returnType OrderedCollection>>addFirst::4 answers E | Nil where E is declared    | ^ array at: firstIndex put: anObject
+52 limit:representation         returnType OrderedCollection>>addLast::4 answers E | Nil where E is declared    | ^ array at: lastIndex put: anObject
+53 limit:representation         returnType OrderedCollection>>at::3 answers E | Nil where E is declared    | ^ array at: firstIndex + index - 1
+54 limit:representation         returnType OrderedCollection>>at:put::3 answers E | Nil where E is declared    | ^ array at: firstIndex + index - 1 put: anObject
+55 annotation                   returnType OrderedCollection>>copyFrom:to::5 answers OrderedCollection where Self is declared    | ^ out
+56 limit:representation         argType OrderedCollection>>do::2 argument 1 of #value: is E | Nil, the block takes E    | firstIndex to: lastIndex do: [:i | aBlock value: (array at: i)]
+57 limit:representation         returnType OrderedCollection>>removeFirst:7 answers E | Nil where E is declared    | ^ x
+58 limit:representation         returnType OrderedCollection>>removeLast:7 answers E | Nil where E is declared    | ^ x
+59 limit:representation         argType OrderedCollection>>reverseDo::2 argument 1 of #value: is E | Nil, the block takes E    | lastIndex to: firstIndex by: -1 do: [:i | aBlock value: (array at: i)]
+60 annotation                   returnType OrderedCollection>>reversed:5 answers OrderedCollection where Self is declared    | ^ out
+61 annotation                   returnType OrderedCollection>>select::5 answers OrderedCollection where Self is declared    | ^ out
+62 limit:type-test              dnu Set>>=:5 Object does not understand #includes:    | ^ self allSatisfy: [:e | aSet includes: e]
+63 limit:type-test              argType String>>=:3 argument 1 of #sameBytesAs: is Object, expected String    | ^ (anObject isString and: [anObject isSymbol not and: [self isSymbol not]]) and: [self sameBytesAs: anObject]
+64 limit:type-test              argType String>>splitOn::7 argument 1 of #indexOfSubstring:startingAt: is String | Character, expected String    | [(j := self indexOfSubstring: sep startingAt: i) > 0] whileTrue: [
+65 limit:type-test              dnu String>>splitOn::9 Character (of String | Character) does not understand #byteSize    | i := j + sep byteSize].
+66 annotation                   argType WriteStream>><<:2 argument 1 of #displayOn: is WriteStream[C], expected WriteStream[String]    | anObject isString ifTrue: [self nextPutAll: anObject] ifFalse: [anObject displayOn: self]
+67 annotation                   argType WriteStream>>display::2 argument 1 of #displayOn: is WriteStream[C], expected WriteStream[String]    | anObject displayOn: self
+68 annotation                   dnu WriteStream>>nextPutAll::8 Object does not understand #do:    | aCollection do: [:e | self nextPut: e].
+69 annotation                   dnu WriteStream>>nextPutAll::10 Object does not understand #byteSize    | n := isText ifTrue: [aCollection byteSize] ifFalse: [aCollection size].
+70 annotation                   argType WriteStream>>print::2 argument 1 of #printOn: is WriteStream[C], expected WriteStream[String]    | anObject printOn: self
+71 annotation                   assignType WriteStream>>setOn::4 collection is C, assigned ByteArray    | ifTrue: [collection := ByteArray new: 32]
+
+# annotation                   21
+# limit:type-test              21
+# limit:representation         8
+# intended                     5
+# checker-sample               4
+# limit:value-dependent        3
+# limit:unannotated-subclass   2
+# limit:bounded-generic        1
+# limit:live-code              1
+# limit:nil-in-generic         1
+# limit:no-bottom              1
+# limit:protocol               1
+# limit:self-class-new         1
+# real                         1

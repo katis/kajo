@@ -31,7 +31,7 @@ method select: <[E, ^Boolean]> ^<Self>
 method sum ^<Dynamic>
 method sum: <[E, ^Number]> ^<Number>
 method displayString ^<String>
-method printOn: <WriteStream[String]> ^<Self>
+method printOn: <WriteStream> ^<Self>
 method identityIncludes: <Object> ^<Boolean>
 method includes: <Object> ^<Boolean>
 method occurrencesOf: <Object> ^<Integer>

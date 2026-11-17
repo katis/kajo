@@ -30,7 +30,7 @@ method sqrtFloor ^<Integer>
 method timesRepeat: <[^Dynamic]> ^<Self>
 method asFraction ^<Fraction>
 method asString ^<String>
-method printOn: <WriteStream[String]> base: <Integer> ^<Self>
+method printOn: <WriteStream> base: <Integer> ^<Self>
 method printPaddedWith: <Character> to: <Integer> ^<String>
 method printString ^<String>
 method printString: <Integer> ^<String>

@@ -3,7 +3,8 @@
 	nilStrict: Nil is a type of its own and a send to T | Nil that Nil does not understand is a diagnostic; off, nil belongs to every type.
 	overloads: a selector with several signatures takes the first whose arguments fit; off, the last one only.
 	covariant: Array[Integer] is an Array[Number]; off (the default), type arguments are invariant with Dynamic as the way out.
-	inferReturns: an unannotated method's result is inferred from its body (cached); off, it is Dynamic."
+	inferReturns: an unannotated method's result is inferred from its body (cached); off, it is Dynamic.
+	typeTests: a type test of a variable (v isKindOf: C, v isString, v isInteger | v isFraction) narrows it in the branch it guards; off, only nil tests do."
 Class {
 	#name : #OTChecker,
 	#superclass : #Object,
@@ -19,7 +20,9 @@ Class {
 		'index',
 		'results',
 		'recordTypes',
-		'cacheIndex'
+		'cacheIndex',
+		'typeTests',
+		'counts'
 	]
 }
 
@@ -258,6 +261,26 @@ OTChecker >> keyOf: aSelector in: aBehavior [
 ]
 
 { #category : #accessing }
+OTChecker >> count: aKey [
+	counts at: aKey put: (counts at: aKey ifAbsent: [0]) + 1
+]
+
+{ #category : #accessing }
+OTChecker >> counts [
+	^ counts
+]
+
+{ #category : #accessing }
+OTChecker >> typeTests [
+	^ typeTests
+]
+
+{ #category : #accessing }
+OTChecker >> typeTests: aBoolean [
+	typeTests := aBoolean
+]
+
+{ #category : #accessing }
 OTChecker >> nilStrict [
 	^ nilStrict
 ]
@@ -301,6 +324,8 @@ OTChecker >> setUp [
 	covariant := false.
 	inferReturns := true.
 	recordTypes := false.
+	typeTests := true.
+	counts := Dictionary new.
 	index := Dictionary new.
 	results := Dictionary new.
 	self forgetCaches

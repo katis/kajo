@@ -5,8 +5,8 @@ method - <Number> ^<Number>
 method / <Number> ^<Number>
 method // <Number> ^<Integer>
 method \\ <Number> ^<Number>
-method abs ^<Self>
-method negated ^<Self>
+method abs ^<Number>
+method negated ^<Number>
 method quo: <Number> ^<Integer>
 method raisedTo: <Integer> ^<Number>
 method reciprocal ^<Number>
@@ -17,13 +17,13 @@ method asInteger ^<Integer>
 method asNumber ^<Self>
 method coerce: <Number> ^<Number>
 method generality ^<Integer>
-method retry: <Symbol> coercing: <Number> ^<Dynamic>
-method to: <Number> ^<Interval>
-method to: <Number> by: <Number> ^<Interval>
+method retry: <Symbol> coercing: <Object> ^<Dynamic>
+method to: <Number> ^<Interval[Self]>
+method to: <Number> by: <Number> ^<Interval[Number]>
 method to: <Number> do: <[Self, ^Dynamic]> ^<Self>
 method to: <Number> by: <Number> do: <[Self, ^Dynamic]> ^<Self>
 method displayString ^<String>
-method printOn: <WriteStream[String]> ^<Self>
+method printOn: <WriteStream> ^<Self>
 method shallowCopy ^<Self>
 method even ^<Boolean>
 method odd ^<Boolean>

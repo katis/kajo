@@ -14,7 +14,7 @@ method growTo: <Integer> ^<Self>
 method isEmpty ^<Boolean>
 method next: <Integer> put: <Object> ^<Object>
 method nextPut: <Object> ^<Object>
-method nextPutAll: <Object> ^<Object>
+method nextPutAll: <SequenceableCollection> ^<SequenceableCollection>
 method nextPutGrowing: <Object> ^<Object>
 method position: <Integer> ^<Self>
 method readLimit ^<Integer>

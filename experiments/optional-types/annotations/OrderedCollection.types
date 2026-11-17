@@ -11,7 +11,7 @@ method asArray ^<Array[E]>
 method at: <Integer> ^<E>
 method at: <Integer> put: <E> ^<E>
 method collect: <[E, ^X]> ^<OrderedCollection[X]>
-method copyFrom: <Integer> to: <Integer> ^<Self>
+method copyFrom: <Integer> to: <Integer> ^<OrderedCollection[E]>
 method copyWith: <E> ^<Self>
 method do: <[E, ^Dynamic]> ^<Self>
 method grow ^<Self>
@@ -23,8 +23,8 @@ method removeIndex: <Integer> ^<E>
 method removeLast ^<E>
 method removeLast: <Integer> ^<SequenceableCollection[E]>
 method reverseDo: <[E, ^Dynamic]> ^<Self>
-method reversed ^<Self>
-method select: <[E, ^Boolean]> ^<Self>
+method reversed ^<OrderedCollection[E]>
+method select: <[E, ^Boolean]> ^<OrderedCollection[E]>
 method setCapacity: <Integer> ^<Self>
 method size ^<Integer>
 method species ^<Behavior>

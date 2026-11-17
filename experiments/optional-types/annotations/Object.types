@@ -41,10 +41,10 @@ method perform: <Symbol> with: <Object> with: <Object> ^<Dynamic>
 method perform: <Symbol> withArguments: <Array> ^<Dynamic>
 method asString ^<String>
 method displayNl ^<Self>
-method displayOn: <WriteStream[String]> ^<Self>
+method displayOn: <WriteStream> ^<Self>
 method displayString ^<String>
 method printNl ^<Self>
-method printOn: <WriteStream[String]> ^<Self>
+method printOn: <WriteStream> ^<Self>
 method printString ^<String>
 method slotAt: <Integer> ^<Dynamic>
 method beReadOnly ^<Self>

@@ -39,8 +39,8 @@ method keysAndValuesDo: <[Integer, Character, ^Dynamic]> ^<Self>
 method reverseDo: <[Character, ^Dynamic]> ^<Self>
 method reversed ^<String>
 method select: <[Character, ^Boolean]> ^<String>
-method displayOn: <WriteStream[String]> ^<Self>
-method printOn: <WriteStream[String]> ^<Self>
+method displayOn: <WriteStream> ^<Self>
+method printOn: <WriteStream> ^<Self>
 method storeString ^<String>
 method isBoundary: <Integer> ^<Boolean>
 method previousBoundary: <Integer> ^<Integer>

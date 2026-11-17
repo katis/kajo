@@ -17,6 +17,8 @@ method badReturn ^<String>
 method okReturn ^<Integer>
 method okSelf ^<Self>
 method takesNumbers: <OrderedCollection[Number]> ^<Self>
+method okTypeTest: <Object> ^<Dynamic>
+method okTypeTestOr: <Object> ^<String>
 class BlockClosure
 method on: <X class | ExceptionSet> do: <[X, ^Dynamic]> ^<Dynamic>
 method value: <Object> ^<Dynamic>
@@ -25,9 +27,13 @@ method dividend ^<Number>
 class Object
 method yourself ^<Self>
 method printString ^<String>
+method isKindOf: <Behavior> ^<Boolean>
+method isString ^<Boolean>
+method isInteger ^<Boolean>
 class Boolean
 method ifTrue: <[^X]> ^<X | Nil>
 method ifTrue: <[^X]> ifFalse: <[^Y]> ^<X | Y>
+method | <Boolean> ^<Boolean>
 method and: <[^Boolean]> ^<Boolean>
 class Collection[E]
 method collect: <[E, ^X]> ^<Collection[X]>
@@ -234,4 +240,12 @@ OTCheckerTest >> testFlow [
 	self assert: (self kindsOf: #okNotNilAnd) equals: #().
 	self assert: (self kindsOf: #badNotNilAndElse) equals: #(#maybeNil).
 	self assert: (self kindsOf: #okLoopNarrowing) equals: #()
+]
+
+{ #category : #tests }
+OTCheckerTest >> testTypeTests [
+	self assert: (self kindsOf: #okTypeTest:) equals: #().
+	self assert: (self kindsOf: #okTypeTestOr:) equals: #().
+	checker typeTests: false.
+	self assert: (self kindsOf: #okTypeTest:) equals: #(#dnu)
 ]

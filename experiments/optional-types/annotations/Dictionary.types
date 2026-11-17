@@ -18,6 +18,7 @@ method includesKey: <Object> ^<Boolean>
 method keyAtValue: <Object> ^<K | Nil>
 method keyAtValue: <Object> ifAbsent: <[^X]> ^<K | X>
 method keys ^<Array[K]>
+method keyOf: <Association[K, V]> ^<K>
 method keysAndValuesDo: <[K, V, ^Dynamic]> ^<Self>
 method keysDo: <[K, ^Dynamic]> ^<Self>
 method keysSortedSafely ^<Array[K]>

@@ -222,7 +222,12 @@ OTMethodCheck >> variableType: aNode in: env [
 	n := aNode name.
 	(n = 'self' or: [n = 'super']) ifTrue: [^ selfType].
 	n = 'thisContext' ifTrue: [^ OTType of: Context].
-	(env narrowingOf: n) ifNotNil: [:t | ^ t].
+	(env narrowingOf: n) ifNotNil: [:t |
+		quiet ifFalse: [(env narrowingKindOf: n) ifNotNil: [:k | | orig |
+			orig := (env envDeclaring: n) ifNotNil: [:x | x vars at: n] ifNil: [(ivarNames includes: n) ifTrue: [self ivarType: n]].
+			(k ~~ #assignment and: [orig notNil and: [orig isUnion or: [orig isNilType or: [k == #typeTest and: [orig isDynamic not and: [(checker isSubtype: orig of: t) not]]]]]]) ifTrue: [
+				checker count: 'narrowRead ' , k , ((ivarNames includes: n) ifTrue: [' ivar'] ifFalse: [' local'])]]].
+		^ t].
 	e := env envDeclaring: n.
 	e notNil ifTrue: [^ e vars at: n].
 	(ivarNames includes: n) ifTrue: [^ self ivarType: n].
@@ -332,19 +337,18 @@ OTMethodCheck >> loop: aNode in: env [
 
 { #category : #narrowing }
 OTMethodCheck >> loopOnce: aNode in: env [
-	| cond e body test last |
+	| cond e body test t |
 	cond := aNode receiver.
 	e := OTEnv parent: env.
-	cond temporaries do: [:t | e declare: t first type: OTUnassigned new].
+	cond temporaries do: [:x | e declare: x first type: OTUnassigned new].
 	self statements: cond statements in: e method: false.
 	body := OTEnv parent: e.
 	cond statements notEmpty ifTrue: [
-		last := cond statements last.
-		(last class == MessageNode and: [last selector == #and:]) ifTrue: [last := last receiver].
-		test := self nilTested: last.
-		(test notNil and: [test last == (aNode selector == #whileTrue: ifTrue: [#notNil] ifFalse: [#isNil])]) ifTrue: [
-			(self currentTypeOf: test first in: e) ifNotNil: [:t | body narrow: test first to: t withoutNil]]].
-	aNode arguments first temporaries do: [:t | body declare: t first type: OTUnassigned new].
+		test := self conditionNarrowing: cond statements last in: e.
+		test notNil ifTrue: [
+			t := aNode selector == #whileTrue: ifTrue: [test at: 2] ifFalse: [test at: 3].
+			t notNil ifTrue: [body narrow: test first to: t kind: (test at: 4)]]].
+	aNode arguments first temporaries do: [:x | body declare: x first type: OTUnassigned new].
 	self statements: aNode arguments first statements in: body method: false.
 	^ OTType nilType
 ]
@@ -382,26 +386,44 @@ OTMethodCheck >> prepass: aBlock [
 ]
 
 { #category : #narrowing }
-OTMethodCheck >> nilTested: aNode [
-	"{variable name. #notNil or #isNil} when aNode is a nil test of a variable (v isNil, v notNil, v == nil, v ~~ nil, v = nil, v ~= nil), else nil."
-	| r s |
+OTMethodCheck >> conditionNarrowing: aNode in: env [
+	"{variable name. its type when aNode is true. its type when false} (nil: unchanged) when aNode tests a variable: a nil test (v isNil, v notNil, v == nil, v ~~ nil, v = nil, v ~= nil), with the typeTests switch a type test (v isKindOf: C, v isString and the other isX), a conjunction (true only) and a disjunction of tests of one variable (true only); else nil."
+	| r s a b t cur |
 	aNode class == MessageNode ifFalse: [^ nil].
 	r := aNode receiver.
-	(r class == VariableNode and: [#('self' 'super' 'thisContext') includes: r name]) ifTrue: [^ nil].
 	s := aNode selector.
-	(s == #and: and: [r class == MessageNode]) ifTrue: [
-		^ (self nilTested: r) ifNotNil: [:t | t last == #notNil ifTrue: [{t first. #notNilAnd}]]].
-	r class == VariableNode ifFalse: [^ nil].
-	s == #isNil ifTrue: [^ {r name. #isNil}].
-	s == #notNil ifTrue: [^ {r name. #notNil}].
-	((s == #== or: [s == #=]) and: [aNode arguments first class == LiteralNode and: [aNode arguments first value isNil]]) ifTrue: [^ {r name. #isNil}].
-	((s == #~~ or: [s == #~=]) and: [aNode arguments first class == LiteralNode and: [aNode arguments first value isNil]]) ifTrue: [^ {r name. #notNil}].
-	^ nil
+	(s == #and: and: [aNode arguments first class == BlockNode]) ifTrue: [
+		a := self conditionNarrowing: r in: env.
+		^ a ifNotNil: [{a first. a at: 2. nil. a at: 4}]].
+	((s == #| or: [s == #or:]) and: [checker typeTests]) ifTrue: [
+		a := self conditionNarrowing: r in: env.
+		b := aNode arguments first.
+		(s == #or: and: [b class == BlockNode and: [b statements size = 1]]) ifTrue: [b := b statements first].
+		b := self conditionNarrowing: b in: env.
+		(a notNil and: [b notNil and: [a first = b first and: [(a at: 2) notNil and: [(b at: 2) notNil]]]]) ifFalse: [^ nil].
+		^ {a first. OTType union: {a at: 2. b at: 2}. nil. #typeTest}].
+	checker typeTests ifTrue: [
+	((s == #== and: [r class == MessageNode and: [r selector == #class and: [r receiver class == VariableNode]]]) and: [aNode arguments first class == VariableNode]) ifTrue: [
+			^ (Smalltalk classNamed: aNode arguments first name) ifNotNil: [:c | {r receiver name. OTType of: c. nil. #typeTest}]]].
+	(r class == VariableNode and: [(#('self' 'super' 'thisContext') includes: r name) not]) ifFalse: [^ nil].
+	cur := self currentTypeOf: r name in: env.
+	t := nil.
+	(s == #isNil or: [(s == #== or: [s == #=]) and: [aNode arguments first class == LiteralNode and: [aNode arguments first value isNil]]])
+		ifTrue: [^ cur ifNotNil: [{r name. nil. cur withoutNil. #nilFlow}]].
+	(s == #notNil or: [(s == #~~ or: [s == #~=]) and: [aNode arguments first class == LiteralNode and: [aNode arguments first value isNil]]])
+		ifTrue: [^ cur ifNotNil: [{r name. cur withoutNil. nil. #nilFlow}]].
+	checker typeTests ifFalse: [^ nil].
+	((s == #isKindOf: or: [s == #isMemberOf:]) and: [aNode arguments first class == VariableNode]) ifTrue: [
+		t := (Smalltalk classNamed: aNode arguments first name) ifNotNil: [:c | OTType of: c]].
+	t isNil ifTrue: [
+		t := (#(#isString String #isSymbol Symbol #isInteger Integer #isFraction Fraction #isFloat Float #isNumber Number #isCharacter Character #isArray Array #isCollection Collection #isBlock BlockClosure #isBoolean Boolean)
+			indexOf: s) in: [:i | (i > 0 and: [i odd]) ifTrue: [OTType of: (Smalltalk classNamed: (#(#isString String #isSymbol Symbol #isInteger Integer #isFraction Fraction #isFloat Float #isNumber Number #isCharacter Character #isArray Array #isCollection Collection #isBlock BlockClosure #isBoolean Boolean) at: i + 1))]]].
+	^ t ifNotNil: [{r name. t. nil. #typeTest}]
 ]
 
 { #category : #narrowing }
 OTMethodCheck >> nilTestIn: aNode in: env [
-	"The nil tests the experiment narrows on: the ifNil: family on a variable's type, and a block run only when a variable is not nil (v notNil ifTrue: [...], v isNil ifFalse: [...], v notNil and: [...], ifTrue:ifFalse: likewise). Answers the send's type, or nil when aNode is none of them."
+	"The flow the experiment follows: the ifNil: family on a variable's type, and the blocks of ifTrue:, ifFalse:, and:, or: and the two-block forms after a condition that tests a variable (conditionNarrowing:). Answers the send's type, or nil when aNode is none of them."
 	| test sel rt nn args blockT r b0 b1 |
 	sel := aNode selector.
 	args := aNode arguments.
@@ -410,29 +432,33 @@ OTMethodCheck >> nilTestIn: aNode in: env [
 		rt := self typeOf: aNode receiver in: env.
 		self countSend: rt result: OTType dynamic node: aNode selector: sel.
 		nn := rt withoutNil.
+		(quiet not and: [rt includesNil and: [args anySatisfy: [:blk | blk numArgs = 1]]]) ifTrue: [checker count: 'blockParam'].
 		r := nil.
-		args do: [:blk | | expect |
+		args do: [:blk | | expect benv |
 			expect := (blk numArgs = 1) ifTrue: [OTBlockType args: {nn} result: OTType dynamic] ifFalse: [nil].
-			blockT := self block: blk expected: expect in: env.
+			benv := env.
+			(blk numArgs = 0 and: [aNode receiver class == VariableNode and: [rt includesNil and: [
+				(sel == #ifNotNil: or: [sel == #ifNotNil:ifNil:]) ifTrue: [blk == args first] ifFalse: [sel == #ifNil:ifNotNil: and: [blk == args last]]]]])
+				ifTrue: [benv := OTEnv parent: env. benv narrow: aNode receiver name to: nn kind: #nilFlow].
+			blockT := self block: blk expected: expect in: benv.
 			r := checker join: r with: blockT result].
 		(sel == #ifNil: and: [rt isDynamic not]) ifTrue: [r := checker join: r with: nn].
 		(sel == #ifNotNil:) ifTrue: [r := checker join: r with: OTType nilType].
 		^ r].
 	(#(#ifTrue: #ifFalse: #and: #or: #ifTrue:ifFalse: #ifFalse:ifTrue:) includes: sel) ifFalse: [^ nil].
-	test := self nilTested: aNode receiver.
+	(args allSatisfy: [:a | a class == BlockNode and: [a numArgs = 0]]) ifFalse: [^ nil].
+	test := self conditionNarrowing: aNode receiver in: env.
 	test isNil ifTrue: [^ nil].
-	(args allSatisfy: [:a | a class == BlockNode]) ifFalse: [^ nil].
 	rt := self typeOf: aNode receiver in: env.
 	self countSend: rt result: (OTType of: Boolean) node: aNode selector: sel.
-	"which block runs when the variable is not nil"
 	b0 := args first.
 	b1 := args size > 1 ifTrue: [args last] ifFalse: [nil].
 	r := nil.
-	args do: [:blk | | e nonNilBranch |
-		nonNilBranch := (test last == #notNilAnd and: [sel == #ifTrue: or: [sel == #ifTrue:ifFalse: and: [blk == b0]]]) or: [(test last == #notNil and: [(#(#ifTrue: #and: ) includes: sel) or: [(sel == #ifTrue:ifFalse: and: [blk == b0]) or: [sel == #ifFalse:ifTrue: and: [blk == b1]]]])
-			or: [test last == #isNil and: [(#(#ifFalse: #or:) includes: sel) or: [(sel == #ifTrue:ifFalse: and: [blk == b1]) or: [sel == #ifFalse:ifTrue: and: [blk == b0]]]]]].
+	args do: [:blk | | e whenTrue t |
+		whenTrue := (sel == #ifTrue: or: [sel == #and:]) or: [(sel == #ifTrue:ifFalse: and: [blk == b0]) or: [sel == #ifFalse:ifTrue: and: [blk == b1]]].
+		t := whenTrue ifTrue: [test at: 2] ifFalse: [test at: 3].
 		e := OTEnv parent: env.
-		nonNilBranch ifTrue: [(self currentTypeOf: test first in: env) ifNotNil: [:t | e narrow: test first to: t withoutNil]].
+		t notNil ifTrue: [e narrow: test first to: t kind: (test at: 4)].
 		r := checker join: r with: (self statements: blk statements in: e method: false)].
 	(#(#ifTrue: #ifFalse:) includes: sel) ifTrue: [r := checker join: r with: OTType nilType].
 	(#(#and: #or:) includes: sel) ifTrue: [r := OTType of: Boolean].
@@ -451,21 +477,19 @@ OTMethodCheck >> currentTypeOf: aName in: env [
 
 { #category : #narrowing }
 OTMethodCheck >> narrowAfter: aStatement in: env [
-	"After `v isNil ifTrue: [^ ...]`, `v notNil ifFalse: [^ ...]` or `v ifNil: [^ ...]`, v is not nil for the rest of the scope."
-	| sel test blk name |
+	"After `cond ifTrue: [^ ...]` the variable cond tests has its type for false for the rest of the scope, after `cond ifFalse: [^ ...]` its type for true, after `v ifNil: [^ ...]` v is not nil."
+	| sel test blk t |
 	aStatement class == MessageNode ifFalse: [^ self].
 	sel := aStatement selector.
 	blk := aStatement arguments isEmpty ifTrue: [nil] ifFalse: [aStatement arguments first].
 	(blk notNil and: [blk class == BlockNode and: [blk statements notEmpty and: [blk statements last class == ReturnNode]]]) ifFalse: [^ self].
-	name := nil.
-	sel == #ifNil: ifTrue: [
-		(aStatement receiver class == VariableNode) ifTrue: [name := aStatement receiver name]].
-	(sel == #ifTrue: or: [sel == #ifFalse:]) ifTrue: [
-		test := self nilTested: aStatement receiver.
-		(test notNil and: [(sel == #ifTrue: and: [test last == #isNil]) or: [sel == #ifFalse: and: [test last == #notNil]]])
-			ifTrue: [name := test first]].
-	name isNil ifTrue: [^ self].
-	(self currentTypeOf: name in: env) ifNotNil: [:t | env narrow: name to: t withoutNil]
+	(sel == #ifNil: and: [aStatement receiver class == VariableNode]) ifTrue: [
+		^ (self currentTypeOf: aStatement receiver name in: env) ifNotNil: [:x | env narrow: aStatement receiver name to: x withoutNil kind: #nilFlow]].
+	(sel == #ifTrue: or: [sel == #ifFalse:]) ifFalse: [^ self].
+	test := self conditionNarrowing: aStatement receiver in: env.
+	test isNil ifTrue: [^ self].
+	t := sel == #ifTrue: ifTrue: [test at: 3] ifFalse: [test at: 2].
+	t notNil ifTrue: [env narrow: test first to: t kind: (test at: 4)]
 ]
 
 { #category : #sending }
@@ -495,6 +519,9 @@ OTMethodCheck >> send: aSymbol to: rt lookup: lookupClassOrNil args: argNodes no
 		(rt includesNil and: [checker nilStrict and: [(UndefinedObject lookupSelector: aSymbol) isNil]]) ifTrue: [
 			self note: #maybeNil at: aNode text: '#' , aSymbol , ' sent to ' , rt printString].
 		members size = 1 ifTrue: [^ self send: aSymbol to: members first lookup: nil args: argNodes node: aNode in: env].
+		quiet ifFalse: [
+			(rt includesNil and: [checker nilStrict and: [(UndefinedObject lookupSelector: aSymbol) notNil]]) ifTrue: [checker count: 'polymorphic with Nil'].
+			(members size > 1 and: [members allSatisfy: [:m | self understands: aSymbol type: m]]) ifTrue: [checker count: 'polymorphic between classes']].
 		members do: [:m | (self understands: aSymbol type: m) ifFalse: [
 			self note: #dnu at: aNode text: m printString , ' (of ' , rt printString , ') does not understand #' , aSymbol]].
 		r := self send: aSymbol to: members first lookup: nil args: argNodes node: aNode in: env.
