@@ -182,3 +182,13 @@ pattern alone is today a method with an empty body. Recommended: the kind
 is decided by the command ("New signature", shown apart in the selector
 list), never by the text. And whether a signature that narrows an inherited
 method is checked against it; recommended: yes, in the checker's module.
+
+## 2026-11-17, the owner's answer to the proposal
+
+"Approve". A signature without a method is a method entry with no body, as
+proposed. The main session reads the answer as covering the proposal's two
+recommendations (in the browser the command decides the kind, never the
+text; a signature that narrows an inherited method is checked against it in
+the checker's module) and says so to the owner. Still open: `kajo seal` and
+the class-level types, types in the browser's class definition, and the
+written forms `:X` and `;`, which the approved placement of the 45 uses.

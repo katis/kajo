@@ -1439,12 +1439,12 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/43-optional-types.md`: Optional types: the direction
  - `docs/decisions/44-types-1.md`: Types 1: the syntax
 
-Awaiting the owner: the proposed form of a signature without a method (a
-method entry with no body, appended to `44-types-1.md`; the owner on
-2026-11-17: `Self` where possible, then that form), Types 1's other two
-questions (`kajo seal` and class-level types, types in the browser's class
-definition) and its written forms for overloads (`<Integer; Number>`) and
-method variables (`:X`). Optional types' five questions were answered
+Awaiting the owner: Types 1's other two questions (`kajo seal` and
+class-level types, types in the browser's class definition) and its written
+forms for overloads (`<Integer; Number>`) and method variables (`:X`). The
+form of a signature without a method (a method entry with no body) was
+approved on 2026-11-17 after "`Self` where possible, then that form"
+(appended to `44-types-1.md`); it is not built. Optional types' five questions were answered
 as recommended on 2026-11-17 (appended to `43-optional-types.md`: explicit
 `Nil`, overloads, narrowing by class tests, class-level types as Tonel
 keys, protocol types made by code only). Fused sends was closed as measured on
