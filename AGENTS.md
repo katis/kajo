@@ -1395,8 +1395,8 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/40-main-offload.md`: The main worker always offloads its young collections
  - `docs/decisions/41-main-flips.md`: The main worker's flips under load, a matrix row
 
-Awaiting the owner: main flips' two questions (`41-main-flips.md`: the
-per-wait record, and the shells' default frame load on the devices). Main
+Awaiting the owner: nothing. Main flips' two questions were answered as
+recommended on 2026-11-17 (appended to `41-main-flips.md`). Main
 offload's question 5 was answered on
 2026-11-17 ("Yes, build it", appended to `40-main-offload.md`; built as
 `docs/modules/main-flips.md`). Native by default's four questions were

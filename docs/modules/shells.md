@@ -335,6 +335,14 @@ every 2000 numbers sets the label, which hops to main, then
 each Transcript line as a text event for it). It runs until quit.
 ## Measurements
 
+A note of 2026-11-17 (`docs/decisions/41-main-flips.md`): the scenario
+rows' default frame load (`mainwork=60000`) fills the 3 ms main turn on
+the devices; under the storm 73 to 1266 of 1266 to 1538 frame turns were
+preempted on the iPad and 10 to 640 on the iPhone, busy fraction 0.30 to
+0.36. The rows keep that load so their history compares (the owner's
+answer); read their main-thread numbers with preempted turns over turns
+beside them. The `mainload` rows run `mainwork=0`.
+
 Mac mini, M2 Pro (8 performance and 4 efficiency cores, 32 GB), macOS
 27.2, its display a Samsung TV at 2560 x 1440, `maximumFramesPerSecond`
 120 and 120.0 Hz delivered in every scenario run; swift.org Swift 6.4.2 for

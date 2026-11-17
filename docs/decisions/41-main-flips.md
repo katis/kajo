@@ -118,3 +118,11 @@ agent through `shell-matrix.sh`.
 2. The default `mainwork=60000` on the devices. Recommended: leave the old
    rows as they are so their history compares, with this note beside them;
    change it only as a module of its own.
+
+## 2026-11-17, the owner's answers
+
+"Accept both".
+
+1. The per-wait record: not now; it is built when a row first shows a wait.
+2. The default frame load: the old rows stay as they are; the note is in
+   `docs/modules/shells.md` under "Measurements".
