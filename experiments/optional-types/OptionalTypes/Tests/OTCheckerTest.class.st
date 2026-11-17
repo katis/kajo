@@ -19,6 +19,8 @@ method okSelf ^<Self>
 method takesNumbers: <OrderedCollection[Number]> ^<Self>
 method okTypeTest: <Object> ^<Dynamic>
 method okTypeTestOr: <Object> ^<String>
+method badIfNotNilResult ^<String>
+method okIfNil ^<String>
 class BlockClosure
 method on: <X class | ExceptionSet> do: <[X, ^Dynamic]> ^<Dynamic>
 method value: <Object> ^<Dynamic>
@@ -248,4 +250,22 @@ OTCheckerTest >> testTypeTests [
 	self assert: (self kindsOf: #okTypeTestOr:) equals: #().
 	checker typeTests: false.
 	self assert: (self kindsOf: #okTypeTest:) equals: #(#dnu)
+]
+
+{ #category : #tests }
+OTCheckerTest >> testIfNotNilBySignaturesAlone [
+	"The ifNil: family typed member by member from three signatures each on Object (with Self) and UndefinedObject (with Dynamic), no T - Nil operator and no rule of the checker's own."
+	checker annotations readString: 'class Object
+method ifNotNil: <[Self, ^R]> ^<R>
+method ifNil: <[^R]> ^<Self>
+method ifNil: <[^R]> ifNotNil: <[Self, ^S]> ^<S>
+class UndefinedObject
+method ifNotNil: <Dynamic> ^<Nil>
+method ifNil: <[^R]> ^<R>
+method ifNil: <[^R]> ifNotNil: <Dynamic> ^<R>' file: 'test'.
+	checker memberwiseNil: true.
+	self assert: (self kindsOf: #okMaybeNilIfNotNil) equals: #().
+	self assert: (self kindsOf: #okIfNil) equals: #().
+	self assert: ((checker check: #badIfNotNilBlock in: OTSample) diagnostics collect: [:d | d text]) asArray equals: #('String does not understand #zork').
+	self assert: ((checker check: #badIfNotNilResult in: OTSample) diagnostics collect: [:d | d text]) asArray equals: #('answers String | Nil where String is declared')
 ]

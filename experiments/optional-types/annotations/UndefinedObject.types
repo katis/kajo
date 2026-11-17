@@ -5,3 +5,7 @@ method isEmptyOrNil ^<Boolean>
 method isLiteral ^<Boolean>
 method printOn: <WriteStream> ^<Self>
 method shallowCopy ^<Self>
+method ifNotNil: <Dynamic> ^<Nil>
+method ifNil: <[^R]> ^<R>
+method ifNil: <[^R]> ifNotNil: <Dynamic> ^<R>
+method ifNotNil: <Dynamic> ifNil: <[^R]> ^<R>

@@ -22,7 +22,8 @@ Class {
 		'recordTypes',
 		'cacheIndex',
 		'typeTests',
-		'counts'
+		'counts',
+		'memberwiseNil'
 	]
 }
 
@@ -271,6 +272,17 @@ OTChecker >> counts [
 ]
 
 { #category : #accessing }
+OTChecker >> memberwiseNil [
+	^ memberwiseNil
+]
+
+{ #category : #accessing }
+OTChecker >> memberwiseNil: aBoolean [
+	"On: the ifNil: family is typed by signatures alone (Object's with Self, UndefinedObject's with Dynamic), a send to a union including Nil when Nil answers the selector; off: the checker's own rule for the ifNil: family (nilTestIn:)."
+	memberwiseNil := aBoolean
+]
+
+{ #category : #accessing }
 OTChecker >> typeTests [
 	^ typeTests
 ]
@@ -326,6 +338,7 @@ OTChecker >> setUp [
 	recordTypes := false.
 	typeTests := true.
 	counts := Dictionary new.
+	memberwiseNil := false.
 	index := Dictionary new.
 	results := Dictionary new.
 	self forgetCaches

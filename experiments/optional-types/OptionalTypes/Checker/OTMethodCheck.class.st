@@ -197,6 +197,8 @@ OTMethodCheck >> typeOf: aNode in: env [
 	c == BraceNode ifTrue: [
 		t := nil.
 		aNode elements do: [:e | t := checker join: t with: (self typeOf: e in: env) withoutSelfMark].
+		"elements of unrelated classes are a tuple, which the language has no type for: Array[Dynamic]"
+		(t notNil and: [t isUnion or: [t isClassType and: [t cls == Object]]]) ifTrue: [t := OTType dynamic].
 		^ OTClassType cls: Array args: {t ifNil: [OTType dynamic]}].
 	c == ReturnNode ifTrue: [
 		t := self typeOf: aNode value in: env.
@@ -429,7 +431,9 @@ OTMethodCheck >> nilTestIn: aNode in: env [
 	args := aNode arguments.
 	(#(#ifNil: #ifNotNil: #ifNil:ifNotNil: #ifNotNil:ifNil:) includes: sel) ifTrue: [
 		(args allSatisfy: [:a | a class == BlockNode]) ifFalse: [^ nil].
+		checker memberwiseNil ifTrue: [^ nil].
 		rt := self typeOf: aNode receiver in: env.
+		quiet ifFalse: [checker count: 'ifNil family receiver ' , (rt isDynamic ifTrue: ['Dynamic'] ifFalse: [rt isVar ifTrue: ['type parameter'] ifFalse: [rt includesNil ifTrue: [(aNode receiver class == VariableNode and: [ivarNames includes: aNode receiver name]) ifTrue: ['union with Nil, an ivar'] ifFalse: ['union with Nil']] ifFalse: ['without Nil']]])].
 		self countSend: rt result: OTType dynamic node: aNode selector: sel.
 		nn := rt withoutNil.
 		(quiet not and: [rt includesNil and: [args anySatisfy: [:blk | blk numArgs = 1]]]) ifTrue: [checker count: 'blockParam'].
@@ -442,7 +446,7 @@ OTMethodCheck >> nilTestIn: aNode in: env [
 				ifTrue: [benv := OTEnv parent: env. benv narrow: aNode receiver name to: nn kind: #nilFlow].
 			blockT := self block: blk expected: expect in: benv.
 			r := checker join: r with: blockT result].
-		(sel == #ifNil: and: [rt isDynamic not]) ifTrue: [r := checker join: r with: nn].
+		sel == #ifNil: ifTrue: [r := checker join: r with: nn].
 		(sel == #ifNotNil:) ifTrue: [r := checker join: r with: OTType nilType].
 		^ r].
 	(#(#ifTrue: #ifFalse: #and: #or: #ifTrue:ifFalse: #ifFalse:ifTrue:) includes: sel) ifFalse: [^ nil].
@@ -516,6 +520,8 @@ OTMethodCheck >> send: aSymbol to: rt lookup: lookupClassOrNil args: argNodes no
 		^ OTType dynamic].
 	rt isUnion ifTrue: [
 		members := rt members reject: [:m | m isNilType].
+		(checker memberwiseNil and: [rt includesNil and: [(self understands: aSymbol type: OTType nilType) and: [(UndefinedObject lookupSelector: aSymbol) ~~ (Object lookupSelector: aSymbol)]]])
+			ifTrue: [members := members , {OTType nilType}].
 		(rt includesNil and: [checker nilStrict and: [(UndefinedObject lookupSelector: aSymbol) isNil]]) ifTrue: [
 			self note: #maybeNil at: aNode text: '#' , aSymbol , ' sent to ' , rt printString].
 		members size = 1 ifTrue: [^ self send: aSymbol to: members first lookup: nil args: argNodes node: aNode in: env].

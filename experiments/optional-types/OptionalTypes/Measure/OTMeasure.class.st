@@ -15,6 +15,14 @@ OTMeasure class >> annotations [
 ]
 
 { #category : #files }
+OTMeasure class >> option [
+	"The second word of the command file, a configure:as: name (#base without one)."
+	| w |
+	w := (Smalltalk primReadFile: 'command') substrings.
+	^ w size > 1 ifTrue: [(w at: 2) asSymbol] ifFalse: [#base]
+]
+
+{ #category : #files }
 OTMeasure class >> classesByName [
 	^ Smalltalk allClasses asArray sort: [:a :b | a name <= b name]
 ]
@@ -95,6 +103,7 @@ OTMeasure class >> configure: aChecker as: aSymbol [
 	aSymbol == #covariant ifTrue: [aChecker covariant: true].
 	aSymbol == #noInference ifTrue: [aChecker inferReturns: false].
 	aSymbol == #noTypeTests ifTrue: [aChecker typeTests: false].
+	aSymbol == #memberwiseNil ifTrue: [aChecker memberwiseNil: true].
 	^ aChecker
 ]
 
@@ -128,7 +137,7 @@ OTMeasure class >> matrix [
 	ann := self annotations.
 	slice := self classesByName select: [:c | (ann infoFor: c) notNil].
 	s := WriteStream on: String new.
-	#(#base #noGenericMethods #nilLoose #noOverloads #covariant #noInference #noTypeTests) do: [:k |
+	#(#base #noGenericMethods #nilLoose #noOverloads #covariant #noInference #noTypeTests #memberwiseNil) do: [:k |
 		t0 := Smalltalk microsecondClock.
 		self tally: (self check: slice with: (self configure: (OTChecker on: ann) as: k)) into: s label: 'slice ' , k.
 		self tally: (self check: self toolsSlice with: (self configure: (OTChecker on: ann) as: k)) into: s label: 'tools ' , k.
@@ -145,7 +154,7 @@ OTMeasure class >> image [
 	"The whole image (kernel, tools, this package) with the proposed language: the time, the counts and the dependency index's size (question 5's starting point and the tables measured on the whole image)."
 	| ann checker checks t0 t1 s edges biggest |
 	ann := self annotations.
-	checker := OTChecker on: ann.
+	checker := self configure: (OTChecker on: ann) as: self option.
 	t0 := Smalltalk microsecondClock.
 	checks := self check: self classesByName with: checker.
 	t1 := Smalltalk microsecondClock.
@@ -163,4 +172,66 @@ OTMeasure class >> image [
 		1 to: 15 do: [:i | | k | k := rs next. s nextPutAll: 'top '; nextPutAll: k; nextPutAll: ' '; print: (checker index at: k) size; nextPutAll: String lf]].
 	self dump: checks to: 'image-diagnostics.txt'.
 	self write: s contents to: 'image.txt'
+]
+
+{ #category : #live }
+OTMeasure class >> liveChanges [
+	"Question 5: ten method bodies recompiled (leaves) and ten signatures changed (widely used ones), {kind. class. selector. new side-file text or nil}."
+	^ {
+		{#body. Association. #key. nil}.
+		{#body. Interval. #increment. nil}.
+		{#body. Fraction. #numerator. nil}.
+		{#body. Character. #isVowel. nil}.
+		{#body. String. #trimmed. nil}.
+		{#body. OrderedCollection. #removeFirst. nil}.
+		{#body. Dictionary. #keysSortedSafely. nil}.
+		{#body. Integer. #isPrime. nil}.
+		{#body. WriteStream. #tab. nil}.
+		{#body. Set. #hash. nil}.
+		{#sig. Object. #printOn:. 'method printOn: <WriteStream[String]> ^<Self>'}.
+		{#sig. Collection. #do:. 'method do: <[E, ^Object]> ^<Self>'}.
+		{#sig. Object. #printString. 'method printString ^<String | Nil>'}.
+		{#sig. Object. #=. 'method = <Object> ^<Boolean>'}.
+		{#sig. SequenceableCollection. #at:. 'method at: <Integer> ^<E | Nil>'}.
+		{#sig. Object. #error:. 'method error: <String> ^<Nil>'}.
+		{#sig. Boolean. #ifTrue:. 'method ifTrue: <[^Dynamic]> ^<Dynamic>'}.
+		{#sig. String. #,. 'method , <Object> ^<String>'}.
+		{#sig. WriteStream. #nextPutAll:. 'method nextPutAll: <String> ^<String>'}.
+		{#sig. OrderedCollection. #add:. 'method add: <E> ^<Self>'}}
+]
+
+{ #category : #live }
+OTMeasure class >> live [
+	"Question 5: the whole image checked once; then each change is made (a body recompiled with compile:, or a signature replaced in the side-file table) and only what read it is rechecked, on a background Process (priority 0) while this Process waits; the dependents, the time and the change in diagnostics, one line each, in out/live.txt."
+	| ann checker s t0 diagCount |
+	ann := self annotations.
+	checker := OTChecker on: ann.
+	t0 := Smalltalk microsecondClock.
+	self check: self classesByName with: checker.
+	s := WriteStream on: String new.
+	diagCount := [checker results inject: 0 into: [:a :mc | a + mc diagnostics size]].
+	s nextPutAll: 'full checkMs='; print: (Smalltalk microsecondClock - t0) // 1000; nextPutAll: ' methods='; print: checker results size; nextPutAll: ' diagnostics='; print: diagCount value; nextPutAll: String lf.
+	self liveChanges do: [:c | | kind cls sel keys rechecked before after us sem b |
+		kind := c first. cls := c at: 2. sel := c at: 3.
+		before := diagCount value.
+		b := cls.
+		kind == #body ifTrue: [b compile: (b compiledMethodAt: sel) sourceCode].
+		kind == #sig ifTrue: [
+			(ann infoFor: cls) methods removeKey: sel ifAbsent: [nil].
+			ann readString: 'class ' , cls name , String lf , (c at: 4) file: 'live'].
+		sem := Semaphore new.
+		[| u0 |
+			u0 := Smalltalk microsecondClock.
+			keys := kind == #body
+				ifTrue: [(checker invalidate: 'body:' , (checker keyOf: sel in: b)) add: (checker keyOf: sel in: b); yourself]
+				ifFalse: [checker invalidate: 'sig:' , cls name , '>>' , sel].
+			rechecked := checker recheck: keys.
+			us := Smalltalk microsecondClock - u0.
+			sem signal] forkAt: 0.
+		sem wait.
+		after := diagCount value.
+		s nextPutAll: kind; nextPutAll: ' '; nextPutAll: cls name; nextPutAll: '>>'; nextPutAll: sel;
+			nextPutAll: ' dependents='; print: keys size; nextPutAll: ' rechecked='; print: rechecked size;
+			nextPutAll: ' recheckUs='; print: us; nextPutAll: ' diagnostics='; print: before; nextPutAll: '->'; print: after; nextPutAll: String lf].
+	self write: s contents to: 'live.txt'
 ]

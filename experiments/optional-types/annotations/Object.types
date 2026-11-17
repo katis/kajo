@@ -89,3 +89,8 @@ meta allInstances ^<Array[Instance]>
 meta instanceCount ^<Integer>
 meta compiledMethodAt: <Symbol> ^<CompiledMethod>
 meta lookupSelector: <Symbol> ^<CompiledMethod | Nil>
+# the ifNil: family (question 1's narrowing check): used as signatures with memberwiseNil, else the checker's own rule
+method ifNotNil: <[Self, ^R]> ^<R>
+method ifNil: <[^R]> ^<Self>
+method ifNil: <[^R]> ifNotNil: <[Self, ^S]> ^<S>
+method ifNotNil: <[Self, ^S]> ifNil: <[^R]> ^<S>

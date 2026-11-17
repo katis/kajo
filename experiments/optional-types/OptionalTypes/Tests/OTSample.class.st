@@ -210,3 +210,18 @@ OTSample >> okTypeTest: anObject [
 OTSample >> okTypeTestOr: anObject [
 	^ (anObject isString | anObject isInteger) ifTrue: [anObject printString] ifFalse: ['']
 ]
+
+{ #category : #samples }
+OTSample >> badIfNotNilBlock [
+	^ name ifNotNil: [:n | n zork]
+]
+
+{ #category : #samples }
+OTSample >> badIfNotNilResult [
+	^ name ifNotNil: [:n | n asUppercase]
+]
+
+{ #category : #samples }
+OTSample >> okIfNil [
+	^ name ifNil: ['none']
+]
