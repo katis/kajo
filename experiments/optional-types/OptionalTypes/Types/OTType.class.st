@@ -41,6 +41,11 @@ OTType >> isNilType [
 ]
 
 { #category : #testing }
+OTType >> isProtocolType [
+	^ false
+]
+
+{ #category : #testing }
 OTType >> isUnassigned [
 	^ false
 ]

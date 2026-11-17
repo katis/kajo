@@ -235,3 +235,25 @@ OTMeasure class >> live [
 			nextPutAll: ' recheckUs='; print: us; nextPutAll: ' diagnostics='; print: before; nextPutAll: '->'; print: after; nextPutAll: String lf].
 	self write: s contents to: 'live.txt'
 ]
+
+{ #category : #scripting }
+OTMeasure class >> scripting [
+	"Question 9: protocols made by code from a scripting dictionary, workspace expressions checked against them, the dictionary replaced and the expressions that read it rechecked; out/scripting.txt."
+	| ann checker s keys t0 rechecked |
+	ann := self annotations.
+	checker := OTChecker on: ann.
+	s := WriteStream on: String new.
+	t0 := Smalltalk microsecondClock.
+	keys := OTScripting register: OTScripting dictionary in: ann.
+	s nextPutAll: 'registered '; print: keys size; nextPutAll: ' protocols in us='; print: Smalltalk microsecondClock - t0; nextPutAll: String lf.
+	OTScripting expressions doWithIndex: [:src :i | | mc |
+		mc := checker checkSource: src named: 'doit' , i printString bindings: (Dictionary new at: 'app' put: (OTProtocolType named: 'Mail.Application'); yourself).
+		s nextPutAll: 'v1 doit'; print: i; nextPutAll: ' ['; nextPutAll: src; nextPutAll: '] : '; print: mc inferredResult; nextPutAll: ' '; print: (mc diagnostics collect: [:d | d text]) asArray; nextPutAll: String lf].
+	t0 := Smalltalk microsecondClock.
+	keys := OTScripting register: OTScripting dictionaryVersion2 in: ann.
+	rechecked := checker recheck: (keys inject: Set new into: [:set :k | set addAll: (checker invalidate: k); yourself]).
+	s nextPutAll: 'replaced: rechecked '; print: rechecked size; nextPutAll: ' expressions in us='; print: Smalltalk microsecondClock - t0; nextPutAll: String lf.
+	(rechecked asArray sort: [:a :b | a key <= b key]) do: [:mc |
+		s nextPutAll: 'v2 '; nextPutAll: mc key; nextPutAll: ' : '; print: mc inferredResult; nextPutAll: ' '; print: (mc diagnostics collect: [:d | d text]) asArray; nextPutAll: String lf].
+	self write: s contents to: 'scripting.txt'
+]

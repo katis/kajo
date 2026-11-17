@@ -160,6 +160,23 @@ OTMethodCheck >> run [
 	self statements: tree statements in: env method: true
 ]
 
+{ #category : #running }
+OTMethodCheck >> runSource: aString key: aKey bindings: aDictionary [
+	"Question 9: check a workspace expression with typed variables; its last statement's type is the result."
+	| tree env |
+	key := aKey.
+	source := aString.
+	tree := [Parser parse: source] on: CompileError do: [:e | self note: #parse at: nil text: e messageText. e return: nil].
+	tree isNil ifTrue: [^ self].
+	parsed := true.
+	selfType := OTType nilType.
+	ivarNames := #().
+	env := OTEnv parent: nil.
+	aDictionary keysAndValuesDo: [:k :v | env declare: k type: v].
+	tree temporaries do: [:t | env declare: t first type: OTUnassigned new].
+	tree statements do: [:st | returns add: (self typeOf: st in: env)]
+]
+
 { #category : #walking }
 OTMethodCheck >> statements: anArray in: env method: isMethod [
 	"The type of the last statement (Nil for none); a method that does not end in a return answers self."
@@ -547,6 +564,7 @@ OTMethodCheck >> send: aSymbol to: rt lookup: lookupClassOrNil args: argNodes no
 			self countSend: rt result: rt result node: aNode selector: aSymbol.
 			^ rt result].
 		^ self send: aSymbol to: (OTType of: BlockClosure) lookup: nil args: argNodes node: aNode in: env].
+	rt isProtocolType ifTrue: [^ self sendToProtocol: aSymbol to: rt args: argNodes node: aNode in: env].
 	rt isMetaType ifTrue: [^ self sendToClass: aSymbol to: rt lookup: lookupClassOrNil args: argNodes node: aNode in: env].
 	rt isClassType ifTrue: [^ self sendToInstance: aSymbol to: rt lookup: lookupClassOrNil args: argNodes node: aNode in: env].
 	argNodes do: [:a | self typeOf: a in: env].
@@ -562,6 +580,23 @@ OTMethodCheck >> sendToInstance: aSymbol to: rt lookup: lookupClassOrNil args: a
 	deps add: 'sel:' , aSymbol.
 	m := lc lookupSelector: aSymbol.
 	^ self unannotated: m selector: aSymbol to: rt from: lc args: argNodes node: aNode in: env
+]
+
+{ #category : #sending }
+OTMethodCheck >> sendToProtocol: aSymbol to: rt args: argNodes node: aNode in: env [
+	"A send to a value of a protocol made by code: its signatures, else Object's methods (a proxy is an Object), else a diagnostic."
+	| p found |
+	deps add: 'protocol:' , rt name.
+	p := ann protocolNamed: rt name.
+	p isNil ifTrue: [argNodes do: [:a | self typeOf: a in: env]. self countSend: rt result: OTType dynamic node: aNode selector: aSymbol. ^ OTType dynamic].
+	found := p signaturesFor: aSymbol.
+	found notNil ifTrue: [^ self apply: {found first. found last} to: rt instance: nil args: argNodes node: aNode in: env].
+	(Object lookupSelector: aSymbol) isNil ifTrue: [
+		argNodes do: [:x | self typeOf: x in: env].
+		self note: #dnu at: aNode text: rt name , ' does not answer #' , aSymbol.
+		self countSend: rt result: OTType dynamic node: aNode selector: aSymbol.
+		^ OTType dynamic].
+	^ self sendToInstance: aSymbol to: (OTType of: Object) lookup: nil args: argNodes node: aNode in: env
 ]
 
 { #category : #sending }
@@ -621,7 +656,7 @@ OTMethodCheck >> apply: found to: rt instance: instanceType args: argNodes node:
 	| defClass sigs s map vars bind argTypes params result leftover |
 	defClass := found first.
 	sigs := found last.
-	map := rt isClassType ifTrue: [ann map: rt to: defClass] ifFalse: [Dictionary new].
+	map := (rt isClassType and: [defClass isBehavior]) ifTrue: [ann map: rt to: defClass] ifFalse: [Dictionary new].
 	s := self chooseSignature: sigs map: map receiver: rt instance: instanceType args: argNodes in: env.
 	deps add: s key.
 	s argTypes size = argNodes size ifFalse: [

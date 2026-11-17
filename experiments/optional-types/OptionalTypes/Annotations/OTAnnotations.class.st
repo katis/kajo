@@ -12,7 +12,8 @@ Class {
 	#instVars : [
 		'infos',
 		'errors',
-		'lines'
+		'lines',
+		'protocols'
 	]
 }
 
@@ -34,6 +35,18 @@ OTAnnotations >> cvarTypeOf: aName in: aClass [
 		(infos at: c ifAbsent: [nil]) ifNotNil: [:i | (i cvars at: aName ifAbsent: [nil]) ifNotNil: [:t | ^ t]].
 		c := c superclass].
 	^ nil
+]
+
+{ #category : #protocols }
+OTAnnotations >> protocolNamed: aString [
+	^ protocols at: aString ifAbsent: [nil]
+]
+
+{ #category : #protocols }
+OTAnnotations >> register: anOTProtocolInfo [
+	"Add or replace the protocol of that name (question 9); answers the dependency key a checker invalidates."
+	protocols at: anOTProtocolInfo name put: anOTProtocolInfo.
+	^ 'protocol:' , anOTProtocolInfo name
 ]
 
 { #category : #accessing }
@@ -194,7 +207,8 @@ OTAnnotations >> readString: aString file: aName [
 OTAnnotations >> setUp [
 	infos := IdentityDictionary new.
 	errors := OrderedCollection new.
-	lines := 0
+	lines := 0.
+	protocols := Dictionary new
 ]
 
 { #category : #lookup }

@@ -23,7 +23,8 @@ Class {
 		'cacheIndex',
 		'typeTests',
 		'counts',
-		'memberwiseNil'
+		'memberwiseNil',
+		'doits'
 	]
 }
 
@@ -48,6 +49,19 @@ OTChecker >> check: aSelector in: aBehavior [
 	self forget: key.
 	results at: key put: mc.
 	mc deps do: [:d | (index at: d ifAbsentPut: [Set new]) add: key].
+	^ mc
+]
+
+{ #category : #checking }
+OTChecker >> checkSource: aString named: aKey bindings: aDictionary [
+	"Check a workspace expression (question 9): aString's statements as a method of UndefinedObject, each name of aDictionary a variable of that type; kept under aKey so that a change it read rechecks it."
+	| mc |
+	mc := OTMethodCheck checker: self behavior: UndefinedObject selector: #doIt.
+	mc runSource: 'doIt' , String lf , aString key: aKey bindings: aDictionary.
+	self forget: aKey.
+	results at: aKey put: mc.
+	doits at: aKey put: {aString. aDictionary}.
+	mc deps do: [:d | (index at: d ifAbsentPut: [Set new]) add: aKey].
 	^ mc
 ]
 
@@ -101,6 +115,7 @@ OTChecker >> recheck: aSetOfKeys [
 	| out |
 	out := OrderedCollection new.
 	aSetOfKeys do: [:mk | | i cname sel b |
+		(doits includesKey: mk) ifTrue: [out add: (self checkSource: (doits at: mk) first named: mk bindings: (doits at: mk) last)] ifFalse: [
 		i := mk indexOfSubstring: '>>'.
 		cname := mk copyFrom: 1 to: i - 1.
 		sel := (mk copyFrom: i + 2 to: mk byteSize) asSymbol.
@@ -109,7 +124,7 @@ OTChecker >> recheck: aSetOfKeys [
 			ifFalse: [Smalltalk classNamed: cname].
 		(b notNil and: [b includesSelector: sel])
 			ifTrue: [out add: (self check: sel in: b)]
-			ifFalse: [self forget: mk. results removeKey: mk ifAbsent: [nil]]].
+			ifFalse: [self forget: mk. results removeKey: mk ifAbsent: [nil]]]].
 	^ out
 ]
 
@@ -216,6 +231,9 @@ OTChecker >> isSubtype: a of: b [
 	(b class == OTVarClass or: [a class == OTVarClass]) ifTrue: [^ a isMetaType or: [a class == OTVarClass or: [a isClassType and: [a cls includesBehavior: Behavior]]]].
 	b isUnion ifTrue: [^ b members anySatisfy: [:m | self isSubtype: a of: m]].
 	(b isClassType and: [b cls == Object]) ifTrue: [^ true].
+	(a isProtocolType or: [b isProtocolType]) ifTrue: [
+		^ a isProtocolType and: [b isProtocolType and: [
+			((annotations protocolNamed: a name) ifNil: [^ true]) includesProtocol: ((annotations protocolNamed: b name) ifNil: [^ true])]]].
 	(a isVar or: [b isVar]) ifTrue: [^ a isVar and: [b isVar and: [a name = b name]]].
 	a isClassType ifTrue: [
 		b isClassType ifTrue: [^ self isClass: a subtypeOf: b].
@@ -339,6 +357,7 @@ OTChecker >> setUp [
 	typeTests := true.
 	counts := Dictionary new.
 	memberwiseNil := false.
+	doits := Dictionary new.
 	index := Dictionary new.
 	results := Dictionary new.
 	self forgetCaches
