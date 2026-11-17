@@ -74,8 +74,8 @@ under `kernel/`, `tools/` or `Sources/`.
    agree, the scanner's `<` against pragmas and binary selectors, the
    Tonel writer and reader and byte identity, class definitions for
    instance variables and type parameters, the syntax fuzzer and the
-   compilers' corpus, the source map, `kajo-format` of sources in
-   `kernel/`), with the ambiguities found by trying the grammar on paper
+   compilers' corpus, the source map, the canonical form
+   `scripts/canonical-tonel.sh --check` asserts), with the ambiguities found by trying the grammar on paper
    against every method of the kernel (a script may scan for the token
    sequences that would become ambiguous).
 8. **What would completion and the protocol need?** Not built: which
