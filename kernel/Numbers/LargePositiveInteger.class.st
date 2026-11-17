@@ -6,19 +6,19 @@ Class {
 }
 
 { #category : #arithmetic }
-LargePositiveInteger >> * aNumber [
+LargePositiveInteger >> * aNumber <Integer; Number> ^<Integer; Number> [
 	<primitive: 42>
 	^ self retry: #* coercing: aNumber
 ]
 
 { #category : #arithmetic }
-LargePositiveInteger >> + aNumber [
+LargePositiveInteger >> + aNumber <Integer; Number> ^<Integer; Number> [
 	<primitive: 40>
 	^ self retry: #+ coercing: aNumber
 ]
 
 { #category : #arithmetic }
-LargePositiveInteger >> - aNumber [
+LargePositiveInteger >> - aNumber <Integer; Number> ^<Integer; Number> [
 	<primitive: 41>
 	^ self retry: #- coercing: aNumber
 ]
@@ -37,14 +37,14 @@ LargePositiveInteger >> // aNumber [
 ]
 
 { #category : #arithmetic }
-LargePositiveInteger >> \\ aNumber [
+LargePositiveInteger >> \\ aNumber <Integer; Number> ^<Integer; Number> [
 	<primitive: 45>
 	aNumber = 0 ifTrue: [^ ZeroDivide new dividend: self; signal: 'division by zero'].
 	^ self retry: #\\ coercing: aNumber
 ]
 
 { #category : #arithmetic }
-LargePositiveInteger >> negated [
+LargePositiveInteger >> negated ^<Integer> [
 	<primitive: 58>
 	^ 0 - self
 ]

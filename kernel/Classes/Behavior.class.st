@@ -27,12 +27,12 @@ Behavior >> methodDictionary [
 ]
 
 { #category : #accessing }
-Behavior >> name [
+Behavior >> name ^<String> [
 	^ self slotAt: 3
 ]
 
 { #category : #accessing }
-Behavior >> superclass [
+Behavior >> superclass ^<Behavior | Nil> [
 	^ self slotAt: 1
 ]
 
@@ -162,13 +162,13 @@ Behavior >> withAllSuperclasses [
 ]
 
 { #category : #'instance creation' }
-Behavior >> basicNew [
+Behavior >> basicNew ^<Instance> [
 	<primitive: 4>
 	^ self error: 'cannot make an instance of ' , self name
 ]
 
 { #category : #'instance creation' }
-Behavior >> basicNew: size [
+Behavior >> basicNew: size <Integer> ^<Instance> [
 	"Module 10: past 4095 slots (32 760 bytes) the instance is a large object, old at birth. The largest pointer object has 16777215 slots; large bytes: the largest byte object 2147483647 bytes (of a words class, as many elements as fit)."
 	<primitive: 3>
 	| kinds limit |
@@ -184,17 +184,17 @@ Behavior >> basicNew: size [
 ]
 
 { #category : #'instance creation' }
-Behavior >> new [
+Behavior >> new ^<Instance> [
 	^ self basicNew initialize
 ]
 
 { #category : #'instance creation' }
-Behavior >> new: size [
+Behavior >> new: size <Integer> ^<Instance> [
 	^ (self basicNew: size) initialize
 ]
 
 { #category : #instances }
-Behavior >> allInstances [
+Behavior >> allInstances ^<Array[Instance]> [
 	"Every object whose class is the receiver, with no limit but the largest Array's (16 777 215; allInstances: takes a smaller one: the owner's answer of 2026-11-09 to the discoverability follow-up's open question 3). Beware: a development image holds millions of objects, and Object allInstances or String allInstances is an Array of hundreds of thousands made in one stop that can be a frame long; ask for a limit where that matters. The objects are found in one stop of the world after every young one is promoted, so an object nothing reaches any more is still an instance until a collection frees it (send Smalltalk garbageCollect first for the live ones only). The immediate classes (SmallInteger, SmallFloat, Character) have no instances in the heap and answer #(); UndefinedObject, True and False answer their one instance."
 	^ self allInstances: 16777215
 ]
@@ -221,7 +221,7 @@ Behavior >> allSubInstances: aLimit [
 ]
 
 { #category : #instances }
-Behavior >> instanceCount [
+Behavior >> instanceCount ^<Integer> [
 	"How many objects have the receiver as their class (primitive 168: the same walk as allInstances, nothing allocated). Garbage counts until a collection frees it."
 	| n |
 	n := Smalltalk primInstanceCountOf: {self}.
@@ -256,12 +256,12 @@ Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
 ]
 
 { #category : #methods }
-Behavior >> canUnderstand: aSymbol [
+Behavior >> canUnderstand: aSymbol <Symbol> ^<Boolean> [
 	^ (self lookupSelector: aSymbol) notNil
 ]
 
 { #category : #methods }
-Behavior >> compiledMethodAt: aSymbol [
+Behavior >> compiledMethodAt: aSymbol <Symbol> ^<CompiledMethod> [
 	^ self compiledMethodAt: aSymbol ifAbsent: [self error: self name , ' has no method ' , aSymbol]
 ]
 
@@ -275,12 +275,12 @@ Behavior >> compiledMethodAt: aSymbol ifAbsent: aBlock [
 ]
 
 { #category : #methods }
-Behavior >> includesSelector: aSymbol [
+Behavior >> includesSelector: aSymbol <Symbol> ^<Boolean> [
 	^ (self compiledMethodAt: aSymbol ifAbsent: [nil]) notNil
 ]
 
 { #category : #methods }
-Behavior >> lookupSelector: aSymbol [
+Behavior >> lookupSelector: aSymbol <Symbol> ^<CompiledMethod | Nil> [
 	| c |
 	c := self.
 	[c == nil] whileFalse: [
@@ -328,7 +328,7 @@ Behavior >> removeSelector: aSymbol [
 ]
 
 { #category : #methods }
-Behavior >> selectors [
+Behavior >> selectors ^<Array[Symbol]> [
 	"The selectors of the receiver's own methods, an Array."
 	| d out |
 	d := self methodDictionary.
@@ -406,12 +406,12 @@ Behavior >> signatureAt: aSelector [
 ]
 
 { #category : #testing }
-Behavior >> includesBehavior: aClass [
+Behavior >> includesBehavior: aClass <Behavior> ^<Boolean> [
 	^ self == aClass or: [self inheritsFrom: aClass]
 ]
 
 { #category : #testing }
-Behavior >> inheritsFrom: aClass [
+Behavior >> inheritsFrom: aClass <Behavior> ^<Boolean> [
 	| c |
 	c := self superclass.
 	[c == nil] whileFalse: [

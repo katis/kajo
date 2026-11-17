@@ -24,6 +24,9 @@ ArrayedCollection class >> new ^<Instance> [
 ]
 
 { #category : #accessing }
+ArrayedCollection class >> new: size <Integer> ^<Instance>
+
+{ #category : #accessing }
 ArrayedCollection class >> new: n <Integer> withAll: anObject <:X> ^<Instance[X]> [
 	^ (self new: n) atAllPut: anObject; yourself
 ]

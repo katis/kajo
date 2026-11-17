@@ -30,11 +30,11 @@ Magnitude >> between: min <Magnitude> and: max <Magnitude> ^<Boolean> [
 ]
 
 { #category : #accessing }
-Magnitude >> max: aMagnitude <Magnitude> ^<Magnitude> [
+Magnitude >> max: aMagnitude <Self; Magnitude> ^<Self; Magnitude> [
 	^ self > aMagnitude ifTrue: [self] ifFalse: [aMagnitude]
 ]
 
 { #category : #accessing }
-Magnitude >> min: aMagnitude <Magnitude> ^<Magnitude> [
+Magnitude >> min: aMagnitude <Self; Magnitude> ^<Self; Magnitude> [
 	^ self < aMagnitude ifTrue: [self] ifFalse: [aMagnitude]
 ]

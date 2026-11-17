@@ -14,6 +14,9 @@ Array >> asArray ^<Self> [
 ]
 
 { #category : #accessing }
+Array >> collect: aBlock <[E, ^:X]> ^<Array[X]>
+
+{ #category : #accessing }
 Array >> isArray ^<Boolean> [
 	^ true
 ]

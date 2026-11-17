@@ -76,6 +76,18 @@ Integer >> timesRepeat: aBlock <[^Dynamic]> ^<Self> [
 	[i <= self] whileTrue: [aBlock value. i := i + 1]
 ]
 
+{ #category : #bits }
+Integer >> bitAnd: anInteger <Integer> ^<Integer>
+
+{ #category : #bits }
+Integer >> bitOr: anInteger <Integer> ^<Integer>
+
+{ #category : #bits }
+Integer >> bitShift: anInteger <Integer> ^<Integer>
+
+{ #category : #bits }
+Integer >> bitXor: anInteger <Integer> ^<Integer>
+
 { #category : #coercion }
 Integer >> asFraction ^<Fraction> [
 	^ Fraction numerator: self denominator: 1

@@ -9,20 +9,20 @@ Class {
 }
 
 { #category : #accessing }
-Fraction >> * aNumber [
+Fraction >> * aNumber <Number> ^<Number> [
 	aNumber isFraction | aNumber isInteger ifFalse: [^ self retry: #* coercing: aNumber].
 	^ (Fraction numerator: numerator * aNumber numerator denominator: denominator * aNumber denominator) normalized
 ]
 
 { #category : #accessing }
-Fraction >> + aNumber [
+Fraction >> + aNumber <Number> ^<Number> [
 	aNumber isFraction | aNumber isInteger ifFalse: [^ self retry: #+ coercing: aNumber].
 	^ (Fraction numerator: numerator * aNumber denominator + (aNumber numerator * denominator)
 		denominator: denominator * aNumber denominator) normalized
 ]
 
 { #category : #accessing }
-Fraction >> - aNumber [
+Fraction >> - aNumber <Number> ^<Number> [
 	aNumber isFraction | aNumber isInteger ifFalse: [^ self retry: #- coercing: aNumber].
 	^ (Fraction numerator: numerator * aNumber denominator - (aNumber numerator * denominator)
 		denominator: denominator * aNumber denominator) normalized

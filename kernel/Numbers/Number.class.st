@@ -5,17 +5,17 @@ Class {
 }
 
 { #category : #arithmetic }
-Number >> * aNumber <Number> ^<Number> [
+Number >> * aNumber <Self; Number> ^<Self; Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
-Number >> + aNumber <Number> ^<Number> [
+Number >> + aNumber <Self; Number> ^<Self; Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
-Number >> - aNumber <Number> ^<Number> [
+Number >> - aNumber <Self; Number> ^<Self; Number> [
 	^ self subclassResponsibility
 ]
 
@@ -30,17 +30,17 @@ Number >> // aNumber <Number> ^<Integer> [
 ]
 
 { #category : #arithmetic }
-Number >> \\ aNumber <Number> ^<Number> [
+Number >> \\ aNumber <Self; Number> ^<Self; Number> [
 	^ self - (self // aNumber * aNumber)
 ]
 
 { #category : #arithmetic }
-Number >> abs ^<Number> [
+Number >> abs ^<Self> [
 	^ self negative ifTrue: [self negated] ifFalse: [self]
 ]
 
 { #category : #arithmetic }
-Number >> negated ^<Number> [
+Number >> negated ^<Self> [
 	^ 0 - self
 ]
 
@@ -113,6 +113,18 @@ Number >> retry: aSelector <Symbol> coercing: aNumber <Object> ^<Dynamic> [
 	self generality > aNumber generality ifTrue: [^ self perform: aSelector with: (self coerce: aNumber)].
 	^ self error: 'cannot ' , aSelector , ' ' , self printString , ' and ' , aNumber printString
 ]
+
+{ #category : #comparing }
+Number >> < aNumber <Number> ^<Boolean>
+
+{ #category : #comparing }
+Number >> <= aNumber <Number> ^<Boolean>
+
+{ #category : #comparing }
+Number >> > aNumber <Number> ^<Boolean>
+
+{ #category : #comparing }
+Number >> >= aNumber <Number> ^<Boolean>
 
 { #category : #intervals }
 Number >> to: stop <Number> ^<Interval[Self]> [

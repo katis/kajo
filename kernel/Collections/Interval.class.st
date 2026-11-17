@@ -64,6 +64,9 @@ Interval >> printOn: aStream [
 ]
 
 { #category : #accessing }
+Interval >> select: aBlock <[N, ^Boolean]> ^<Array[N]>
+
+{ #category : #accessing }
 Interval >> setFrom: a <Number> to: b <Number> by: s <Number> ^<Self> [
 	start := a. stop := b. step := s
 ]

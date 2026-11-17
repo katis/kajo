@@ -18,6 +18,12 @@ SequenceableCollection >> allButLast ^<Self> [
 ]
 
 { #category : #accessing }
+SequenceableCollection >> at: index <Integer> ^<E>
+
+{ #category : #accessing }
+SequenceableCollection >> at: index <Integer> put: value <E> ^<E>
+
+{ #category : #accessing }
 SequenceableCollection >> atAllPut: anObject <E> ^<Self> [
 	1 to: self size do: [:i | self at: i put: anObject]
 ]
