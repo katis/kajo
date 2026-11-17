@@ -192,3 +192,22 @@ text; a signature that narrows an inherited method is checked against it in
 the checker's module) and says so to the owner. Still open: `kajo seal` and
 the class-level types, types in the browser's class definition, and the
 written forms `:X` and `;`, which the approved placement of the 45 uses.
+
+## 2026-11-17, the owner's answers to the rest
+
+"approve your recommendations for the other questions". So:
+
+- `kajo seal` stays as it is and keeps the class-level types of the image
+  it seals; a release image is built with `--release`.
+- Types in the browser's class-definition text are left to the module that
+  shows types apart from the text.
+- The written forms stay: `:X` declares a method variable and overloads are
+  written by position with `;`.
+- The reading of "Approve" above (the command decides a signature's kind in
+  the browser; a narrowing signature is checked against the inherited
+  method) was put to the owner and not objected to.
+
+The main session also recommended, in the same message, building the
+signature form as the first part of Types 2 (the checker in the development
+image) and not as a module of its own, and reads the answer as covering it:
+the brief of Types 2 is written next and is the owner's to start.
