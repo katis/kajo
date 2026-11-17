@@ -159,22 +159,22 @@ TypeService class >> invalidationOf: changes [
 	| keys table oldSigs |
 	keys := Set new.
 	table := checker table.
-	changes do: [:c | | kind sel b cls key old new |
+	changes do: [:c | | kind sel b cls key old new flipped |
 		kind := c first. sel := c at: 2. b := c at: 3.
 		cls := b theNonMetaClass.
 		(kind == #method or: [kind == #methodRemoved or: [kind == #signature]]) ifTrue: [
 			key := checker keyOf: sel in: b.
-			old := (table classes at: cls ifAbsent: [nil]) ifNotNil: [:tc | tc carriesTypes -> ((tc signaturesAt: sel meta: b isMeta) ifNil: [''] ifNotNil: [:l | l printString])].
-			table forget: cls.
-			new := (table typedClass: cls) in: [:tc | tc carriesTypes -> ((tc signaturesAt: sel meta: b isMeta) ifNil: [''] ifNotNil: [:l | l printString])].
-			(old notNil and: [old key ~= new key])
+			old := (table classes at: cls ifAbsent: [nil]) ifNotNil: [:tc | (tc signaturesAt: sel meta: b isMeta) ifNil: [''] ifNotNil: [:l | l printString]].
+			flipped := (table refresh: sel in: b) not and: [old notNil].
+			new := (table typedClass: cls) in: [:tc | (tc signaturesAt: sel meta: b isMeta) ifNil: [''] ifNotNil: [:l | l printString]].
+			flipped
 				ifTrue: [
 					"the class began or stopped carrying types: every lookup through it may change, so everything is checked again"
 					checker forgetCaches.
 					keys addAll: checker resultKeys]
 				ifFalse: [
 					keys addAll: (checker invalidate: 'body:' , key).
-					(kind == #method and: [old notNil and: [old value = new value and: [checker hasResultFor: key]]]) ifFalse: [
+					(kind == #method and: [old notNil and: [old = new and: [checker hasResultFor: key]]]) ifFalse: [
 						keys addAll: (checker invalidate: 'sig:' , key).
 						keys addAll: (checker invalidate: 'sel:' , sel).
 						keys addAll: (self withDependents: (checker indexKeysEndingWith: '>>' , sel))]].

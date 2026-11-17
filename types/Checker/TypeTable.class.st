@@ -30,6 +30,33 @@ TypeTable >> forgetAll [
 ]
 
 { #category : #accessing }
+TypeTable >> refresh: aSelector in: aBehavior [
+	"One method or signature of aBehavior changed (compiled, removed, added): its entry in the class's TypedClass is read again and the rest kept, so a change costs its own pattern and not the class's every method. Answers false, having forgotten the class, when the class must be read whole again: it began or stopped carrying types (its parameters and its untyped methods' meaning change), or a test's overlay names the selector."
+	| cls tc key p kind ct |
+	cls := aBehavior theNonMetaClass.
+	tc := classes at: cls ifAbsent: [^ true].
+	((overlay at: aBehavior ifAbsent: [#()]) anySatisfy: [:t | ((Parser new setSource: t) parsePattern at: 1) asSymbol == aSelector])
+		ifTrue: [self forget: cls. ^ false].
+	key := self keyOf: aSelector in: aBehavior.
+	tc problems removeKey: key ifAbsent: [nil].
+	(aBehavior isMeta ifTrue: [tc metaMethods] ifFalse: [tc methods]) removeKey: aSelector ifAbsent: [nil].
+	(aBehavior compiledMethodAt: aSelector ifAbsent: [nil])
+		ifNotNil: [:m |
+			(Smalltalk sourceOf: m) ifNotNil: [:src |
+				p := [(Parser new setSource: src) parsePattern] on: CompileError do: [:e | nil].
+				(p notNil and: [self hasTypes: p]) ifTrue: [kind := #method] ifFalse: [p := nil]]]
+		ifNil: [
+			(Smalltalk signatureOf: aSelector in: aBehavior) ifNotNil: [:e |
+				p := [(Parser new setSource: e first) parsePattern]
+					on: CompileError do: [:x | tc addProblem: 'the signature does not read: ' , x messageText for: key. nil].
+				kind := #signature]].
+	p ifNotNil: [self addSignaturesFrom: (Array with: aBehavior with: p with: kind) into: tc].
+	ct := Smalltalk typesOf: cls.
+	tc carriesTypes = (tc signatureCount > 0 or: [ct notNil and: [ct isEmpty not]]) ifFalse: [self forget: cls. ^ false].
+	^ true
+]
+
+{ #category : #accessing }
 TypeTable >> setUp [
 	classes := IdentityDictionary new.
 	protocols := Dictionary new.
