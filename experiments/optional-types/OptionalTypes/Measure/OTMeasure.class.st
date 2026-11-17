@@ -107,6 +107,7 @@ OTMeasure class >> configure: aChecker as: aSymbol [
 	aSymbol == #noInference ifTrue: [aChecker inferReturns: false].
 	aSymbol == #noTypeTests ifTrue: [aChecker typeTests: false].
 	aSymbol == #memberwiseNil ifTrue: [aChecker memberwiseNil: true].
+	aSymbol == #noGenericClasses ifTrue: [aChecker genericClasses: false. aChecker genericMethods: false].
 	^ aChecker
 ]
 
@@ -140,7 +141,7 @@ OTMeasure class >> matrix [
 	ann := self annotations.
 	slice := self classesByName select: [:c | (ann infoFor: c) notNil].
 	s := WriteStream on: String new.
-	#(#base #noGenericMethods #nilLoose #noOverloads #covariant #noInference #noTypeTests #memberwiseNil) do: [:k |
+	#(#base #noGenericMethods #nilLoose #noOverloads #covariant #noInference #noTypeTests #memberwiseNil #noGenericClasses) do: [:k |
 		t0 := Smalltalk microsecondClock.
 		self tally: (self check: slice with: (self configure: (OTChecker on: ann) as: k)) into: s label: 'slice ' , k.
 		self tally: (self check: self toolsSlice with: (self configure: (OTChecker on: ann) as: k)) into: s label: 'tools ' , k.

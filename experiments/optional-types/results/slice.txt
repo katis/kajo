@@ -1,0 +1,4 @@
+files=27 annotationLines=670 signatures=622 variables=17 annotationErrors=0
+slice methods=672 parsed=672 withSignature=650 clean=654 sends=2330 knownReceiver=2076 typedBySignature=1835 knownResult=1500 diagnostics=21 argType=8 assignType=1 dnu=4 returnType=8
+narrowing counts (question 1): [blockParam]=1 [ifNil family receiver Dynamic]=10 [ifNil family receiver union with Nil, an ivar]=2 [narrowRead nilFlow local]=1 [narrowRead typeTest local]=38 [polymorphic between classes]=17
+checkMs=120

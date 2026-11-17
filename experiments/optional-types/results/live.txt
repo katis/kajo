@@ -1,0 +1,21 @@
+full checkMs=1322 methods=3040 diagnostics=37
+body Association>>key dependents=1 rechecked=1 recheckUs=67 diagnostics=37->37
+body Interval>>increment dependents=1 rechecked=1 recheckUs=67 diagnostics=37->37
+body Fraction>>numerator dependents=1 rechecked=1 recheckUs=67 diagnostics=37->37
+body Character>>isVowel dependents=1 rechecked=1 recheckUs=106 diagnostics=37->37
+body String>>trimmed dependents=1 rechecked=1 recheckUs=962 diagnostics=37->37
+body OrderedCollection>>removeFirst dependents=1 rechecked=1 recheckUs=438 diagnostics=37->37
+body Dictionary>>keysSortedSafely dependents=1 rechecked=1 recheckUs=184 diagnostics=37->37
+body Integer>>isPrime dependents=1 rechecked=1 recheckUs=618 diagnostics=37->37
+body WriteStream>>tab dependents=1 rechecked=1 recheckUs=108 diagnostics=37->37
+body Set>>hash dependents=1 rechecked=1 recheckUs=101 diagnostics=37->37
+sig Object>>printOn: dependents=6 rechecked=6 recheckUs=891 diagnostics=37->38
+sig Collection>>do: dependents=17 rechecked=17 recheckUs=4267 diagnostics=38->38
+sig Object>>printString dependents=50 rechecked=50 recheckUs=37932 diagnostics=38->55
+sig Object>>= dependents=166 rechecked=166 recheckUs=207367 diagnostics=55->55
+sig SequenceableCollection>>at: dependents=170 rechecked=170 recheckUs=213243 diagnostics=55->92
+sig Object>>error: dependents=306 rechecked=306 recheckUs=221906 diagnostics=92->125
+sig Boolean>>ifTrue: dependents=453 rechecked=453 recheckUs=433446 diagnostics=125->125
+sig String>>, dependents=579 rechecked=579 recheckUs=554557 diagnostics=125->116
+sig WriteStream>>nextPutAll: dependents=66 rechecked=66 recheckUs=67300 diagnostics=116->121
+sig OrderedCollection>>add: dependents=390 rechecked=390 recheckUs=449888 diagnostics=121->122

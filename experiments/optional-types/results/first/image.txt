@@ -1,0 +1,17 @@
+image methods=2986 parsed=2986 withSignature=642 clean=2929 sends=24642 knownReceiver=12702 typedBySignature=6560 knownResult=8108 diagnostics=71 argType=17 arity=1 assignType=1 dnu=36 returnType=16
+checkMs=1209 indexKeys=2398 indexEdges=12147 largestDependents=260
+top sel:assert: 260
+top body:TestCase>>assert: 260
+top sel:new 223
+top sig:String>>, 187
+top body:Behavior>>new 153
+top sig:Integer>>+ 149
+top sig:OrderedCollection class>>new 142
+top sig:Boolean>>ifTrue: 137
+top sig:Object>>= 123
+top sig:OrderedCollection>>add: 105
+top sel:assert:equals: 102
+top body:TestCase>>assert:equals: 102
+top sig:HashedCollection class>>new 87
+top sig:OrderedCollection>>asArray 86
+top sig:Boolean>>ifFalse: 73

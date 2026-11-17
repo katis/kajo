@@ -1,0 +1,100 @@
+traced methods=101 tests=55 passed=55 failures=0 errors=0
+Association>>key:value: arg1 declared=K seen=Object genericOrBlock
+Association>>key:value: arg2 declared=V seen=SmallInteger | String genericOrBlock
+Association>>value: arg1 declared=V seen=Symbol | SmallInteger genericOrBlock
+Character>>< arg1 declared=Character seen=Character same
+Character>>= arg1 declared=Object seen=Character declaredWider
+Dictionary>>associationsDo: arg1 declared=[Association[K, V], ^Dynamic] seen=BlockClosure genericOrBlock
+Dictionary>>at: arg1 declared=K seen=Symbol | SmallInteger | String genericOrBlock
+Dictionary>>at:ifAbsent: arg1 declared=K seen=Object genericOrBlock
+Dictionary>>at:ifAbsent: arg2 declared=[^X] seen=BlockClosure genericOrBlock
+Dictionary>>at:ifAbsentPut: arg1 declared=K seen=Object genericOrBlock
+Dictionary>>at:ifAbsentPut: arg2 declared=[^V] seen=BlockClosure genericOrBlock
+Dictionary>>at:ifPresent: arg1 declared=K seen=Symbol genericOrBlock
+Dictionary>>at:ifPresent: arg2 declared=[V, ^X] seen=BlockClosure genericOrBlock
+Dictionary>>at:put: arg1 declared=K seen=Object genericOrBlock
+Dictionary>>at:put: arg2 declared=V seen=Symbol | SmallInteger | String genericOrBlock
+Dictionary>>collect: arg1 declared=[V, ^X] seen=BlockClosure genericOrBlock
+Dictionary>>includesKey: arg1 declared=Object seen=Symbol declaredWider
+Dictionary>>keyAtValue: arg1 declared=Object seen=SmallInteger declaredWider
+Dictionary>>keyAtValue:ifAbsent: arg1 declared=Object seen=SmallInteger declaredWider
+Dictionary>>keyAtValue:ifAbsent: arg2 declared=[^X] seen=BlockClosure genericOrBlock
+Dictionary>>keyOf: arg1 declared=Association[K, V] seen=Association genericOrBlock
+Dictionary>>keysAndValuesDo: arg1 declared=[K, V, ^Dynamic] seen=BlockClosure genericOrBlock
+Dictionary>>keysDo: arg1 declared=[K, ^Dynamic] seen=BlockClosure genericOrBlock
+Dictionary>>removeKey: arg1 declared=K seen=Symbol | SmallInteger genericOrBlock
+Dictionary>>removeKey:ifAbsent: arg1 declared=K seen=CompiledMethod | Symbol | SmallInteger genericOrBlock
+Dictionary>>removeKey:ifAbsent: arg2 declared=[^X] seen=BlockClosure genericOrBlock
+Dictionary>>select: arg1 declared=[V, ^Boolean] seen=BlockClosure genericOrBlock
+Dictionary>>valuesDo: arg1 declared=[V, ^Dynamic] seen=BlockClosure genericOrBlock
+Fraction>>setNumerator:denominator: arg1 declared=Integer seen=SmallInteger declaredWider
+Fraction>>setNumerator:denominator: arg2 declared=Integer seen=SmallInteger declaredWider
+Integer>>/ arg1 declared=Number seen=SmallInteger declaredWider
+Integer>><< arg1 declared=Integer seen=SmallInteger declaredWider
+Integer>>gcd: arg1 declared=Integer seen=SmallInteger declaredWider
+Integer>>lcm: arg1 declared=Integer seen=SmallInteger declaredWider
+Integer>>printPaddedWith:to: arg1 declared=Character seen=Character same
+Integer>>printPaddedWith:to: arg2 declared=Integer seen=SmallInteger declaredWider
+Integer>>printString: arg1 declared=Integer seen=SmallInteger declaredWider
+Interval>>at: arg1 declared=Integer seen=SmallInteger declaredWider
+Interval>>collect: arg1 declared=[N, ^X] seen=BlockClosure genericOrBlock
+Interval>>do: arg1 declared=[N, ^Dynamic] seen=BlockClosure genericOrBlock
+Interval>>setFrom:to:by: arg1 declared=Number seen=SmallInteger declaredWider
+Interval>>setFrom:to:by: arg2 declared=Number seen=SmallInteger declaredWider
+Interval>>setFrom:to:by: arg3 declared=Number seen=SmallInteger declaredWider
+OrderedCollection>>, arg1 declared=Collection[E] seen=Array genericOrBlock
+OrderedCollection>>add: arg1 declared=E seen=Object genericOrBlock
+OrderedCollection>>add:beforeIndex: arg1 declared=E seen=SmallInteger genericOrBlock
+OrderedCollection>>add:beforeIndex: arg2 declared=Integer seen=SmallInteger declaredWider
+OrderedCollection>>addFirst: arg1 declared=E seen=SmallInteger | MessageNode genericOrBlock
+OrderedCollection>>addLast: arg1 declared=E seen=Object | Nil genericOrBlock
+OrderedCollection>>at: arg1 declared=Integer seen=SmallInteger declaredWider
+OrderedCollection>>at:put: arg1 declared=Integer seen=SmallInteger declaredWider
+OrderedCollection>>at:put: arg2 declared=E seen=SmallInteger genericOrBlock
+OrderedCollection>>collect: arg1 declared=[E, ^X] seen=BlockClosure genericOrBlock
+OrderedCollection>>copyFrom:to: arg1 declared=Integer seen=SmallInteger declaredWider
+OrderedCollection>>copyFrom:to: arg2 declared=Integer seen=SmallInteger declaredWider
+OrderedCollection>>do: arg1 declared=[E, ^Dynamic] seen=BlockClosure genericOrBlock
+OrderedCollection>>remove:ifAbsent: arg1 declared=E seen=SmallInteger genericOrBlock
+OrderedCollection>>remove:ifAbsent: arg2 declared=[^X] seen=BlockClosure genericOrBlock
+OrderedCollection>>removeIndex: arg1 declared=Integer seen=SmallInteger declaredWider
+OrderedCollection>>reverseDo: arg1 declared=[E, ^Dynamic] seen=BlockClosure genericOrBlock
+OrderedCollection>>select: arg1 declared=[E, ^Boolean] seen=BlockClosure genericOrBlock
+OrderedCollection>>setCapacity: arg1 declared=Integer seen=SmallInteger declaredWider
+Set>>add: arg1 declared=E seen=Number | Symbol | String genericOrBlock
+Set>>collect: arg1 declared=[E, ^X] seen=BlockClosure genericOrBlock
+Set>>do: arg1 declared=[E, ^Dynamic] seen=BlockClosure genericOrBlock
+Set>>includes: arg1 declared=Object seen=Number | String declaredWider
+Set>>remove:ifAbsent: arg1 declared=E seen=SmallInteger genericOrBlock
+Set>>remove:ifAbsent: arg2 declared=[^X] seen=BlockClosure genericOrBlock
+String>>< arg1 declared=String seen=String same
+String>><= arg1 declared=String seen=String same
+String>>= arg1 declared=Object seen=SmallInteger | Symbol | String declaredWider
+String>>> arg1 declared=String seen=String same
+String>>beginsWith: arg1 declared=String seen=String same
+String>>collect: arg1 declared=[Character, ^Character] seen=BlockClosure genericOrBlock
+String>>do: arg1 declared=[Character, ^Dynamic] seen=BlockClosure genericOrBlock
+String>>endsWith: arg1 declared=String seen=String same
+String>>first: arg1 declared=Integer seen=SmallInteger declaredWider
+String>>includesSubstring: arg1 declared=String seen=String same
+String>>indexOf: arg1 declared=Character seen=Character same
+String>>indexOfSubstring: arg1 declared=String seen=String same
+String>>keysAndValuesDo: arg1 declared=[Integer, Character, ^Dynamic] seen=BlockClosure genericOrBlock
+String>>occurrencesOf: arg1 declared=Character seen=Character same
+String>>previousBoundary: arg1 declared=Integer seen=SmallInteger declaredWider
+String>>printOn: arg1 declared=WriteStream seen=WriteStream same
+String>>replaceAll:with: arg1 declared=String seen=String same
+String>>replaceAll:with: arg2 declared=String seen=String same
+String>>reverseDo: arg1 declared=[Character, ^Dynamic] seen=BlockClosure genericOrBlock
+String>>select: arg1 declared=[Character, ^Boolean] seen=BlockClosure genericOrBlock
+String>>splitOn: arg1 declared=String | Character seen=Character | String same
+WriteStream>><< arg1 declared=Object seen=SmallInteger | String declaredWider
+WriteStream>>growTo: arg1 declared=Integer seen=SmallInteger declaredWider
+WriteStream>>nextPut: arg1 declared=Object seen=OTClassType | Character | SmallInteger declaredWider
+WriteStream>>nextPutAll: arg1 declared=SequenceableCollection seen=SequenceableCollection same
+WriteStream>>nextPutGrowing: arg1 declared=Object seen=Magnitude declaredWider
+WriteStream>>position: arg1 declared=Integer seen=SmallInteger declaredWider
+WriteStream>>print: arg1 declared=Object seen=OTType | SmallInteger | String declaredWider
+WriteStream>>setOn: arg1 declared=C seen=ArrayedCollection genericOrBlock
+WriteStream>>skip: arg1 declared=Integer seen=SmallInteger declaredWider
+arguments: declaredWider=34 genericOrBlock=48 same=16

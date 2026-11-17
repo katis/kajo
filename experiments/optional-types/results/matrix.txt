@@ -1,0 +1,31 @@
+slice base methods=672 parsed=672 withSignature=650 clean=654 sends=2330 knownReceiver=2076 typedBySignature=1835 knownResult=1500 diagnostics=21 argType=8 assignType=1 dnu=4 returnType=8
+tools base methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=577 typedBySignature=228 knownResult=382 diagnostics=0
+ms=232
+slice noGenericMethods methods=672 parsed=672 withSignature=650 clean=656 sends=2330 knownReceiver=2048 typedBySignature=1809 knownResult=1413 diagnostics=19 argType=7 assignType=1 dnu=3 returnType=8
+tools noGenericMethods methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=575 typedBySignature=226 knownResult=379 diagnostics=0
+ms=217
+slice nilLoose methods=672 parsed=672 withSignature=650 clean=663 sends=2330 knownReceiver=2076 typedBySignature=1835 knownResult=1500 diagnostics=12 argType=5 assignType=1 dnu=4 returnType=2
+tools nilLoose methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=577 typedBySignature=228 knownResult=382 diagnostics=0
+ms=226
+slice noOverloads methods=672 parsed=672 withSignature=650 clean=598 sends=2330 knownReceiver=2073 typedBySignature=1832 knownResult=1497 diagnostics=145 argType=97 assignType=20 dnu=4 returnType=24
+tools noOverloads methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=577 typedBySignature=228 knownResult=382 diagnostics=0
+ms=226
+slice covariant methods=672 parsed=672 withSignature=650 clean=654 sends=2330 knownReceiver=2076 typedBySignature=1835 knownResult=1500 diagnostics=21 argType=8 assignType=1 dnu=4 returnType=8
+tools covariant methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=577 typedBySignature=228 knownResult=382 diagnostics=0
+ms=226
+slice noInference methods=672 parsed=672 withSignature=650 clean=654 sends=2330 knownReceiver=2075 typedBySignature=1834 knownResult=1480 diagnostics=21 argType=8 assignType=1 dnu=4 returnType=8
+tools noInference methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=554 typedBySignature=207 knownResult=173 diagnostics=0
+ms=171
+slice noTypeTests methods=672 parsed=672 withSignature=650 clean=641 sends=2330 knownReceiver=2072 typedBySignature=1839 knownResult=1461 diagnostics=45 argType=12 assignType=1 dnu=24 returnType=8
+tools noTypeTests methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=574 typedBySignature=228 knownResult=381 diagnostics=0
+ms=221
+slice memberwiseNil methods=672 parsed=672 withSignature=650 clean=654 sends=2330 knownReceiver=2076 typedBySignature=1837 knownResult=1502 diagnostics=21 argType=8 assignType=1 dnu=4 returnType=8
+tools memberwiseNil methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=577 typedBySignature=229 knownResult=382 diagnostics=0
+ms=229
+slice noGenericClasses methods=672 parsed=672 withSignature=650 clean=665 sends=2330 knownReceiver=2040 typedBySignature=1801 knownResult=1405 diagnostics=9 argType=4 assignType=1 dnu=3 returnType=1
+tools noGenericClasses methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=567 typedBySignature=218 knownResult=368 diagnostics=0
+ms=231
+slice noAnnotations base methods=672 parsed=672 withSignature=0 clean=668 sends=2330 knownReceiver=989 typedBySignature=0 knownResult=158 diagnostics=4 dnu=4
+tools noAnnotations base methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=448 typedBySignature=0 knownResult=195 diagnostics=0
+slice noAnnotations noInference methods=672 parsed=672 withSignature=0 clean=668 sends=2330 knownReceiver=979 typedBySignature=0 knownResult=48 diagnostics=4 dnu=4
+tools noAnnotations noInference methods=243 parsed=243 withSignature=0 clean=243 sends=1440 knownReceiver=434 typedBySignature=0 knownResult=10 diagnostics=0

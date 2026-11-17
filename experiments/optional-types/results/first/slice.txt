@@ -1,0 +1,3 @@
+files=27 annotationLines=662 signatures=613 variables=17 annotationErrors=0
+slice methods=672 parsed=672 withSignature=642 clean=629 sends=2330 knownReceiver=2077 typedBySignature=1848 knownResult=1472 diagnostics=55 argType=15 assignType=1 dnu=23 returnType=16
+checkMs=119

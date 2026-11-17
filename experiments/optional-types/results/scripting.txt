@@ -1,0 +1,14 @@
+registered 4 protocols in us=78
+v1 doit1 [app mailboxes first messages first subject asUppercase] : String #()
+v1 doit2 [app mailboxes first messages first sender , ' wrote'] : String #()
+v1 doit3 [app mailboxes first messages first sender: 'me'] : Dynamic #('Mail.Message does not answer #sender:')
+v1 doit4 [app mailboxes first unreadCount + 1] : Integer #()
+v1 doit5 [app move: app mailboxes first messages first to: app mailboxes last withPriority: #urgent] : Nil #()
+v1 doit6 [app mailboxes first name: 'Archive'] : Dynamic #('Mail.Mailbox does not answer #name:')
+replaced: rechecked 6 expressions in us=860
+v2 doit1 : Dynamic #('Mail.RichText does not answer #asUppercase')
+v2 doit2 : Dynamic #('Mail.Message does not answer #sender')
+v2 doit3 : Dynamic #('Mail.Message does not answer #sender:')
+v2 doit4 : Integer #()
+v2 doit5 : Nil #()
+v2 doit6 : Mail.Mailbox #()

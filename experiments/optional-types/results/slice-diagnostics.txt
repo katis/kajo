@@ -1,0 +1,21 @@
+dnu BlockClosure>>ifError::2 Error does not understand #receiver    | ^ self on: Error do: [:e | aBlock cull: e messageText cull: e receiver]
+argType Collection>>sum:2 argument 1 of #+ is E, expected Number    | ^ self inject: 0 into: [:a :b | a + b]
+returnType Dictionary>>select::5 answers Instance where Self is declared    | ^ out
+dnu Fraction>>coerce::2 Number does not understand #asFraction    | ^ aNumber asFraction
+argType Interval>>last:2 argument 1 of #- is N, expected Number    | ^ stop - ((stop - start) \\ step)
+returnType Interval>>last:2 answers Number where N is declared    | ^ stop - ((stop - start) \\ step)
+assignType Interval>>setFrom:to:by::2 start is N, assigned Number    | start := a. stop := b. step := s
+argType Interval>>size:2 argument 1 of #< is N, expected Number    | step > 0 ifTrue: [stop < start ifTrue: [^ 0]. ^ stop - start // step + 1].
+argType Interval>>size:2 argument 1 of #- is N, expected Number    | step > 0 ifTrue: [stop < start ifTrue: [^ 0]. ^ stop - start // step + 1].
+argType OrderedCollection>>add:beforeIndex::2 argument 1 of #addLast: is Nil, expected E    | self addLast: nil.
+returnType OrderedCollection>>addFirst::4 answers E | Nil where E is declared    | ^ array at: firstIndex put: anObject
+returnType OrderedCollection>>addLast::4 answers E | Nil where E is declared    | ^ array at: lastIndex put: anObject
+returnType OrderedCollection>>at::3 answers E | Nil where E is declared    | ^ array at: firstIndex + index - 1
+returnType OrderedCollection>>at:put::3 answers E | Nil where E is declared    | ^ array at: firstIndex + index - 1 put: anObject
+argType OrderedCollection>>do::2 argument 1 of #value: is E | Nil, the block takes E    | firstIndex to: lastIndex do: [:i | aBlock value: (array at: i)]
+returnType OrderedCollection>>removeFirst:7 answers E | Nil where E is declared    | ^ x
+returnType OrderedCollection>>removeLast:7 answers E | Nil where E is declared    | ^ x
+argType OrderedCollection>>reverseDo::2 argument 1 of #value: is E | Nil, the block takes E    | lastIndex to: firstIndex by: -1 do: [:i | aBlock value: (array at: i)]
+argType String>>splitOn::7 argument 1 of #indexOfSubstring:startingAt: is String | Character, expected String    | [(j := self indexOfSubstring: sep startingAt: i) > 0] whileTrue: [
+dnu String>>splitOn::9 Character (of String | Character) does not understand #byteSize    | i := j + sep byteSize].
+dnu WriteStream>>nextPutAll::10 SequenceableCollection does not understand #byteSize    | n := isText ifTrue: [aCollection byteSize] ifFalse: [aCollection size].

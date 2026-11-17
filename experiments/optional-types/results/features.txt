@@ -1,0 +1,20 @@
+generic method signatures (own variables): 49
+lines class: 27
+lines ivar: 17
+lines meta: 67
+lines method: 555
+lines super: 4
+overloaded selectors: 15
+super lines (superclass arguments): 4
+uses Dynamic: 85
+uses Instance: 15
+uses Instance[...]: 14
+uses Self: 129
+uses Self class: 1
+uses T | Nil: 16
+uses X class (a variable's class): 1
+uses a block type: 99
+uses a class-side type (Foo class): 1
+uses a generic class with arguments: 70
+uses a union of classes: 17
+generic classes: Array[E] ArrayedCollection[E] Association[K, Collection[E] Dictionary[K, HashedCollection[E] Interval[N] OrderedCollection[E] PositionableStream[C] ReadStream[C] SequenceableCollection[E] Set[E] WriteStream[C]

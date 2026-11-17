@@ -143,7 +143,7 @@ OTMethodCheck >> run [
 			instType := OTClassType cls: base args: (params collect: [:p | OTType dynamic]) selfKind: #instance.
 			ivarNames := #()]
 		ifFalse: [
-			selfType := OTClassType cls: base args: (params collect: [:p | OTVar named: p]) selfKind: #self.
+			selfType := OTClassType cls: base args: (params collect: [:p | checker genericClasses ifTrue: [OTVar named: p] ifFalse: [OTType dynamic]]) selfKind: #self.
 			instType := nil.
 			ivarNames := (Smalltalk instanceVariableNamesOf: base) collect: [:s | s asString]].
 	((ann signaturesFor: selector meta: meta from: base) ifNotNil: [:f | (checker signatures: f apply: selector from: behavior) ifTrue: [f]]) ifNotNil: [:found |
@@ -657,6 +657,7 @@ OTMethodCheck >> apply: found to: rt instance: instanceType args: argNodes node:
 	defClass := found first.
 	sigs := found last.
 	map := (rt isClassType and: [defClass isBehavior]) ifTrue: [ann map: rt to: defClass] ifFalse: [Dictionary new].
+	checker genericClasses ifFalse: [map keys do: [:k | map at: k put: OTType dynamic]].
 	s := self chooseSignature: sigs map: map receiver: rt instance: instanceType args: argNodes in: env.
 	deps add: s key.
 	s argTypes size = argNodes size ifFalse: [

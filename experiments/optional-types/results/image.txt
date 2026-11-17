@@ -1,0 +1,18 @@
+image methods=3040 parsed=3040 withSignature=650 clean=3008 sends=25880 knownReceiver=13248 typedBySignature=6798 knownResult=8366 diagnostics=37 argType=10 arity=1 assignType=1 dnu=17 returnType=8
+checkMs=1320 indexKeys=2505 indexEdges=12544 largestDependents=261
+narrowing counts (question 1): [blockParam]=6 [ifNil family receiver Dynamic]=298 [ifNil family receiver union with Nil]=7 [ifNil family receiver union with Nil, an ivar]=2 [ifNil family receiver without Nil]=6 [narrowRead nilFlow local]=29 [narrowRead typeTest local]=38 [polymorphic between classes]=23
+top sel:assert: 261
+top body:TestCase>>assert: 261
+top sel:new 228
+top sig:String>>, 195
+top body:Behavior>>new 157
+top sig:OrderedCollection class>>new 145
+top sig:Integer>>+ 142
+top sig:Boolean>>ifTrue: 132
+top sig:Object>>= 121
+top sig:OrderedCollection>>add: 109
+top sel:assert:equals: 105
+top body:TestCase>>assert:equals: 105
+top sig:HashedCollection class>>new 96
+top sig:OrderedCollection>>asArray 88
+top sig:SequenceableCollection>>at: 76

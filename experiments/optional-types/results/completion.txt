@@ -1,0 +1,6 @@
+typesOfAMethodUs n=230 p50=110 p90=480 max=1921
+typeAtOffsetUs n=178 p50=2 p90=5 max=12
+selectorsOfAReceiverUs n=300 p50=344 p90=583 max=816
+selectorsListed n=300 p50=148 p90=186 max=186
+diagnosticsOfAClassUs n=10 p50=5681 p90=27367 max=41455
+dependentsOfAChangeUs n=237 p50=1 p90=2 max=7

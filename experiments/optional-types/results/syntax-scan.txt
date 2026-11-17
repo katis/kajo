@@ -1,0 +1,17 @@
+argument positions (a <T> after each): 1953
+binary patterns: 87
+binary patterns whose selector holds < or > (e.g. < aMagnitude <Magnitude>): 28
+block literals with arguments ([:x <T> | ...]): 1111
+blocks with temporaries ([:x | | t <T> | ...]): 107
+body sequences < Name > (a cast would collide with comparisons): 0
+body sequences ^< or ^ <: 0
+body sequences ||: 0
+files: 208
+instance variable declarations: 384
+methods: 2658
+methods with arguments and pragmas (an argument type <T> next to <pragma>): 145
+methods with pragmas: 223
+methods with temporaries (| t <T> | would hold a | of a union): 674
+result positions (^<T> after the pattern): 2658
+pragma names: primitive: 177, devProtocol 31, slow 6, expectedFailure 3, unwind 2, consumesPragmas: 2, debuggable 1, handler 1, author: 1
+pragma names starting with a capital: 0

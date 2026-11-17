@@ -24,7 +24,8 @@ Class {
 		'typeTests',
 		'counts',
 		'memberwiseNil',
-		'doits'
+		'doits',
+		'genericClasses'
 	]
 }
 
@@ -301,6 +302,17 @@ OTChecker >> memberwiseNil: aBoolean [
 ]
 
 { #category : #accessing }
+OTChecker >> genericClasses [
+	^ genericClasses
+]
+
+{ #category : #accessing }
+OTChecker >> genericClasses: aBoolean [
+	"Off: every type argument of a generic class is Dynamic (Array[E] is read as Array), the measure of what generic classes buy."
+	genericClasses := aBoolean
+]
+
+{ #category : #accessing }
 OTChecker >> typeTests [
 	^ typeTests
 ]
@@ -358,6 +370,7 @@ OTChecker >> setUp [
 	counts := Dictionary new.
 	memberwiseNil := false.
 	doits := Dictionary new.
+	genericClasses := true.
 	index := Dictionary new.
 	results := Dictionary new.
 	self forgetCaches
