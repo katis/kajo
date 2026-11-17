@@ -1406,8 +1406,8 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/41-main-flips.md`: The main worker's flips under load, a matrix row
  - `docs/decisions/42-fused-sends.md`: Fused sends, measured first (stopped at the bound)
 
-Awaiting the owner: fused sends' one question (`42-fused-sends.md`: close
-it as measured). Main flips' two questions were answered as
+Awaiting the owner: nothing. Fused sends was closed as measured on
+2026-11-17 (appended to `42-fused-sends.md`). Main flips' two questions were answered as
 recommended on 2026-11-17 (appended to `41-main-flips.md`). Main
 offload's question 5 was answered on
 2026-11-17 ("Yes, build it", appended to `40-main-offload.md`; built as

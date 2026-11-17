@@ -77,3 +77,8 @@ on its first clause.
    percent on one kernel and 0.6 percent on the kernel tests, and a Release
    app runs native code. Reopen only if a workload where the interpreter
    matters is shown to be bound by the dispatch between a push and a send.
+
+## 2026-11-17, the owner's answer
+
+"Yes, close it". Fused sends is closed as measured; the reopening
+condition is the one in question 1.
