@@ -177,3 +177,78 @@ Build the recommended option; decisions only.
 3. If only the second inline copy passes and the shared path does not.
    Recommended: stop and hand back with the numbers; a second copy of the
    send in the loop is the owner's decision.
+
+## Part 1: the counts (2026-11-17, 7934a55)
+
+Mac mini M2 Pro, swift.org Swift 6.4.2 (swiftly, first on PATH;
+`~/kajo-scratch/fused-sends/part1/env.txt`). The counting build
+(`swift build -c release --product kajo -Xswiftc -DKAJO_COUNT_OPCODES`) ran
+every workload at one worker (`scripts/part1-count.sh`, raw counts in
+`part1/counts/<workload>.txt`, run lines in `part1/count-runs.txt`); the
+cycles and instructions are the aligned `-enable-testing` release build's
+(`ab.sh`'s flags), three runs, the median (`scripts/part1-cycles.sh`,
+`part1/cycles.txt`): the workers' own counters for the kernels and the
+collections program, the whole `kajo test` process from `/usr/bin/time -l`
+for the tests (image load and harness included, so their cycles per
+dispatch are high). Every path here is under `~/kajo-scratch/fused-sends/`;
+the full table with every pair and triple ending in a send per workload is
+`part1/table.md` (`scripts/part1-table.py`).
+
+Dispatches are counted as the head dispatches them: a fused opcode is one
+dispatch, and a pair is counted only when its second instruction began
+where the first ended. A push that a fused opcode already took (`push_temp
+push_temp send` runs as `fused_push_temp_push_temp` then `send`) is not in
+a `push_temp send` row; those rows are exactly the dispatches a new pair
+would remove, since the peephole fuses left to right and no fused pair
+starts with a send.
+
+| workload | dispatches | `push_temp send` | `push_self send` | `push_lit send` | `push_ivar send` | other pushes | all | cycles per dispatch | IPC | ceiling (i) | ceiling (ii) |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| arith | 1069 M | 0 | 0 | 0 | 0 | 0 | 0 | 5.73 | 3.15 | 0 | 0 |
+| fib | 559 M | 0 | 0 | 0 | 0 | 0 | 0 | 8.30 | 3.65 | 0 | 0 |
+| sends | 787 M | 80.0 M (10.17 %) | 0 | 0 | 0 | 0 | 10.17 % | 7.18 | 4.75 | 10.17 % | 2.09 % |
+| alloc | 692 M | 0 | 0 | 42.0 M (6.06 %) | 42.0 M (6.06 %) | 0 | 12.12 % | 13.99 | 4.52 | 12.12 % | 1.34 % |
+| ivars | 993 M | 0 | 0 | 32 k | 0 | 0 | 0.00 % | 6.13 | 3.73 | 0.00 % | 0.00 % |
+| walk | 449 M | 21.0 M (4.67 %) | 0 | 33.6 M (7.48 %) | 0 | 0 | 12.15 % | 27.11 | 2.19 | 12.15 % | 1.43 % |
+| storeheavy | 1346 M | 64 k | 0 | 64 k | 0 | 0 | 0.01 % | 5.28 | 4.62 | 0.01 % | 0.00 % |
+| closures | 1173 M | 0 | 0 | 60 k | 0 | 60 k | 0.01 % | 8.97 | 5.43 | 0.01 % | 0.00 % |
+| floats | 480 M | 0 | 0 | 0 | 0 | 0 | 0 | 22.55 | 5.40 | 0 | 0 |
+| st-sends | 787 M | 40.0 M (5.08 %) | 0 | 0 | 0 | 0 | 5.08 % | 5.96 | 3.88 | 5.08 % | 1.54 % |
+| st-ivars | 993 M | 0 | 0 | 32 k | 0 | 0 | 0.00 % | 6.15 | 3.72 | 0.00 % | 0.00 % |
+| st-closures | 1173 M | 0 | 0 | 0 | 0 | 60 k | 0.01 % | 9.27 | 4.98 | 0.01 % | 0.00 % |
+| collections | 1462 M | 10.8 M (0.74 %) | 2.4 M (0.16 %) | 0 | 0 | 0 | 0.90 % | 9.66 | 4.13 | 0.90 % | 0.16 % |
+| kernel tests (249) | 984 M | 19.9 M (2.02 %) | 7.0 M (0.71 %) | 1.7 M (0.17 %) | 7.4 M (0.75 %) | 4.0 M (0.41 %) | 4.07 % | 15.18 | 3.68 | 4.07 % | 0.51 % |
+| kernel and tools tests (295) | 1144 M | 23.4 M (2.04 %) | 8.3 M (0.73 %) | 2.0 M (0.17 %) | 8.6 M (0.76 %) | 4.7 M (0.41 %) | 4.11 % | 15.20 | 3.64 | 4.11 % | 0.52 % |
+
+Counts under a thousand are shown as 0 (the exact ones are in
+`part1/table.md`).
+
+The arithmetic ceiling is the cycles saved if every counted pair cost one
+dispatch less, as a share of the workload's cycles: (i) at the workload's
+mean cycles per dispatch, which is the dispatch share itself and assumes
+the removed dispatch costs as much as an average instruction with its work
+(far more than it can); (ii) at the dispatch's own seven instructions
+(`ldrb`, `cmp`, `b.hi`, `adr`, `ldrh`, `add`, `br`) at the workload's
+measured instructions per cycle, which assumes no misprediction is
+removed. The truth lies between; the cheating build measures it.
+
+Other pairs ending in a send in the kernel tests: `push_closure send` 0.65
+percent (not a push the loop does inline: `pushClosure` allocates out of
+line), `push_int send` 0.39, `pop send` 0.13, `send send` 0.13, the rest
+under 0.05 each; every pair ending in a send together 5.15 percent of the
+tests' dispatches, with 74.3 M sends among 984 M dispatches (13.2 per send).
+The top triples ending in a send are under 0.4 percent each (`push_lit
+push_temp send` 0.39, `push_ivar push_ivar send` 0.30). `push_* send_super`
+is 2 k dispatches. In `sends` the loop's `push_temp 5; send at:` and
+`push_temp 3; send step:` are the 80 M (kasm sends `at:` as a plain send);
+`st-sends` compiles `at:` to the special `at` opcode, so only `step:` is a
+`push_temp send` (40 M). `alloc` and `walk` are `push_lit send` (`new`)
+and `push_ivar send`.
+
+Static, in the plain form the compilers emit (`part1/counts/static-*.txt`,
+pairs not across a jump target): the kernel image's 56 386 instructions
+have `push_temp send` at 2803 sites (4.97 percent), `push_lit send` 2201
+(3.90), `send send` 1577, `push_self send` 879 (1.56), `push_closure send`
+829, `push_int send` 530, `push_ivar send` 215 (0.38); the development
+image (kernel and `tools/`, 73 268) 3506, 2949, 1999, 1010, 1151, 646 and
+338.
