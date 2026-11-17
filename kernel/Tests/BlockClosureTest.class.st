@@ -100,6 +100,18 @@ BlockClosureTest >> testAnUncapturedLoopTempKeepsItsValue [
 ]
 
 { #category : #tests }
+BlockClosureTest >> testIfError [
+	"The handler block takes the error's text and the receiver of the method that signalled it; any Error has both (it sent receiver to every Error and only MessageNotUnderstood answered it)."
+	self assert: ([3 + 4] ifError: [:text | 0]) = 7.
+	self assert: ([Error new signal: 'boom'] ifError: [:text | text]) = 'boom'.
+	self assert: ([Error new signal: 'boom'] ifError: [:text :rcv | rcv]) == self.
+	self assert: ([1 / 0] ifError: [:text :rcv | rcv]) = 1.
+	self assert: ([7 zork] ifError: [:text :rcv | rcv]) = 7.
+	self assert: ([Error new signal] ifError: [42]) = 42.
+	self assert: Error new receiver isNil
+]
+
+{ #category : #tests }
 BlockClosureTest >> testLoopBodyTempsArePerIteration [
 	"Module 8d, Pharo's rule: a temp declared in an inlined loop body, captured and assigned, is a fresh variable on every pass."
 	| blocks k |

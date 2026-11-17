@@ -93,6 +93,15 @@ Exception >> pass [
 ]
 
 { #category : #handling }
+Exception >> receiver [
+	"The receiver of the method that signalled: the first frame below the signal that is not the exception's own (as frames skips them). Nil before a signal. BlockClosure>>ifError: hands it to its block."
+	| ctx |
+	ctx := self signalerContext.
+	[ctx notNil and: [ctx receiver == self]] whileTrue: [ctx := ctx sender].
+	^ ctx ifNotNil: [:c | c receiver]
+]
+
+{ #category : #handling }
 Exception >> resume [
 	^ self resume: nil
 ]
