@@ -1295,6 +1295,20 @@ Safety:
    `true` and a base register; a path that is shared is not a path that is
    free. Read the spills in the disassembly for every case added, the
    small ones too.
+ - A syntax change is checked against every reader of source, not only
+   the compilers. Both Tonel readers end a method's pattern at the first
+   `[`; a type such as `Array[E]` in a pattern would have cut every typed
+   method there, and the optional-types experiment found it by scanning,
+   before any parser was written.
+ - What a release image must not hold is decided by where it is stored,
+   before the feature is built. Types as pragmas would be literals in every
+   method of every image and types as class metadata would ship with the
+   class; kept as source text and built into tables only where the checker
+   is loaded, a release image holds none.
+ - A method no test runs and nothing sends is unverified however long it
+   has been there. `BlockClosure>>ifError:` raised a second error inside
+   its own handler from the day it was written; a type checker over the
+   image was the first thing to read it.
 
 ## Verification
 
@@ -1407,7 +1421,10 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/42-fused-sends.md`: Fused sends, measured first (stopped at the bound)
  - `docs/decisions/43-optional-types.md`: Optional types: the direction
 
-Awaiting the owner: nothing. Fused sends was closed as measured on
+Awaiting the owner: optional types' five questions
+(`43-optional-types.md`, the experiment's results of 2026-11-17: explicit
+`Nil`, overloads, narrowing by class tests, where class-level types live,
+protocol types made by code only). Fused sends was closed as measured on
 2026-11-17 (appended to `42-fused-sends.md`). Main flips' two questions were answered as
 recommended on 2026-11-17 (appended to `41-main-flips.md`). Main
 offload's question 5 was answered on
