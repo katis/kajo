@@ -53,6 +53,7 @@ ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: 
 		tag: (aPackageOrNil ifNil: [nil] ifNotNil: [aTagOrNil]) kind: kind comment: (aCommentOrNil ifNil: ['']))
 		of: result.
 	Smalltalk forgetClassNames.
+	Smalltalk noteChange: #class of: nil in: result.
 	^ result
 ]
 
@@ -132,6 +133,7 @@ ClassBuilder class >> redefine: aClass instanceVariableNames: ivars classVariabl
 	newBindings do: [:b | b isUndeclared ifTrue: [b beDeclared]].
 	removed do: [:n | | b | b := kept at: n. b beUndeclared. Smalltalk noteUndeclared: b in: aClass].
 	added do: [:n | Smalltalk forgetUndeclared: n in: aClass].
+	Smalltalk noteChange: #class of: nil in: aClass.
 	^ aClass
 ]
 
@@ -239,8 +241,9 @@ ClassBuilder class >> reshape: aBehavior own: ownNames meta: isMeta into: shapes
 { #category : #removing }
 ClassBuilder class >> remove: aClass [
 	"Remove aClass from the image (Smalltalk removeClass:): refused while it has subclasses or instances, while a method outside it names it, or while a Process runs one of its methods. Its methods go, its class variables' Bindings are forgotten, Smalltalk forgets the name; the class object stays in the VM's class table, renamed AnObsolete<Name>."
-	| methods result |
+	| methods result oldName |
 	self checkWritable: aClass name.
+	oldName := aClass name.
 	aClass subclasses isEmpty ifFalse: [^ ClassDefinitionError new signal: aClass name , ' has subclasses'].
 	methods := OrderedCollection new.
 	aClass methodsDo: [:m | methods add: m].
@@ -249,5 +252,7 @@ ClassBuilder class >> remove: aClass [
 	result isString ifTrue: [^ ClassDefinitionError new signal: result].
 	methods do: [:m | Pragma noteRemoved: m].
 	Smalltalk forgetClass: aClass.
+	"Types 2: the listener hears the name the class had (the class object is AnObsolete<Name> now)."
+	Smalltalk noteChange: #classRemoved of: oldName in: aClass.
 	^ aClass
 ]

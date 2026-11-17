@@ -122,6 +122,13 @@ public struct KernelBuild: Sendable {
                     throw CompileError("Smalltalk recordClassTypes: \(problem)")
                 }
             }
+            // Types 2: the signatures without a method go into the same
+            // table, and a release image gets none of them either.
+            if !options.release && !plan.signatureRecords.isEmpty {
+                if let problem = image.runToCompletion(className: "Smalltalk", selector: "recordSignatures:", strings: plan.signatureRecords) {
+                    throw CompileError("Smalltalk recordSignatures: \(problem)")
+                }
+            }
             if let problem = image.runToCompletion(className: "Smalltalk", selector: "initializeKernel") {
                 throw CompileError("Smalltalk initializeKernel: \(problem)")
             }
@@ -167,6 +174,10 @@ struct Plan {
     /// type parameters separated by blanks; an empty superclass type for
     /// none).
     var typeRecords: [String] = []
+    /// Types 2: per signature without a method, "Class[ class]\nselector\n
+    /// category\npackage\ntext" (the package when it is not the class's,
+    /// empty otherwise; the pattern's text last), as `sources` are.
+    var signatureRecords: [String] = []
     var warnings: [String] = []
     /// Instance variable names (inherited first) and class-side ones.
     var instanceVariables: [String: [String]] = [:]
@@ -294,6 +305,22 @@ struct Plan {
                     for case .symbol(let s) in xs { consumed.insert(s) }
                 }
                 used.append((p.selector, file, p.line))
+            }
+        }
+        // Types 2: the signatures, each refused when its class has a method
+        // of the same selector on the same side, from any file.
+        let methodKeys = Set(zip(all, compiled).map { "\($0.0.0.className)\($0.0.0.classSide ? " class" : "")>>\($0.1.selector)" })
+        var signatureKeys: Set<String> = []
+        for (c, file, package) in ordered.map({ ($0, $0.file, "") }) + extensions.map({ e in
+            let p = KernelBuild.package(ofFile: e.file, tag: fileTags[e.file])
+            return (e, e.file, p == classPackage[e.name] ? "" : p)
+        }) {
+            for sig in c.signatures {
+                let key = "\(sig.className)\(sig.classSide ? " class" : "")>>\(sig.selector)"
+                if methodKeys.contains(key) { throw CompileError("\(key) is both a method and a signature", file: file, line: sig.line) }
+                if !signatureKeys.insert(key).inserted { throw CompileError("a signature for \(key) twice", file: file, line: sig.line) }
+                signatureRecords.append("\(sig.className)\(sig.classSide ? " class" : "")\n\(sig.selector)\n\(sig.category)\n\(package)\n"
+                                        + String(decoding: sig.text, as: UTF8.self))
             }
         }
         consumed.insert("consumesPragmas:")

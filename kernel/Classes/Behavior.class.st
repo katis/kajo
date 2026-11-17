@@ -110,11 +110,16 @@ Behavior >> compile: aString classified: aCategoryOrNil [
 	category := aCategoryOrNil isNil
 		ifTrue: [(self categoryOf: method selector) ifNil: [Behavior defaultCategory]]
 		ifFalse: [aCategoryOrNil asSymbol].
+	"Types 2: a method compiled where a signature without a method stands replaces it (open question 2), filed under the signature's category unless one is given."
+	(old isNil and: [aCategoryOrNil isNil]) ifTrue: [
+		(Smalltalk signatureOf: method selector in: self) ifNotNil: [:e | category := e at: 2]].
 	self addSelector: method selector withMethod: method.
 	Smalltalk noteSource: aString of: method.
 	Smalltalk noteCategory: category of: method selector in: self.
 	old ifNotNil: [:m | Smalltalk forgetSourceOf: m].
+	Smalltalk forgetSignatureOf: method selector in: self.
 	DevProtocol noteChangeOf: method selector in: self.
+	Smalltalk noteChange: #method of: method selector in: self.
 	^ method selector
 ]
 
@@ -318,6 +323,7 @@ Behavior >> removeSelector: aSymbol [
 	Smalltalk forgetSourceOf: old.
 	Smalltalk forgetCategoryOf: aSymbol in: self.
 	Smalltalk notePackage: nil of: aSymbol in: self.
+	Smalltalk noteChange: #methodRemoved of: aSymbol in: self.
 	^ old
 ]
 
@@ -363,6 +369,40 @@ Behavior >> selectorsInCategory: aCategory [
 { #category : #printing }
 Behavior >> printOn: aStream [
 	aStream nextPutAll: self name
+]
+
+{ #category : #signatures }
+Behavior >> removeSignature: aSelector [
+	"Types 2: forget this class's signature without a method of aSelector; answers its pattern's text, or nil when there was none."
+	| e |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSelector; signal].
+	e := Smalltalk forgetSignatureOf: aSelector in: self.
+	e isNil ifTrue: [^ nil].
+	Smalltalk noteChange: #signature of: aSelector asSymbol in: self.
+	^ e first
+]
+
+{ #category : #signatures }
+Behavior >> signature: aString classified: aCategoryOrNil [
+	"Types 2 (docs/modules/types-2.md): add or replace this class's signature without a method, aString a message pattern with at least one type, as a class file writes it after `Class >> `. Nothing to the VM: no method, respondsTo: and includesSelector: unchanged; text the type checker reads, which a release build does not keep. Refused with an Error when this class has a method of that selector (a class has a method or a signature for a selector) and with a CompileError when aString is not one pattern with a type; InstallForbidden in a release image. Answers the selector."
+	| parser p sel |
+	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: nil; signal].
+	parser := Parser new setSource: aString.
+	p := parser parsePattern.
+	parser kind == #end ifFalse: [^ CompileError new line: parser line; signal: 'a signature is a message pattern alone'].
+	((p at: 3) anySatisfy: [:t | t notNil]) | (p at: 4) notNil
+		ifFalse: [^ CompileError new line: 1; signal: 'a signature writes at least one type'].
+	sel := (p at: 1) asSymbol.
+	(self includesSelector: sel) ifTrue: [^ self error: self name , '>>' , sel , ' is a method: a class has a method or a signature for a selector'].
+	Smalltalk noteSignature: (aString copyFrom: 1 to: parser lastEnd) category: aCategoryOrNil package: DevProtocol packageOfActiveSession of: sel in: self.
+	Smalltalk noteChange: #signature of: sel in: self.
+	^ sel
+]
+
+{ #category : #signatures }
+Behavior >> signatureAt: aSelector [
+	"Types 2: the pattern's text of this class's signature without a method of aSelector, or nil."
+	^ (Smalltalk signatureOf: aSelector in: self) ifNotNil: [:e | e first]
 ]
 
 { #category : #testing }

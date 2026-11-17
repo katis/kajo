@@ -56,6 +56,8 @@ func swiftSummary(_ t: TonelClass) -> String {
     f += [t.typeParameters.joined(separator: " "), t.superclassType ?? "",
           t.instanceVariables.compactMap { v in t.instanceVariableTypes[v].map { "\(v) <\($0)>;" } }.joined()]
     for m in t.methods { f += [m.classSide ? "class" : "instance", m.category, String(decoding: m.source, as: UTF8.self)] }
+    // Types 2: each signature without a method, after the methods.
+    for g in t.signatures { f += ["signature " + (g.classSide ? "class" : "instance"), g.category, String(decoding: g.text, as: UTF8.self)] }
     return f.joined(separator: rs)
 }
 

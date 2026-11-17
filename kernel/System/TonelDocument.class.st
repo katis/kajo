@@ -14,7 +14,8 @@ Class {
 		'methods',
 		'typeParameters',
 		'superclassType',
-		'instVarTypes'
+		'instVarTypes',
+		'signatures'
 	]
 }
 
@@ -35,6 +36,7 @@ TonelDocument >> classTypes [
 	t := ClassTypes new.
 	t typeParameters: self typeParameters; superclassType: superclassType.
 	self instVarTypes do: [:a | t type: a value of: a key].
+	self signatures do: [:sig | t signature: (sig at: 4) category: (sig at: 2) package: nil at: (sig at: 3) asSymbol meta: sig first].
 	^ t isEmpty ifTrue: [nil] ifFalse: [t]
 ]
 
@@ -110,6 +112,12 @@ TonelDocument >> name: aString [
 ]
 
 { #category : #accessing }
+TonelDocument >> signatures [
+	"Types 2: the signatures without a method, each {class side?. category. selector. the pattern's text}, in the file's order."
+	^ signatures ifNil: [signatures := OrderedCollection new]
+]
+
+{ #category : #accessing }
 TonelDocument >> superclassName [
 	^ superclassName
 ]
@@ -165,5 +173,7 @@ TonelDocument >> summary [
 		, (self instVarTypes inject: '' into: [:a :e | a , e key , ' <' , e value , '>;']).
 	self methods do: [:m |
 		out := out , rs , ((m at: 1) ifTrue: ['class'] ifFalse: ['instance']) , rs , (m at: 2) , rs , (m at: 3)].
+	self signatures do: [:sig |
+		out := out , rs , 'signature ' , ((sig at: 1) ifTrue: ['class'] ifFalse: ['instance']) , rs , (sig at: 2) , rs , (sig at: 4)].
 	^ out
 ]

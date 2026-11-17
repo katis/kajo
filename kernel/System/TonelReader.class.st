@@ -6,7 +6,8 @@ Class {
 		'source',
 		'position',
 		'limit',
-		'line'
+		'line',
+		'keys'
 	]
 }
 
@@ -175,8 +176,8 @@ TonelReader >> readDocument [
 
 { #category : #reading }
 TonelReader >> readMethodInto: aDocument [
-	"A method's metadata is read for its category; any other key (an #author of a file written before the development answers among them) is read and ignored, as Pharo's Tonel ignores keys it does not know, so the next write leaves it out."
-	| category owner classSide patternStart open close end src body meta parser |
+	"A method's metadata is read for its category; any other key (an #author of a file written before the development answers among them) is read and ignored, as Pharo's Tonel ignores keys it does not know, so the next write leaves it out. Types 2: the token after the pattern, comments skipped, decides: a [ starts a method's body, the next entry's { or the end of the file ends a signature without a method (the pattern's text, kept with its category; at least one type, one per selector and side, never beside a method of that selector), anything else is refused."
+	| category owner classSide patternStart open close end src body meta parser pattern patternLine key |
 	category := ''.
 	self byte = 123 ifTrue: [
 		meta := self map: 0.
@@ -194,12 +195,29 @@ TonelReader >> readMethodInto: aDocument [
 	position := position + 2.
 	self space.
 	patternStart := position.
+	patternLine := line.
 	"Types 1: the pattern is what the Parser reads as one, its types included (Array[E] and [E, ^R] hold brackets), and the body starts at the [ after it. A comment in a pattern keeps its brackets (the review fixes, part 2, item 3); a pattern holds no string."
 	parser := Parser new setSource: source position: position line: line.
-	parser parsePattern.
+	pattern := parser parsePattern.
 	line := parser scanner tokenLine.
-	parser scanner kind == #leftBracket ifFalse: [
-		^ self fail: (parser scanner kind == #end ifTrue: ['a method without a body'] ifFalse: ['expected [ after the method''s pattern'])].
+	keys isNil ifTrue: [keys := Dictionary new].
+	key := (classSide ifTrue: ['class '] ifFalse: ['']) , pattern first.
+	(parser scanner kind == #leftBrace or: [parser scanner kind == #end]) ifTrue: [
+		((pattern at: 3) anySatisfy: [:t | t notNil]) | (pattern at: 4) notNil
+			ifFalse: [^ CompileError new line: patternLine; signal: 'a signature writes at least one type'].
+		(keys at: key ifAbsent: [nil]) ifNotNil: [:k |
+			^ CompileError new line: patternLine; signal: (k == #signature
+				ifTrue: ['a signature for ' , owner , (classSide ifTrue: [' class'] ifFalse: ['']) , '>>' , pattern first , ' twice']
+				ifFalse: [owner , (classSide ifTrue: [' class'] ifFalse: ['']) , '>>' , pattern first , ' is both a method and a signature'])].
+		owner = aDocument name ifFalse: [^ CompileError new line: patternLine; signal: 'a method of ' , owner , ' in ' , aDocument name , '''s file'].
+		keys at: key put: #signature.
+		aDocument signatures add: (Array with: classSide with: category with: pattern first with: (source copyFrom: patternStart to: parser lastEnd)).
+		position := parser scanner kind == #end ifTrue: [limit] ifFalse: [parser scanner start].
+		^ self].
+	parser scanner kind == #leftBracket ifFalse: [^ self fail: 'expected [ after the method''s pattern'].
+	(keys at: key ifAbsent: [nil]) == #signature ifTrue: [
+		^ CompileError new line: patternLine; signal: owner , (classSide ifTrue: [' class'] ifFalse: ['']) , '>>' , pattern first , ' is both a method and a signature'].
+	keys at: key put: #method.
 	position := parser scanner start.
 	open := position.
 	close := self matchingBracket: open.
@@ -241,7 +259,8 @@ TonelReader >> setSource: aString [
 	source := aString.
 	position := 1.
 	limit := aString byteSize + 1.
-	line := 1
+	line := 1.
+	keys := Dictionary new
 ]
 
 { #category : #reading }

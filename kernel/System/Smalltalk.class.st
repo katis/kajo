@@ -11,9 +11,40 @@ Class {
 		'packages',
 		'resumes',
 		'registryLock',
-		'classTypes'
+		'classTypes',
+		'changeListener'
 	]
 }
+
+{ #category : #changes }
+Smalltalk class >> changeListener [
+	^ changeListener
+]
+
+{ #category : #changes }
+Smalltalk class >> changeListener: anObjectOrNil [
+	"Types 2: the one object told of every change of the image's code (the type checker's TypeService), or nil. It answers noteChange:of:in:, beginChanges and endChanges."
+	changeListener := anObjectOrNil
+]
+
+{ #category : #changes }
+Smalltalk class >> changesDuring: aBlock [
+	"Types 2: aBlock's changes are one to the listener (a Tonel file loaded is one recheck): it hears of each as it comes, and of the bracket's end."
+	| l |
+	l := changeListener.
+	l isNil ifTrue: [^ aBlock value].
+	[l beginChanges] on: Error do: [:e | Transcript showLine: 'change listener: ' , e messageText].
+	^ aBlock ensure: [[l endChanges] on: Error do: [:e | Transcript showLine: 'change listener: ' , e messageText]]
+]
+
+{ #category : #changes }
+Smalltalk class >> noteChange: aKind of: aSelectorOrNil in: aBehavior [
+	"Types 2: tell the change listener, when there is one, that aBehavior's code changed. aKind is #method (compiled), #methodRemoved, #signature (added, changed or removed), #class (defined, or redefined: its shape, its types, its methods) or #classRemoved. A plain hook (docs/modules/types-2.md, starting position 3): nil costs one test; an error of the listener is printed and is never the changer's."
+	| l |
+	l := changeListener.
+	l isNil ifTrue: [^ nil].
+	[l noteChange: aKind of: aSelectorOrNil in: aBehavior] on: Error do: [:e | Transcript showLine: 'change listener: ' , e messageText]
+]
 
 { #category : #'class variables' }
 Smalltalk class >> forgetUndeclared: aSymbol in: aClass [
@@ -525,6 +556,18 @@ Smalltalk class >> forgetDefinitionOf: aClass [
 ]
 
 { #category : #sources }
+Smalltalk class >> forgetSignatureOf: aSelector in: aBehavior [
+	"Forget aBehavior's signature of aSelector (Types 2), and the class's ClassTypes when nothing is left in it; answers the forgotten {text. category. package} or nil."
+	| cls |
+	cls := aBehavior theNonMetaClass.
+	^ self registry: [ | t e |
+		t := classTypes isNil ifTrue: [nil] ifFalse: [classTypes at: cls ifAbsent: [nil]].
+		e := t isNil ifTrue: [nil] ifFalse: [t removeSignatureAt: aSelector meta: aBehavior isMeta].
+		(t notNil and: [t isEmpty]) ifTrue: [classTypes removeKey: cls ifAbsent: [nil]].
+		e]
+]
+
+{ #category : #sources }
 Smalltalk class >> forgetSourceOf: aCompiledMethod [
 	^ self registry: [
 		sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aCompiledMethod ifAbsent: [nil]]]]
@@ -560,6 +603,18 @@ Smalltalk class >> noteDefinition: aClassDefinition of: aClass [
 ]
 
 { #category : #sources }
+Smalltalk class >> noteSignature: aString category: aCategory package: aPackageOrNil of: aSelector in: aBehavior [
+	"Keep a signature without a method of aBehavior (Types 2): the pattern's text in its class's ClassTypes (made when the class has none), with its category and its package (nil or empty: the class's). Nothing checks it here; Behavior>>signature:classified: is the checked way in."
+	| cls |
+	cls := aBehavior theNonMetaClass.
+	self registry: [ | t |
+		classTypes isNil ifTrue: [classTypes := IdentityDictionary new].
+		t := classTypes at: cls ifAbsent: [nil].
+		t isNil ifTrue: [t := ClassTypes new. classTypes at: cls put: t].
+		t signature: aString category: aCategory package: aPackageOrNil at: aSelector meta: aBehavior isMeta]
+]
+
+{ #category : #sources }
 Smalltalk class >> noteSource: aString of: aCompiledMethod [
 	"Kept per class: one dictionary of every source would pass the 3071 entries an object of one block can hash (a kernel of 1536 methods filled it, module 8d)."
 	self registry: [
@@ -569,7 +624,7 @@ Smalltalk class >> noteSource: aString of: aCompiledMethod [
 
 { #category : #sources }
 Smalltalk class >> noteTypes: aClassTypesOrNil of: aClass [
-	"Keep aClass's types (Types 1), or forget them for nil or none."
+	"Keep aClass's types (Types 1; since Types 2 its signatures without a method with them), or forget them for nil or none."
 	self registry: [
 		(aClassTypesOrNil isNil or: [aClassTypesOrNil isEmpty])
 			ifTrue: [classTypes isNil ifFalse: [classTypes removeKey: aClass ifAbsent: [nil]]]
@@ -618,6 +673,25 @@ Smalltalk class >> recordDefinitions: anArray [
 ]
 
 { #category : #sources }
+Smalltalk class >> recordSignatures: anArray [
+	"The image build hands the signatures without a method over (Types 2, docs/modules/types-2.md): 'Class[ class]', the selector, the category, the package (when it is not the class's, else empty) and the pattern's text, a line each (the text last). A release image's build does not send this."
+	| lf |
+	lf := String with: Character lf.
+	anArray do: [:s | | i j k p spec sel cat pkg meta cls |
+		i := s indexOf: Character lf.
+		j := s indexOfSubstring: lf startingAt: i + 1.
+		k := s indexOfSubstring: lf startingAt: j + 1.
+		p := s indexOfSubstring: lf startingAt: k + 1.
+		spec := s copyFrom: 1 to: i - 1.
+		sel := (s copyFrom: i + 1 to: j - 1) asSymbol.
+		cat := s copyFrom: j + 1 to: k - 1.
+		pkg := s copyFrom: k + 1 to: p - 1.
+		meta := spec endsWith: ' class'.
+		cls := self at: (meta ifTrue: [spec copyFrom: 1 to: spec byteSize - 6] ifFalse: [spec]) asSymbol.
+		self noteSignature: (s copyFrom: p + 1 to: s byteSize) category: cat package: pkg of: sel in: (meta ifTrue: [cls class] ifFalse: [cls])]
+]
+
+{ #category : #sources }
 Smalltalk class >> recordSources: anArray [
 	"The image build hands every method's source over: 'Class[ class]', the selector, the category, the package (module 9b: when it is not the class's, else empty) and the source, a line each (the source last). An agent's author mark is a pragma in the source (the development answers)."
 	| lf |
@@ -656,6 +730,12 @@ Smalltalk class >> replaceSources: anAssociationList of: aBehavior [
 	self registry: [
 		sources isNil ifTrue: [sources := IdentityDictionary new].
 		sources at: aBehavior put: d]
+]
+
+{ #category : #sources }
+Smalltalk class >> signatureOf: aSelector in: aBehavior [
+	"aBehavior's signature without a method of aSelector (Types 2): {the pattern's text. its category. its package or nil}, or nil."
+	^ (self typesOf: aBehavior theNonMetaClass) ifNotNil: [:t | t signatureAt: aSelector meta: aBehavior isMeta]
 ]
 
 { #category : #sources }

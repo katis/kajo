@@ -49,6 +49,21 @@ public struct TonelMethod: Sendable {
     public let line: Int
 }
 
+/// Types 2: a signature without a method (docs/modules/types-2.md): a
+/// method entry with no body, `Class [class] >> pattern` with its types and
+/// nothing after the pattern but the next entry's metadata or the end of the
+/// file. It is nothing to the VM: never compiled, kept as the pattern's text
+/// in the class's types, which a release build does not fill.
+public struct TonelSignature: Sendable {
+    public let className: String
+    public let classSide: Bool
+    public let category: String
+    public let selector: String
+    /// The pattern as written, from the selector to the pattern's end.
+    public let text: [UInt8]
+    public let line: Int
+}
+
 public struct TonelClass: Sendable {
     public let file: String
     public let line: Int
@@ -69,6 +84,8 @@ public struct TonelClass: Sendable {
     public var typeParameters: [String] = []
     public var superclassType: String? = nil
     public var instanceVariableTypes: [String: String] = [:]
+    /// Types 2: the signatures without a method, in the file's order.
+    public var signatures: [TonelSignature] = []
 
     /// Whether the definition carries any type.
     public var hasTypes: Bool { !typeParameters.isEmpty || superclassType != nil || !instanceVariableTypes.isEmpty }
@@ -328,6 +345,8 @@ struct TonelReader {
                 cls.superclassType = t
             }
         }
+        // Types 2: the selectors with a method, "class sel" on the class side.
+        var methodKeys: Set<String> = []
         while true {
             _ = try space()
             if i >= b.count { break }
@@ -363,13 +382,39 @@ struct TonelReader {
             // keeps its brackets (the review fixes, part 2, item 3: `at: i
             // "in [1, size]" put: v`); a pattern holds no string.
             var parser = try Parser(b, file: file, line: line, at: i)
-            _ = try parser.parsePattern()
+            let pattern = try parser.parsePattern()
             line = parser.token.line
+            // Types 2: the token after the pattern, comments skipped,
+            // decides: [ a method's body; the next entry's { or the end of
+            // the file a signature without a method; anything else refused
+            // (docs/modules/types-2.md, part 1: a forgotten [ is refused at
+            // the pattern, never read as a signature).
+            let key = "\(classSide ? "class " : "")\(pattern.selector)"
             switch parser.token.kind {
             case .leftBracket: break
-            case .end: throw fail("a method without a body")
+            case .leftBrace, .end:
+                guard pattern.argumentTypes.contains(where: { $0 != nil }) || pattern.resultType != nil else {
+                    throw CompileError("a signature writes at least one type", file: file, line: patternLine)
+                }
+                if cls.signatures.contains(where: { "\($0.classSide ? "class " : "")\($0.selector)" == key }) {
+                    throw CompileError("a signature for \(owner)\(classSide ? " class" : "")>>\(pattern.selector) twice", file: file, line: patternLine)
+                }
+                if methodKeys.contains(key) {
+                    throw CompileError("\(owner)\(classSide ? " class" : "")>>\(pattern.selector) is both a method and a signature", file: file, line: patternLine)
+                }
+                guard owner == name else {
+                    throw CompileError("a method of \(owner) in \(name)'s file", file: file, line: patternLine)
+                }
+                cls.signatures.append(TonelSignature(className: name, classSide: classSide, category: category, selector: pattern.selector,
+                                                     text: Array(b[patternStart..<parser.lastEnd]), line: patternLine))
+                i = parser.token.kind == .end ? b.count : parser.token.start
+                continue
             default: throw fail("expected [ after the method's pattern")
             }
+            if cls.signatures.contains(where: { "\($0.classSide ? "class " : "")\($0.selector)" == key }) {
+                throw CompileError("\(owner)\(classSide ? " class" : "")>>\(pattern.selector) is both a method and a signature", file: file, line: patternLine)
+            }
+            methodKeys.insert(key)
             i = parser.token.start
             let open = i
             let close = try matchingBracket(open)

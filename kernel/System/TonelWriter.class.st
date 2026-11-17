@@ -62,8 +62,13 @@ TonelWriter class >> cut: aRange in: aString [
 
 { #category : #writing }
 TonelWriter class >> hasMethodsOf: aClass package: aName [
-	^ (Array with: aClass with: aClass class) anySatisfy: [:b |
-		b selectors anySatisfy: [:sel | (Smalltalk packageOfSelector: sel in: b) = aName]]
+	"Whether the package aName has a method of aClass, or a signature without a method of it (Types 2)."
+	^ ((Array with: aClass with: aClass class) anySatisfy: [:b |
+		b selectors anySatisfy: [:sel | (Smalltalk packageOfSelector: sel in: b) = aName]])
+		or: [(Smalltalk typesOf: aClass) notNil and: [
+			#(false true) anySatisfy: [:meta | | t |
+				t := Smalltalk typesOf: aClass.
+				(t signatureSelectorsMeta: meta) anySatisfy: [:sel | ((t signatureAt: sel meta: meta) at: 3) = aName]]]]
 ]
 
 { #category : #writing }
@@ -140,14 +145,25 @@ TonelWriter class >> methodsOf: aClass [
 
 { #category : #writing }
 TonelWriter class >> methodsOf: aClass package: aName [
-	"Each method's text (a line break, its category, its definition) of the package aName, instance side first, by category, by selector."
-	| out |
+	"Each method's and each signature's text (a line break, its category, its definition) of the package aName, instance side first, by category, by selector (Types 2: a signature without a method stands among the methods in this order)."
+	| out own |
 	out := OrderedCollection new.
-	(Array with: aClass with: aClass class) do: [:b | | org |
-		org := b organization.
+	own := Smalltalk packageOf: aClass.
+	(Array with: aClass with: aClass class) do: [:b | | org types |
+		org := IdentityDictionary new.
+		b organization keysAndValuesDo: [:cat :sels |
+			sels do: [:sel |
+				(Smalltalk packageOfSelector: sel in: b) = aName ifTrue: [(org at: cat ifAbsentPut: [OrderedCollection new]) add: sel -> nil]]].
+		types := Smalltalk typesOf: aClass.
+		types ifNotNil: [:t |
+			(t signatureSelectorsMeta: b isMeta) do: [:sel | | e |
+				e := t signatureAt: sel meta: b isMeta.
+				((e at: 3) ifNil: [own]) = aName ifTrue: [(org at: (e at: 2) ifAbsentPut: [OrderedCollection new]) add: sel -> e]]].
 		(org keys asArray sort: [:x :y | x <= y]) do: [:cat |
-			(org at: cat) do: [:sel |
-				(Smalltalk packageOfSelector: sel in: b) = aName ifTrue: [out add: (self method: sel in: b category: cat)]]]].
+			((org at: cat) asArray sort: [:x :y | x key <= y key]) do: [:a |
+				out add: (a value isNil
+					ifTrue: [self method: a key in: b category: cat]
+					ifFalse: [self signature: a value first in: b category: cat])]]].
 	^ out
 ]
 
@@ -181,6 +197,15 @@ TonelWriter class >> pragmasFrom: aScanner token: aKind into: cuts [
 		sel = 'author:' ifTrue: [cuts add: (Array with: start with: aScanner stop)].
 		k := aScanner next].
 	^ k
+]
+
+{ #category : #writing }
+TonelWriter class >> signature: aString in: aBehavior category: aCategory [
+	"A signature without a method (Types 2): its metadata on a line, then `Class [class] >> pattern` on the next, the pattern's text as it was read."
+	| lf |
+	lf := String lf.
+	^ lf , '{ #category : ' , (self ston: aCategory) , ' }' , lf
+		, aBehavior theNonMetaClass name , (aBehavior isMeta ifTrue: [' class'] ifFalse: ['']) , ' >> ' , aString , lf
 ]
 
 { #category : #writing }

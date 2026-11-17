@@ -5,14 +5,8 @@ Class {
 }
 
 { #category : #loading }
-TonelLoader class >> load: aDocument [
-	"The file's class with no place of its own: an existing class keeps its package and tag, a new one gets the session's package or the default and no tag."
-	^ self load: aDocument package: nil tag: nil
-]
-
-{ #category : #loading }
-TonelLoader class >> load: aDocument package: aPackageOrNil tag: aTagOrNil [
-	| cls sup existing methods |
+TonelLoader class >> basicLoad: aDocument package: aPackageOrNil tag: aTagOrNil [
+	| cls sup existing methods types old |
 	aDocument isExtension ifTrue: [^ self loadExtension: aDocument].
 	sup := aDocument superclassName ifNotNil: [:n | Smalltalk at: n asSymbol ifAbsent: [^ ClassDefinitionError new signal: aDocument name , ': no superclass ' , n]].
 	existing := Smalltalk at: aDocument name asSymbol ifAbsent: [nil].
@@ -27,9 +21,28 @@ TonelLoader class >> load: aDocument package: aPackageOrNil tag: aTagOrNil [
 		(methods at: ((m at: 1) ifTrue: [cls class] ifFalse: [cls])) add: (Array with: (m at: 3) with: ((m at: 2) isEmpty ifTrue: [nil] ifFalse: [(m at: 2) asSymbol]))].
 	ClassBuilder redefine: cls instanceVariableNames: aDocument instVarNames classVariableNames: aDocument classVarNames
 		classInstanceVariableNames: aDocument classInstVarNames methods: methods.
-	"Types 1: the file's types are the class's, none when it writes none."
-	Smalltalk noteTypes: aDocument classTypes of: cls.
+	"Types 1: the file's types are the class's, none when it writes none. Types 2: with its signatures without a method; another package's signatures of the class stay while no method of their selector came with the file."
+	old := Smalltalk typesOf: cls.
+	types := aDocument classTypes ifNil: [ClassTypes new].
+	types keepSignaturesOf: old except: (Smalltalk packageOf: cls).
+	#(false true) do: [:meta | | b |
+		b := meta ifTrue: [cls class] ifFalse: [cls].
+		(types signatureSelectorsMeta: meta) do: [:sel | (b includesSelector: sel) ifTrue: [types removeSignatureAt: sel meta: meta]]].
+	Smalltalk noteTypes: types of: cls.
+	Smalltalk noteChange: #class of: nil in: cls.
 	^ cls
+]
+
+{ #category : #loading }
+TonelLoader class >> load: aDocument [
+	"The file's class with no place of its own: an existing class keeps its package and tag, a new one gets the session's package or the default and no tag."
+	^ self load: aDocument package: nil tag: nil
+]
+
+{ #category : #loading }
+TonelLoader class >> load: aDocument package: aPackageOrNil tag: aTagOrNil [
+	"Types 2: the whole load is one change to the change listener (Smalltalk changesDuring:)."
+	^ Smalltalk changesDuring: [self basicLoad: aDocument package: aPackageOrNil tag: aTagOrNil]
 ]
 
 { #category : #loading }
@@ -46,10 +59,14 @@ TonelLoader class >> load: aDocument path: aPath [
 
 { #category : #loading }
 TonelLoader class >> loadExtension: aDocument [
+	"An Extension's methods compiled one by one, then its signatures without a method added (Types 2)."
 	| cls |
 	cls := Smalltalk at: aDocument name asSymbol ifAbsent: [^ ClassDefinitionError new signal: 'an extension of unknown class ' , aDocument name].
 	aDocument methods do: [:m | | b |
 		b := (m at: 1) ifTrue: [cls class] ifFalse: [cls].
 		b compile: (m at: 3) classified: ((m at: 2) isEmpty ifTrue: [nil] ifFalse: [m at: 2])].
+	aDocument signatures do: [:g | | b |
+		b := (g at: 1) ifTrue: [cls class] ifFalse: [cls].
+		b signature: (g at: 4) classified: ((g at: 2) isEmpty ifTrue: [nil] ifFalse: [g at: 2])].
 	^ cls
 ]
