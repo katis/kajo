@@ -25,7 +25,8 @@
 #   swift      anything that is in no other tier (Swift outside the core,
 #              Package.swift, Tests/, scripts/, justfile, apps/ but its
 #              Smalltalk, models/, experiments/ code ...)
-#   smalltalk  kernel/, tools/, apps/Shared/smalltalk/
+#   smalltalk  kernel/, tools/, types/ (Types 2: the type checker's package),
+#              apps/Shared/smalltalk/
 #   none       docs/, any *.md (experiments/*/RESULTS.md among them)
 # A swift or core diff that touches a gate script (check-tier.sh, its test,
 # gates-lib.sh, weekly.sh, fuzz.sh, fuzz-gate.sh; since main-flips the
@@ -54,7 +55,7 @@ classify() {
   case $1 in
     Sources/KajoVM/(ObjectMemory|Interpreter|Loader|Workers|Processes|Nursery|Marking|Relocation|YoungCollection|ObjectModel|Native)/*) print core ;;
     Sources/KajoAOT/*) print core ;;
-    kernel/*|tools/*|apps/Shared/smalltalk/*) print smalltalk ;;
+    kernel/*|tools/*|types/*|apps/Shared/smalltalk/*) print smalltalk ;;
     # Tests' Markdown files are fixtures read byte for byte (the perf
     # report's, the app project's): before *.md (the review fixes, part 2).
     Tests/*) print swift ;;

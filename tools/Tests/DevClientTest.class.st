@@ -220,12 +220,13 @@ DevClientTest >> testEventsReachTheirListeners [
 
 { #category : #tests }
 DevClientTest >> testEveryRequestHasItsMessage [
-	"DevClient class>>requests against this image's own protocol.describe: the same kinds, each method taking the request's arguments and the result block."
+	"DevClient class>>requests against this image's own protocol.describe: the same kinds, each method taking the request's arguments and the result block. The one request of another package (Types 2: diagnostics, the Types package's) is described where that package is."
 	| described table |
 	described := DevProtocol describe.
 	table := Dictionary new.
 	DevClient requests do: [:r | table at: r first put: (r at: 2)].
-	self assert: table size equals: described size.
+	self assert: table size equals: described size + ((Smalltalk includesKey: #TypeService) ifTrue: [0] ifFalse: [1]).
+	self assert: ((described collect: [:d | d at: 'kind']) includes: 'diagnostics') equals: (Smalltalk includesKey: #TypeService).
 	described do: [:d | | sel |
 		sel := table at: (d at: 'kind') ifAbsent: [nil].
 		self assert: sel notNil description: (d at: 'kind') , ' has no DevClient message'.

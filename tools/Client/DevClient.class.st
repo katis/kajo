@@ -358,6 +358,12 @@ DevClient >> classTonel: className then: aBlock [
 ]
 
 { #category : #requests }
+DevClient >> diagnostics: className selector: selector side: side then: aBlock [
+	"Types 2: the type checker's diagnostics of the image, a class or a method (a request of the Types package's, which a development image holds)."
+	^ self request: 'diagnostics' args: {'className'. className. 'selector'. selector. 'side'. side} then: aBlock
+]
+
+{ #category : #requests }
 DevClient >> evaluate: source receiver: receiver then: aBlock [
 	^ self request: 'evaluate' args: {'source'. source. 'receiver'. receiver} then: aBlock
 ]
@@ -630,6 +636,7 @@ DevClient class >> requests [
 		#('class.remove' #classRemove:then:)
 		#('class.selectors' #classSelectors:side:then:)
 		#('class.tonel' #classTonel:then:)
+		#('diagnostics' #diagnostics:selector:side:then:)
 		#('evaluate' #evaluate:receiver:then:)
 		#('inspect' #inspect:then:)
 		#('inspect.release' #inspectRelease:then:)

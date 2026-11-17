@@ -10,7 +10,9 @@ bundled image to Kajo.
 - Kajo is the prebuilt Release build in `/path/to/kajo/Prebuilt`, the one
   local package the project names: both configurations run the same
   optimized VM, and nothing is compiled or fetched for it.
-- Debug bundles a development image of the kernel and `src/` and serves
+- Debug bundles a development image of the kernel, Kajo's type checker
+  (`types/`: it checks nothing until a client asks for diagnostics)
+  and `src/` and serves
   the Kajo development protocol from launch (Bonjour `_kajo-dev._tcp`,
   named "Sample on <device>"). Its pairing screen is a shake away on
   iOS and in the app menu (Pairing…, shift-command-P) on the Mac.

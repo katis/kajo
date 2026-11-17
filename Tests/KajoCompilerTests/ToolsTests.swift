@@ -21,20 +21,27 @@ let toolsDirectory: String = {
     return url.appendingPathComponent("tools").path
 }()
 
+/// Types 2: the type checker's package.
+let typesDirectory: String = {
+    var url = URL(fileURLWithPath: #filePath)
+    for _ in 0..<3 { url.deleteLastPathComponent() }
+    return url.appendingPathComponent("types").path
+}()
+
 let toolsProbeDirectory: String = {
     var url = URL(fileURLWithPath: #filePath)
     url.deleteLastPathComponent()
     return url.appendingPathComponent("Fixtures/toolsprobe").path
 }()
 
-/// kernel/ and tools/: the development image.
+/// kernel/, tools/ and (since Types 2) types/: the development image.
 let developmentImage: [UInt8] = {
-    try! KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory])).image
+    try! KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory, typesDirectory])).image
 }()
 
 /// The development image and the probe the shell tests drive it with.
 let probedImage: [UInt8] = {
-    try! KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory, toolsProbeDirectory])).image
+    try! KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory, typesDirectory, toolsProbeDirectory])).image
 }()
 
 /// A view host that takes every op of ADR 0010's two rounds and keeps the
@@ -169,7 +176,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
 
 @Suite(.serialized) struct ToolsTests {
     @Test func theDevelopmentImageBuildsAndTheToolsTestsPass() throws {
-        let r = try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory]))
+        let r = try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory, typesDirectory]))
         #expect(r.warnings.isEmpty, "\(r.warnings)")
         let classes = try tonelFiles(in: toolsDirectory).filter { $0.hasSuffix("Test.class.st") }
         #expect(classes.count >= 7)
@@ -190,11 +197,11 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         defer { image.destroy() }
         let dir = try temporaryDirectory("packages")
         defer { try? FileManager.default.removeItem(at: dir) }
-        for d in ["kernel", "tools"] {
+        for d in ["kernel", "tools", "types"] {
             try FileManager.default.createDirectory(at: dir.appendingPathComponent(d), withIntermediateDirectories: true)
         }
-        _ = try runSmalltalk(image, "writePackages:", ["Kernel", "kernel", "Tools", "tools"], sources: dir.path)
-        for (package, source) in [("kernel", kernelDirectory), ("tools", toolsDirectory)] {
+        _ = try runSmalltalk(image, "writePackages:", ["Kernel", "kernel", "Tools", "tools", "Types", "types"], sources: dir.path)
+        for (package, source) in [("kernel", kernelDirectory), ("tools", toolsDirectory), ("types", typesDirectory)] {
             let want = try tonelFiles(in: source)
             let got = try tonelFiles(in: dir.path + "/" + package)
             #expect(got == want, "\(package)")

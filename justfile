@@ -94,9 +94,9 @@ new-check OUT="":
 mac-shell *ARGS:
     scripts/mac-shell.sh {{ARGS}}
 
-# Module 9c: the development image, kernel/ and tools/ (OUT defaults to dev.img)
+# Module 9c: the development image, kernel/ and tools/ (since Types 2 also types/, the type checker; OUT defaults to dev.img)
 dev-image OUT="dev.img":
-    swift run kajo build-image -o {{OUT}} --with tools
+    swift run kajo build-image -o {{OUT}} --with tools --with types
 
 # Module 9c: the developer UI: the development image in the macOS shell, its tools on its own socket, changes written to tools/
 tools:

@@ -66,7 +66,7 @@ gl_spec() {
     kernel-test)     spec_cmd="just kernel-test" ;;
     new-check)       spec_cmd="just new-check" ;;
     build-image)     spec_cmd="swift run kajo build-image -o $o/kernel.img" ;;
-    dev-image)       spec_cmd="swift run kajo build-image -o $o/dev.img --with tools" ;;
+    dev-image)       spec_cmd="swift run kajo build-image -o $o/dev.img --with tools --with types" ;;
     tools-test)      spec_cmd="swift run kajo test $o/dev.img" ;;
     compiler-tests)  spec_cmd="swift test --filter KajoCompilerTests" ;;
     mac-shell-tests) spec_cmd="rm -f $o/mac-tests-rows.txt; scripts/mac-shell.sh build && scripts/mac-shell.sh run $o/mac-tests-rows.txt mode=tests; cat $o/mac-tests-rows.txt"

@@ -25,6 +25,7 @@ expect none - AGENTS.md experiments/large-bytes/RESULTS.md docs/adr/0001-swift.m
 expect smalltalk - kernel/Object.class.st
 expect smalltalk - tools/DevClient.class.st docs/x.md
 expect smalltalk - apps/Shared/smalltalk/demo.st
+expect smalltalk - types/Checker/TypeChecker.class.st kernel/Object.class.st
 expect swift - scripts/check-tier.sh scripts/gates-lib.sh justfile
 expect swift - Sources/KajoVM/Shell/ShellVM.swift
 expect swift - Sources/KajoVM/Headless.swift

@@ -23,7 +23,7 @@ Smalltalk class >> changeListener [
 
 { #category : #changes }
 Smalltalk class >> changeListener: anObjectOrNil [
-	"Types 2: the one object told of every change of the image's code (the type checker's TypeService), or nil. It answers noteChange:of:in:, beginChanges and endChanges."
+	"Types 2: the one object told of every change of the image's code (the type checker of a development image), or nil. It answers noteChange:of:in:, beginChanges and endChanges."
 	changeListener := anObjectOrNil
 ]
 

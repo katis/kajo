@@ -6,9 +6,13 @@
 #   apps/Shared/build-images.sh <dir> [mac]
 # writes <dir>/kajo/{kernel,shell,st-sends,st-ivars,st-closures}.img and
 # <dir>/kajo/kasm/*.kasm; with mac (the macOS shell's build) also module 9c's
-# development images: dev.img (kernel/, tools/, the scenario loads and the
-# scripted session) and dev2000.img (the same with 1806 generated classes of
-# 11 methods: 2000 classes, the browser's measurement).
+# development images: dev.img (kernel/, tools/, types/, the scenario loads
+# and the scripted session) and dev2000.img (the same with 1806 generated
+# classes of 11 methods: 2000 classes, the browser's measurement). Types 2:
+# every development image holds the type checker's package (types/), which
+# checks nothing until it is asked; the scenario images (kernel.img,
+# shell.img, the st-*.img kernels) do not, so the matrices measure what
+# they measured.
 set -euo pipefail
 out=${1:?usage: build-images.sh <resources dir> [mac]}
 platform=${2:-}
@@ -28,7 +32,7 @@ fi
 cd $root
 if [[ $platform == product ]]; then
   rmdir $dst/kasm
-  $kajo build-image -o $dst/dev.img kernel --with tools > /dev/null
+  $kajo build-image -o $dst/dev.img kernel --with tools --with types > /dev/null
   rm -f $dst/../kajo-build.log
   exit 0
 fi
@@ -49,11 +53,11 @@ for k in sends ivars closures; do
   $kajo build-image -o $dst/st-$k.img kernel Tests/KajoVMTests/Fixtures/smalltalk/$k > /dev/null
 done
 if [[ $platform == mac ]]; then
-  $kajo build-image -o $dst/dev.img kernel --with tools --with apps/Shared/smalltalk --with apps/Shared/devsession > /dev/null
+  $kajo build-image -o $dst/dev.img kernel --with tools --with types --with apps/Shared/smalltalk --with apps/Shared/devsession > /dev/null
   gen=$scratch/gen2000
   rm -rf $gen
   /usr/bin/python3 scripts/gen-classes.py $gen 1806 11
-  $kajo build-image -o $dst/dev2000.img kernel --with tools --with apps/Shared/smalltalk --with apps/Shared/devsession --with $gen > /dev/null
+  $kajo build-image -o $dst/dev2000.img kernel --with tools --with types --with apps/Shared/smalltalk --with apps/Shared/devsession --with $gen > /dev/null
 fi
 for k in prelude lib arith fib sends alloc ivars walk storeheavy closures floats; do
   cp Tests/KajoVMTests/Fixtures/kernels/$k.kasm $dst/kasm/

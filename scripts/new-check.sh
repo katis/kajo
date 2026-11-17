@@ -13,7 +13,9 @@
 # Then the built products: a Release binary links no development protocol,
 # no compiler and no shell modes (symbols and strings), its Info.plist names
 # neither the Bonjour service nor the local network, and its image is a
-# release image that refuses to serve; a Debug product has all three; both
+# release image that refuses to serve and holds no class of the type
+# checker and no signature's text (Types 2); a Debug product has all of
+# them; both
 # link the prebuilt VM (no KajoVM is compiled for the app, and the Debug
 # product holds the prebuilt framework's symbols). The
 # image build phase is timed first and incremental (nothing changed, then
@@ -86,6 +88,13 @@ strs() {
   print -n "DNSServiceRegister=$(nm -u $1 2>/dev/null | grep -c _DNSServiceRegister) "
 }
 plistkeys() { plutil -p $1 | grep -cE "NSBonjourServices|NSLocalNetworkUsageDescription" }
+# Types 2 (docs/modules/types-2.md): the type checker's classes and the
+# kernel's signatures without a method (the type table's text) in an
+# image's bytes: none in a Release image, both in a Debug one.
+types() {
+  print -n "checker_classes=$(LC_ALL=C grep -c -a -E 'TypeChecker|MethodTypeCheck' $1) "
+  print -n "signature_text=$(LC_ALL=C grep -c -a -F 'bitXor: anInteger <Integer> ^<Integer>' $1) "
+}
 refuses() {
   local sock=$work/check-$$.sock
   gtimeout 20 $kajo run $1 --protocol $sock > $work/refuse.out 2>&1
@@ -94,14 +103,14 @@ refuses() {
 
 check() {
   local tag=$1 bin=$2 plist=$3 img=$4 want=$5
-  local sy=$(symbols $bin) st=$(strs $bin) pk=$(plistkeys $plist) rf=$(refuses $img)
+  local sy=$(symbols $bin) st=$(strs $bin) pk=$(plistkeys $plist) rf=$(refuses $img) ty=$(types $img)
   local bytes=$(stat -f %z $bin) imgbytes=$(stat -f %z $img)
-  print "$tag: binary_bytes=$bytes image_bytes=$imgbytes ${sy}${st}plist_keys=$pk image_refuses_to_serve=$rf"
+  print "$tag: binary_bytes=$bytes image_bytes=$imgbytes ${sy}${st}${ty}plist_keys=$pk image_refuses_to_serve=$rf"
   if [[ $want == release ]]; then
-    [[ $sy == *"KajoDev=0 KajoAppDevelopment=0 KajoCompiler=0 KajoShellCore=0 KajoAOT=0 "* && $sy != *"KajoVM=0 "* && $st == "_kajo-dev._tcp=0 kajo-pairing-token=0 DNSServiceRegister=0 " && $pk == 0 && $rf == 1 ]] \
+    [[ $sy == *"KajoDev=0 KajoAppDevelopment=0 KajoCompiler=0 KajoShellCore=0 KajoAOT=0 "* && $sy != *"KajoVM=0 "* && $st == "_kajo-dev._tcp=0 kajo-pairing-token=0 DNSServiceRegister=0 " && $ty == "checker_classes=0 signature_text=0 " && $pk == 0 && $rf == 1 ]] \
       || { print "$tag: FAILED the release checks"; fail=1; }
   else
-    [[ $sy != *"KajoDev=0 "* && $sy != *"KajoAppDevelopment=0 "* && $sy == *"KajoCompiler=0 KajoShellCore=0 KajoAOT=0 "* && $st != *"DNSServiceRegister=0 "* && $pk == 2 && $rf == 0 ]] \
+    [[ $sy != *"KajoDev=0 "* && $sy != *"KajoAppDevelopment=0 "* && $sy == *"KajoCompiler=0 KajoShellCore=0 KajoAOT=0 "* && $st != *"DNSServiceRegister=0 "* && $ty != *"checker_classes=0 "* && $ty != *"signature_text=0 "* && $pk == 2 && $rf == 0 ]] \
       || { print "$tag: FAILED the debug checks"; fail=1; }
   fi
 }

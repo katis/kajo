@@ -170,7 +170,7 @@ public enum AppProjectGenerator {
     /// Names a generated app may not take: the modules every app imports,
     /// the platform's, and the packages a development image holds.
     static let reserved: Set<String> = ["Swift", "Foundation", "Dispatch", "Darwin", "AppKit", "UIKit", "QuartzCore",
-                                        "Combine", "SwiftUI", "Testing", "XCTest", "Kernel", "Tools", "Main", "Self", "Any", "Type",
+                                        "Combine", "SwiftUI", "Testing", "XCTest", "Kernel", "Tools", "Types", "Main", "Self", "Any", "Type",
                                         "Protocol", "Object", "Smalltalk"]
 
     /// The name rule: a capital letter, then letters and digits, 2 to 30
