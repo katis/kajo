@@ -4,9 +4,13 @@
     scripts/shell-report.py <outdir>
     scripts/shell-report.py --bar <outdir>
 
-Reads golden.txt, scenarios.txt, events.txt, hog.txt and drift.txt (one
-`key=value` line per launch) and prints markdown tables: medians over the
-runs with the range in brackets.
+Reads golden.txt, scenarios.txt, events.txt, hog.txt, mainload.txt and
+drift.txt (one `key=value` line per launch) and prints markdown tables:
+medians over the runs with the range in brackets. Any other *.txt file of
+result rows (lines that start with `mode=` after the wall clock, or FAILED
+lines) is a row kind the report does not know: both outputs name it, and
+--bar tabulates it as "<name> (UNKNOWN kind)" so its rows are counted,
+never dropped.
 
 --bar (gate tiers, docs/modules/gate-tiers.md) tabulates the bar's columns
 over every raw row instead (AGENTS.md: after any device run, tabulate the
@@ -24,6 +28,17 @@ the host's nursery's collections (gc_ycHost, gc_ycHostMaxMs), and a line
 naming every young mode the rows carry: stw and offload, and any other
 value counted as unknown (never as a pass or a failure). Rows without the
 counter read "?" in those columns.
+
+The main worker's flips under load (docs/modules/main-flips.md): the
+mainload rows (the storm with the frame action allocating enough to flip
+the main worker's nursery a hundred times or more a launch, offload and the
+stw control) get a table of their own and a per-launch table; --bar adds
+two columns over every row: the main worker's flips in the window
+(main_flips) and its waits for its collector in the window
+(main_collector_waits, the longest main_collector_wait_max_ms). Rows
+without the fields read "?"; a row whose whole-run count
+(gc_ycMainCollectorWaits, warm-up included) is above the window's is named
+in the notes, as is every row with a wait.
 
 The warm-up launch (docs/modules/first-launch.md): shell-matrix.sh runs one
 idle launch before its first row into warmup.txt; it is never a row of a
@@ -176,8 +191,45 @@ def on_main(rows):
     return n, mx, have, stw, absent, hn, hmx
 
 
+KNOWN_FILES = ["drift", "golden", "scenarios", "events", "hog", "mainload"]
+
+
+def unknown_files(d):
+    """The *.txt files of result rows that are no known row kind (not the
+    warm-up, not a device's console log or a served-requests file)."""
+    out = []
+    for p in sorted(Path(d).glob("*.txt")):
+        name = p.stem
+        if name in KNOWN_FILES or name == "warmup" or name.startswith("requests-") or name.endswith("-console"):
+            continue
+        text = p.read_text(errors="replace")
+        if any(" mode=" in l or l.startswith("mode=") or l.startswith("FAILED=") for l in text.splitlines()):
+            out.append(name)
+    return out
+
+
+def flips_waits(rows):
+    """(main flips, waits for the collector, longest wait ms or None, rows
+    with the fields) over rows, window values (main_flips,
+    main_collector_waits, main_collector_wait_max_ms)."""
+    flips = waits = 0.0
+    mx = None
+    have = 0
+    for r in rows:
+        if "main_flips" not in r:
+            continue
+        have += 1
+        flips += num(r.get("main_flips")) or 0
+        n = num(r.get("main_collector_waits")) or 0
+        waits += n
+        m = num(r.get("main_collector_wait_max_ms"))
+        if n > 0 and m is not None:
+            mx = m if mx is None else max(mx, m)
+    return flips, waits, mx, have
+
+
 def row_name(r):
-    keys = ["mode", "kernel", "kind", "workers", "scenario", "young", "events", "hog", "budget", "run"]
+    keys = ["mode", "kernel", "kind", "workers", "scenario", "young", "events", "hog", "budget", "mainalloc", "mainwork", "run"]
     return " ".join(f"{k}={r[k]}" for k in keys if k in r)
 
 
@@ -197,7 +249,8 @@ def warmup_line(d):
 
 
 def bar(d):
-    files = ["drift", "golden", "scenarios", "events", "hog"]
+    unknown = unknown_files(d)
+    files = KNOWN_FILES + unknown
     w = warmup_line(d)
     if w:
         print(w)
@@ -206,8 +259,11 @@ def bar(d):
     if ym:
         print(ym)
         print()
-    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | young on the main thread (longest ms) | host's nursery (longest ms) | longest stop ms | longest wait for a safepoint ms (kind, last parker/how it parked) |")
-    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|")
+    if unknown:
+        print("row kinds this report does not know (tabulated as UNKNOWN, never dropped): " + ", ".join(f + ".txt" for f in unknown))
+        print()
+    print("| file | rows | launches failed | checksums not ok | rows missing frames | frames missed | rows with no frames | rows falling back | fallbacks | unjustified fallbacks | stalls (longest ms) | sweep stops (longest ms) | young on the main thread (longest ms) | host's nursery (longest ms) | main flips | main waits for the collector (longest ms) | longest stop ms | longest wait for a safepoint ms (kind, last parker/how it parked) |")
+    print("|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|")
     tot = defaultdict(float)
     worst = None
     worst_wait = None
@@ -258,6 +314,12 @@ def bar(d):
         if host_max is not None:
             tot["hostmax"] = max(tot["hostmax"], host_max)
         tot["onmainhave"] += om_have
+        fl, wn, wmax, fw_have = flips_waits(ok_rows)
+        tot["flips"] += fl
+        tot["waits"] += wn
+        tot["flipshave"] += fw_have
+        if wmax is not None:
+            tot["waitmax"] = max(tot["waitmax"], wmax)
         for k, v in [("rows", len(rows)), ("failed", failed), ("sums", bad_sum), ("missing", len(missing)), ("missed", missed),
                      ("noframes", len(noframes)), ("falling", len(falling)), ("fallbacks", fallbacks), ("sweeps", sweep_n),
                      ("unjust", unjust), ("stalls", stall_n), ("onmain", om_n), ("host", host_n)]:
@@ -268,7 +330,10 @@ def bar(d):
         wait = f"{ww[0]:.2f} ({ww[1]}, {ww[2]})" if ww else "-"
         om = "?" if not om_have else (f"{om_n:.0f} ({om_max:.2f})" if om_max is not None else f"{om_n:.0f}")
         ho = "?" if not om_have else (f"{host_n:.0f} ({host_max:.2f})" if host_max is not None else f"{host_n:.0f}")
-        print(f"| {f} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {om} | {ho} | {stop} | {wait} |")
+        flc = "?" if not fw_have else f"{fl:.0f}"
+        wtc = "?" if not fw_have else (f"{wn:.0f} ({wmax:.2f})" if wmax is not None else f"{wn:.0f}")
+        label = f if f in KNOWN_FILES else f"{f} (UNKNOWN kind)"
+        print(f"| {label} | {len(rows)} | {failed} | {bad_sum} | {len(missing)} | {missed:.0f} | {len(noframes)} | {len(falling)} | {fallbacks:.0f} | {unjust:.0f} | {st} | {sw} | {om} | {ho} | {flc} | {wtc} | {stop} | {wait} |")
         for r in rows:
             if r.get("_failed"):
                 notes.append(f"- {f}: launch failed: {' '.join(k + '=' + v for k, v in r.items() if not k.startswith('_'))}")
@@ -285,13 +350,24 @@ def bar(d):
         for r in [r for r in ok_rows if (num(r.get("gc_ycOnMain")) or 0) > 0]:
             notes.append(f"- {f}: {r.get('gc_ycOnMain')} young collections on the main thread (longest {r.get('gc_ycOnMainMaxMs')} ms;"
                          f" worker 0's {r.get('gc_ycOnMainW0')}, the host's {r.get('gc_ycOnMainHost')}): {row_name(r)}")
+        for r in [r for r in ok_rows if (num(r.get("main_collector_waits")) or 0) > 0]:
+            notes.append(f"- {f}: {r.get('main_collector_waits')} waits of the main worker for its collector, {r.get('main_collector_wait_ms')} ms,"
+                         f" longest {r.get('main_collector_wait_max_ms')} ms (flips {r.get('main_flips')}, missed {r.get('missed')},"
+                         f" thermal {r.get('thermal_start', '-')}->{r.get('thermal_end', '-')}): {row_name(r)}")
+        for r in ok_rows:
+            run_w, win_w = num(r.get("gc_ycMainCollectorWaits")), num(r.get("main_collector_waits"))
+            if run_w is not None and win_w is not None and run_w > win_w:
+                notes.append(f"- {f}: {run_w - win_w:.0f} waits for the collector outside the window (whole run {r.get('gc_ycMainCollectorWaits')},"
+                             f" longest {r.get('gc_ycMainCollectorWaitMaxMs')} ms): {row_name(r)}")
     stop = f"{worst[0]:.2f} ({worst[1]}, {worst[3]}: {row_name(worst[2])})" if worst else "-"
     sw = f"{tot['sweeps']:.0f} ({tot['sweepmax']:.2f})" if tot["sweeps"] else "0"
     stt = f"{tot['stalls']:.0f} ({tot['stallmax']:.2f})" if tot["stalls"] else "0"
     wait = f"{worst_wait[0]:.2f} ({worst_wait[1]}, {worst_wait[2]}, {worst_wait[4]}: {row_name(worst_wait[3])})" if worst_wait else "-"
     omt = "?" if not tot["onmainhave"] else (f"{tot['onmain']:.0f} ({tot['onmainmax']:.2f})" if tot["onmain"] else "0")
     hot = "?" if not tot["onmainhave"] else (f"{tot['host']:.0f} ({tot['hostmax']:.2f})" if tot["host"] else "0")
-    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {omt} | {hot} | {stop} | {wait} |")
+    flt = "?" if not tot["flipshave"] else f"{tot['flips']:.0f}"
+    wtt = "?" if not tot["flipshave"] else (f"{tot['waits']:.0f} ({tot['waitmax']:.2f})" if tot["waits"] else "0")
+    print(f"| all | {tot['rows']:.0f} | {tot['failed']:.0f} | {tot['sums']:.0f} | {tot['missing']:.0f} | {tot['missed']:.0f} | {tot['noframes']:.0f} | {tot['falling']:.0f} | {tot['fallbacks']:.0f} | {tot['unjust']:.0f} | {stt} | {sw} | {omt} | {hot} | {flt} | {wtt} | {stop} | {wait} |")
     if notes:
         print()
         print("\n".join(notes))
@@ -304,12 +380,47 @@ def bar(d):
     return 1 if tot["failed"] or tot["sums"] else 0
 
 
+def mainload_tables(d):
+    """The mainload rows: medians by young mode and load, then every launch
+    (docs/modules/main-flips.md)."""
+    rows = lines(d / "mainload.txt")
+    if not rows:
+        return
+    print("### mainload (the storm, the main worker allocating on every frame)\n")
+    print("| young | mainalloc | mainwork | runs | main flips | flip max ms | waits for the collector | wait ms | longest wait ms | offloaded collections (p50 / p99 ms) | frame turn p50 / p99 / max ms | busy frac | preempted turns of | missed of expected | fallbacks |")
+    print("|---|--:|--:|--:|---|---|---|---|---|---|---|---|---|---|--:|")
+    g = group(rows, ["young", "mainalloc", "mainwork"])
+    for (y, a, w), rs in g.items():
+        print(f"| {y} | {a} | {w} | {len(rs)} | {med(rs, 'main_flips', '{:.0f}')} | {med(rs, 'main_flip_max_ms', '{:.3f}')} | "
+              f"{med(rs, 'main_collector_waits', '{:.0f}')} | {med(rs, 'main_collector_wait_ms', '{:.3f}')} | {med(rs, 'main_collector_wait_max_ms', '{:.3f}')} | "
+              f"{med(rs, 'gc_ycOffloaded', '{:.0f}')} ({med(rs, 'gc_ycOffP50ms', '{:.2f}', False)} / {med(rs, 'gc_ycOffP99ms', '{:.2f}', False)}) | "
+              f"{med(rs, 'turn_tick_p50_ms', '{:.2f}', False)} / {med(rs, 'turn_tick_p99_ms', '{:.2f}', False)} / {med(rs, 'turn_tick_max_ms', '{:.2f}', False)} | "
+              f"{med(rs, 'main_busy_frac', '{:.3f}')} | {med(rs, 'preempted_turns', '{:.0f}', False)} of {med(rs, 'turns', '{:.0f}', False)} | "
+              f"{med(rs, 'missed', '{:.0f}')} of {med(rs, 'expected', '{:.0f}', False)} | {med(rs, 'gc_fallbacks', '{:.0f}')} |")
+    print()
+    print("| young | run | flips | waits | wait ms | longest wait ms | offloaded | off p50 / p99 ms | turn p50 / p99 / max ms | busy frac | missed of expected | fallbacks | thermal start | thermal end |")
+    print("|---|--:|--:|--:|--:|--:|--:|---|---|--:|---|--:|---|---|")
+    for r in rows:
+        if r.get("_failed"):
+            print(f"| FAILED | {r.get('run', '-')} | | | | | | | | | | | | |")
+            continue
+        print(f"| {r.get('young', '-')} | {r.get('run', '-')} | {r.get('main_flips', '?')} | {r.get('main_collector_waits', '?')} | {r.get('main_collector_wait_ms', '?')} | "
+              f"{r.get('main_collector_wait_max_ms', '?')} | {r.get('gc_ycOffloaded', '-')} | {r.get('gc_ycOffP50ms', '-')} / {r.get('gc_ycOffP99ms', '-')} | "
+              f"{r.get('turn_tick_p50_ms', '-')} / {r.get('turn_tick_p99_ms', '-')} / {r.get('turn_tick_max_ms', '-')} | {r.get('main_busy_frac', '-')} | "
+              f"{r.get('missed', '-')} of {r.get('expected', '-')} | {r.get('gc_fallbacks', '-')} | {r.get('thermal_start', '-')} | {r.get('thermal_end', '-')} |")
+    print()
+
+
 def main():
     if sys.argv[1] == "--bar":
         sys.exit(bar(Path(sys.argv[2])))
     d = Path(sys.argv[1])
-    fails = sum(1 for f in ["golden", "scenarios", "events", "hog", "drift"] for r in lines(d / f"{f}.txt") if r.get("_failed"))
+    unknown = unknown_files(d)
+    fails = sum(1 for f in KNOWN_FILES + unknown for r in lines(d / f"{f}.txt") if r.get("_failed"))
     print(f"launches failed: {fails}\n")
+    if unknown:
+        print("row kinds this report does not know (no table; --bar counts their rows): "
+              + ", ".join(f"{f}.txt ({len(lines(d / (f + '.txt')))} rows)" for f in unknown) + "\n")
     w = warmup_line(d)
     if w:
         print(w + "\n")
@@ -348,6 +459,8 @@ def main():
                   f"{med(rs, 'power_w', '{:.1f}')} | {med(rs, 'footprint_peak_mb', '{:.0f}')} | {med(rs, 'gc_fallbacks', '{:.0f}')} | "
                   f"{med(rs, 'gc_stalls', '{:.0f}')} ({med(rs, 'gc_stallMaxMs', '{:.1f}', False)}) | {sw} | {th} |")
         print()
+
+    mainload_tables(d)
 
     dr = lines(d / "drift.txt")
     if dr:

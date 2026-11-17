@@ -6,9 +6,23 @@
 #
 #   scripts/shell-matrix.sh mac|device <outdir> [parts]
 #
-# parts (default all): golden scenarios events hog drift. RUNS (3), WORKERS
-# (background workers in the scenarios: 7 on the Mac, 5 on the phone),
-# SECONDS_ (10) override; EXTRA_ARGS adds launch arguments (AOT 1: native=1).
+# parts (default all): golden scenarios events hog mainload drift. RUNS (3),
+# WORKERS (background workers in the scenarios: 7 on the Mac, 5 on the
+# phone), SECONDS_ (10) override; EXTRA_ARGS adds launch arguments (AOT 1:
+# native=1).
+#
+# main-flips (docs/modules/main-flips.md): the part mainload is the storm
+# with the main worker allocating on every frame, enough to flip its
+# nursery a hundred times or more a launch, under young=offload and the
+# young=stw control, RUNS runs each (six rows by default), into
+# mainload.txt. MAINALLOC and MAINWORK override the frame action's load.
+# The defaults were chosen in the module's part 1 by a rule written before
+# the devices' rows were read: the smallest load that flips 100 times or
+# more in every run while the frame turn's p50 stays under a quarter of a
+# frame and the frame action finishes in its turn. With the default
+# mainwork=60000 no load met it on any machine (the arithmetic alone fills
+# the 3 ms turn budget on the iPad), so mainwork=0: 12000 pairs a frame on
+# the Mac's 60 Hz display (116 flips), 6000 on the devices' 120 Hz (116).
 #
 # The first-launch follow-up (docs/modules/first-launch.md): before its first
 # row the matrix runs one idle launch of the shell, the warm-up, into
@@ -19,7 +33,7 @@ set -uo pipefail
 root=${0:A:h:h}
 target=${1:?mac|device}
 out=${2:?outdir}
-parts=${3:-"drift golden scenarios events hog drift"}
+parts=${3:-"drift golden scenarios events hog mainload drift"}
 RUNS=${RUNS:-3}
 SECS=${SECONDS_:-10}
 mkdir -p $out
@@ -27,9 +41,11 @@ mkdir -p $out
 if [[ $target == mac ]]; then
   W=${WORKERS:-7}; one() { $root/scripts/mac-shell.sh run "$@" ${=EXTRA_ARGS:-} }
   GW=(1 2 6)
+  MA=${MAINALLOC:-12000} MW=${MAINWORK:-0}
 else
   W=${WORKERS:-5}; one() { $root/scripts/device.sh run "$@" ${=EXTRA_ARGS:-} }
   GW=(1 2 6)
+  MA=${MAINALLOC:-6000} MW=${MAINWORK:-0}
 fi
 drifted=0
 if [[ ${WARMUP:-1} == 1 ]]; then
@@ -71,6 +87,12 @@ for part in ${=parts}; do
       for run in $(seq $RUNS); do
         one $out/hog.txt mode=scenario scenario=idle young=offload hog=1 events=1000 workers=$W seconds=$SECS run=$run
         one $out/hog.txt mode=scenario scenario=idle young=offload hog=1 budget=off workers=$W seconds=$SECS run=$run
+      done ;;
+    mainload)
+      for run in $(seq $RUNS); do
+        for y in offload stw; do
+          one $out/mainload.txt mode=scenario scenario=storm young=$y mainalloc=$MA mainwork=$MW workers=$W seconds=$SECS run=$run
+        done
       done ;;
   esac
 done

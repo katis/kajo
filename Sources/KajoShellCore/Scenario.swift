@@ -7,7 +7,8 @@ import KajoAppDevelopment
 import KajoVM
 
 /// `mode=scenario scenario=storm|ring|share|large|photo|idle gc=cm|stw young=stw|offload
-/// workers=N seconds=10 warmup=1 events=0|1000 hog=0|1 budget=on|off`:
+/// workers=N seconds=10 warmup=1 events=0|1000 hog=0|1 budget=on|off
+/// mainalloc=20 mainwork=60000`:
 /// module 7's scenarios driven by the real display link. The window is
 /// built in Smalltalk (ShellBench), a probe view is moved by Smalltalk on
 /// every frame event (so ProMotion does not throttle) after module 7's
@@ -420,6 +421,9 @@ import KajoVM
         func d(_ k: String) -> UInt64 { (counters[k] ?? 0) &- (counterBase[k] ?? 0) }
         var line = "scenario=\(name) gc=\(options.string("gc", "cm")) young=\(options.string("young", "offload")) workers=\(options.int("workers", 5))"
         line += " seconds=\(seconds) events=\(eventRate) hog=\(hog ? 1 : 0) budget=\(budgetOff ? "off" : "on") thermal_start=\(thermalStart)"
+        // main-flips: the frame action's load, so a row says what the main
+        // worker allocated on every frame (the mainload rows).
+        line += " mainalloc=\(options.int("mainalloc", 20)) mainwork=\(options.int("mainwork", 60000))"
         line += " nominal_hz=\(f2(nominal)) refresh_hz=\(f2(fa.deliveredHz)) frames=\(fa.frames) expected=\(fa.expected)"
         line += " ticks_total=\(ticksTotal) begin_late_ms=\(f3(beginLateMs)) counted_s=\(f3(counted))"
         line += " drops=\(fa.drops) missed=\(fa.missed) missed120=\(fa120.missed)"

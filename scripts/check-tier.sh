@@ -28,7 +28,9 @@
 #   smalltalk  kernel/, tools/, apps/Shared/smalltalk/
 #   none       docs/, any *.md (experiments/*/RESULTS.md among them)
 # A swift or core diff that touches a gate script (check-tier.sh, its test,
-# gates-lib.sh, weekly.sh, fuzz.sh, fuzz-gate.sh) owes check-tier-test
+# gates-lib.sh, weekly.sh, fuzz.sh, fuzz-gate.sh; since main-flips the
+# matrix gates' shell-matrix.sh and shell-report.py, whose --bar the test
+# reads over fixture rows) owes check-tier-test
 # first; one that touches models/ owes model-check (the core tier always
 # runs it). The fuzzers are one gate, `fuzz`, over the targets owed.
 set -uo pipefail
@@ -108,7 +110,7 @@ for f in $files; do [[ $f == models/* ]] && models=1; done
 # test is owed by a diff that touches a gate script.
 tiertest=0
 for f in $files; do
-  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh) ]] && tiertest=1
+  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh|shell-matrix.sh|shell-report.py) ]] && tiertest=1
 done
 
 print "check-tier: ${#files} files from $source_desc"

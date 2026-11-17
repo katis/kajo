@@ -88,7 +88,7 @@ check_gates "clean-build swift-test tsan kernel-test apps new-check model-check"
 core="clean-build swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak fuzz apps kernel-test new-check ab matrix-mac matrix-iphone"
 check_gates "$core" Sources/KajoVM/Marking/Marker.swift
 check_gates "check-tier-test $core" Sources/KajoVM/Marking/Marker.swift scripts/weekly.sh
-for f in check-tier.sh check-tier-test.sh gates-lib.sh weekly.sh fuzz.sh fuzz-gate.sh; do
+for f in check-tier.sh check-tier-test.sh gates-lib.sh weekly.sh fuzz.sh fuzz-gate.sh shell-matrix.sh shell-report.py; do
   n=$((n + 1)); [[ $(gates scripts/$f) == check-tier-test* ]] || { print "FAIL: scripts/$f does not owe check-tier-test"; fail=1 }
 done
 n=$((n + 1)); [[ $(gates scripts/device.sh) != *check-tier-test* ]] || { print "FAIL: scripts/device.sh owes check-tier-test"; fail=1 }
@@ -226,6 +226,27 @@ $root/scripts/shell-report.py --bar $bars/none > /dev/null; rc=$?
 n=$((n + 1)); [[ $rc == 1 ]] || { print "FAIL: --bar over no rows: rc=$rc"; fail=1 }
 rc=$( GL_ROOT=$root GL_OUT=$bars/gate GL_MAC_SHELL=true GL_SHELL_MATRIX=false zsh -c 'source $GL_ROOT/scripts/gates-lib.sh; gl_spec matrix-mac; cd $GL_ROOT; zsh -c "$spec_cmd" > /dev/null 2>&1; print $?' )
 n=$((n + 1)); [[ $rc != 0 ]] || { print "FAIL: the matrix gate passed with its matrix step failing"; fail=1 }
+# main-flips (docs/modules/main-flips.md): --bar over mainload rows shows
+# the main flips and the waits for the collector with the longest, a wait
+# is shown and never folded into 0, the rows without the fields read "?",
+# a row kind the report does not know is tabulated as UNKNOWN, and the
+# report's mainload table has the rows.
+mkdir -p $bars/ml
+print 'at=1 mode=scenario run=1 tag=- scenario=storm young=offload workers=5 mainalloc=6000 mainwork=0 frames=1200 expected=1200 missed=0 main_flips=118 main_collector_waits=0 main_collector_wait_ms=0.000 main_collector_wait_max_ms=0.000 gc_ycMainCollectorWaits=0 gc_ycOnMain=0 gc_ycHost=0 thermal_start=fair thermal_end=fair' > $bars/ml/mainload.txt
+print 'at=2 mode=scenario run=1 tag=- scenario=storm young=stw workers=5 mainalloc=6000 mainwork=0 frames=1200 expected=1200 missed=2 main_flips=0 main_collector_waits=0 main_collector_wait_ms=0.000 main_collector_wait_max_ms=0.000 gc_ycMainCollectorWaits=- gc_ycOnMain=- thermal_start=fair thermal_end=fair' >> $bars/ml/mainload.txt
+print 'at=3 mode=scenario run=2 tag=- scenario=storm young=offload workers=5 mainalloc=6000 mainwork=0 frames=1199 expected=1200 missed=1 main_flips=121 main_collector_waits=3 main_collector_wait_ms=4.500 main_collector_wait_max_ms=2.250 gc_ycMainCollectorWaits=4 gc_ycMainCollectorWaitMaxMs=2.250 gc_ycOnMain=0 gc_ycHost=0 thermal_start=serious thermal_end=serious' >> $bars/ml/mainload.txt
+print 'mode=golden kind=st kernel=fib workers=1 run=1 ok=1 checksum=5' > $bars/ml/golden.txt
+print 'at=4 mode=scenario run=1 tag=- scenario=storm young=offload workers=5 missed=0 main_flips=7' > $bars/ml/brandnew.txt
+bar=$($root/scripts/shell-report.py --bar $bars/ml); rc=$?
+n=$((n + 1)); [[ $rc == 0 ]] || { print "FAIL: --bar over mainload rows: rc=$rc"; fail=1 }
+n=$((n + 1)); [[ $bar == *"| main flips | main waits for the collector (longest ms) |"* ]] || { print "FAIL: --bar has no flips and waits columns"; fail=1 }
+n=$((n + 1)); [[ $(print -r -- $bar | grep '^| mainload |') == *"| 239 | 3 (2.25) |"* ]] || { print "FAIL: --bar's mainload row does not show 239 flips and 3 waits (2.25 ms): $(print -r -- $bar | grep '^| mainload |')"; fail=1 }
+n=$((n + 1)); [[ $(print -r -- $bar | grep '^| golden |') == *"| ? | ? |"* ]] || { print "FAIL: --bar's golden row does not read ? for flips and waits"; fail=1 }
+n=$((n + 1)); [[ $(print -r -- $bar | grep '^| all |') == *"| 246 | 3 (2.25) |"* ]] || { print "FAIL: --bar's all row does not sum flips and waits"; fail=1 }
+n=$((n + 1)); [[ $bar == *"| brandnew (UNKNOWN kind) | 1 |"* && $bar == *"does not know"*"brandnew.txt"* ]] || { print "FAIL: --bar dropped or did not name a row kind it does not know"; fail=1 }
+n=$((n + 1)); [[ $bar == *"3 waits of the main worker for its collector, 4.500 ms, longest 2.250 ms"*"thermal serious->serious"* && $bar == *"1 waits for the collector outside the window"* ]] || { print "FAIL: --bar's notes do not name the row with waits"; fail=1 }
+rep=$($root/scripts/shell-report.py $bars/ml); rc=$?
+n=$((n + 1)); [[ $rc == 0 && $rep == *"### mainload"* && $(print -r -- $rep | grep -c '^| offload | [12] | 1[12][18] |') == 2 ]] || { print "FAIL: the report's mainload tables: rc=$rc"; fail=1 }
 rm -rf $bars
 # docs only: exit 0 at once, saying so.
 out=$(print docs/x.md | $root/scripts/check-tier.sh --paths -); rc=$?
