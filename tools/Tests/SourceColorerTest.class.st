@@ -24,6 +24,23 @@ SourceColorerTest >> testASourceItCannotReadIsColouredUpToTheError [
 ]
 
 { #category : #tests }
+SourceColorerTest >> testATypeIsColouredAsAType [
+	"Types 1: a type in the pattern is blue from its < to its >, its names are not purple, and a pragma after it is not a type."
+	| st |
+	st := self stylesOf: 'at: i <Integer> put: v <Array[E | Nil]> ^<[E, ^:X]>
+	<primitive: 60>
+	^ Transcript'.
+	self assert: st first equals: #('at: i <Integer> put: v <Array[E | Nil]> ^<[E, ^:X]>' 'bold').
+	self assert: (st includes: #('<Integer>' 'color:blue')).
+	self assert: (st includes: #('<Array[E | Nil]>' 'color:blue')).
+	self assert: (st includes: #('<[E, ^:X]>' 'color:blue')).
+	self deny: (st includes: #('Integer' 'color:purple')).
+	self deny: (st includes: #('<primitive: 60>' 'color:blue')).
+	self assert: (st includes: #('60' 'color:green')).
+	self assert: (st includes: #('Transcript' 'color:purple'))
+]
+
+{ #category : #tests }
 SourceColorerTest >> testTokensAndComments [
 	| st |
 	st := self stylesOf: 'at: i put: v

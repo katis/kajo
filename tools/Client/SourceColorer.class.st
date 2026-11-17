@@ -1,4 +1,4 @@
-"Syntax colouring of a method's source with the kernel's Scanner (module 9c): the styles a TextView takes (styles:), {start. stop. style} triples over byte offsets. The message pattern is bold; keywords and binary selectors keep the text's colour; pseudo-variables are teal, other identifiers starting with a capital (globals) purple, literals (numbers, characters, strings, symbols, literal arrays' brackets) brown and green, comments gray. A source the Scanner cannot read is coloured up to where it stopped."
+"Syntax colouring of a method's source with the kernel's Scanner (module 9c): the styles a TextView takes (styles:), {start. stop. style} triples over byte offsets. The message pattern is bold; keywords and binary selectors keep the text's colour; pseudo-variables are teal, other identifiers starting with a capital (globals) purple, literals (numbers, characters, strings, symbols, literal arrays' brackets) brown and green, comments gray, and a type in the pattern (Types 1), from its < to its >, blue as a whole: its names are neither globals nor sends. A source the Scanner cannot read is coloured up to where it stopped."
 Class {
 	#name : #SourceColorer,
 	#superclass : #Object
@@ -39,18 +39,25 @@ SourceColorer class >> stylesFor: aString [
 { #category : #colouring }
 SourceColorer class >> stylesFor: aString pattern: aBoolean [
 	"The styles of a method source (aBoolean: its message pattern is bold) or of a doit."
-	| out s last patternEnd |
+	| out s last patternEnd spans p inType |
 	out := OrderedCollection new.
 	aString isEmptyOrNil ifTrue: [^ #()].
-	patternEnd := aBoolean
-		ifTrue: [[Scanner patternEndIn: aString] on: Error do: [:e | 0]]
-		ifFalse: [0].
+	patternEnd := 0.
+	spans := #().
+	aBoolean ifTrue: [
+		[p := Parser new setSource: aString.
+		 [p parsePattern] on: CompileError do: [:e | nil].
+		 patternEnd := p lastEnd.
+		 spans := p typeSpans] on: Error do: [:e | nil]].
 	patternEnd > 0 ifTrue: [out add: 1; add: patternEnd; add: 'bold'].
+	spans do: [:sp | out add: sp first + 1; add: sp last; add: 'color:blue'].
+	inType := [:i | spans anySatisfy: [:sp | i > sp first and: [i <= sp last]]].
 	s := Scanner on: aString.
 	last := 1.
 	[[s next ~~ #end] whileTrue: [
 		self commentsIn: aString from: last to: s start - 1 into: out.
-		(self styleOf: s kind value: s value) ifNotNil: [:st | out add: s start; add: s stop - 1; add: st].
+		(inType value: s start) ifFalse: [
+			(self styleOf: s kind value: s value) ifNotNil: [:st | out add: s start; add: s stop - 1; add: st]].
 		last := s stop]] on: Error do: [:e | ^ out asArray].
 	self commentsIn: aString from: last to: aString byteSize into: out.
 	^ out asArray

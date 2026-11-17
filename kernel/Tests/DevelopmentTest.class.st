@@ -216,6 +216,8 @@ DevelopmentTest >> testJsonRoundTrip [
 DevelopmentTest >> testRemovedClassesAreFreedAndTheirIndicesTaken [
 	| a index b |
 	Smalltalk isReleaseImage ifTrue: [^ self].
+	"A class an earlier test of the same run removed is freed first: freed by the collection below, its lower index would be the one b takes (Types 1's parts put this test after ClassFuzzTest)."
+	Smalltalk garbageCollect.
 	a := Object subclass: #DevelopmentSampleA instanceVariableNames: 'x' classVariableNames: '' package: 'Kernel' tag: 'Tests-Development'.
 	index := a classIndex.
 	Smalltalk removeClass: a.

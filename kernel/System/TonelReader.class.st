@@ -1,4 +1,4 @@
-"Tonel files read in the image (module 8e): the bootstrap reader (Sources/KajoCompiler/Tonel.swift) in Smalltalk, rule for rule: the comment before the definition (a doubled quote is one quote), the STON map of Class { ... } or Extension { ... } (a #category, #package or #tag key read and ignored as every key it does not know: the class's place is its file's, tagOfPath:), then each method's optional { #category : ... } and Class [class] >> pattern [ body ], the body's end found by bracket depth outside strings, comments and character literals. A method's source is its pattern without the blanks before the bracket, then its body (a blank between when the body starts with neither a blank nor a line break), as the image build records it. The bootstrap reader stays the image build's and the oracle: a test reads every kernel file with both."
+"Tonel files read in the image (module 8e): the bootstrap reader (Sources/KajoCompiler/Tonel.swift) in Smalltalk, rule for rule: the comment before the definition (a doubled quote is one quote), the STON map of Class { ... } or Extension { ... } (a #category, #package or #tag key read and ignored as every key it does not know: the class's place is its file's, tagOfPath:), then each method's optional { #category : ... } and Class [class] >> pattern [ body ], the pattern being what the Parser reads as one, its types included (Types 1), and the body's end found by bracket depth outside strings, comments and character literals. Types 1's keys: #typeParameters (type names), #superclassType (a type naming the #superclass) and a type after an instance variable's name in #instVars. A method's source is its pattern without the blanks before the bracket, then its body (a blank between when the body starts with neither a blank nor a line break), as the image build records it. The bootstrap reader stays the image build's and the oracle: a test reads every kernel file with both."
 Class {
 	#name : #TonelReader,
 	#superclass : #Object,
@@ -56,6 +56,12 @@ TonelReader >> identifier [
 { #category : #reading }
 TonelReader >> isIdentifierByte: b [
 	^ b >= 128 or: [(b between: 48 and: 57) or: [(b between: 65 and: 90) or: [(b between: 97 and: 122) or: [b = 95]]]]
+]
+
+{ #category : #reading }
+TonelReader >> isTypeName: aString [
+	"One identifier that starts with A to Z (Types 1)."
+	^ aString notEmpty and: [((aString byteAt: 1) between: 65 and: 90) and: [Smalltalk isIdentifier: aString]]
 ]
 
 { #category : #reading }
@@ -159,8 +165,9 @@ TonelReader >> readDocument [
 			ifFalse: [
 				((#(#symbol #string #identifier) includes: sup first) and: [Smalltalk isIdentifier: (sup at: 2)]) ifFalse: [^ self fail: 'bad #superclass'].
 				doc superclassName: (sup at: 2)].
-		doc instVarNames: (self names: 'instVars' in: def); classInstVarNames: (self names: 'classInstVars' in: def);
-			classVarNames: (self names: 'classVars' in: def)].
+		doc instVarNames: (self typedNames: def into: doc); classInstVarNames: (self names: 'classInstVars' in: def);
+			classVarNames: (self names: 'classVars' in: def).
+		self readTypes: def into: doc].
 	doc type: (self text: 'type' in: def).
 	[self space. position < limit] whileTrue: [self readMethodInto: doc].
 	^ doc
@@ -169,7 +176,7 @@ TonelReader >> readDocument [
 { #category : #reading }
 TonelReader >> readMethodInto: aDocument [
 	"A method's metadata is read for its category; any other key (an #author of a file written before the development answers among them) is read and ignored, as Pharo's Tonel ignores keys it does not know, so the next write leaves it out."
-	| category owner classSide patternStart open close end src body meta |
+	| category owner classSide patternStart open close end src body meta parser |
 	category := ''.
 	self byte = 123 ifTrue: [
 		meta := self map: 0.
@@ -187,19 +194,13 @@ TonelReader >> readMethodInto: aDocument [
 	position := position + 2.
 	self space.
 	patternStart := position.
-	"The pattern runs to the first [ outside a comment (the review fixes, part 2, item 3: a comment in a pattern keeps its brackets; a pattern holds no string)."
-	[position < limit and: [self byte ~= 91]] whileTrue: [
-		self byte = 34
-			ifTrue: [
-				position := position + 1.
-				[position < limit and: [self byte ~= 34]] whileTrue: [
-					self byte = 10 ifTrue: [line := line + 1].
-					position := position + 1].
-				position < limit ifTrue: [position := position + 1]]
-			ifFalse: [
-				self byte = 10 ifTrue: [line := line + 1].
-				position := position + 1]].
-	position >= limit ifTrue: [^ self fail: 'a method without a body'].
+	"Types 1: the pattern is what the Parser reads as one, its types included (Array[E] and [E, ^R] hold brackets), and the body starts at the [ after it. A comment in a pattern keeps its brackets (the review fixes, part 2, item 3); a pattern holds no string."
+	parser := Parser new setSource: source position: position line: line.
+	parser parsePattern.
+	line := parser scanner tokenLine.
+	parser scanner kind == #leftBracket ifFalse: [
+		^ self fail: (parser scanner kind == #end ifTrue: ['a method without a body'] ifFalse: ['expected [ after the method''s pattern'])].
+	position := parser scanner start.
 	open := position.
 	close := self matchingBracket: open.
 	end := open.
@@ -211,6 +212,28 @@ TonelReader >> readMethodInto: aDocument [
 	position := close + 1.
 	owner = aDocument name ifFalse: [^ self fail: 'a method of ' , owner , ' in ' , aDocument name , '''s file'].
 	aDocument methods add: (Array with: classSide with: category with: src)
+]
+
+{ #category : #reading }
+TonelReader >> readTypes: aMap into: aDocument [
+	"#typeParameters and #superclassType (Types 1), checked as the bootstrap reader checks them."
+	| v params node |
+	v := (aMap detect: [:a | a key = 'typeParameters'] ifNone: [nil]) ifNotNil: [:a | a value].
+	v ifNotNil: [
+		v first == #array ifFalse: [^ self fail: '#typeParameters is an array of names'].
+		params := OrderedCollection new.
+		(v at: 2) do: [:x | | n |
+			n := (#(#symbol #string #identifier) includes: x first) ifTrue: [x at: 2] ifFalse: [''].
+			(self isTypeName: n) ifFalse: [^ self fail: '#typeParameters: ''' , n , ''' is not a type name'].
+			(params includes: n) ifTrue: [^ self fail: '#typeParameters: ' , n , ' twice'].
+			params add: n].
+		aDocument typeParameters: params asArray].
+	v := (aMap detect: [:a | a key = 'superclassType'] ifNone: [nil]) ifNotNil: [:a | a value].
+	v ifNotNil: [
+		v first == #string ifFalse: [^ self fail: '#superclassType is a type in a string'].
+		node := [Parser parseClassType: (v at: 2)] on: CompileError do: [:e | ^ self fail: '#superclassType: ' , e reason].
+		(node kind == #name and: [node name = aDocument superclassName]) ifFalse: [^ self fail: '#superclassType names another class than #superclass'].
+		aDocument superclassType: (v at: 2)]
 ]
 
 { #category : #reading }
@@ -244,6 +267,23 @@ TonelReader >> text: aKey in: aMap [
 	| v |
 	v := (aMap detect: [:a | a key = aKey] ifNone: [^ nil]) value.
 	^ (#(#symbol #string #identifier) includes: v first) ifTrue: [v at: 2] ifFalse: [nil]
+]
+
+{ #category : #reading }
+TonelReader >> typedNames: aMap into: aDocument [
+	"The names of #instVars, each item names with an optional <type> after each (Types 1, the Parser's type grammar); the types go to aDocument."
+	| v out |
+	v := (aMap detect: [:a | a key = 'instVars'] ifNone: [^ #()]) value.
+	v first == #array ifFalse: [^ self fail: '#instVars is an array of names'].
+	out := OrderedCollection new.
+	(v at: 2) do: [:x | | vars |
+		(#(#symbol #string #identifier) includes: x first) ifFalse: [^ self fail: '#instVars is an array of names'].
+		vars := [Parser parseTypedVariables: (x at: 2)] on: CompileError do: [:e | ^ self fail: '#instVars: ' , e reason].
+		vars do: [:nt |
+			(Smalltalk isIdentifier: nt first) ifFalse: [^ self fail: 'bad name ''' , nt first , ''' in #instVars'].
+			out add: nt first.
+			(nt at: 2) ifNotNil: [:ty | aDocument instVarTypes add: nt first -> ty]]].
+	^ out asArray
 ]
 
 { #category : #reading }

@@ -51,6 +51,10 @@ func swiftSummary(_ t: TonelClass) -> String {
     let rs = "\u{1E}"
     var f = [t.name, t.superclass ?? "nil", t.instanceVariables.joined(separator: " "), t.classVariables.joined(separator: " "),
              t.classInstanceVariables.joined(separator: " "), t.type ?? "", t.comment, t.isExtension ? "extension" : "class"]
+    // Types 1: the type parameters, the superclass type and each typed
+    // instance variable as `name <type>;`.
+    f += [t.typeParameters.joined(separator: " "), t.superclassType ?? "",
+          t.instanceVariables.compactMap { v in t.instanceVariableTypes[v].map { "\(v) <\($0)>;" } }.joined()]
     for m in t.methods { f += [m.classSide ? "class" : "instance", m.category, String(decoding: m.source, as: UTF8.self)] }
     return f.joined(separator: rs)
 }

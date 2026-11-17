@@ -1,11 +1,12 @@
-"Recursive descent over the Scanner's tokens: the bootstrap compiler's parser in Smalltalk, with the same grammar and the same nesting limit."
+"Recursive descent over the Scanner's tokens: the bootstrap compiler's parser in Smalltalk, with the same grammar and the same nesting limit. Since Types 1 (docs/modules/types-1.md) the pattern holds Strongtalk-style types, an argument's after its name and the result's after the whole pattern (TypeNode), with the bootstrap's grammar and refusals; typeSpans holds each written type's range, from its < to its >, for the source colourer."
 Class {
 	#name : #Parser,
 	#superclass : #Object,
 	#instVars : [
 		'scanner',
 		'depth',
-		'lastEnd'
+		'lastEnd',
+		'typeSpans'
 	]
 }
 
@@ -45,6 +46,12 @@ Parser >> isBinary: aString [
 { #category : #accessing }
 Parser >> kind [
 	^ scanner kind
+]
+
+{ #category : #accessing }
+Parser >> lastEnd [
+	"The end of the token most recently consumed (a byte offset from 0, exclusive)."
+	^ lastEnd
 ]
 
 { #category : #accessing }
@@ -231,32 +238,17 @@ Parser >> parseMessages: receiver [
 
 { #category : #accessing }
 Parser >> parseMethod [
-	| line selector args pragmas temps statements |
+	| line pattern pragmas temps statements |
 	line := self line.
-	selector := ''.
-	args := OrderedCollection new.
-	self kind == #identifier ifTrue: [selector := self value. self advance] ifFalse: [
-	(self kind == #binary or: [self kind == #bar]) ifTrue: [
-		selector := self kind == #bar ifTrue: ['|'] ifFalse: [self value].
-		self advance.
-		self kind == #identifier ifFalse: [^ self fail: 'expected an argument name'].
-		args add: {self value. self line}.
-		self advance] ifFalse: [
-	self kind == #keyword ifTrue: [
-		[self kind == #keyword] whileTrue: [
-			selector := selector , self value.
-			self advance.
-			self kind == #identifier ifFalse: [^ self fail: 'expected an argument name'].
-			args add: {self value. self line}.
-			self advance]] ifFalse: [
-	^ self fail: 'expected a message pattern']]].
+	pattern := self parsePattern.
 	pragmas := self parsePragmas.
 	temps := self parseTemporaries.
 	pragmas := pragmas , self parsePragmas.
 	statements := self parseStatementsInBlock: false.
 	self kind == #end ifFalse: [^ self fail: 'unexpected text after the method''s statements'].
 	^ MethodNode new
-		setSelector: selector asSymbol arguments: args asArray temporaries: temps pragmas: pragmas asArray statements: statements;
+		setSelector: pattern first asSymbol arguments: (pattern at: 2) temporaries: temps pragmas: pragmas asArray statements: statements;
+		argumentTypes: (pattern at: 3) resultType: (pattern at: 4);
 		line: line;
 		yourself
 ]
@@ -279,6 +271,8 @@ Parser >> parsePragmas [
 	out := OrderedCollection new.
 	[self isBinary: '<'] whileTrue: [
 		line := self line.
+		"Types 1: a capital, [, ( or : after the < is a type's start, and a type is written only in the pattern."
+		self typeFollows ifTrue: [^ self fail: 'a pragma name starts with a lowercase letter'].
 		self advance.
 		selector := ''.
 		args := OrderedCollection new.
@@ -403,11 +397,257 @@ Parser >> setSource: aString [
 ]
 
 { #category : #accessing }
+Parser >> setSource: aString position: aPosition line: aLine [
+	"Read aString from the byte at aPosition (from 1), counting lines from aLine (the Tonel reader's pattern)."
+	scanner := Scanner on: aString.
+	scanner position: aPosition line: aLine.
+	depth := 0.
+	lastEnd := aPosition - 1.
+	scanner next
+]
+
+{ #category : #accessing }
 Parser >> value [
 	^ scanner value
+]
+
+{ #category : #types }
+Parser >> expectTypeEnd [
+	"The > that ends a type is one character (Types 1, starting position 2): a binary run that starts with it is split and the rest scanned again, so ^<A>| t | and <A><B> read as with a blank."
+	(self kind == #binary and: [(self value byteAt: 1) = 62]) ifFalse: [^ self fail: 'expected > to end the type'].
+	self value = '>' ifTrue: [^ self advance].
+	lastEnd := scanner start.
+	scanner rescanFrom: scanner start + 1
+]
+
+{ #category : #types }
+Parser >> parseArgumentType [
+	"An argument's <type> when one follows, else nil."
+	^ self typeFollows ifTrue: [self parseTypeAnnotation] ifFalse: [nil]
+]
+
+{ #category : #types }
+Parser >> parseClassType [
+	"A class definition's type (Types 1: #superclassType): the whole text one type, no method variable, no alternatives."
+	| t |
+	t := self parseType.
+	self kind == #semicolon ifTrue: [^ self fail: 'alternatives are written in a method''s pattern'].
+	self kind == #end ifFalse: [^ self fail: 'unexpected text after the type'].
+	t declaresVariable ifTrue: [^ self fail: 'a method variable is declared in a method''s pattern'].
+	^ t
+]
+
+{ #category : #types }
+Parser >> parsePattern [
+	"The message pattern with its types (Types 1): {selector. arguments ({name. line} each). argument types (a TypeNode or nil each). result type or nil}."
+	| selector args types result counts argument |
+	selector := ''.
+	args := OrderedCollection new.
+	types := OrderedCollection new.
+	argument := [
+		self kind == #identifier ifFalse: [^ self fail: 'expected an argument name'].
+		args add: {self value. self line}.
+		self advance.
+		types add: self parseArgumentType].
+	self kind == #identifier ifTrue: [selector := self value. self advance] ifFalse: [
+	(self kind == #binary or: [self kind == #bar]) ifTrue: [
+		selector := self kind == #bar ifTrue: ['|'] ifFalse: [self value].
+		self advance.
+		argument value] ifFalse: [
+	self kind == #keyword ifTrue: [
+		[self kind == #keyword] whileTrue: [
+			selector := selector , self value.
+			self advance.
+			argument value]] ifFalse: [
+	^ self fail: 'expected a message pattern']]].
+	(self kind == #caret and: [self typeFollowsCaret]) ifTrue: [
+		self advance.
+		result := self parseTypeAnnotation.
+		self kind == #keyword ifTrue: [^ self fail: 'the result type follows the whole pattern'].
+		self typeFollows ifTrue: [^ self fail: 'a type after the result'].
+		(self kind == #caret and: [self typeFollowsCaret]) ifTrue: [^ self fail: 'two result types']].
+	"Overloads: every place with alternatives has the same number."
+	counts := ((types asArray copyWith: result) select: [:t | t notNil and: [t kind == #alternatives]]) collect: [:t | t parts size].
+	counts isEmpty ifFalse: [
+		args isEmpty ifTrue: [^ self fail: 'a unary method has no overloads'].
+		(counts allSatisfy: [:n | n = counts first]) ifFalse: [^ self fail: 'overloads give every place the same number of alternatives']].
+	^ {selector. args asArray. types asArray. result}
+]
+
+{ #category : #types }
+Parser >> parseType [
+	"type := member { | member }"
+	| start first members |
+	self enter.
+	start := scanner start - 1.
+	first := self parseTypeMember.
+	self kind == #bar ifFalse: [self leave. ^ first].
+	members := OrderedCollection with: first.
+	[self kind == #bar] whileTrue: [
+		self advance.
+		members add: self parseTypeMember].
+	self leave.
+	^ TypeNode kind: #union name: nil parts: members asArray result: nil start: start end: lastEnd
+]
+
+{ #category : #types }
+Parser >> parseTypeAnnotation [
+	"< alternatives >, at the <."
+	| spanStart start first all t |
+	spanStart := scanner start - 1.
+	self advance.
+	start := scanner start - 1.
+	first := self parseType.
+	t := first.
+	self kind == #semicolon ifTrue: [
+		all := OrderedCollection with: first.
+		[self kind == #semicolon] whileTrue: [
+			self advance.
+			all add: self parseType].
+		t := TypeNode kind: #alternatives name: nil parts: all asArray result: nil start: start end: lastEnd].
+	self expectTypeEnd.
+	typeSpans isNil ifTrue: [typeSpans := OrderedCollection new].
+	typeSpans add: {spanStart. lastEnd}.
+	^ t
+]
+
+{ #category : #types }
+Parser >> parseTypeMember [
+	"member := primary [ class ]"
+	| start p |
+	start := scanner start - 1.
+	p := self parseTypePrimary.
+	(self kind == #identifier and: [self value = 'class']) ifFalse: [^ p].
+	self advance.
+	^ TypeNode kind: #class name: nil parts: {p} result: nil start: start end: lastEnd
+]
+
+{ #category : #types }
+Parser >> parseTypePrimary [
+	| start n args result t |
+	start := scanner start - 1.
+	self kind == #identifier ifTrue: [
+		n := self value.
+		((n byteAt: 1) between: 65 and: 90) ifFalse: [^ self fail: 'a type name starts with a capital'].
+		self advance.
+		self kind == #leftBracket ifFalse: [^ TypeNode kind: #name name: n parts: #() result: nil start: start end: lastEnd].
+		self advance.
+		args := OrderedCollection with: self parseType.
+		[self isBinary: ','] whileTrue: [
+			self advance.
+			args add: self parseType].
+		self kind == #rightBracket ifFalse: [^ self fail: 'expected ] to end the type arguments'].
+		self advance.
+		^ TypeNode kind: #name name: n parts: args asArray result: nil start: start end: lastEnd].
+	self kind == #colon ifTrue: [
+		self advance.
+		(self kind == #identifier and: [(self value byteAt: 1) between: 65 and: 90]) ifFalse: [^ self fail: 'expected a type variable''s name after :'].
+		n := self value.
+		self advance.
+		^ TypeNode kind: #variable name: n parts: #() result: nil start: start end: lastEnd].
+	self kind == #leftBracket ifTrue: [
+		self advance.
+		args := OrderedCollection new.
+		[self kind == #caret] whileFalse: [
+			args add: self parseType.
+			(self isBinary: ',') ifFalse: [^ self fail: 'a block type ends with ^ and its result type'].
+			self advance].
+		self advance.
+		result := self parseType.
+		self kind == #rightBracket ifFalse: [^ self fail: 'expected ] to end the block type'].
+		self advance.
+		^ TypeNode kind: #block name: nil parts: args asArray result: result start: start end: lastEnd].
+	self kind == #leftParen ifTrue: [
+		self advance.
+		t := self parseType.
+		self kind == #rightParen ifFalse: [^ self fail: 'expected ) in the type'].
+		self advance.
+		^ t].
+	^ self fail: 'expected a type'
+]
+
+{ #category : #types }
+Parser >> parseTypedVariables [
+	"An #instVars item (Types 1): names, each with an optional <type> after it; {name. the type's text between the angle brackets, or nil} each."
+	| out n start t end |
+	out := OrderedCollection new.
+	[self kind == #end] whileFalse: [
+		self kind == #identifier ifFalse: [^ self fail: 'expected an instance variable''s name'].
+		n := self value.
+		self advance.
+		self typeFollows
+			ifFalse: [out add: {n. nil}]
+			ifTrue: [
+				self advance.
+				start := scanner start.
+				t := self parseType.
+				self kind == #semicolon ifTrue: [^ self fail: 'alternatives are written in a method''s pattern'].
+				t declaresVariable ifTrue: [^ self fail: 'a method variable is declared in a method''s pattern'].
+				end := lastEnd.
+				self expectTypeEnd.
+				out add: {n. scanner source copyFrom: start to: end}]].
+	^ out asArray
+]
+
+{ #category : #types }
+Parser >> scanner [
+	^ scanner
+]
+
+{ #category : #types }
+Parser >> typeFollows [
+	"Whether the token is a < that starts a type: followed by a capital, [, ( or :. The scanner is left where it was."
+	^ self typeFollowsAfter: 0
+]
+
+{ #category : #types }
+Parser >> typeFollowsAfter: n [
+	| save answer |
+	save := {scanner state. lastEnd}.
+	n timesRepeat: [self advance].
+	answer := (self isBinary: '<') and: [
+		self advance.
+		((self kind == #identifier or: [self kind == #keyword]) and: [(self value byteAt: 1) between: 65 and: 90])
+			or: [#(#leftBracket #leftParen #colon) includes: self kind]].
+	scanner restore: save first.
+	lastEnd := save last.
+	^ answer
+]
+
+{ #category : #types }
+Parser >> typeFollowsCaret [
+	"Whether the token is ^ and a type's < follows it."
+	^ self typeFollowsAfter: 1
+]
+
+{ #category : #types }
+Parser >> typeSpans [
+	"{start. end} of each type written in the pattern, from its < to its > (byte offsets from 0, end exclusive)."
+	^ typeSpans ifNil: [#()]
 ]
 
 { #category : #accessing }
 Parser class >> parse: aString [
 	^ self new setSource: aString; parseMethod
+]
+
+{ #category : #types }
+Parser class >> parseClassType: aString [
+	"A class definition's type, a TypeNode; a CompileError when it is not one."
+	^ self new setSource: aString; parseClassType
+]
+
+{ #category : #types }
+Parser class >> parseTypedVariables: aString [
+	"An #instVars item's names with their types' texts; a CompileError when it is not one."
+	^ self new setSource: aString; parseTypedVariables
+]
+
+{ #category : #types }
+Parser class >> patternOf: aString [
+	"A Parser that read aString's message pattern, types included; it stands at the token after it. The pattern's end is its lastEnd."
+	| p |
+	p := self new setSource: aString.
+	p parsePattern.
+	^ p
 ]

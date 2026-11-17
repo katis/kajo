@@ -1,4 +1,4 @@
-"One Tonel file as TonelReader read it (module 8e): the class definition (name, superclass name, instance, class and class-side instance variable names, #type, comment; a #category, #package or #tag key is read and ignored: the class's place is its file's, tags as subdirectories) or an Extension's class name, and its methods, each {class side?. category. source}."
+"One Tonel file as TonelReader read it (module 8e): the class definition (name, superclass name, instance, class and class-side instance variable names, #type, comment, and Types 1's type parameters, superclass type and instance variables' types; a #category, #package or #tag key is read and ignored: the class's place is its file's, tags as subdirectories) or an Extension's class name, and its methods, each {class side?. category. source}."
 Class {
 	#name : #TonelDocument,
 	#superclass : #Object,
@@ -11,7 +11,10 @@ Class {
 		'type',
 		'comment',
 		'isExtension',
-		'methods'
+		'methods',
+		'typeParameters',
+		'superclassType',
+		'instVarTypes'
 	]
 }
 
@@ -23,6 +26,16 @@ TonelDocument >> classInstVarNames [
 { #category : #accessing }
 TonelDocument >> classInstVarNames: anArray [
 	classInstVarNames := anArray
+]
+
+{ #category : #accessing }
+TonelDocument >> classTypes [
+	"The ClassTypes the file writes, or nil when it writes none (Types 1)."
+	| t |
+	t := ClassTypes new.
+	t typeParameters: self typeParameters; superclassType: superclassType.
+	self instVarTypes do: [:a | t type: a value of: a key].
+	^ t isEmpty ifTrue: [nil] ifFalse: [t]
 ]
 
 { #category : #accessing }
@@ -53,6 +66,12 @@ TonelDocument >> instVarNames [
 { #category : #accessing }
 TonelDocument >> instVarNames: anArray [
 	instVarNames := anArray
+]
+
+{ #category : #accessing }
+TonelDocument >> instVarTypes [
+	"name -> the type's text, for each typed instance variable in order."
+	^ instVarTypes ifNil: [instVarTypes := OrderedCollection new]
 ]
 
 { #category : #accessing }
@@ -101,6 +120,16 @@ TonelDocument >> superclassName: aStringOrNil [
 ]
 
 { #category : #accessing }
+TonelDocument >> superclassType [
+	^ superclassType
+]
+
+{ #category : #accessing }
+TonelDocument >> superclassType: aStringOrNil [
+	superclassType := aStringOrNil
+]
+
+{ #category : #accessing }
 TonelDocument >> type [
 	^ type
 ]
@@ -108,6 +137,16 @@ TonelDocument >> type [
 { #category : #accessing }
 TonelDocument >> type: aStringOrNil [
 	type := aStringOrNil
+]
+
+{ #category : #accessing }
+TonelDocument >> typeParameters [
+	^ typeParameters ifNil: [#()]
+]
+
+{ #category : #accessing }
+TonelDocument >> typeParameters: anArray [
+	typeParameters := anArray
 ]
 
 { #category : #summary }
@@ -121,7 +160,9 @@ TonelDocument >> summary [
 	| rs out |
 	rs := String with: (Character value: 30).
 	out := name , rs , (superclassName ifNil: ['nil']) , rs , (self names: self instVarNames) , rs , (self names: self classVarNames) , rs
-		, (self names: self classInstVarNames) , rs , (type ifNil: ['']) , rs , comment , rs , (self isExtension ifTrue: ['extension'] ifFalse: ['class']).
+		, (self names: self classInstVarNames) , rs , (type ifNil: ['']) , rs , comment , rs , (self isExtension ifTrue: ['extension'] ifFalse: ['class'])
+		, rs , (self names: self typeParameters) , rs , (superclassType ifNil: ['']) , rs
+		, (self instVarTypes inject: '' into: [:a :e | a , e key , ' <' , e value , '>;']).
 	self methods do: [:m |
 		out := out , rs , ((m at: 1) ifTrue: ['class'] ifFalse: ['instance']) , rs , (m at: 2) , rs , (m at: 3)].
 	^ out

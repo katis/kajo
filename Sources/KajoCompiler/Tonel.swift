@@ -63,6 +63,15 @@ public struct TonelClass: Sendable {
     public let type: String?
     public let comment: String
     public var methods: [TonelMethod]
+    /// Types 1: `#typeParameters`, `#superclassType` and the types written
+    /// after instance variables' names in `#instVars` (name to the type's
+    /// text), as written. Kept as text: the VM never sees them.
+    public var typeParameters: [String] = []
+    public var superclassType: String? = nil
+    public var instanceVariableTypes: [String: String] = [:]
+
+    /// Whether the definition carries any type.
+    public var hasTypes: Bool { !typeParameters.isEmpty || superclassType != nil || !instanceVariableTypes.isEmpty }
 }
 
 /// A STON value of the subset Tonel uses.
@@ -264,6 +273,25 @@ struct TonelReader {
             }
             return out
         }
+        // Types 1: each #instVars item is names, each with an optional
+        // <type> after it (the method parser's type grammar).
+        var ivarTypes: [String: String] = [:]
+        func typedNames() throws(CompileError) -> [String] {
+            guard let v = entry("instVars") else { return [] }
+            guard case .array(let xs) = v else { throw fail("#instVars is an array of names") }
+            var out: [String] = []
+            for x in xs {
+                guard let t = x.text else { throw fail("#instVars is an array of names") }
+                let vars: [(name: String, type: String?)]
+                do { vars = try parseTypedVariables(Array(t.utf8)) } catch { throw fail("#instVars: \(error.message)") }
+                for (n, ty) in vars {
+                    guard isIdentifier(n) else { throw fail("bad name '\(n)' in #instVars") }
+                    out.append(n)
+                    if let ty { ivarTypes[n] = ty }
+                }
+            }
+            return out
+        }
         let isExtension = kind == "Extension"
         var superclass: String? = nil
         if !isExtension {
@@ -275,9 +303,31 @@ struct TonelReader {
             }
         }
         var cls = TonelClass(file: file, line: headLine, isExtension: isExtension, name: name, superclass: superclass,
-                             instanceVariables: try names("instVars"), classInstanceVariables: try names("classInstVars"),
+                             instanceVariables: try typedNames(), classInstanceVariables: try names("classInstVars"),
                              classVariables: isExtension ? [] : try names("classVars"),
                              type: entry("type")?.text, comment: comment, methods: [])
+        cls.instanceVariableTypes = ivarTypes
+        // Types 1: the class's type parameters and what it gives its
+        // superclass's (checked here as the reader in Smalltalk checks them).
+        if !isExtension {
+            if let v = entry("typeParameters") {
+                guard case .array(let xs) = v else { throw fail("#typeParameters is an array of names") }
+                for x in xs {
+                    guard let t = x.text, isTypeName(t) else { throw fail("#typeParameters: '\(x.text ?? "")' is not a type name") }
+                    if cls.typeParameters.contains(t) { throw fail("#typeParameters: \(t) twice") }
+                    cls.typeParameters.append(t)
+                }
+            }
+            if let v = entry("superclassType") {
+                guard case .string(let t) = v else { throw fail("#superclassType is a type in a string") }
+                let node: TypeNode
+                do { node = try parseClassType(Array(t.utf8)) } catch { throw fail("#superclassType: \(error.message)") }
+                guard case .name(let n, _) = node.kind, n == superclass else {
+                    throw fail("#superclassType names another class than #superclass")
+                }
+                cls.superclassType = t
+            }
+        }
         while true {
             _ = try space()
             if i >= b.count { break }
@@ -307,24 +357,20 @@ struct TonelReader {
             _ = try space()
             let patternStart = i
             let patternLine = line
-            // the pattern runs to the first [ outside a comment (the review
-            // fixes, part 2, item 3: a comment in a pattern, `at: i "in
-            // [1, size]" put: v`, keeps its brackets; a pattern holds no
-            // string)
-            while i < b.count && b[i] != 91 {
-                if b[i] == 34 {
-                    i += 1
-                    while i < b.count && b[i] != 34 {
-                        if b[i] == 10 { line += 1 }
-                        i += 1
-                    }
-                    if i < b.count { i += 1 }
-                    continue
-                }
-                if b[i] == 10 { line += 1 }
-                i += 1
+            // Types 1: the pattern is what the method parser reads as one,
+            // its types included (`Array[E]` and `[E, ^R]` hold brackets),
+            // and the body starts at the [ after it. A comment in a pattern
+            // keeps its brackets (the review fixes, part 2, item 3: `at: i
+            // "in [1, size]" put: v`); a pattern holds no string.
+            var parser = try Parser(b, file: file, line: line, at: i)
+            _ = try parser.parsePattern()
+            line = parser.token.line
+            switch parser.token.kind {
+            case .leftBracket: break
+            case .end: throw fail("a method without a body")
+            default: throw fail("expected [ after the method's pattern")
             }
-            guard i < b.count else { throw fail("a method without a body") }
+            i = parser.token.start
             let open = i
             let close = try matchingBracket(open)
             // Module 8e: the recorded source is the pattern without the
@@ -368,6 +414,44 @@ public func tonelTag(ofPath path: String) throws(CompileError) -> String? {
 /// `..`, no `/` or NUL, not hidden (a leading `.`).
 public func isTonelTag(_ name: String) -> Bool {
     !name.isEmpty && !name.hasPrefix(".") && !name.contains("/") && !name.contains("\0")
+}
+
+/// Types 1: whether `name` can be a type parameter's name: one identifier
+/// that starts with A to Z.
+func isTypeName(_ name: String) -> Bool {
+    guard let c = name.utf8.first, c >= 65, c <= 90, isIdentifier(name) else { return false }
+    return true
+}
+
+/// Types 1: a class definition's type (`#superclassType`), the whole text.
+func parseClassType(_ text: [UInt8]) throws(CompileError) -> TypeNode {
+    var p = try Parser(text, file: "")
+    return try p.parseClassType()
+}
+
+/// Types 1: an `#instVars` item: names, each with an optional `<type>`
+/// after it; the type as its text between the angle brackets.
+func parseTypedVariables(_ text: [UInt8]) throws(CompileError) -> [(name: String, type: String?)] {
+    var p = try Parser(text, file: "")
+    var out: [(String, String?)] = []
+    while true {
+        switch p.token.kind {
+        case .end: return out
+        case .identifier(let n):
+            try p.advance()
+            guard try p.typeFollows() else { out.append((n, nil)); continue }
+            try p.advance()
+            let start = p.token.start
+            let t = try p.parseType()
+            if p.token.kind == .semicolon { throw p.fail("alternatives are written in a method's pattern") }
+            if t.declaresVariable { throw p.fail("a method variable is declared in a method's pattern") }
+            let end = p.lastEnd
+            try p.expectTypeEnd()
+            out.append((n, String(decoding: text[start..<end], as: UTF8.self)))
+        default:
+            throw p.fail("expected an instance variable's name")
+        }
+    }
 }
 
 /// Read one Tonel file.

@@ -1,4 +1,4 @@
-"The image's classes as Tonel files (module 8e), in the canonical form kernel/ is written in: the class comment (quotes doubled), the class definition with the keys #name, #superclass, #instVars, #classVars, #classInstVars (each only when not empty) and #type (only when the format kind is not the one the superclass's gives), never #category, #package or #tag (tags as subdirectories: the package is the directory the file is written into and the tag, when the class has one, the subdirectory), a tab before each key and two before each name; then the methods, instance side before class side, grouped by category with the categories sorted, the selectors sorted within each, each one as `{ #category : ... }` on its line and `Class >> pattern [body]` where pattern and body are the recorded source split after the message pattern. A body that does not start on a line of its own is put on one, indented by a tab; anything else of the source is written as recorded. A method of another package than its class's is written in that package's <Class>.extension.st, `Extension { #name : ... }` and the methods (module 9b). A method's metadata is its category only: an agent's author mark is a pragma in the method's source, <author: #'agent:<name>'> (the development answers; source:author: puts it there)."
+"The image's classes as Tonel files (module 8e), in the canonical form kernel/ is written in: the class comment (quotes doubled), the class definition with the keys #name, #superclass, #typeParameters, #superclassType (Types 1: each only when the class has it; a type after an instance variable's name in its #instVars string, one blank between), #instVars, #classVars, #classInstVars (each only when not empty) and #type (only when the format kind is not the one the superclass's gives), never #category, #package or #tag (tags as subdirectories: the package is the directory the file is written into and the tag, when the class has one, the subdirectory), a tab before each key and two before each name; then the methods, instance side before class side, grouped by category with the categories sorted, the selectors sorted within each, each one as `{ #category : ... }` on its line and `Class >> pattern [body]` where pattern and body are the recorded source split after the message pattern. A body that does not start on a line of its own is put on one, indented by a tab; anything else of the source is written as recorded. A method of another package than its class's is written in that package's <Class>.extension.st, `Extension { #name : ... }` and the methods (module 9b). A method's metadata is its category only: an agent's author mark is a pragma in the method's source, <author: #'agent:<name>'> (the development answers; source:author: puts it there)."
 Class {
 	#name : #TonelWriter,
 	#superclass : #Object
@@ -68,9 +68,10 @@ TonelWriter class >> hasMethodsOf: aClass package: aName [
 
 { #category : #writing }
 TonelWriter class >> headerOf: aClass [
-	| d lf entries out comment type |
+	| d lf entries out comment type types |
 	lf := String lf.
 	d := Smalltalk definitionOf: aClass.
+	types := Smalltalk typesOf: aClass.
 	d isNil ifTrue: [^ self error: aClass name , ' has no definition in the image'].
 	out := ''.
 	comment := d comment ifNil: [''].
@@ -78,7 +79,12 @@ TonelWriter class >> headerOf: aClass [
 	entries := OrderedCollection new.
 	entries add: '#name : ' , (self ston: aClass name).
 	entries add: '#superclass : ' , (aClass superclass ifNil: ['nil'] ifNotNil: [:s | self ston: s name]).
-	d instVarNames isEmpty ifFalse: [entries add: (self list: '#instVars' of: d instVarNames)].
+	types ifNotNil: [:t |
+		t typeParameters isEmpty ifFalse: [entries add: (self list: '#typeParameters' of: t typeParameters)].
+		t superclassType ifNotNil: [:s | entries add: '#superclassType : ''' , (s copyReplaceAll: '''' with: '''''') , '''']].
+	d instVarNames isEmpty ifFalse: [
+		entries add: (self list: '#instVars' of: (d instVarNames collect: [:n |
+			(types ifNotNil: [:t | t typeOf: n]) ifNil: [n asString] ifNotNil: [:ty | n , ' <' , ty , '>']]))].
 	aClass classVarNames isEmpty ifFalse: [entries add: (self list: '#classVars' of: aClass classVarNames)].
 	d classInstVarNames isEmpty ifFalse: [entries add: (self list: '#classInstVars' of: d classInstVarNames)].
 	type := self typeOf: aClass.
@@ -185,14 +191,8 @@ TonelWriter class >> source: aString author: aClient [
 	lf := String lf.
 	mark := '<author: ' , (self ston: aClient asString) , '>'.
 	cuts := OrderedCollection new.
-	[s := Scanner on: aString.
-	k := s next.
-	k == #identifier
-		ifTrue: [k := s next]
-		ifFalse: [
-			(k == #binary or: [k == #bar])
-				ifTrue: [s next. k := s next]
-				ifFalse: [[k == #keyword] whileTrue: [s next. k := s next]]].
+	[s := (Parser patternOf: aString) scanner.
+	k := s kind.
 	k := self pragmasFrom: s token: k into: cuts.
 	insertAt := s start.
 	k == #bar ifTrue: [

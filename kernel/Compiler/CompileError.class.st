@@ -21,3 +21,9 @@ CompileError >> line: anInteger [
 CompileError >> messageText [
 	^ 'line ' , line printString , ': ' , super messageText
 ]
+
+{ #category : #accessing }
+CompileError >> reason [
+	"The message without its line (Types 1: a Tonel reader puts the key it read before it)."
+	^ super messageText
+]

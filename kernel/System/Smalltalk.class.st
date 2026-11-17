@@ -10,7 +10,8 @@ Class {
 		'undeclared',
 		'packages',
 		'resumes',
-		'registryLock'
+		'registryLock',
+		'classTypes'
 	]
 }
 
@@ -264,6 +265,12 @@ Smalltalk class >> tonelTagsOf: anArray [
 	^ anArray collect: [:p | [(TonelReader tagOfPath: p) ifNil: ['']] on: Error do: [:e | 'refused: ' , e messageText]]
 ]
 
+{ #category : #'file in' }
+Smalltalk class >> typeDescriptionsOf: anArray [
+	"For each method source, its types as the Parser keeps them (MethodNode>>typesDescription), or 'refused ' and the CompileError's text (Types 1: a test compares them with the bootstrap compiler's)."
+	^ anArray collect: [:s | [(Parser parse: s) typesDescription] on: CompileError do: [:e | 'refused ' , e messageText]]
+]
+
 { #category : #'file out' }
 Smalltalk class >> readTonelFile: aPath [
 	"The text of the file aPath names under the directory the VM was opened with."
@@ -507,6 +514,7 @@ Smalltalk class >> forgetClass: aClass [
 		sources isNil ifFalse: [sources removeKey: aClass ifAbsent: [nil]. sources removeKey: aClass class ifAbsent: [nil]].
 		organizations isNil ifFalse: [organizations removeKey: aClass ifAbsent: [nil]. organizations removeKey: aClass class ifAbsent: [nil]].
 		packages isNil ifFalse: [packages removeKey: aClass ifAbsent: [nil]. packages removeKey: aClass class ifAbsent: [nil]].
+		classTypes isNil ifFalse: [classTypes removeKey: aClass ifAbsent: [nil]].
 		undeclared isNil ifFalse: [undeclared removeKey: aClass ifAbsent: [nil]]].
 	classNames := nil
 ]
@@ -557,6 +565,31 @@ Smalltalk class >> noteSource: aString of: aCompiledMethod [
 	self registry: [
 		sources isNil ifTrue: [sources := IdentityDictionary new].
 		(sources at: aCompiledMethod methodClass ifAbsentPut: [IdentityDictionary new]) at: aCompiledMethod put: aString]
+]
+
+{ #category : #sources }
+Smalltalk class >> noteTypes: aClassTypesOrNil of: aClass [
+	"Keep aClass's types (Types 1), or forget them for nil or none."
+	self registry: [
+		(aClassTypesOrNil isNil or: [aClassTypesOrNil isEmpty])
+			ifTrue: [classTypes isNil ifFalse: [classTypes removeKey: aClass ifAbsent: [nil]]]
+			ifFalse: [
+				classTypes isNil ifTrue: [classTypes := IdentityDictionary new].
+				classTypes at: aClass put: aClassTypesOrNil]]
+]
+
+{ #category : #sources }
+Smalltalk class >> recordClassTypes: anArray [
+	"The image build hands the class-level types over (Types 1), for the classes that have any: the name, the type parameters (separated by blanks), the superclass type (empty for none), then each typed instance variable's name and its type's text, separated by the record separator (30). A release image's build does not send this."
+	| rs |
+	rs := Character value: 30.
+	anArray do: [:s | | fields types |
+		fields := s splitOn: (String with: rs).
+		types := ClassTypes new.
+		types typeParameters: ((fields at: 2) substrings collect: [:n | n asString]) asArray.
+		(fields at: 3) isEmpty ifFalse: [types superclassType: (fields at: 3)].
+		4 to: fields size - 1 by: 2 do: [:i | types type: (fields at: i + 1) of: (fields at: i)].
+		self noteTypes: types of: (self at: (fields at: 1) asSymbol)]
 ]
 
 { #category : #sources }
@@ -629,6 +662,12 @@ Smalltalk class >> replaceSources: anAssociationList of: aBehavior [
 Smalltalk class >> sourceOf: aCompiledMethod [
 	^ self registry: [
 		sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d at: aCompiledMethod ifAbsent: [nil]]]]
+]
+
+{ #category : #sources }
+Smalltalk class >> typesOf: aClass [
+	"aClass's ClassTypes, or nil when its definition writes no type (Types 1)."
+	^ self registry: [classTypes isNil ifFalse: [classTypes at: aClass ifAbsent: [nil]]]
 ]
 
 { #category : #system }

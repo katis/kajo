@@ -1,4 +1,4 @@
-"Loads one Tonel file into the running image (module 8e; Smalltalk readTonel:): defines the class or redefines the existing one through ClassBuilder, with the file's methods as the class's whole method set on both sides, made in the same primitive call that changes the shape, so a file that renames an instance variable and the methods that use it loads in one step. An Extension's methods are compiled into their class one by one."
+"Loads one Tonel file into the running image (module 8e; Smalltalk readTonel:): defines the class or redefines the existing one through ClassBuilder, with the file's methods as the class's whole method set on both sides, made in the same primitive call that changes the shape, so a file that renames an instance variable and the methods that use it loads in one step; the file's class-level types become the class's (Types 1). An Extension's methods are compiled into their class one by one."
 Class {
 	#name : #TonelLoader,
 	#superclass : #Object
@@ -27,6 +27,8 @@ TonelLoader class >> load: aDocument package: aPackageOrNil tag: aTagOrNil [
 		(methods at: ((m at: 1) ifTrue: [cls class] ifFalse: [cls])) add: (Array with: (m at: 3) with: ((m at: 2) isEmpty ifTrue: [nil] ifFalse: [(m at: 2) asSymbol]))].
 	ClassBuilder redefine: cls instanceVariableNames: aDocument instVarNames classVariableNames: aDocument classVarNames
 		classInstanceVariableNames: aDocument classInstVarNames methods: methods.
+	"Types 1: the file's types are the class's, none when it writes none."
+	Smalltalk noteTypes: aDocument classTypes of: cls.
 	^ cls
 ]
 

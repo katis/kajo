@@ -307,3 +307,77 @@ f . ^ 1
 f ^ ^ 1
 
 f ^ [^ 1]
+
+at: index <Integer> put: value <E> ^<E>
+	^ value
+
+size ^<Integer>
+	^ a
+
++ aNumber <Integer; Number> ^<Integer; Number>
+	^ aNumber
+
+collect: aBlock <[E, ^:X]> ^<Array[X]>
+	^ Array with: (aBlock value: a)
+
+inject: x <:A> into: aBlock <[A, E, ^A]> ^<A>
+	^ aBlock value: x value: a
+
+on: c <X class | ExceptionSet> do: h <[X, ^Dynamic]> ^<Dynamic>
+	^ c
+
+f: x <Integer> <primitive: 60>
+	^ x
+
+f: x <Integer><primitive: 60>
+	^ x
+
+f ^<Integer>| t | t := 1. ^ t
+
+f: x <Array[E]>^<E> ^ x
+
+f: x <(Integer | Nil) class> ^ x
+
+f: x <Integer "a count"> ^ x
+
+f: x <unwind> ^ x
+
+f: x <Integer>> ^ x
+
+f <Primitive: 60> ^ 1
+
+f | t | <Integer> ^ 1
+
+f ^<Integer> ^<Integer> ^ 1
+
+f ^<Integer> <Integer> ^ 1
+
+f: x ^<Integer> g: y ^ x
+
+f ^<Integer; Float> ^ 1
+
+f: x <A; B> ^<A; B; C> ^ x
+
+f: x <Array[integer]> ^ x
+
+f: x <[E]> ^ x
+
+f: x <:x> ^ x
+
+f: x <Integer |> ^ x
+
+f: x
+	<Integer
+	^ x
+
+f: x <A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]> ^ x
+
+f ^<[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^A]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]> ^ 1
+
+f: x <(((((((((((((((((((((((((((((((A)))))))))))))))))))))))))))))))> ^ x
+
+f: x <A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A[A]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]> ^ x
+
+f ^<[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^[^A]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]]> ^ 1
+
+f: x <((((((((((((((((((((((((((((((((A))))))))))))))))))))))))))))))))> ^ x

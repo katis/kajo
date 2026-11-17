@@ -114,6 +114,14 @@ public struct KernelBuild: Sendable {
             if let problem = image.runToCompletion(className: "Smalltalk", selector: "recordDefinitions:", strings: plan.definitionRecords) {
                 throw CompileError("Smalltalk recordDefinitions: \(problem)")
             }
+            // Types 1: the class-level types, as text, into a table of their
+            // own (`Smalltalk recordClassTypes:`); a release image gets none
+            // (docs/modules/types-1.md, question 3).
+            if !options.release && !plan.typeRecords.isEmpty {
+                if let problem = image.runToCompletion(className: "Smalltalk", selector: "recordClassTypes:", strings: plan.typeRecords) {
+                    throw CompileError("Smalltalk recordClassTypes: \(problem)")
+                }
+            }
             if let problem = image.runToCompletion(className: "Smalltalk", selector: "initializeKernel") {
                 throw CompileError("Smalltalk initializeKernel: \(problem)")
             }
@@ -154,6 +162,11 @@ struct Plan {
     /// breaks; module 9b added the package; the tag, empty for none,
     /// took the category's place with tags as subdirectories).
     var definitionRecords: [String] = []
+    /// Types 1: per class that has any, "name RS typeParameters RS
+    /// superclassType RS (ivar RS type)*" (RS the record separator, 30;
+    /// type parameters separated by blanks; an empty superclass type for
+    /// none).
+    var typeRecords: [String] = []
     var warnings: [String] = []
     /// Instance variable names (inherited first) and class-side ones.
     var instanceVariables: [String: [String]] = [:]
@@ -242,6 +255,11 @@ struct Plan {
                                       c.classInstanceVariables.joined(separator: " "), tags[c.name] ?? "", kind,
                                       KernelBuild.package(ofFile: c.file, tag: tags[c.name]), c.comment]
                 .joined(separator: "\n"))
+            if c.hasTypes {
+                var fields = [c.name, c.typeParameters.joined(separator: " "), c.superclassType ?? ""]
+                for v in c.instanceVariables { if let ty = c.instanceVariableTypes[v] { fields += [v, ty] } }
+                typeRecords.append(fields.joined(separator: "\u{1E}"))
+            }
             definitions.append(KernelClassDefinition(name: c.name, superclass: c.superclass, instSize: all.count, kind: kind,
                                                      metaSlots: allMeta.count, classVariables: c.classVariables, file: c.file,
                                                      line: c.line))

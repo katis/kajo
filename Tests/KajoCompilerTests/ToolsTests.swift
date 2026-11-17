@@ -278,6 +278,12 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         #expect(t.until("compiledThroughTheBrowser"))
         let file = project.appendingPathComponent("ToolsProbe.extension.st").path
         #expect((try? String(contentsOfFile: file, encoding: .utf8))?.contains("probeAnswer") == true)
+        // Types 1: a method with types in its pattern, accepted in the
+        // browser's source pane, is compiled, kept with its types, shown
+        // with them, and its file holds the typed pattern.
+        #expect(try t.probe("compileTypedThroughTheBrowser") == .bool(true))
+        #expect(t.until("compiledTypedThroughTheBrowser"))
+        #expect((try? String(contentsOfFile: file, encoding: .utf8))?.contains("ToolsProbe >> probeTyped: x <Integer> ^<Integer> [") == true)
         #expect(((try t.probe("latencyCount"))?.int ?? 0) >= 4)
         #expect(t.shell.count("call.setTree") >= 1)
         #expect(t.shell.count("call.setStyles") >= 1)

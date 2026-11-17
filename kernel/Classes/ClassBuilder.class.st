@@ -122,6 +122,8 @@ ClassBuilder class >> redefine: aClass instanceVariableNames: ivars classVariabl
 		b isMeta
 			ifTrue: [b == aClass class ifTrue: [d classInstVarNames: ownC]]
 			ifFalse: [b == aClass ifTrue: [d instVarNames: own]]].
+	"Types 1: an instance variable that went takes its type with it."
+	(Smalltalk typesOf: aClass) ifNotNil: [:t | t keepOnly: own. t isEmpty ifTrue: [Smalltalk noteTypes: nil of: aClass]].
 	sources keysAndValuesDo: [:b :srcs | Smalltalk replaceSources: (srcs collect: [:x | x first -> (x at: 2)]) of: b].
 	overrides keysAndValuesDo: [:b :list |
 		Smalltalk forgetCategoriesOf: b.

@@ -15,6 +15,9 @@ import Testing
 enum NestedConstruct: String, CaseIterable, CustomTestStringConvertible {
     case parentheses, blocks, cascades, keywordArguments, assignments, literalArrays, braceArrays
     case binaryChain, unaryChain, keywordChain
+    /// Types 1: a type's generic arguments, block types and parentheses,
+    /// each level one of the parser's (`Array[Array[...]]` d deep).
+    case typeArguments, blockTypes, typeParentheses
 
     var testDescription: String { rawValue }
 
@@ -32,6 +35,9 @@ enum NestedConstruct: String, CaseIterable, CustomTestStringConvertible {
         case .binaryChain: return "f: x ^ x" + rep(" + 1", d)
         case .unaryChain: return "f: x ^ x" + rep(" yourself", d)
         case .keywordChain: return "f: x ^ " + rep("(", d) + "x" + rep(" k: 1)", d)
+        case .typeArguments: return "f: x <" + rep("A[", d - 1) + "A" + rep("]", d - 1) + "> ^ x"
+        case .blockTypes: return "f ^<" + rep("[^", d - 1) + "A" + rep("]", d - 1) + "> ^ 1"
+        case .typeParentheses: return "f: x <" + rep("(", d - 1) + "A" + rep(")", d - 1) + "> ^ x"
         }
     }
 

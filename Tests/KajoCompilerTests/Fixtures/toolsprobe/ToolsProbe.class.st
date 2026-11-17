@@ -41,6 +41,28 @@ ToolsProbe class >> compileThroughTheBrowser [
 ]
 
 { #category : #probing }
+ToolsProbe class >> compileTypedThroughTheBrowser [
+	"Types 1: accept a method with types in its pattern in the first browser's source pane."
+	| m |
+	m := self browser model.
+	m selectClass: 'ToolsProbe'.
+	m newMethodTemplate.
+	m accept: 'probeTyped: x <Integer> ^<Integer>
+	^ x + 1'.
+	^ true
+]
+
+{ #category : #probing }
+ToolsProbe class >> compiledTypedThroughTheBrowser [
+	"Types 1: the typed method runs, its recorded source keeps its types, and the browser shows them."
+	^ (ToolsProbe includesSelector: #probeTyped:)
+		and: [(ToolsProbe new probeTyped: 41) = 42
+		and: [((Smalltalk sourceOf: (ToolsProbe compiledMethodAt: #probeTyped:)) beginsWith: 'probeTyped: x <Integer> ^<Integer>')
+		and: [(self browser model status beginsWith: 'compiled')
+		and: [self browser model source includesSubstring: 'probeTyped: x <Integer> ^<Integer>']]]]
+]
+
+{ #category : #probing }
 ToolsProbe class >> debuggerReady [
 	"A debugger is open on a doesNotUnderstand: stop with its frames."
 	| d |

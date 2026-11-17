@@ -428,6 +428,53 @@ struct PragmaNode {
     let line: Int
 }
 
+/// Types 1 (docs/modules/types-1.md): a Strongtalk-style type as written,
+/// kept in the tree with its source range (byte offsets, end exclusive) and
+/// never read by code generation. A parenthesized type is its inner type.
+struct TypeNode: Equatable {
+    indirect enum Kind: Equatable {
+        /// `Integer`, `Array[E]`, `Self`, `Dynamic`, `Nil`.
+        case name(String, [TypeNode])
+        /// `:X`, a method variable declared where it first appears.
+        case variable(String)
+        /// `[A, B, ^R]`.
+        case block([TypeNode], TypeNode)
+        /// `A | B`.
+        case union([TypeNode])
+        /// `X class`.
+        case meta(TypeNode)
+        /// `A; B`: one per signature of an overloaded method.
+        case alternatives([TypeNode])
+    }
+    let kind: Kind
+    let start: Int
+    let end: Int
+
+    /// Whether a method variable is declared in it (`:X`).
+    var declaresVariable: Bool {
+        switch kind {
+        case .variable: return true
+        case .name(_, let ts), .union(let ts), .alternatives(let ts): return ts.contains { $0.declaresVariable }
+        case .block(let ts, let r): return r.declaresVariable || ts.contains { $0.declaresVariable }
+        case .meta(let t): return t.declaresVariable
+        }
+    }
+
+    /// The form both compilers' tests compare: the kind, the range and
+    /// the parts (`Parser>>describeType:` in the kernel writes the same).
+    var description: String {
+        func all(_ ts: [TypeNode]) -> String { ts.map { " " + $0.description }.joined() }
+        switch kind {
+        case .name(let n, let args): return "(name \(n) \(start) \(end)\(all(args)))"
+        case .variable(let n): return "(var \(n) \(start) \(end))"
+        case .block(let args, let r): return "(block \(start) \(end)\(all(args)) ^\(r.description))"
+        case .union(let ms): return "(union \(start) \(end)\(all(ms)))"
+        case .meta(let t): return "(class \(start) \(end) \(t.description))"
+        case .alternatives(let ts): return "(alt \(start) \(end)\(all(ts)))"
+        }
+    }
+}
+
 final class MethodNode {
     let selector: String
     let arguments: [(name: String, line: Int)]
@@ -435,6 +482,10 @@ final class MethodNode {
     let pragmas: [PragmaNode]
     let statements: [Statement]
     let line: Int
+    /// Types 1: each argument's type (nil when none is written) and the
+    /// result type. Code generation never reads them.
+    var argumentTypes: [TypeNode?] = []
+    var resultType: TypeNode? = nil
     var scope: Scope!
     init(selector: String, arguments: [(name: String, line: Int)], temporaries: [(name: String, line: Int)],
          pragmas: [PragmaNode], statements: [Statement], line: Int) {
@@ -444,6 +495,12 @@ final class MethodNode {
         self.pragmas = pragmas
         self.statements = statements
         self.line = line
+    }
+
+    /// The types as both compilers' tests compare them: one line per
+    /// argument (`-` when untyped), then the result.
+    var typesDescription: String {
+        (argumentTypes.map { $0?.description ?? "-" } + [resultType?.description ?? "-"]).joined(separator: "\n")
     }
 }
 
@@ -466,9 +523,14 @@ struct Parser {
     static let maxDepth = 32
     /// Module 9b: the end of the token most recently consumed.
     var lastEnd = 0
+    /// Types 1: each type written in the pattern, from its `<` to its `>`
+    /// (byte offsets, end exclusive), in order.
+    var typeSpans: [(start: Int, end: Int)] = []
 
-    init(_ text: [UInt8], file: String, line: Int = 1) throws(CompileError) {
+    init(_ text: [UInt8], file: String, line: Int = 1, at position: Int = 0) throws(CompileError) {
         scanner = Scanner(text, file: file, line: line)
+        scanner.pos = position
+        lastEnd = position
         token = try scanner.next()
     }
 
@@ -489,44 +551,211 @@ struct Parser {
         if depth > Parser.maxDepth { throw fail("nested deeper than \(Parser.maxDepth)") }
     }
 
+    struct Pattern {
+        var selector = ""
+        var arguments: [(name: String, line: Int)] = []
+        var argumentTypes: [TypeNode?] = []
+        var resultType: TypeNode? = nil
+    }
+
     // method := pattern pragmas? temporaries? pragmas? statements
     mutating func parseMethod() throws(CompileError) -> MethodNode {
         let line = token.line
-        var selector = ""
-        var args: [(String, Int)] = []
-        switch token.kind {
-        case .identifier(let name):
-            selector = name
-            try advance()
-        case .binary(let op):
-            selector = op
-            try advance()
-            guard case .identifier(let a) = token.kind else { throw fail("expected an argument name") }
-            args.append((a, token.line))
-            try advance()
-        case .bar:
-            selector = "|"
-            try advance()
-            guard case .identifier(let a) = token.kind else { throw fail("expected an argument name") }
-            args.append((a, token.line))
-            try advance()
-        case .keyword:
-            while case .keyword(let k) = token.kind {
-                selector += k
-                try advance()
-                guard case .identifier(let a) = token.kind else { throw fail("expected an argument name") }
-                args.append((a, token.line))
-                try advance()
-            }
-        default:
-            throw fail("expected a message pattern")
-        }
+        let p = try parsePattern()
         var pragmas = try parsePragmas()
         let temps = try parseTemporaries()
         pragmas += try parsePragmas()
         let statements = try parseStatements(inBlock: false)
         guard token.kind == .end else { throw fail("unexpected text after the method's statements") }
-        return MethodNode(selector: selector, arguments: args, temporaries: temps, pragmas: pragmas, statements: statements, line: line)
+        let m = MethodNode(selector: p.selector, arguments: p.arguments, temporaries: temps, pragmas: pragmas, statements: statements, line: line)
+        m.argumentTypes = p.argumentTypes
+        m.resultType = p.resultType
+        return m
+    }
+
+    /// The message pattern with its types (Types 1): an argument's type
+    /// after its name, the result type after the whole pattern.
+    mutating func parsePattern() throws(CompileError) -> Pattern {
+        var p = Pattern()
+        func argument(_ parser: inout Parser) throws(CompileError) {
+            guard case .identifier(let a) = parser.token.kind else { throw parser.fail("expected an argument name") }
+            p.arguments.append((a, parser.token.line))
+            try parser.advance()
+            p.argumentTypes.append(try parser.parseArgumentType())
+        }
+        switch token.kind {
+        case .identifier(let name):
+            p.selector = name
+            try advance()
+        case .binary(let op):
+            p.selector = op
+            try advance()
+            try argument(&self)
+        case .bar:
+            p.selector = "|"
+            try advance()
+            try argument(&self)
+        case .keyword:
+            while case .keyword(let k) = token.kind {
+                p.selector += k
+                try advance()
+                try argument(&self)
+            }
+        default:
+            throw fail("expected a message pattern")
+        }
+        if token.kind == .caret, try typeFollows(afterCaret: true) {
+            try advance()
+            p.resultType = try parseTypeAnnotation()
+            if case .keyword = token.kind { throw fail("the result type follows the whole pattern") }
+            if try typeFollows() { throw fail("a type after the result") }
+            if token.kind == .caret, try typeFollows(afterCaret: true) { throw fail("two result types") }
+        }
+        // Overloads: every place with alternatives has the same number.
+        let counts = (p.argumentTypes + [p.resultType]).compactMap { t -> Int? in
+            if case .alternatives(let ts)? = t?.kind { return ts.count }
+            return nil
+        }
+        if let n = counts.first {
+            if p.arguments.isEmpty { throw fail("a unary method has no overloads") }
+            if counts.contains(where: { $0 != n }) { throw fail("overloads give every place the same number of alternatives") }
+        }
+        return p
+    }
+
+    /// Whether the token is a `<` that starts a type: followed by a
+    /// capital, `[`, `(` or `:` (with `afterCaret`, the token is `^` and
+    /// the next two are looked at). The scanner is left where it was.
+    mutating func typeFollows(afterCaret: Bool = false) throws(CompileError) -> Bool {
+        let save = (scanner, token, lastEnd)
+        defer { (scanner, token, lastEnd) = save }
+        if afterCaret { try advance() }
+        guard case .binary("<") = token.kind else { return false }
+        try advance()
+        switch token.kind {
+        case .identifier(let n), .keyword(let n): return n.utf8.first.map { $0 >= 65 && $0 <= 90 } ?? false
+        case .leftBracket, .leftParen, .colon: return true
+        default: return false
+        }
+    }
+
+    /// An argument's `<type>` when one follows, else nil.
+    mutating func parseArgumentType() throws(CompileError) -> TypeNode? {
+        guard try typeFollows() else { return nil }
+        return try parseTypeAnnotation()
+    }
+
+    /// `<` alternatives `>`, at the `<`.
+    mutating func parseTypeAnnotation() throws(CompileError) -> TypeNode {
+        let spanStart = token.start
+        try advance()
+        let start = token.start
+        let first = try parseType()
+        var t = first
+        if token.kind == .semicolon {
+            var all = [first]
+            while token.kind == .semicolon {
+                try advance()
+                all.append(try parseType())
+            }
+            t = TypeNode(kind: .alternatives(all), start: start, end: lastEnd)
+        }
+        try expectTypeEnd()
+        typeSpans.append((spanStart, lastEnd))
+        return t
+    }
+
+    /// The `>` that ends a type is one character (Types 1, starting
+    /// position 2): a binary run that starts with it is split and the rest
+    /// scanned again, so `^<A>| t |` and `<A><B>` read as with a blank.
+    mutating func expectTypeEnd() throws(CompileError) {
+        guard case .binary(let b) = token.kind, b.utf8.first == 62 else { throw fail("expected > to end the type") }
+        if b == ">" { try advance(); return }
+        lastEnd = token.start + 1
+        scanner.pos = token.start + 1
+        token = try scanner.next()
+    }
+
+    /// type := member { "|" member }
+    mutating func parseType() throws(CompileError) -> TypeNode {
+        try enter()
+        defer { depth -= 1 }
+        let start = token.start
+        let first = try parseTypeMember()
+        guard token.kind == .bar else { return first }
+        var members = [first]
+        while token.kind == .bar {
+            try advance()
+            members.append(try parseTypeMember())
+        }
+        return TypeNode(kind: .union(members), start: start, end: lastEnd)
+    }
+
+    /// member := primary [ "class" ]
+    mutating func parseTypeMember() throws(CompileError) -> TypeNode {
+        let start = token.start
+        let p = try parseTypePrimary()
+        guard case .identifier("class") = token.kind else { return p }
+        try advance()
+        return TypeNode(kind: .meta(p), start: start, end: lastEnd)
+    }
+
+    mutating func parseTypePrimary() throws(CompileError) -> TypeNode {
+        let start = token.start
+        switch token.kind {
+        case .identifier(let n):
+            guard let c = n.utf8.first, c >= 65, c <= 90 else { throw fail("a type name starts with a capital") }
+            try advance()
+            guard token.kind == .leftBracket else { return TypeNode(kind: .name(n, []), start: start, end: lastEnd) }
+            try advance()
+            var args = [try parseType()]
+            while case .binary(",") = token.kind {
+                try advance()
+                args.append(try parseType())
+            }
+            guard token.kind == .rightBracket else { throw fail("expected ] to end the type arguments") }
+            try advance()
+            return TypeNode(kind: .name(n, args), start: start, end: lastEnd)
+        case .colon:
+            try advance()
+            guard case .identifier(let n) = token.kind, let c = n.utf8.first, c >= 65, c <= 90 else {
+                throw fail("expected a type variable's name after :")
+            }
+            try advance()
+            return TypeNode(kind: .variable(n), start: start, end: lastEnd)
+        case .leftBracket:
+            try advance()
+            var args: [TypeNode] = []
+            while token.kind != .caret {
+                args.append(try parseType())
+                guard case .binary(",") = token.kind else { throw fail("a block type ends with ^ and its result type") }
+                try advance()
+            }
+            try advance()
+            let result = try parseType()
+            guard token.kind == .rightBracket else { throw fail("expected ] to end the block type") }
+            try advance()
+            return TypeNode(kind: .block(args, result), start: start, end: lastEnd)
+        case .leftParen:
+            try advance()
+            let t = try parseType()
+            guard token.kind == .rightParen else { throw fail("expected ) in the type") }
+            try advance()
+            return t
+        default:
+            throw fail("expected a type")
+        }
+    }
+
+    /// A class definition's type (Types 1: `#superclassType`, an instance
+    /// variable's): the whole text one type, no method variable, no
+    /// alternatives.
+    mutating func parseClassType() throws(CompileError) -> TypeNode {
+        let t = try parseType()
+        if token.kind == .semicolon { throw fail("alternatives are written in a method's pattern") }
+        guard token.kind == .end else { throw fail("unexpected text after the type") }
+        if t.declaresVariable { throw fail("a method variable is declared in a method's pattern") }
+        return t
     }
 
     /// `<keyword: literal ...>` or `<unary>`; any number.
@@ -534,6 +763,9 @@ struct Parser {
         var out: [PragmaNode] = []
         while case .binary("<") = token.kind {
             let line = token.line
+            // Types 1: a capital, [, ( or : after the < is a type's start,
+            // and a type is written only in the pattern.
+            if try typeFollows() { throw fail("a pragma name starts with a lowercase letter") }
             try advance()
             var selector = ""
             var args: [Literal] = []

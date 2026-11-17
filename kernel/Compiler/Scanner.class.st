@@ -138,6 +138,13 @@ Scanner >> position [
 ]
 
 { #category : #accessing }
+Scanner >> position: aPosition line: aLine [
+	"Scan from the byte at aPosition (from 1), counting lines from aLine (Types 1: the Tonel reader's pattern)."
+	position := aPosition.
+	line := aLine
+]
+
+{ #category : #accessing }
 Scanner >> quoted [
 	"After the opening quote: the String up to the closing one ('' is a quote)."
 	| s out startLine b |
@@ -155,6 +162,13 @@ Scanner >> quoted [
 			ifFalse: [
 				b = 10 ifTrue: [line := line + 1].
 				position := position + 1]]
+]
+
+{ #category : #accessing }
+Scanner >> rescanFrom: aPosition [
+	"The token that starts at aPosition, on the current line (Types 1: the rest of a binary run after a type's >)."
+	position := aPosition.
+	^ self next
 ]
 
 { #category : #accessing }
@@ -313,16 +327,9 @@ Scanner class >> on: aString [
 
 { #category : #accessing }
 Scanner class >> patternEndIn: aString [
-	"The byte offset of the last byte of a method source's message pattern (module 8e: the Tonel writer puts the body's bracket after it)."
-	| s k end |
-	s := self on: aString.
-	k := s next.
-	k == #identifier ifTrue: [^ s stop - 1].
-	(k == #binary or: [k == #bar]) ifTrue: [s next. ^ s stop - 1].
-	end := 0.
-	[k == #keyword] whileTrue: [
-		s next.
-		end := s stop - 1.
-		k := s next].
-	^ end
+	"The byte offset of the last byte of a method source's message pattern, its types included (module 8e: the Tonel writer puts the body's bracket after it; Types 1: the Parser reads the pattern). A pattern that does not read ends where the reading stopped."
+	| p |
+	p := Parser new setSource: aString.
+	[p parsePattern] on: CompileError do: [:e | ^ p lastEnd].
+	^ p lastEnd
 ]
