@@ -252,3 +252,64 @@ have `push_temp send` at 2803 sites (4.97 percent), `push_lit send` 2201
 829, `push_int send` 530, `push_ivar send` 215 (0.38); the development
 image (kernel and `tools/`, 73 268) 3506, 2949, 1999, 1010, 1151, 646 and
 338.
+
+## Part 2: the rule (committed before any cheating build)
+
+A copy of `~/kajo-scratch/fused-sends/part2/rule.txt`, committed on its
+own so that this commit's time precedes every cheating measurement.
+
+```text
+The rule that decides build or stop (fused sends, part 2). Written
+2026-11-17 after part 1's counts (c434e23) and before any cheating build
+is made or measured. The brief's recommended rule, open question 1's
+recommended answer, made exact.
+
+Candidates. The four push-then-send pairs at 0.5 percent of dispatches or
+more in at least one workload of part 1: `push_temp send`, `push_self
+send`, `push_lit send`, `push_ivar send`. (`push_closure send`, 0.65
+percent of the kernel tests, is out: its push is an out-of-line
+allocation, not a push the loop does inline. Every other push before a
+send is under 0.4 percent everywhere.)
+
+Builds. Two cheating builds from the rule's commit, never committed, each
+fusing all four candidates through the existing peephole (four opcodes
+appended after 66, each the push's first byte, the send intact after it):
+ (a) shared send path: the fused case does the push and continues into the
+     one inline send that the plain `send` case also uses; the send's
+     inline body exists once in `interpret`;
+ (b) second inline copy: each fused case does the push and has its own
+     inline send.
+The verifier, stepping and the source map are not touched beyond what the
+peephole and the fused-opcode table already give; the build counts only
+if every checksum is equal.
+
+Measurement. Each cheating build against the rule commit's own build
+(docs only since 7934a55, so the code is 7934a55's), both `-c release
+-Xswiftc -enable-testing` with `-align-all-nofallthru-blocks=5
+-align-loops=32` (scripts/ab.sh's flags), five runs interleaved
+(base, variant alternating), `--slice-ms 0`:
+ - the twelve golden kernels (kasm: alloc, arith, fib, ivars, sends,
+   storeheavy, walk, closures, floats; Smalltalk: st-sends, st-ivars,
+   st-closures) at 1 and 8 workers, the workers' cycles from the run line;
+ - the kernel tests (kernel image built by each side's own binary, `kajo
+   test <img> --workers 1`), the process's cycles from `/usr/bin/time -l`,
+   every test passing on both sides.
+Gain of a workload = 1 - (median cycles of the variant / median cycles of
+the base), at 1 worker. Checksums equal on both sides in every run.
+
+Decision.
+ 1. A cheating build passes if its gain is 5.0 percent or more on at least
+    two of: sends, st-sends, fib, closures (the kasm kernel), the kernel
+    tests; every checksum is equal; and no golden kernel's median cycles
+    ratio is above 1.010 at 1 or at 8 workers.
+ 2. The all-four build of (a) is measured first. If it does not pass, no
+    pair alone is measured for building (a pair alone removes a subset of
+    the same dispatches) and the module stops: the bound is written in the
+    doc. If it passes, each pair is measured alone in an (a) build, and
+    only the pairs that pass alone are built (open question 2).
+ 3. (b) is measured either way, for the bound. If (b) passes and (a) does
+    not, the module stops and hands back with the numbers: a second inline
+    copy of the send is the owner's decision (open question 3).
+ 4. A build that passes here is built for real and must meet the same
+    threshold in the committed build, not only in the cheating one.
+```
