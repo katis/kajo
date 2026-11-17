@@ -18,7 +18,8 @@ Class {
 		'inferring',
 		'index',
 		'results',
-		'recordTypes'
+		'recordTypes',
+		'cacheIndex'
 	]
 }
 
@@ -73,6 +74,42 @@ OTChecker >> dependentsOf: aKey [
 ]
 
 { #category : #dependencies }
+OTChecker >> invalidate: aKey [
+	"What a change of aKey (a signature, a body, a selector, a class's variables) makes stale: the inferred results that read it are forgotten, transitively through their own bodies, and the keys of every method whose check read any of them are answered (a Set)."
+	| todo seen methods k |
+	todo := OrderedCollection with: aKey.
+	seen := Set new.
+	seen add: aKey.
+	methods := Set new.
+	[todo isEmpty] whileFalse: [
+		k := todo removeFirst.
+		(index at: k ifAbsent: [#()]) do: [:mk | methods add: mk].
+		(cacheIndex at: k ifAbsent: [#()]) asArray do: [:cm | | bk |
+			returnCache removeKey: cm ifAbsent: [nil].
+			bk := 'body:' , (self keyOf: cm selector in: cm methodClass).
+			(seen includes: bk) ifFalse: [seen add: bk. todo add: bk]]].
+	^ methods
+]
+
+{ #category : #dependencies }
+OTChecker >> recheck: aSetOfKeys [
+	"Check again each method named by a key (Class>>selector or Class class>>selector) that still exists; the checks."
+	| out |
+	out := OrderedCollection new.
+	aSetOfKeys do: [:mk | | i cname sel b |
+		i := mk indexOfSubstring: '>>'.
+		cname := mk copyFrom: 1 to: i - 1.
+		sel := (mk copyFrom: i + 2 to: mk byteSize) asSymbol.
+		b := (cname endsWith: ' class')
+			ifTrue: [(Smalltalk classNamed: (cname copyFrom: 1 to: cname byteSize - 6)) ifNotNil: [:c | c class]]
+			ifFalse: [Smalltalk classNamed: cname].
+		(b notNil and: [b includesSelector: sel])
+			ifTrue: [out add: (self check: sel in: b)]
+			ifFalse: [self forget: mk. results removeKey: mk ifAbsent: [nil]]].
+	^ out
+]
+
+{ #category : #dependencies }
 OTChecker >> forget: aMethodKey [
 	"Drop a method's old dependencies before it is checked again."
 	(results at: aMethodKey ifAbsent: [nil]) ifNotNil: [:old |
@@ -82,12 +119,25 @@ OTChecker >> forget: aMethodKey [
 { #category : #accessing }
 OTChecker >> forgetCaches [
 	returnCache := IdentityDictionary new.
+	cacheIndex := Dictionary new.
 	inferring := IdentitySet new
 ]
 
 { #category : #accessing }
 OTChecker >> forgetInferredReturnOf: aCompiledMethod [
 	returnCache removeKey: aCompiledMethod ifAbsent: [nil]
+]
+
+{ #category : #relations }
+OTChecker >> signatures: found apply: aSelector from: aBehavior [
+	"Whether the signatures found from aBehavior up still describe the method aBehavior runs: not when it runs an override in a class between with no side file of its own (an unannotated override is not assumed to keep its superclass's signature)."
+	| impl c d |
+	found isNil ifTrue: [^ false].
+	impl := aBehavior lookupSelector: aSelector.
+	impl isNil ifTrue: [^ true].
+	c := impl methodClass theNonMetaClass.
+	d := found first.
+	^ c == d or: [(c inheritsFrom: d) not or: [(annotations infoFor: c) notNil]]
 ]
 
 { #category : #accessing }
@@ -110,6 +160,7 @@ OTChecker >> inferredReturnOf: aCompiledMethod [
 	"The result type of an unannotated method from its body, with Self for the receiver; Dynamic while it is being inferred (recursion) or when the switch is off."
 	| mc t |
 	inferReturns ifFalse: [^ OTType dynamic].
+	aCompiledMethod primitive = 0 ifFalse: [^ OTType dynamic].
 	(returnCache at: aCompiledMethod ifAbsent: [nil]) ifNotNil: [:r | ^ r].
 	(inferring includes: aCompiledMethod) ifTrue: [^ OTType dynamic].
 	inferring add: aCompiledMethod.
@@ -118,6 +169,7 @@ OTChecker >> inferredReturnOf: aCompiledMethod [
 	 mc run.
 	 t := mc inferredResult] ensure: [inferring remove: aCompiledMethod ifAbsent: [nil]].
 	returnCache at: aCompiledMethod put: t.
+	mc deps do: [:d | (cacheIndex at: d ifAbsentPut: [IdentitySet new]) add: aCompiledMethod].
 	^ t
 ]
 
@@ -144,7 +196,7 @@ OTChecker >> isClass: a subtypeOf: b [
 		y := b args at: i.
 		(covariant
 			ifTrue: [self isSubtype: x of: y]
-			ifFalse: [x isDynamic or: [y isDynamic or: [x sameAs: y]]]) ifFalse: [^ false]].
+			ifFalse: [(self isSubtype: x of: y) and: [self isSubtype: y of: x]]) ifFalse: [^ false]].
 	^ true
 ]
 
@@ -156,7 +208,8 @@ OTChecker >> isSubtype: a of: b [
 	a isUnion ifTrue: [^ a members allSatisfy: [:m | self isSubtype: m of: b]].
 	b class == OTSelf ifTrue: [^ a class == OTSelf or: [(a isClassType or: [a isMetaType]) and: [a selfKind == #self]]].
 	b class == OTInstance ifTrue: [^ a class == OTInstance or: [a isClassType and: [a selfKind == #instance]]].
-	(a class == OTSelf or: [a class == OTInstance]) ifTrue: [^ true].
+	(a class == OTSelf or: [a class == OTInstance or: [a class == OTSelfClass or: [b class == OTSelfClass]]]) ifTrue: [^ true].
+	(b class == OTVarClass or: [a class == OTVarClass]) ifTrue: [^ a isMetaType or: [a class == OTVarClass or: [a isClassType and: [a cls includesBehavior: Behavior]]]].
 	b isUnion ifTrue: [^ b members anySatisfy: [:m | self isSubtype: a of: m]].
 	(b isClassType and: [b cls == Object]) ifTrue: [^ true].
 	(a isVar or: [b isVar]) ifTrue: [^ a isVar and: [b isVar and: [a name = b name]]].
@@ -182,8 +235,8 @@ OTChecker >> isSubtype: a of: b [
 OTChecker >> join: a with: b [
 	"The least type that holds both (approximate: a common superclass, else a union of at most three)."
 	| c u |
-	a isNil ifTrue: [^ b].
-	b isNil ifTrue: [^ a].
+	(a isNil or: [a isUnassigned]) ifTrue: [^ b].
+	(b isNil or: [b isUnassigned]) ifTrue: [^ a].
 	(a isDynamic or: [b isDynamic]) ifTrue: [^ OTType dynamic].
 	(a sameAs: b) ifTrue: [^ a].
 	(a isNilType or: [b isNilType]) ifTrue: [^ OTType union: {a. b}].
@@ -257,8 +310,11 @@ OTChecker >> setUp [
 OTChecker >> unify: p with: a vars: aSet into: aDictionary [
 	"Bind the method variables aSet names in the parameter type p to what the argument type a gives them."
 	| map ps |
+	(p class == OTVarClass and: [(aSet includes: p name) and: [a isMetaType]]) ifTrue: [
+		aDictionary at: p name put: (self join: (aDictionary at: p name ifAbsent: [nil]) with: (OTType of: a cls)).
+		^ self].
 	(p isVar and: [aSet includes: p name]) ifTrue: [
-		aDictionary at: p name put: (self join: (aDictionary at: p name ifAbsent: [nil]) with: a withoutSelfMark).
+		aDictionary at: p name put: (self join: (aDictionary at: p name ifAbsent: [nil]) with: a).
 		^ self].
 	p isUnion ifTrue: [
 		(p members reject: [:m | m isNilType]) do: [:m | self unify: m with: a withoutNil vars: aSet into: aDictionary].

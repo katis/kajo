@@ -44,15 +44,18 @@ OTTypeParser >> parseAlternative [
 	name := scanner value.
 	self advance.
 	name = 'Dynamic' ifTrue: [^ OTType dynamic].
-	name = 'Self' ifTrue: [^ OTSelf new].
-	name = 'Instance' ifTrue: [^ OTInstance new].
+	name = 'Self' ifTrue: [(scanner kind == #identifier and: [scanner value = 'class']) ifTrue: [self advance. ^ OTSelfClass new]. ^ OTSelf new].
+	name = 'Instance' ifTrue: [^ scanner kind == #leftBracket ifTrue: [OTInstance new args: self parseArguments; yourself] ifFalse: [OTInstance new]].
 	name = 'Nil' ifTrue: [^ OTType nilType].
 	(params includes: name) ifTrue: [^ OTVar named: name].
 	(Smalltalk classNamed: name) ifNotNil: [:c |
 		(scanner kind == #identifier and: [scanner value = 'class']) ifTrue: [self advance. ^ OTMetaType cls: c].
 		scanner kind == #leftBracket ifTrue: [^ OTClassType cls: c args: self parseArguments].
 		^ OTClassType cls: c args: #()].
-	name byteSize <= 2 ifTrue: [methodVars add: name. ^ OTVar named: name].
+	name byteSize <= 2 ifTrue: [
+		methodVars add: name.
+		(scanner kind == #identifier and: [scanner value = 'class']) ifTrue: [self advance. ^ OTVarClass named: name].
+		^ OTVar named: name].
 	^ self fail: 'no class named ' , name
 ]
 

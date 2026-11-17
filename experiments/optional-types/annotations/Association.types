@@ -1,0 +1,13 @@
+class Association[K, V]
+super Magnitude
+ivar key <K>
+ivar value <V>
+method key ^<K>
+method value ^<V>
+method key: <K> ^<Self>
+method value: <V> ^<Self>
+method key: <K> value: <V> ^<Self>
+method < <Association> ^<Boolean>
+method = <Object> ^<Boolean>
+method hash ^<Integer>
+meta key: <X> value: <Y> ^<Instance[X, Y]>

@@ -1,0 +1,24 @@
+class WriteStream[C]
+method << <Object> ^<Self>
+method atEnd ^<Boolean>
+method contents ^<C>
+method cr ^<Self>
+method lf ^<Self>
+method newLine ^<Self>
+method space ^<Self>
+method tab ^<Self>
+method display: <Object> ^<Self>
+method print: <Object> ^<Self>
+method grow ^<Self>
+method growTo: <Integer> ^<Self>
+method isEmpty ^<Boolean>
+method next: <Integer> put: <Object> ^<Object>
+method nextPut: <Object> ^<Object>
+method nextPutAll: <Object> ^<Object>
+method nextPutGrowing: <Object> ^<Object>
+method position: <Integer> ^<Self>
+method readLimit ^<Integer>
+method reset ^<Self>
+method resetContents ^<Self>
+method setOn: <C> ^<Self>
+method skip: <Integer> ^<Self>

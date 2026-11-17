@@ -17,11 +17,17 @@ method badReturn ^<String>
 method okReturn ^<Integer>
 method okSelf ^<Self>
 method takesNumbers: <OrderedCollection[Number]> ^<Self>
+class BlockClosure
+method on: <X class | ExceptionSet> do: <[X, ^Dynamic]> ^<Dynamic>
+method value: <Object> ^<Dynamic>
+class ZeroDivide
+method dividend ^<Number>
 class Object
 method yourself ^<Self>
 method printString ^<String>
 class Boolean
 method ifTrue: <[^X]> ^<X | Nil>
+method ifTrue: <[^X]> ifFalse: <[^Y]> ^<X | Y>
 method and: <[^Boolean]> ^<Boolean>
 class Collection[E]
 method collect: <[E, ^X]> ^<Collection[X]>
@@ -185,7 +191,7 @@ OTCheckerTest >> testTempFlow [
 
 { #category : #tests }
 OTCheckerTest >> testTypeNotation [
-	#('Integer' 'Array[E]' 'Dictionary[K, V]' 'String class' 'Integer | Nil' '[E, ^Boolean]' '[^X]' 'Self' 'Instance' 'Dynamic' 'Nil')
+	#('Integer' 'Array[E]' 'Dictionary[K, V]' 'String class' 'Integer | Nil' '[E, ^Boolean]' '[^X]' 'Self' 'Instance' 'Instance[E]' 'Dynamic' 'Nil')
 		do: [:s | self assert: (OTTypeParser parse: s params: #('E' 'K' 'V')) printString equals: s].
 	self assert: (OTTypeParser parse: '(Integer | Nil) | String') printString equals: 'Integer | String | Nil'.
 	self should: [OTTypeParser parse: 'Intger'] raise: CompileError.
@@ -213,4 +219,19 @@ OTCheckerTest >> testSubtyping [
 	self deny: (checker isSubtype: (t value: '[Integer, ^Integer]') of: (t value: '[Object, ^Integer]')).
 	self assert: (checker isSubtype: (t value: 'String class') of: (t value: 'Collection class')).
 	self assert: (checker isSubtype: (t value: 'String class') of: (t value: 'Behavior'))
+]
+
+{ #category : #tests }
+OTCheckerTest >> testHandlerArgumentFromTheExceptionClass [
+	self assert: (self kindsOf: #okHandler) equals: #(#dnu).
+	self assert: ((checker check: #badHandler in: OTSample) diagnostics collect: [:d | d text]) asArray
+		equals: #('Integer does not understand #foo' 'ZeroDivide does not understand #zork')
+]
+
+{ #category : #tests }
+OTCheckerTest >> testFlow [
+	self assert: (self kindsOf: #okRecursiveBlock) equals: #().
+	self assert: (self kindsOf: #okNotNilAnd) equals: #().
+	self assert: (self kindsOf: #badNotNilAndElse) equals: #(#maybeNil).
+	self assert: (self kindsOf: #okLoopNarrowing) equals: #()
 ]

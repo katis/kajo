@@ -1,0 +1,16 @@
+class HashedCollection[E]
+ivar tally <Integer>
+ivar array <Array>
+method capacity ^<Integer>
+method equal: <Object> to: <Object> ^<Boolean>
+method growIfNeeded ^<Self>
+method hashFor: <Object> ^<Integer>
+method indexFor: <Object> ^<Integer>
+method keyOf: <Object> ^<Object>
+method rehashTo: <Integer> ^<Self>
+method removeAll ^<Self>
+method removeAt: <Integer> ^<Self>
+method setCapacity: <Integer> ^<Self>
+method size ^<Integer>
+meta new ^<Instance>
+meta new: <Integer> ^<Instance>

@@ -1,0 +1,27 @@
+class Character
+method < <Character> ^<Boolean>
+method = <Object> ^<Boolean>
+method asCharacter ^<Self>
+method asInteger ^<Integer>
+method asLowercase ^<Character>
+method asUppercase ^<Character>
+method asString ^<String>
+method asSymbol ^<Symbol>
+method codePoint ^<Integer>
+method value ^<Integer>
+method digitValue ^<Integer>
+method isAlphaNumeric ^<Boolean>
+method isDigit ^<Boolean>
+method isLetter ^<Boolean>
+method isLowercase ^<Boolean>
+method isUppercase ^<Boolean>
+method isSeparator ^<Boolean>
+method isVowel ^<Boolean>
+method utf8Size ^<Integer>
+meta value: <Integer> ^<Character>
+meta digitValue: <Integer> ^<Character>
+meta cr ^<Character>
+meta lf ^<Character>
+meta newline ^<Character>
+meta space ^<Character>
+meta tab ^<Character>

@@ -1,0 +1,44 @@
+# Integer arithmetic: an Integer with an Integer is an Integer (the first signature, an overload),
+# anything else is a Number. / is a Number either way (a Fraction).
+class Integer
+method + <Integer> ^<Integer>
+method + <Number> ^<Number>
+method - <Integer> ^<Integer>
+method - <Number> ^<Number>
+method * <Integer> ^<Integer>
+method * <Number> ^<Number>
+method // <Number> ^<Integer>
+method \\ <Integer> ^<Integer>
+method \\ <Number> ^<Number>
+method / <Number> ^<Number>
+method << <Integer> ^<Integer>
+method >> <Integer> ^<Integer>
+method bitAnd: <Integer> ^<Integer>
+method bitOr: <Integer> ^<Integer>
+method bitXor: <Integer> ^<Integer>
+method bitShift: <Integer> ^<Integer>
+method max: <Integer> ^<Integer>
+method max: <Number> ^<Number>
+method min: <Integer> ^<Integer>
+method min: <Number> ^<Number>
+method asCharacter ^<Character>
+method factorial ^<Integer>
+method gcd: <Integer> ^<Integer>
+method lcm: <Integer> ^<Integer>
+method isPrime ^<Boolean>
+method sqrtFloor ^<Integer>
+method timesRepeat: <[^Dynamic]> ^<Self>
+method asFraction ^<Fraction>
+method asString ^<String>
+method printOn: <WriteStream[String]> base: <Integer> ^<Self>
+method printPaddedWith: <Character> to: <Integer> ^<String>
+method printString ^<String>
+method printString: <Integer> ^<String>
+method storeString ^<String>
+method isInteger ^<Boolean>
+method asInteger ^<Self>
+method numerator ^<Integer>
+method denominator ^<Integer>
+method negated ^<Integer>
+method abs ^<Integer>
+meta readFrom: <String> ^<Integer | Nil>

@@ -1,0 +1,45 @@
+class Collection[E]
+method add: <E> ^<E>
+method addAll: <Collection[E]> ^<Collection[E]>
+method remove: <E> ^<E>
+method remove: <E> ifAbsent: <[^X]> ^<E | X>
+method removeAll: <Collection[E]> ^<Collection[E]>
+method asArray ^<Array[E]>
+method asIdentitySet ^<IdentitySet[E]>
+method asOrderedCollection ^<OrderedCollection[E]>
+method asSet ^<Set[E]>
+method sorted ^<Array[E]>
+method sorted: <[E, E, ^Boolean]> ^<Array[E]>
+method species ^<Behavior>
+method allSatisfy: <[E, ^Boolean]> ^<Boolean>
+method anySatisfy: <[E, ^Boolean]> ^<Boolean>
+method noneSatisfy: <[E, ^Boolean]> ^<Boolean>
+method anyOne ^<E>
+method collect: <[E, ^X]> ^<Collection[X]>
+method count: <[E, ^Boolean]> ^<Integer>
+method detect: <[E, ^Boolean]> ^<E>
+method detect: <[E, ^Boolean]> ifNone: <[^X]> ^<E | X>
+method detectMax: <[E, ^Magnitude]> ^<E | Nil>
+method detectMin: <[E, ^Magnitude]> ^<E | Nil>
+method do: <[E, ^Dynamic]> ^<Self>
+method do: <[E, ^Dynamic]> separatedBy: <[^Dynamic]> ^<Self>
+method inject: <A> into: <[A, E, ^A]> ^<A>
+method max ^<E>
+method min ^<E>
+method reject: <[E, ^Boolean]> ^<Self>
+method select: <[E, ^Boolean]> ^<Self>
+method sum ^<Dynamic>
+method sum: <[E, ^Number]> ^<Number>
+method displayString ^<String>
+method printOn: <WriteStream[String]> ^<Self>
+method identityIncludes: <Object> ^<Boolean>
+method includes: <Object> ^<Boolean>
+method occurrencesOf: <Object> ^<Integer>
+method ifEmpty: <[^X]> ^<Self | X>
+method ifNotEmpty: <[Self, ^X]> ^<Self | X>
+method isCollection ^<Boolean>
+method isEmpty ^<Boolean>
+method notEmpty ^<Boolean>
+method isNotEmpty ^<Boolean>
+method isEmptyOrNil ^<Boolean>
+method size ^<Integer>

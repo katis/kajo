@@ -1,0 +1,7 @@
+class UndefinedObject
+method isNil ^<Boolean>
+method notNil ^<Boolean>
+method isEmptyOrNil ^<Boolean>
+method isLiteral ^<Boolean>
+method printOn: <WriteStream[String]> ^<Self>
+method shallowCopy ^<Self>

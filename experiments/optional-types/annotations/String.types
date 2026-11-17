@@ -1,0 +1,75 @@
+# A String is a sequence of Characters (scalars); it has no at: and no size (UTF-8 bytes: byteSize,
+# scalarCount), which a type cannot say: the inherited at: and size stay typed and fail at run time.
+class String
+super ArrayedCollection[Character]
+method asByteArray ^<ByteArray>
+method byteAt: <Integer> ^<Integer>
+method byteSize ^<Integer>
+method utf8Size ^<Integer>
+method < <String> ^<Boolean>
+method <= <String> ^<Boolean>
+method > <String> ^<Boolean>
+method >= <String> ^<Boolean>
+method = <Object> ^<Boolean>
+method compare: <String> ^<Integer>
+method hash ^<Integer>
+method sameBytesAs: <String> ^<Boolean>
+method asFloat ^<Float>
+method asInteger ^<Integer | Nil>
+method asLowercase ^<String>
+method asUppercase ^<String>
+method asNumber ^<Number | Nil>
+method asString ^<String>
+method asSymbol ^<Symbol>
+method displayString ^<String>
+method lines ^<Array[String]>
+method readStream ^<ReadStream[String]>
+method replaceAll: <String> with: <String> ^<String>
+method splitOn: <String | Character> ^<Array[String]>
+method substrings ^<Array[String]>
+method trimmed ^<String>
+method , <String> ^<String>
+method copyFrom: <Integer> to: <Integer> ^<String>
+method copyReplaceAll: <String> with: <String> ^<String>
+method copyWith: <Character> ^<String>
+method asArray ^<Array[Character]>
+method collect: <[Character, ^Character]> ^<String>
+method do: <[Character, ^Dynamic]> ^<Self>
+method keysAndValuesDo: <[Integer, Character, ^Dynamic]> ^<Self>
+method reverseDo: <[Character, ^Dynamic]> ^<Self>
+method reversed ^<String>
+method select: <[Character, ^Boolean]> ^<String>
+method displayOn: <WriteStream[String]> ^<Self>
+method printOn: <WriteStream[String]> ^<Self>
+method storeString ^<String>
+method isBoundary: <Integer> ^<Boolean>
+method previousBoundary: <Integer> ^<Integer>
+method scalarAt: <Integer> ^<Character>
+method scalarCount ^<Integer>
+method scalarSizeAt: <Integer> ^<Integer>
+method scalars ^<Self>
+method beginsWith: <String> ^<Boolean>
+method endsWith: <String> ^<Boolean>
+method includesSubstring: <String> ^<Boolean>
+method indexOf: <Character> ^<Integer>
+method indexOfSubstring: <String> ^<Integer>
+method indexOfSubstring: <String> startingAt: <Integer> ^<Integer>
+method occurrencesOf: <Character> ^<Integer>
+method allButFirst ^<String>
+method allButLast ^<String>
+method first ^<Character>
+method first: <Integer> ^<String>
+method last ^<Character>
+method isEmpty ^<Boolean>
+method notEmpty ^<Boolean>
+method isString ^<Boolean>
+meta new ^<Instance>
+meta cr ^<String>
+meta lf ^<String>
+meta space ^<String>
+meta tab ^<String>
+meta fromUtf8: <ByteArray> ^<String>
+meta new: <Integer> withAll: <Character> ^<String>
+meta streamContents: <[WriteStream[String], ^Dynamic]> ^<String>
+meta with: <Character> ^<String>
+meta with: <Character> with: <Character> ^<String>

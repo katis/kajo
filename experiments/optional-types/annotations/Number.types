@@ -1,0 +1,44 @@
+class Number
+method * <Number> ^<Number>
+method + <Number> ^<Number>
+method - <Number> ^<Number>
+method / <Number> ^<Number>
+method // <Number> ^<Integer>
+method \\ <Number> ^<Number>
+method abs ^<Self>
+method negated ^<Self>
+method quo: <Number> ^<Integer>
+method raisedTo: <Integer> ^<Number>
+method reciprocal ^<Number>
+method rem: <Number> ^<Number>
+method squared ^<Number>
+method asFloat ^<Float>
+method asInteger ^<Integer>
+method asNumber ^<Self>
+method coerce: <Number> ^<Number>
+method generality ^<Integer>
+method retry: <Symbol> coercing: <Number> ^<Dynamic>
+method to: <Number> ^<Interval>
+method to: <Number> by: <Number> ^<Interval>
+method to: <Number> do: <[Self, ^Dynamic]> ^<Self>
+method to: <Number> by: <Number> do: <[Self, ^Dynamic]> ^<Self>
+method displayString ^<String>
+method printOn: <WriteStream[String]> ^<Self>
+method shallowCopy ^<Self>
+method even ^<Boolean>
+method odd ^<Boolean>
+method isZero ^<Boolean>
+method negative ^<Boolean>
+method positive ^<Boolean>
+method strictlyPositive ^<Boolean>
+method sign ^<Integer>
+method ceiling ^<Integer>
+method floor ^<Integer>
+method rounded ^<Integer>
+method truncated ^<Integer>
+method < <Number> ^<Boolean>
+method <= <Number> ^<Boolean>
+method > <Number> ^<Boolean>
+method >= <Number> ^<Boolean>
+method max: <Number> ^<Number>
+method min: <Number> ^<Number>

@@ -164,3 +164,38 @@ OTSample >> takesNumbers: aCollection [
 OTSample >> varianceSend [
 	^ self takesNumbers: items
 ]
+
+{ #category : #samples }
+OTSample >> okHandler [
+	^ [count foo] on: ZeroDivide do: [:e | e dividend]
+]
+
+{ #category : #samples }
+OTSample >> badHandler [
+	^ [count foo] on: ZeroDivide do: [:e | e zork]
+]
+
+{ #category : #samples }
+OTSample >> okRecursiveBlock [
+	| fact |
+	fact := [:n | n < 2 ifTrue: [1] ifFalse: [n * (fact value: n - 1)]].
+	^ fact value: 5
+]
+
+{ #category : #samples }
+OTSample >> okNotNilAnd [
+	^ (name notNil and: [count > 1]) ifTrue: [name asUppercase] ifFalse: ['']
+]
+
+{ #category : #samples }
+OTSample >> badNotNilAndElse [
+	^ (name notNil and: [count > 1]) ifTrue: [''] ifFalse: [name asUppercase]
+]
+
+{ #category : #samples }
+OTSample >> okLoopNarrowing [
+	| s |
+	s := name.
+	[s notNil] whileTrue: [s := s asUppercase. s := nil].
+	^ count
+]

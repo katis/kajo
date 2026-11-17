@@ -1,0 +1,23 @@
+class Exception
+ivar messageText <String | Nil>
+method defaultAction ^<Dynamic>
+method description ^<String>
+method isResumable ^<Boolean>
+method messageText ^<String>
+method messageText: <String> ^<Self>
+method printOn: <WriteStream[String]> ^<Self>
+method outer ^<Dynamic>
+method pass ^<Dynamic>
+method resume ^<Dynamic>
+method resume: <Object> ^<Dynamic>
+method retry ^<Dynamic>
+method retryUsing: <[^Dynamic]> ^<Dynamic>
+method return ^<Dynamic>
+method return: <Object> ^<Dynamic>
+method signal ^<Dynamic>
+method signal: <String> ^<Dynamic>
+method signalerContext ^<Context | Nil>
+meta , <Exception class | ExceptionSet> ^<ExceptionSet>
+meta handles: <Exception> ^<Boolean>
+meta signal ^<Dynamic>
+meta signal: <String> ^<Dynamic>

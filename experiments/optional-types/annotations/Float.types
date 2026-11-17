@@ -1,0 +1,21 @@
+class Float
+method + <Number> ^<Float>
+method - <Number> ^<Float>
+method * <Number> ^<Float>
+method / <Number> ^<Float>
+method asFloat ^<Self>
+method asFraction ^<Number>
+method isFinite ^<Boolean>
+method isInfinite ^<Boolean>
+method isNaN ^<Boolean>
+method exponent ^<Integer>
+method fractionPart ^<Float>
+method sqrt ^<Float>
+method timesTwoPower: <Integer> ^<Float>
+method printString ^<String>
+meta e ^<Float>
+meta pi ^<Float>
+meta infinity ^<Float>
+meta nan ^<Float>
+meta negativeInfinity ^<Float>
+meta readFrom: <String> ^<Float>

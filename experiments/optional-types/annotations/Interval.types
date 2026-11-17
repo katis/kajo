@@ -1,0 +1,18 @@
+# An Interval of Integers in practice; its collect: and select: answer Arrays (species).
+class Interval
+super SequenceableCollection[Integer]
+ivar start <Number>
+ivar stop <Number>
+ivar step <Number>
+method at: <Integer> ^<Integer>
+method collect: <[Integer, ^X]> ^<Array[X]>
+method select: <[Integer, ^Boolean]> ^<Array[Integer]>
+method do: <[Integer, ^Dynamic]> ^<Self>
+method first ^<Integer>
+method last ^<Integer>
+method increment ^<Number>
+method size ^<Integer>
+method species ^<Behavior>
+method setFrom: <Number> to: <Number> by: <Number> ^<Self>
+meta from: <Number> to: <Number> ^<Instance>
+meta from: <Number> to: <Number> by: <Number> ^<Instance>

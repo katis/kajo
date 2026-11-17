@@ -1,0 +1,36 @@
+class OrderedCollection[E]
+ivar array <Array[E | Nil]>
+ivar firstIndex <Integer>
+ivar lastIndex <Integer>
+method , <Collection[E]> ^<Self>
+method add: <E> ^<E>
+method add: <E> beforeIndex: <Integer> ^<E>
+method addFirst: <E> ^<E>
+method addLast: <E> ^<E>
+method asArray ^<Array[E]>
+method at: <Integer> ^<E>
+method at: <Integer> put: <E> ^<E>
+method collect: <[E, ^X]> ^<OrderedCollection[X]>
+method copyFrom: <Integer> to: <Integer> ^<Self>
+method copyWith: <E> ^<Self>
+method do: <[E, ^Dynamic]> ^<Self>
+method grow ^<Self>
+method remove: <E> ifAbsent: <[^X]> ^<E | X>
+method removeAll ^<Self>
+method removeFirst ^<E>
+method removeFirst: <Integer> ^<SequenceableCollection[E]>
+method removeIndex: <Integer> ^<E>
+method removeLast ^<E>
+method removeLast: <Integer> ^<SequenceableCollection[E]>
+method reverseDo: <[E, ^Dynamic]> ^<Self>
+method reversed ^<Self>
+method select: <[E, ^Boolean]> ^<Self>
+method setCapacity: <Integer> ^<Self>
+method size ^<Integer>
+method species ^<Behavior>
+meta new ^<Instance>
+meta new: <Integer> ^<Instance>
+meta with: <X> ^<Instance[X]>
+meta with: <X> with: <X> ^<Instance[X]>
+meta with: <X> with: <X> with: <X> ^<Instance[X]>
+meta withAll: <Collection[X]> ^<Instance[X]>

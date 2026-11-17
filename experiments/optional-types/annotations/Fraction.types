@@ -1,0 +1,10 @@
+class Fraction
+ivar numerator <Integer>
+ivar denominator <Integer>
+method numerator ^<Integer>
+method denominator ^<Integer>
+method normalized ^<Number>
+method reciprocal ^<Number>
+method asFraction ^<Self>
+method setNumerator: <Integer> denominator: <Integer> ^<Self>
+meta numerator: <Integer> denominator: <Integer> ^<Instance>

@@ -1,0 +1,12 @@
+class ArrayedCollection[E]
+method add: <E> ^<E>
+method size ^<Integer>
+meta new ^<Instance>
+meta new: <Integer> ^<Instance>
+meta new: <Integer> withAll: <X> ^<Instance[X]>
+meta streamContents: <[WriteStream[Instance], ^Dynamic]> ^<Instance>
+meta with: <X> ^<Instance[X]>
+meta with: <X> with: <X> ^<Instance[X]>
+meta with: <X> with: <X> with: <X> ^<Instance[X]>
+meta with: <X> with: <X> with: <X> with: <X> ^<Instance[X]>
+meta withAll: <Collection[X]> ^<Instance[X]>

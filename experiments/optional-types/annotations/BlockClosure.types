@@ -1,0 +1,26 @@
+# A block literal has a block type ([A, ^R]); these are the sends a BlockClosure-typed value (or a
+# variable holding a block of unknown type) answers. value and value: on a block type are typed by the
+# checker from the block type itself.
+class BlockClosure
+method whileTrue: <[^Dynamic]> ^<Nil>
+method whileFalse: <[^Dynamic]> ^<Nil>
+method whileTrue ^<Nil>
+method whileFalse ^<Nil>
+method repeat ^<Dynamic>
+method value ^<Dynamic>
+method value: <Object> ^<Dynamic>
+method value: <Object> value: <Object> ^<Dynamic>
+method value: <Object> value: <Object> value: <Object> ^<Dynamic>
+method valueWithArguments: <Array> ^<Dynamic>
+method cull: <Object> ^<Dynamic>
+method cull: <Object> cull: <Object> ^<Dynamic>
+method numArgs ^<Integer>
+method ensure: <[^Dynamic]> ^<Dynamic>
+method ifCurtailed: <[^Dynamic]> ^<Dynamic>
+method ifError: <[^Dynamic]> ^<Dynamic>
+method on: <X class | ExceptionSet> do: <[X, ^Dynamic]> ^<Dynamic>
+method fork ^<Process>
+method forkAt: <Integer | Nil> ^<Process>
+method method ^<CompiledMethod>
+method receiver ^<Object>
+method isBlock ^<Boolean>

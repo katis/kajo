@@ -41,6 +41,11 @@ OTType >> isNilType [
 ]
 
 { #category : #testing }
+OTType >> isUnassigned [
+	^ false
+]
+
+{ #category : #testing }
 OTType >> isUnion [
 	^ false
 ]

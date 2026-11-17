@@ -1,0 +1,28 @@
+# A Dictionary is a collection of its values.
+class Dictionary[K, V]
+super HashedCollection[V]
+method add: <Association[K, V]> ^<Association[K, V]>
+method associations ^<Array[Association[K, V]]>
+method associationsDo: <[Association[K, V], ^Dynamic]> ^<Self>
+method associationsDo: <[Association[K, V], ^Dynamic]> separatedBy: <[^Dynamic]> ^<Self>
+method at: <K> ^<V>
+method at: <K> ifAbsent: <[^X]> ^<V | X>
+method at: <K> ifAbsentPut: <[^V]> ^<V>
+method at: <K> ifPresent: <[V, ^X]> ^<X | Nil>
+method at: <K> ifPresent: <[V, ^X]> ifAbsent: <[^Y]> ^<X | Y>
+method at: <K> put: <V> ^<V>
+method collect: <[V, ^X]> ^<Dictionary[K, X]>
+method do: <[V, ^Dynamic]> ^<Self>
+method includes: <Object> ^<Boolean>
+method includesKey: <Object> ^<Boolean>
+method keyAtValue: <Object> ^<K | Nil>
+method keyAtValue: <Object> ifAbsent: <[^X]> ^<K | X>
+method keys ^<Array[K]>
+method keysAndValuesDo: <[K, V, ^Dynamic]> ^<Self>
+method keysDo: <[K, ^Dynamic]> ^<Self>
+method keysSortedSafely ^<Array[K]>
+method removeKey: <K> ^<V>
+method removeKey: <K> ifAbsent: <[^X]> ^<V | X>
+method select: <[V, ^Boolean]> ^<Self>
+method values ^<Array[V]>
+method valuesDo: <[V, ^Dynamic]> ^<Self>

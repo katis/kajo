@@ -1,0 +1,16 @@
+# True and False inherit these; ifTrue: and the like are inlined by the compiler but typed as sends.
+class Boolean
+method & <Boolean> ^<Boolean>
+method | <Boolean> ^<Boolean>
+method and: <[^Boolean]> ^<Boolean>
+method or: <[^Boolean]> ^<Boolean>
+method eqv: <Boolean> ^<Boolean>
+method xor: <Boolean> ^<Boolean>
+method not ^<Boolean>
+method ifTrue: <[^X]> ^<X | Nil>
+method ifFalse: <[^X]> ^<X | Nil>
+method ifTrue: <[^X]> ifFalse: <[^Y]> ^<X | Y>
+method ifFalse: <[^X]> ifTrue: <[^Y]> ^<X | Y>
+method isBoolean ^<Boolean>
+method isLiteral ^<Boolean>
+method shallowCopy ^<Self>

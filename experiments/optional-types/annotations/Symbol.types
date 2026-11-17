@@ -1,0 +1,14 @@
+class Symbol
+method = <Object> ^<Boolean>
+method asString ^<String>
+method asSymbol ^<Self>
+method displayString ^<String>
+method hash ^<Integer>
+method isBinary ^<Boolean>
+method isSymbol ^<Boolean>
+method keywords ^<Array[String]>
+method numArgs ^<Integer>
+method value: <Object> ^<Dynamic>
+method value: <Object> value: <Object> ^<Dynamic>
+meta intern: <String> ^<Symbol>
+meta lookup: <String> ^<Symbol | Nil>

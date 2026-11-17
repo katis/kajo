@@ -1,0 +1,26 @@
+# Streams are typed by their collection (C), not by their element: the element type would need a bound
+# (C <: SequenceableCollection[E]) that the language leaves out; next and peek are Dynamic.
+class PositionableStream[C]
+super Object
+ivar collection <C>
+ivar position <Integer>
+ivar readLimit <Integer>
+ivar isText <Boolean>
+method atEnd ^<Boolean>
+method collection ^<C>
+method contents ^<C>
+method do: <[Dynamic, ^Dynamic]> ^<Self>
+method isEmpty ^<Boolean>
+method next ^<Dynamic>
+method next: <Integer> ^<C>
+method peek ^<Dynamic>
+method peekFor: <Object> ^<Boolean>
+method position ^<Integer>
+method position: <Integer> ^<Self>
+method reset ^<Self>
+method setOn: <C> ^<Self>
+method skip: <Integer> ^<Self>
+method skipSeparators ^<Self>
+method upTo: <Object> ^<C>
+method upToEnd ^<C>
+meta on: <X> ^<Instance[X]>

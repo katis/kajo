@@ -1,0 +1,7 @@
+# collect: is restated so that an Array's collect: is an Array (no Self[X] in the language).
+class Array[E]
+method asArray ^<Self>
+method isArray ^<Boolean>
+method isLiteral ^<Boolean>
+method collect: <[E, ^X]> ^<Array[X]>
+method printOn: <WriteStream[String]> ^<Self>

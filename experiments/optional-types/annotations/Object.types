@@ -1,0 +1,91 @@
+# Object: the top. Every class answers these.
+class Object
+method -> <Object> ^<Association[Self, Object]>
+method at: <Integer> ^<Dynamic>
+method at: <Integer> put: <Object> ^<Object>
+method basicAt: <Integer> ^<Dynamic>
+method basicAt: <Integer> put: <Object> ^<Object>
+method basicSize ^<Integer>
+method in: <[Self, ^X]> ^<X>
+method instVarAt: <Integer> ^<Dynamic>
+method instVarAt: <Integer> put: <Object> ^<Object>
+method size ^<Integer>
+method value ^<Self>
+method yourself ^<Self>
+method class ^<Self class>
+method isKindOf: <Behavior> ^<Boolean>
+method isMemberOf: <Behavior> ^<Boolean>
+method respondsTo: <Symbol> ^<Boolean>
+method = <Object> ^<Boolean>
+method == <Object> ^<Boolean>
+method hash ^<Integer>
+method identityHash ^<Integer>
+method ~= <Object> ^<Boolean>
+method ~~ <Object> ^<Boolean>
+method copy ^<Self>
+method postCopy ^<Self>
+method shallowCopy ^<Self>
+method assert: <Boolean | [^Boolean]> ^<Self>
+method error: <String> ^<Dynamic>
+method halt ^<Self>
+method indexError: <Integer> ^<Dynamic>
+method primitiveFailed ^<Dynamic>
+method shouldNotImplement ^<Dynamic>
+method subclassResponsibility ^<Dynamic>
+method initialize ^<Self>
+method become: <Object> ^<Self>
+method doesNotUnderstand: <Message> ^<Dynamic>
+method perform: <Symbol> ^<Dynamic>
+method perform: <Symbol> with: <Object> ^<Dynamic>
+method perform: <Symbol> with: <Object> with: <Object> ^<Dynamic>
+method perform: <Symbol> withArguments: <Array> ^<Dynamic>
+method asString ^<String>
+method displayNl ^<Self>
+method displayOn: <WriteStream[String]> ^<Self>
+method displayString ^<String>
+method printNl ^<Self>
+method printOn: <WriteStream[String]> ^<Self>
+method printString ^<String>
+method slotAt: <Integer> ^<Dynamic>
+method beReadOnly ^<Self>
+method beWritable ^<Self>
+method isReadOnly ^<Boolean>
+method setReadOnly: <Boolean> ^<Boolean>
+method pointerCount ^<Integer>
+method pointersTo ^<Array>
+method pointersTo: <Integer> ^<Array>
+method isArray ^<Boolean>
+method isBehavior ^<Boolean>
+method isBlock ^<Boolean>
+method isBoolean ^<Boolean>
+method isCharacter ^<Boolean>
+method isClass ^<Boolean>
+method isCollection ^<Boolean>
+method isCompiledMethod ^<Boolean>
+method isContext ^<Boolean>
+method isEmptyOrNil ^<Boolean>
+method isFloat ^<Boolean>
+method isFraction ^<Boolean>
+method isInteger ^<Boolean>
+method isLiteral ^<Boolean>
+method isNil ^<Boolean>
+method isNumber ^<Boolean>
+method isString ^<Boolean>
+method isSymbol ^<Boolean>
+method notNil ^<Boolean>
+# the class side every class shares (Behavior's instance side, seen from a class)
+meta new ^<Instance>
+meta new: <Integer> ^<Instance>
+meta basicNew ^<Instance>
+meta basicNew: <Integer> ^<Instance>
+meta name ^<String>
+meta superclass ^<Behavior | Nil>
+meta selectors ^<Array[Symbol]>
+meta includesSelector: <Symbol> ^<Boolean>
+meta canUnderstand: <Symbol> ^<Boolean>
+meta inheritsFrom: <Behavior> ^<Boolean>
+meta includesBehavior: <Behavior> ^<Boolean>
+meta allInstances ^<Array[Instance]>
+meta instanceCount ^<Integer>
+meta compiledMethodAt: <Symbol> ^<CompiledMethod>
+meta lookupSelector: <Symbol> ^<CompiledMethod | Nil>

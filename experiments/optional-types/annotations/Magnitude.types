@@ -1,0 +1,8 @@
+class Magnitude
+method < <Magnitude> ^<Boolean>
+method <= <Magnitude> ^<Boolean>
+method > <Magnitude> ^<Boolean>
+method >= <Magnitude> ^<Boolean>
+method between: <Magnitude> and: <Magnitude> ^<Boolean>
+method max: <Magnitude> ^<Magnitude>
+method min: <Magnitude> ^<Magnitude>

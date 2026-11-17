@@ -26,7 +26,8 @@ Class {
 		'typedSends',
 		'knownResults',
 		'types',
-		'parsed'
+		'parsed',
+		'prepassing'
 	]
 }
 
@@ -139,13 +140,13 @@ OTMethodCheck >> run [
 	meta
 		ifTrue: [
 			selfType := OTMetaType cls: base selfKind: #self.
-			instType := OTClassType cls: base args: (params collect: [:p | OTVar named: p]) selfKind: #instance.
+			instType := OTClassType cls: base args: (params collect: [:p | OTType dynamic]) selfKind: #instance.
 			ivarNames := #()]
 		ifFalse: [
 			selfType := OTClassType cls: base args: (params collect: [:p | OTVar named: p]) selfKind: #self.
 			instType := nil.
 			ivarNames := (Smalltalk instanceVariableNamesOf: base) collect: [:s | s asString]].
-	(ann signaturesFor: selector meta: meta from: base) ifNotNil: [:found |
+	((ann signaturesFor: selector meta: meta from: base) ifNotNil: [:f | (checker signatures: f apply: selector from: behavior) ifTrue: [f]]) ifNotNil: [:found |
 		sig := found last last.
 		deps add: sig key.
 		sigMap := meta ifTrue: [Dictionary new] ifFalse: [ann map: selfType to: found first].
@@ -155,7 +156,7 @@ OTMethodCheck >> run [
 		env declare: a first type: ((sig notNil and: [sig argTypes size = tree arguments size])
 			ifTrue: [(sig argTypes at: i) substitute: sigMap self: selfType instance: instType]
 			ifFalse: [OTType dynamic])].
-	tree temporaries do: [:t | env declare: t first type: OTType nilType].
+	tree temporaries do: [:t | env declare: t first type: OTUnassigned new].
 	self statements: tree statements in: env method: true
 ]
 
@@ -183,6 +184,10 @@ OTMethodCheck >> typeOf: aNode in: env [
 	c == LiteralNode ifTrue: [^ self literalType: aNode value].
 	c == VariableNode ifTrue: [^ self variableType: aNode in: env].
 	c == AssignmentNode ifTrue: [
+		"a block assigned to a variable may name the variable (a recursive block): it is not nil inside"
+		(aNode value class == BlockNode and: [(env envDeclaring: aNode variable name) notNil]) ifTrue: [
+			(env envDeclaring: aNode variable name) vars at: aNode variable name put: OTUnassigned new.
+			env forgetNarrowing: aNode variable name].
 		t := self typeOf: aNode value in: env.
 		self assign: aNode variable type: t in: env node: aNode.
 		^ t].
@@ -238,15 +243,20 @@ OTMethodCheck >> ivarType: aName [
 OTMethodCheck >> assign: aVariableNode type: aType in: env node: aNode [
 	| n e declared |
 	n := aVariableNode name.
-	env forgetNarrowing: n.
 	e := env envDeclaring: n.
+	(e notNil and: [env depth = e depth])
+		ifTrue: [env forgetNarrowing: n]
+		ifFalse: [env join: n with: aType by: checker].
 	e notNil ifTrue: [
-		e vars at: n put: (env depth > e depth
-			ifTrue: [checker join: (e vars at: n) with: aType]
-			ifFalse: [aType]).
+		env depth > e depth
+			ifTrue: [
+				e vars at: n put: (checker join: (e vars at: n) with: aType).
+				env narrow: n to: aType]
+			ifFalse: [e vars at: n put: aType].
 		^ self].
 	(ivarNames includes: n) ifTrue: [
 		declared := self ivarType: n.
+		(checker isSubtype: aType of: declared) ifTrue: [env narrow: n to: aType].
 		(checker isSubtype: aType of: declared) ifFalse: [
 			self note: #assignType at: aNode text: n , ' is ' , declared printString , ', assigned ' , aType printString].
 		^ self].
@@ -268,6 +278,13 @@ OTMethodCheck >> checkReturn: aType node: aNode [
 OTMethodCheck >> block: aBlockNode expected: aTypeOrNil in: env [
 	"Check a block literal, its arguments typed by the expected block type when its arity fits; answer its block type."
 	| e argTypes result |
+	(self assignsOuter: aBlockNode in: env) ifTrue: [self prepass: [self blockOnce: aBlockNode expected: aTypeOrNil in: env]].
+	^ self blockOnce: aBlockNode expected: aTypeOrNil in: env
+]
+
+{ #category : #walking }
+OTMethodCheck >> blockOnce: aBlockNode expected: aTypeOrNil in: env [
+	| e argTypes result |
 	e := OTEnv parent: env.
 	argTypes := OrderedCollection new.
 	aBlockNode arguments doWithIndex: [:a :i | | t |
@@ -276,7 +293,7 @@ OTMethodCheck >> block: aBlockNode expected: aTypeOrNil in: env [
 			ifFalse: [OTType dynamic].
 		argTypes add: t.
 		e declare: a first type: t].
-	aBlockNode temporaries do: [:t | e declare: t first type: OTType nilType].
+	aBlockNode temporaries do: [:t | e declare: t first type: OTUnassigned new].
 	result := self statements: aBlockNode statements in: e method: false.
 	^ OTBlockType args: argTypes asArray result: result
 ]
@@ -299,8 +316,69 @@ OTMethodCheck >> message: aNode in: env [
 		^ self send: aNode selector to: selfType lookup: base superclass args: aNode arguments node: aNode in: env].
 	narrowed := self nilTestIn: aNode in: env.
 	narrowed notNil ifTrue: [^ narrowed].
+	((aNode selector == #whileTrue: or: [aNode selector == #whileFalse:]) and: [aNode receiver class == BlockNode and: [aNode arguments first class == BlockNode]])
+		ifTrue: [^ self loop: aNode in: env].
 	rt := self typeOf: aNode receiver in: env.
 	^ self send: aNode selector to: rt lookup: nil args: aNode arguments node: aNode in: env
+]
+
+{ #category : #narrowing }
+OTMethodCheck >> loop: aNode in: env [
+	"[cond] whileTrue: [body]: the body runs in the condition's scope (what the condition assigned is assigned), and after a condition that ends in a not-nil test (v notNil, v notNil and: [...]) the variable is not nil in the body. Answers Nil."
+	self countSend: (OTType of: BlockClosure) result: OTType nilType node: aNode selector: aNode selector.
+	(self assignsOuter: aNode in: env) ifTrue: [self prepass: [self loopOnce: aNode in: env]].
+	^ self loopOnce: aNode in: env
+]
+
+{ #category : #narrowing }
+OTMethodCheck >> loopOnce: aNode in: env [
+	| cond e body test last |
+	cond := aNode receiver.
+	e := OTEnv parent: env.
+	cond temporaries do: [:t | e declare: t first type: OTUnassigned new].
+	self statements: cond statements in: e method: false.
+	body := OTEnv parent: e.
+	cond statements notEmpty ifTrue: [
+		last := cond statements last.
+		(last class == MessageNode and: [last selector == #and:]) ifTrue: [last := last receiver].
+		test := self nilTested: last.
+		(test notNil and: [test last == (aNode selector == #whileTrue: ifTrue: [#notNil] ifFalse: [#isNil])]) ifTrue: [
+			(self currentTypeOf: test first in: e) ifNotNil: [:t | body narrow: test first to: t withoutNil]]].
+	aNode arguments first temporaries do: [:t | body declare: t first type: OTUnassigned new].
+	self statements: aNode arguments first statements in: body method: false.
+	^ OTType nilType
+]
+
+{ #category : #narrowing }
+OTMethodCheck >> assignsOuter: aNode in: env [
+	"Whether a block (or a loop's blocks) assigns a variable declared outside it: such a block is typed twice, so the second pass starts from what the first assigned (loops iterated once)."
+	| names |
+	names := Set new.
+	self assigned: aNode into: names.
+	^ names anySatisfy: [:n | (env envDeclaring: n) notNil or: [ivarNames includes: n]]
+]
+
+{ #category : #narrowing }
+OTMethodCheck >> assigned: aNode into: aSet [
+	| c |
+	c := aNode class.
+	c == AssignmentNode ifTrue: [aSet add: aNode variable name. ^ self assigned: aNode value into: aSet].
+	c == MessageNode ifTrue: [self assigned: aNode receiver into: aSet. aNode arguments do: [:a | self assigned: a into: aSet]. ^ self].
+	c == CascadeNode ifTrue: [self assigned: aNode receiver into: aSet. aNode messages do: [:m | (m at: 2) do: [:a | self assigned: a into: aSet]]. ^ self].
+	c == BlockNode ifTrue: [aNode statements do: [:st | self assigned: st into: aSet]. ^ self].
+	c == BraceNode ifTrue: [aNode elements do: [:a | self assigned: a into: aSet]. ^ self].
+	c == ReturnNode ifTrue: [^ self assigned: aNode value into: aSet]
+]
+
+{ #category : #narrowing }
+OTMethodCheck >> prepass: aBlock [
+	"Run aBlock quietly once (its assignments join into the outer variables); not nested."
+	| was |
+	prepassing == true ifTrue: [^ self].
+	was := quiet.
+	quiet := true.
+	prepassing := true.
+	aBlock ensure: [quiet := was. prepassing := false]
 ]
 
 { #category : #narrowing }
@@ -309,9 +387,11 @@ OTMethodCheck >> nilTested: aNode [
 	| r s |
 	aNode class == MessageNode ifFalse: [^ nil].
 	r := aNode receiver.
-	r class == VariableNode ifFalse: [^ nil].
-	(#('self' 'super' 'thisContext') includes: r name) ifTrue: [^ nil].
+	(r class == VariableNode and: [#('self' 'super' 'thisContext') includes: r name]) ifTrue: [^ nil].
 	s := aNode selector.
+	(s == #and: and: [r class == MessageNode]) ifTrue: [
+		^ (self nilTested: r) ifNotNil: [:t | t last == #notNil ifTrue: [{t first. #notNilAnd}]]].
+	r class == VariableNode ifFalse: [^ nil].
 	s == #isNil ifTrue: [^ {r name. #isNil}].
 	s == #notNil ifTrue: [^ {r name. #notNil}].
 	((s == #== or: [s == #=]) and: [aNode arguments first class == LiteralNode and: [aNode arguments first value isNil]]) ifTrue: [^ {r name. #isNil}].
@@ -349,8 +429,8 @@ OTMethodCheck >> nilTestIn: aNode in: env [
 	b1 := args size > 1 ifTrue: [args last] ifFalse: [nil].
 	r := nil.
 	args do: [:blk | | e nonNilBranch |
-		nonNilBranch := (test last == #notNil and: [(#(#ifTrue: #and: ) includes: sel) or: [(sel == #ifTrue:ifFalse: and: [blk == b0]) or: [sel == #ifFalse:ifTrue: and: [blk == b1]]]])
-			or: [test last == #isNil and: [(#(#ifFalse: #or:) includes: sel) or: [(sel == #ifTrue:ifFalse: and: [blk == b1]) or: [sel == #ifFalse:ifTrue: and: [blk == b0]]]]].
+		nonNilBranch := (test last == #notNilAnd and: [sel == #ifTrue: or: [sel == #ifTrue:ifFalse: and: [blk == b0]]]) or: [(test last == #notNil and: [(#(#ifTrue: #and: ) includes: sel) or: [(sel == #ifTrue:ifFalse: and: [blk == b0]) or: [sel == #ifFalse:ifTrue: and: [blk == b1]]]])
+			or: [test last == #isNil and: [(#(#ifFalse: #or:) includes: sel) or: [(sel == #ifTrue:ifFalse: and: [blk == b1]) or: [sel == #ifFalse:ifTrue: and: [blk == b0]]]]]].
 		e := OTEnv parent: env.
 		nonNilBranch ifTrue: [(self currentTypeOf: test first in: env) ifNotNil: [:t | e narrow: test first to: t withoutNil]].
 		r := checker join: r with: (self statements: blk statements in: e method: false)].
@@ -406,7 +486,7 @@ OTMethodCheck >> argTypesOf: argNodes in: env [
 OTMethodCheck >> send: aSymbol to: rt lookup: lookupClassOrNil args: argNodes node: aNode in: env [
 	"The type of a send, its diagnostics noted. lookupClassOrNil is the class a super send looks up from."
 	| r members was |
-	(rt isDynamic or: [rt isVar or: [rt class == OTSelf or: [rt class == OTInstance]]]) ifTrue: [
+	(rt isDynamic or: [rt isVar or: [rt class == OTSelf or: [rt class == OTInstance or: [rt class == OTSelfClass]]]]) ifTrue: [
 		argNodes do: [:a | self typeOf: a in: env].
 		self countSend: rt result: OTType dynamic node: aNode selector: aSymbol.
 		^ OTType dynamic].
@@ -445,8 +525,8 @@ OTMethodCheck >> sendToInstance: aSymbol to: rt lookup: lookupClassOrNil args: a
 	| lc found m |
 	lc := lookupClassOrNil ifNil: [rt cls].
 	found := ann signaturesFor: aSymbol meta: false from: lc.
-	found notNil ifTrue: [^ self apply: found to: rt instance: nil args: argNodes node: aNode in: env].
-	quiet ifFalse: [deps add: 'sel:' , aSymbol].
+	(checker signatures: found apply: aSymbol from: lc) ifTrue: [^ self apply: found to: rt instance: nil args: argNodes node: aNode in: env].
+	deps add: 'sel:' , aSymbol.
 	m := lc lookupSelector: aSymbol.
 	^ self unannotated: m selector: aSymbol to: rt from: lc args: argNodes node: aNode in: env
 ]
@@ -456,10 +536,11 @@ OTMethodCheck >> sendToClass: aSymbol to: rt lookup: lookupClassOrNil args: argN
 	| lc found m inst |
 	lc := lookupClassOrNil ifNil: [rt cls].
 	found := ann signaturesFor: aSymbol meta: true from: lc.
+	(checker signatures: found apply: aSymbol from: lc class) ifFalse: [found := nil].
 	inst := OTClassType cls: rt cls args: #() selfKind: (rt selfKind == #self ifTrue: [#instance] ifFalse: [nil]).
 	(rt selfKind == #self) ifTrue: [inst := instType].
 	found notNil ifTrue: [^ self apply: found to: rt instance: inst args: argNodes node: aNode in: env].
-	quiet ifFalse: [deps add: 'sel:' , aSymbol].
+	deps add: 'sel:' , aSymbol.
 	m := lc class lookupSelector: aSymbol.
 	^ self unannotated: m selector: aSymbol to: rt from: lc class args: argNodes node: aNode in: env
 ]
@@ -475,7 +556,7 @@ OTMethodCheck >> unannotated: aMethodOrNil selector: aSymbol to: rt from: aBehav
 		self countSend: rt result: OTType dynamic node: aNode selector: aSymbol.
 		^ OTType dynamic].
 	r := checker inferredReturnOf: aMethodOrNil.
-	r isDynamic ifFalse: [quiet ifFalse: [deps add: 'body:' , (checker keyOf: aSymbol in: aMethodOrNil methodClass)]].
+	deps add: 'body:' , (checker keyOf: aSymbol in: aMethodOrNil methodClass).
 	r := self resolveSelf: r to: rt.
 	self countSend: rt result: r node: aNode selector: aSymbol.
 	^ r
@@ -509,7 +590,7 @@ OTMethodCheck >> apply: found to: rt instance: instanceType args: argNodes node:
 	sigs := found last.
 	map := rt isClassType ifTrue: [ann map: rt to: defClass] ifFalse: [Dictionary new].
 	s := self chooseSignature: sigs map: map receiver: rt instance: instanceType args: argNodes in: env.
-	quiet ifFalse: [deps add: s key].
+	deps add: s key.
 	s argTypes size = argNodes size ifFalse: [
 		self note: #annotation at: aNode text: s key , ' has ' , s argTypes size printString , ' argument types'.
 		argNodes do: [:a | self typeOf: a in: env].

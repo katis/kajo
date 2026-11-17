@@ -1,0 +1,37 @@
+class SequenceableCollection[E]
+method at: <Integer> ^<E>
+method at: <Integer> put: <E> ^<E>
+method allButFirst ^<Self>
+method allButLast ^<Self>
+method atAllPut: <E> ^<Self>
+method first ^<E>
+method first: <Integer> ^<Self>
+method last ^<E>
+method last: <Integer> ^<Self>
+method indexOf: <Object> ^<Integer>
+method indexOf: <Object> ifAbsent: <[^X]> ^<Integer | X>
+method replaceFrom: <Integer> to: <Integer> with: <SequenceableCollection[E]> ^<Self>
+method replaceFrom: <Integer> to: <Integer> with: <SequenceableCollection[E]> startingAt: <Integer> ^<Self>
+method swap: <Integer> with: <Integer> ^<Self>
+method = <Object> ^<Boolean>
+method hash ^<Integer>
+method , <SequenceableCollection[E]> ^<Self>
+method copyFrom: <Integer> to: <Integer> ^<Self>
+method copyWith: <E> ^<Self>
+method reversed ^<Self>
+method collect: <[E, ^X]> ^<SequenceableCollection[X]>
+method do: <[E, ^Dynamic]> ^<Self>
+method doWithIndex: <[E, Integer, ^Dynamic]> ^<Self>
+method keysAndValuesDo: <[Integer, E, ^Dynamic]> ^<Self>
+method reverseDo: <[E, ^Dynamic]> ^<Self>
+method select: <[E, ^Boolean]> ^<Self>
+method with: <SequenceableCollection[Y]> collect: <[E, Y, ^X]> ^<SequenceableCollection[X]>
+method with: <SequenceableCollection[Y]> do: <[E, Y, ^Dynamic]> ^<Self>
+method withIndexDo: <[E, Integer, ^Dynamic]> ^<Self>
+method insertionSortFrom: <Integer> to: <Integer> by: <[E, E, ^Boolean]> ^<Self>
+method merge: <Array[E]> from: <Integer> mid: <Integer> to: <Integer> into: <Array[E]> by: <[E, E, ^Boolean]> ^<Self>
+method sort ^<Self>
+method sort: <[E, E, ^Boolean]> ^<Self>
+method readStream ^<ReadStream[Self]>
+method writeStream ^<WriteStream[Self]>
+method isSequenceable ^<Boolean>

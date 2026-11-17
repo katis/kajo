@@ -1,0 +1,6 @@
+class Set[E]
+method add: <E> ^<E>
+method collect: <[E, ^X]> ^<Set[X]>
+method do: <[E, ^Dynamic]> ^<Self>
+method includes: <Object> ^<Boolean>
+method remove: <E> ifAbsent: <[^X]> ^<E | X>

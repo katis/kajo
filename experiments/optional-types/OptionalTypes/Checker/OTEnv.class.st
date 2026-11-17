@@ -40,6 +40,16 @@ OTEnv >> forgetNarrowing: aName [
 ]
 
 { #category : #accessing }
+OTEnv >> join: aName with: aType by: aChecker [
+	"An assignment in this scope: each narrowing of aName in an enclosing scope below the variable's own now also holds aType."
+	| e |
+	e := self.
+	[e notNil and: [(e vars includesKey: aName) not]] whileTrue: [
+		(e narrowed at: aName ifAbsent: [nil]) ifNotNil: [:t | e narrowed at: aName put: (aChecker join: t with: aType)].
+		e := e parent]
+]
+
+{ #category : #accessing }
 OTEnv >> narrow: aName to: aType [
 	narrowed at: aName put: aType
 ]
