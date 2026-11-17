@@ -393,3 +393,214 @@ type after an instance variable's name inside its `#instVars` string, one
 blank between (`'array <Array[E | Nil]>'`). The writer writes each only when
 present; a reader takes a comment inside an `#instVars` string as the
 scanner does (skipped) and the writer leaves it out.
+
+## As built (2026-11-17)
+
+Built on the mini with swiftly's swift.org 6.4.2 first on PATH. Work files
+in `~/kajo-scratch/types-1/` (`part1/`, `work/`, `broken/`, `check/`).
+
+### What was built
+
+- **The bootstrap compiler** (`Sources/KajoCompiler/Syntax.swift`):
+  `Parser.parsePattern` reads the pattern with its types (the grammar of
+  part 1), `TypeNode` keeps each type with its range, `MethodNode` keeps
+  `argumentTypes` and `resultType`, `typeSpans` each annotation from its `<`
+  to its `>`. `expectTypeEnd` splits a binary run after a type's `>`.
+  `parsePragmas` refuses a capital, `[`, `(` or `:` after a pragma's `<`.
+  `parseClassType` and `parseTypedVariables` read the class-level types.
+  Code generation (`Compiler.swift`) is unchanged: it never reads a type.
+- **The kernel's compiler** (`kernel/Compiler/`): `TypeNode` (new), the
+  same methods in `Parser` (`parsePattern`, `typeFollows`,
+  `parseTypeAnnotation`, `expectTypeEnd`, `parseType`, `parseTypeMember`,
+  `parseTypePrimary`, `parseClassType`, `parseTypedVariables`,
+  `Parser class>>patternOf:`), the same refusals with the same messages,
+  `MethodNode>>argumentTypes`, `resultType` and `typesDescription`;
+  `Scanner>>rescanFrom:` and `position:line:`; `Scanner
+  class>>patternEndIn:` asks the Parser, so the Tonel writer's pattern skips
+  a type with its brackets; `CompileError>>reason` (the message without its
+  line).
+- **Tonel**: both readers take the pattern as the parser reads it
+  (`Tonel.swift`, `TonelReader>>readMethodInto:`) and the keys
+  `#typeParameters`, `#superclassType` and a type after a name in
+  `#instVars` (`TonelClass`, `TonelDocument`), refused alike when
+  malformed; the writer (`TonelWriter>>headerOf:`) writes them back after
+  `#superclass`; `TonelWriter class>>source:author:` skips a typed pattern
+  through the Parser.
+- **Where the class-level types live** (question 3): `ClassTypes` (new) in
+  `Smalltalk`'s `classTypes` table (`typesOf:`, `noteTypes:of:`,
+  `recordClassTypes:`, forgotten with the class). The image build hands
+  them over unless it builds a release image (`KernelBuild`,
+  `Plan.typeRecords`). `TonelLoader` gives a class its file's types;
+  `ClassBuilder` keeps them through a redefinition and drops the type of an
+  instance variable the redefinition removes. The class rules
+  (`ClassRules`) and primitives 145 to 147 are unchanged and see names
+  only: no file under the core directories changed.
+- **The slice inline**: `experiments/optional-types/scripts/inline.py`
+  wrote 577 signatures, 15 type parameters, 4 superclass types and 17
+  instance variable types into 27 kernel files (55 method variables
+  declared with `:`); the 45 signatures that restate an inherited method
+  were not moved (listed by the script; `~/kajo-scratch/types-1/work/inline.txt`).
+  The experiment's side files and checker are unchanged. One side-file
+  comment (PositionableStream's `collection`) was left out.
+- **The tools**: `SourceColorer` colours a type in the pattern blue from
+  its `<` to its `>`, its names not as globals; the browser accepts a
+  typed method and shows it with its types (ToolsProbe's
+  `compileTypedThroughTheBrowser`, through the real `DevClient`, in
+  `ToolsTests.theToolsDevelopTheImageTheyRunIn`).
+- **Tests**: `Tests/KajoCompilerTests/TypesTests.swift` (the pattern table
+  of 51 sources through both parsers, nesting 31 to 33 in each bracket,
+  starting position 4 over every typed method of `kernel/`, the
+  class-level keys through both readers, the release image's marker);
+  `kernel/Tests/TypeSyntaxTest.class.st` (position 4 in the kernel's
+  compiler, the tree, the capitalized pragma, the redefinition, the
+  agent's mark); `StackDepthTests` gained the type constructs; the corpus
+  gained 32 typed entries (186 now); the syntax fuzzer gained four typed
+  seeds (`typed-method.st`, `typed-overload.st`, `typed.class.st`,
+  `Collection-typed.class.st`); `TonelRoundTripTests`' reader comparison
+  includes the class-level types; `SourceColorerTest` gained
+  `testATypeIsColouredAsAType`.
+
+### The starting positions, answered
+
+1. Right (part 1). The table test refuses `<Primitive: 60>`, `<Unwind>` and
+   a type after the temporaries in both compilers with "a pragma name
+   starts with a lowercase letter", and `f: x <integer>` stays a unary
+   pragma.
+2. Right with the one-character `>` (part 1). `TypesTests.typesCompileToNothing`
+   writes each of the 577 typed methods with the blank before every type's
+   `<` (or `^<`) and after its `>` removed: the same types, the same
+   bytecodes. The table holds `^<Integer>| t |`, `<Integer><primitive: 60>`
+   and `<Array[E]>^<E>`, read as with blanks, and `<Integer>>` refused
+   ("expected an expression") in both compilers.
+3. A release image keeps every comment and source (part 1), so the
+   class-level types are in a table of their own that the release build
+   does not fill. Measured on the final commit (aligned release `kajo`,
+   `part1/*.img`):
+
+   | image | bytes |
+   |---|---|
+   | e28c961's kernel, release (and plain: the same) | 6 638 864 |
+   | this module's kernel without the slice's types, release | 6 908 912 |
+   | this module's typed kernel, release | 6 929 840 |
+   | this module's typed kernel, plain | 6 950 800 |
+
+   The release image grows 290 976 bytes: 270 048 for the module's own
+   code (TypeNode, ClassTypes, TypeSyntaxTest and 63 methods, with their
+   sources and the image build's garbage, which `--no-init` shows: the
+   same TypeSyntaxTest adds 5 424 bytes to a `--no-init` image and 51 600
+   to an initialized one, AGENTS.md's high-water lesson) and 20 928 for
+   the slice's type text in the methods' recorded sources, which a release
+   image keeps as it keeps every source. The class-level types are the
+   other 20 960 bytes of the plain image. The type text of an instance
+   variable (`Array[E | Nil]`) is in the plain image twice and in the
+   release image 0 times; a method's (`<[E, ^:X]>`) is in both.
+   `TypesTests.aReleaseImageHoldsNoClassLevelType` checks a marker type
+   name written only in a class definition: found in the development
+   build's bytes, absent from the release build's, and the release image
+   writes the class back with no type key.
+4. **Right, on all 577 typed methods, in both compilers.** Bootstrap
+   (`TypesTests.typesCompileToNothing`): each typed method, the same with
+   its types blanked and the same with them removed compile to the same
+   bytecodes, header, literals, blocks and pragmas, and the source map's
+   ranges equal (blanked) or shifted by the bytes removed (removed). The
+   kernel's compiler (`TypeSyntaxTest>>testTypesCompileToNothing`): every
+   typed method of the image compiles to the same CompiledCode as its
+   source with the types blanked (`sameCodeAs:`, the map included).
+   `CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid`: the two
+   compilers agree on every method of the typed image.
+5. **Wrong by a little, and only for typed source.** Five interleaved runs
+   of aligned release builds (`part1/timing-final.txt`,
+   `part1/timing-parser.txt`; the baseline's spread was 113 to 123 ms and
+   1 025 to 1 043 ms):
+
+   | build, kernel | image build ms | kernel's Compiler, every method, ms |
+   |---|---|---|
+   | e28c961, its kernel (2201 methods) | 114 to 122 | 1 039 to 1 053 |
+   | this module, e28c961's kernel | 118 to 123 | 1 039 to 1 057 |
+   | this module, its kernel without the slice's types (2264 methods) | 122 to 124 (one 151) | 1 094 to 1 107 |
+   | this module, its typed kernel (2264 methods) | 126 to 130 | 1 106 to 1 117 |
+
+   The bootstrap with types in its parser builds the starting commit's
+   kernel inside the baseline's spread, to the same bytes. The typed
+   kernel builds about 4 ms (3 percent) slower than the same kernel
+   without the types, and the kernel's Compiler takes about 13 ms (1.2
+   percent) longer over the same 2264 methods: the types' text is parsed.
+   The kernel's own parser on untyped source could not be isolated (its
+   kernel has 63 more methods than the starting commit's).
+
+### The nesting limit, measured
+
+`StackDepthTests` with the three type constructs (debug, `KAJO_STACK_PROBE`):
+generic arguments, block types and parentheses each cost 7 200 bytes a
+level, 255 096 bytes at the limit of 32: on a 512 KB thread with the
+debug margin of 1.25 (319 KB). 33 levels are refused in both compilers
+(the table test and the corpus).
+
+### Broken variants (run by hand, `~/kajo-scratch/types-1/scripts/broken.py`, outputs in `broken/`)
+
+| variant | the check that failed |
+|---|---|
+| a type reaches the literal frame (the bootstrap adds a pragma with the result type) | `TypesTests.typesCompileToNothing`: 1154 of 577 comparisons, "literal count" |
+| the bootstrap Tonel reader ends the pattern at the first `[` | the kernel image build: "ArrayedCollection.class.st:27: expected a method: Class >> selector [ ... ]" (`typesCompileToNothing`, every test that builds the kernel) |
+| the pragma rule without the capital test (a capital after `<` read as a pragma) | the kernel image build: "Array.class.st:12: expected [ after the method's pattern" |
+| the kernel's parser accepts a capitalized pragma the bootstrap refuses | `TypesTests.bothParsersReadTheTableAlike` (3 differ) and `bothCompilersAgreeOnTheCorpus` (2 of 186: "the bootstrap refused it and this compiler accepted it") |
+
+### Deviations
+
+- The brief's 15 overloaded selectors are 6 (part 1), and none of them
+  moved: all 6 restate SmallInteger's and the large integers' arithmetic in
+  Integer. The overload form is built and tested (the table, the corpus,
+  a fuzz seed) but no kernel method uses it yet.
+- 45 of the 622 signatures did not move inline (part 1; the list is
+  `inline.py`'s output). The brief said every signature moves.
+- Question 3's recommended place, beside the comment, is kept by a release
+  image, so the brief's other option was built: a table of its own
+  (`Smalltalk`'s `classTypes`), filled by every build but a release build.
+- Starting position 5 is wrong by 3 percent (image build) and 1.2 percent
+  (the kernel's compiler) for the typed kernel against the same kernel
+  without types; the parser itself costs nothing measurable on untyped
+  source.
+- `DevelopmentTest>>testRemovedClassesAreFreedAndTheirIndicesTaken`
+  collects garbage before it starts. The new slow test changed the kernel
+  test parts; in its new part the test ran after ClassFuzzTest, its own
+  collection freed a class ClassFuzzTest had removed, and that lower index
+  was the one its second class took (failed 2 of 2 in
+  `theKernelsTestsPassAndTheEventsAreTheProtocol`, passes with the
+  collection first). A thin test of the same kind as the weekly's.
+- PositionableStream's side-file comment on `collection` was left out; a
+  comment inside an `#instVars` string is read and not written back.
+
+### Not done
+
+- `kajo seal` keeps the class-level types of the image it seals (it
+  keeps that image's comments, sources and tools as well); the release
+  build is the one place that leaves them out (open question 2 below).
+- The browser shows and accepts a typed method as text; a class definition
+  in the browser's form has no types, and defining one there keeps the
+  class's types for the instance variables it still names.
+- Types on temporaries and block parameters, as the brief says.
+
+### Found, not this module's
+
+- The image's size grows by the build's garbage: one test class of five
+  methods adds 5 424 bytes to a `--no-init` image and 51 600 bytes to an
+  initialized one (`~/kajo-scratch/types-1/work/size/`). AGENTS.md's
+  high-water lesson again; most of this module's 270 048 bytes of growth
+  in a release image is that.
+- The experiment's `features.py` counted 15 overloaded selectors where the
+  side files have 6 (it cuts a line at its first `^`, inside a block type).
+
+### Open questions (built as recommended where there was one)
+
+1. The 45 signatures that restate an inherited method (Integer's
+   arithmetic with its 6 overloads, Object's class side, Number's
+   comparisons, `SequenceableCollection>>at:`). Recommended: the checker's
+   module writes them on the methods that answer them (SmallInteger, the
+   large integers, Behavior, Magnitude, Object), checked as the experiment
+   checked them, rather than any syntax for a signature without a method.
+2. `kajo seal` and the class-level types. Recommended: leave seal as it
+   is; it seals what it is given, and a release image is built with
+   `--release` (a generated app's Release configuration does).
+3. A class definition in the browser has no types. Recommended: leave it
+   to the module that shows types apart from the text (the brief's "not in
+   this module").
