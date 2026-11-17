@@ -3,8 +3,8 @@ Class {
 	#name : #Fraction,
 	#superclass : #Number,
 	#instVars : [
-		'numerator',
-		'denominator'
+		'numerator <Integer>',
+		'denominator <Integer>'
 	]
 }
 
@@ -54,7 +54,7 @@ Fraction >> asFloat [
 ]
 
 { #category : #accessing }
-Fraction >> asFraction [
+Fraction >> asFraction ^<Self> [
 	^ self
 ]
 
@@ -64,7 +64,7 @@ Fraction >> coerce: aNumber [
 ]
 
 { #category : #accessing }
-Fraction >> denominator [
+Fraction >> denominator ^<Integer> [
 	^ denominator
 ]
 
@@ -95,7 +95,7 @@ Fraction >> negative [
 ]
 
 { #category : #accessing }
-Fraction >> normalized [
+Fraction >> normalized ^<Number> [
 	| g n d |
 	denominator = 0 ifTrue: [^ ZeroDivide new dividend: numerator; signal: 'division by zero'].
 	g := numerator gcd: denominator.
@@ -106,7 +106,7 @@ Fraction >> normalized [
 ]
 
 { #category : #accessing }
-Fraction >> numerator [
+Fraction >> numerator ^<Integer> [
 	^ numerator
 ]
 
@@ -121,12 +121,12 @@ Fraction >> printString [
 ]
 
 { #category : #accessing }
-Fraction >> reciprocal [
+Fraction >> reciprocal ^<Number> [
 	^ (Fraction numerator: denominator denominator: numerator) normalized
 ]
 
 { #category : #accessing }
-Fraction >> setNumerator: n denominator: d [
+Fraction >> setNumerator: n <Integer> denominator: d <Integer> ^<Self> [
 	numerator := n.
 	denominator := d
 ]
@@ -137,6 +137,6 @@ Fraction >> truncated [
 ]
 
 { #category : #accessing }
-Fraction class >> numerator: n denominator: d [
+Fraction class >> numerator: n <Integer> denominator: d <Integer> ^<Instance> [
 	^ self basicNew setNumerator: n denominator: d
 ]

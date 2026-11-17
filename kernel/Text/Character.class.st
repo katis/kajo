@@ -5,52 +5,52 @@ Class {
 }
 
 { #category : #accessing }
-Character >> < aCharacter [
+Character >> < aCharacter <Character> ^<Boolean> [
 	^ self value < aCharacter value
 ]
 
 { #category : #accessing }
-Character >> = anObject [
+Character >> = anObject <Object> ^<Boolean> [
 	^ self == anObject
 ]
 
 { #category : #accessing }
-Character >> asCharacter [
+Character >> asCharacter ^<Self> [
 	^ self
 ]
 
 { #category : #accessing }
-Character >> asInteger [
+Character >> asInteger ^<Integer> [
 	^ self value
 ]
 
 { #category : #accessing }
-Character >> asLowercase [
+Character >> asLowercase ^<Character> [
 	^ self isUppercase ifTrue: [Character value: self value + 32] ifFalse: [self]
 ]
 
 { #category : #accessing }
-Character >> asString [
+Character >> asString ^<String> [
 	^ String with: self
 ]
 
 { #category : #accessing }
-Character >> asSymbol [
+Character >> asSymbol ^<Symbol> [
 	^ self asString asSymbol
 ]
 
 { #category : #accessing }
-Character >> asUppercase [
+Character >> asUppercase ^<Character> [
 	^ self isLowercase ifTrue: [Character value: self value - 32] ifFalse: [self]
 ]
 
 { #category : #accessing }
-Character >> codePoint [
+Character >> codePoint ^<Integer> [
 	^ self value
 ]
 
 { #category : #accessing }
-Character >> digitValue [
+Character >> digitValue ^<Integer> [
 	| v |
 	v := self value.
 	(v between: 48 and: 57) ifTrue: [^ v - 48].
@@ -70,7 +70,7 @@ Character >> hash [
 ]
 
 { #category : #accessing }
-Character >> isAlphaNumeric [
+Character >> isAlphaNumeric ^<Boolean> [
 	^ self isLetter or: [self isDigit]
 ]
 
@@ -80,12 +80,12 @@ Character >> isCharacter [
 ]
 
 { #category : #accessing }
-Character >> isDigit [
+Character >> isDigit ^<Boolean> [
 	^ self value between: 48 and: 57
 ]
 
 { #category : #accessing }
-Character >> isLetter [
+Character >> isLetter ^<Boolean> [
 	^ self isUppercase or: [self isLowercase or: [self value > 127 and: [self isSeparator not]]]
 ]
 
@@ -95,24 +95,24 @@ Character >> isLiteral [
 ]
 
 { #category : #accessing }
-Character >> isLowercase [
+Character >> isLowercase ^<Boolean> [
 	^ self value between: 97 and: 122
 ]
 
 { #category : #accessing }
-Character >> isSeparator [
+Character >> isSeparator ^<Boolean> [
 	| v |
 	v := self value.
 	^ v = 32 or: [v = 9 or: [v = 10 or: [v = 13 or: [v = 12 or: [v = 160]]]]]
 ]
 
 { #category : #accessing }
-Character >> isUppercase [
+Character >> isUppercase ^<Boolean> [
 	^ self value between: 65 and: 90
 ]
 
 { #category : #accessing }
-Character >> isVowel [
+Character >> isVowel ^<Boolean> [
 	^ 'aeiouAEIOU' includes: self
 ]
 
@@ -127,7 +127,7 @@ Character >> shallowCopy [
 ]
 
 { #category : #accessing }
-Character >> utf8Size [
+Character >> utf8Size ^<Integer> [
 	| v |
 	v := self value.
 	v < 16r80 ifTrue: [^ 1].
@@ -137,43 +137,43 @@ Character >> utf8Size [
 ]
 
 { #category : #accessing }
-Character >> value [
+Character >> value ^<Integer> [
 	<primitive: 76>
 	^ self primitiveFailed
 ]
 
 { #category : #accessing }
-Character class >> cr [
+Character class >> cr ^<Character> [
 	^ self value: 13
 ]
 
 { #category : #accessing }
-Character class >> digitValue: anInteger [
+Character class >> digitValue: anInteger <Integer> ^<Character> [
 	^ '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ' scalarAt: anInteger + 1
 ]
 
 { #category : #accessing }
-Character class >> lf [
+Character class >> lf ^<Character> [
 	^ self value: 10
 ]
 
 { #category : #accessing }
-Character class >> newline [
+Character class >> newline ^<Character> [
 	^ self value: 10
 ]
 
 { #category : #accessing }
-Character class >> space [
+Character class >> space ^<Character> [
 	^ self value: 32
 ]
 
 { #category : #accessing }
-Character class >> tab [
+Character class >> tab ^<Character> [
 	^ self value: 9
 ]
 
 { #category : #accessing }
-Character class >> value: anInteger [
+Character class >> value: anInteger <Integer> ^<Character> [
 	<primitive: 77>
 	^ self error: anInteger printString , ' is not a Unicode scalar'
 ]

@@ -2,26 +2,29 @@
 Class {
 	#name : #Array,
 	#superclass : #ArrayedCollection,
+	#typeParameters : [
+		'E'
+	],
 	#type : #variable
 }
 
 { #category : #accessing }
-Array >> asArray [
+Array >> asArray ^<Self> [
 	^ self
 ]
 
 { #category : #accessing }
-Array >> isArray [
+Array >> isArray ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-Array >> isLiteral [
+Array >> isLiteral ^<Boolean> [
 	^ self allSatisfy: [:e | e isLiteral]
 ]
 
 { #category : #accessing }
-Array >> printOn: aStream [
+Array >> printOn: aStream <WriteStream> ^<Self> [
 	aStream nextPutAll: '#('.
 	self do: [:e | aStream print: e] separatedBy: [aStream space].
 	aStream nextPut: $)

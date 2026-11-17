@@ -2,34 +2,37 @@
 Class {
 	#name : #HashedCollection,
 	#superclass : #Collection,
+	#typeParameters : [
+		'E'
+	],
 	#instVars : [
-		'tally',
-		'array'
+		'tally <Integer>',
+		'array <Array>'
 	]
 }
 
 { #category : #accessing }
-HashedCollection >> capacity [
+HashedCollection >> capacity ^<Integer> [
 	^ array size
 ]
 
 { #category : #accessing }
-HashedCollection >> equal: a to: b [
+HashedCollection >> equal: a <Object> to: b <Object> ^<Boolean> [
 	^ a = b
 ]
 
 { #category : #accessing }
-HashedCollection >> growIfNeeded [
+HashedCollection >> growIfNeeded ^<Self> [
 	tally * 4 >= (array size * 3) ifTrue: [self rehashTo: array size * 2]
 ]
 
 { #category : #accessing }
-HashedCollection >> hashFor: anObject [
+HashedCollection >> hashFor: anObject <Object> ^<Integer> [
 	^ anObject hash
 ]
 
 { #category : #accessing }
-HashedCollection >> indexFor: key [
+HashedCollection >> indexFor: key <Object> ^<Integer> [
 	"The slot holding key, or the empty slot where it would go."
 	| n i e |
 	n := array size.
@@ -40,7 +43,7 @@ HashedCollection >> indexFor: key [
 ]
 
 { #category : #accessing }
-HashedCollection >> keyOf: entry [
+HashedCollection >> keyOf: entry <Object> ^<Object> [
 	^ entry
 ]
 
@@ -50,7 +53,7 @@ HashedCollection >> postCopy [
 ]
 
 { #category : #accessing }
-HashedCollection >> rehashTo: newSize [
+HashedCollection >> rehashTo: newSize <Integer> ^<Self> [
 	"The new table is filled before it replaces the old one (the review fixes, item 10): a reader meanwhile sees the old, whole table, never an empty one."
 	| new n |
 	new := Array new: newSize.
@@ -64,12 +67,12 @@ HashedCollection >> rehashTo: newSize [
 ]
 
 { #category : #accessing }
-HashedCollection >> removeAll [
+HashedCollection >> removeAll ^<Self> [
 	self setCapacity: 8
 ]
 
 { #category : #accessing }
-HashedCollection >> removeAt: index [
+HashedCollection >> removeAt: index <Integer> ^<Self> [
 	"Empty the slot and re-place the cluster after it."
 	| n i e |
 	n := array size.
@@ -83,7 +86,7 @@ HashedCollection >> removeAt: index [
 ]
 
 { #category : #accessing }
-HashedCollection >> setCapacity: n [
+HashedCollection >> setCapacity: n <Integer> ^<Self> [
 	| c |
 	c := 8.
 	[c * 3 < (n * 4)] whileTrue: [c := c * 2].
@@ -92,16 +95,16 @@ HashedCollection >> setCapacity: n [
 ]
 
 { #category : #accessing }
-HashedCollection >> size [
+HashedCollection >> size ^<Integer> [
 	^ tally
 ]
 
 { #category : #accessing }
-HashedCollection class >> new [
+HashedCollection class >> new ^<Instance> [
 	^ self new: 8
 ]
 
 { #category : #accessing }
-HashedCollection class >> new: n [
+HashedCollection class >> new: n <Integer> ^<Instance> [
 	^ self basicNew setCapacity: n
 ]

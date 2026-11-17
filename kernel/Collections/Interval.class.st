@@ -2,15 +2,18 @@
 Class {
 	#name : #Interval,
 	#superclass : #SequenceableCollection,
+	#typeParameters : [
+		'N'
+	],
 	#instVars : [
-		'start',
-		'stop',
-		'step'
+		'start <N>',
+		'stop <Number>',
+		'step <Number>'
 	]
 }
 
 { #category : #accessing }
-Interval >> at: index [
+Interval >> at: index <Integer> ^<N> [
 	(index isInteger and: [index between: 1 and: self size]) ifFalse: [^ self indexError: index].
 	^ start + (step * (index - 1))
 ]
@@ -21,7 +24,7 @@ Interval >> at: index put: anObject [
 ]
 
 { #category : #accessing }
-Interval >> collect: aBlock [
+Interval >> collect: aBlock <[N, ^:X]> ^<Array[X]> [
 	| out i |
 	out := Array new: self size.
 	i := 0.
@@ -30,7 +33,7 @@ Interval >> collect: aBlock [
 ]
 
 { #category : #accessing }
-Interval >> do: aBlock [
+Interval >> do: aBlock <[N, ^Dynamic]> ^<Self> [
 	| i |
 	i := start.
 	step > 0
@@ -39,17 +42,17 @@ Interval >> do: aBlock [
 ]
 
 { #category : #accessing }
-Interval >> first [
+Interval >> first ^<N> [
 	^ start
 ]
 
 { #category : #accessing }
-Interval >> increment [
+Interval >> increment ^<Number> [
 	^ step
 ]
 
 { #category : #accessing }
-Interval >> last [
+Interval >> last ^<N> [
 	^ stop - ((stop - start) \\ step)
 ]
 
@@ -61,29 +64,29 @@ Interval >> printOn: aStream [
 ]
 
 { #category : #accessing }
-Interval >> setFrom: a to: b by: s [
+Interval >> setFrom: a <Number> to: b <Number> by: s <Number> ^<Self> [
 	start := a. stop := b. step := s
 ]
 
 { #category : #accessing }
-Interval >> size [
+Interval >> size ^<Integer> [
 	step > 0 ifTrue: [stop < start ifTrue: [^ 0]. ^ stop - start // step + 1].
 	start < stop ifTrue: [^ 0].
 	^ start - stop // step negated + 1
 ]
 
 { #category : #accessing }
-Interval >> species [
+Interval >> species ^<Behavior> [
 	^ Array
 ]
 
 { #category : #accessing }
-Interval class >> from: a to: b [
+Interval class >> from: a <:X> to: b <Number> ^<Instance[X]> [
 	^ self from: a to: b by: 1
 ]
 
 { #category : #accessing }
-Interval class >> from: a to: b by: s [
+Interval class >> from: a <:X> to: b <Number> by: s <Number> ^<Instance[X]> [
 	s = 0 ifTrue: [^ self error: 'step must not be zero'].
 	^ self basicNew setFrom: a to: b by: s
 ]

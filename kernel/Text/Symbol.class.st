@@ -5,43 +5,43 @@ Class {
 }
 
 { #category : #accessing }
-Symbol >> = anObject [
+Symbol >> = anObject <Object> ^<Boolean> [
 	^ self == anObject
 ]
 
 { #category : #accessing }
-Symbol >> asString [
+Symbol >> asString ^<String> [
 	^ '' , self
 ]
 
 { #category : #accessing }
-Symbol >> asSymbol [
+Symbol >> asSymbol ^<Self> [
 	^ self
 ]
 
 { #category : #accessing }
-Symbol >> displayString [
+Symbol >> displayString ^<String> [
 	^ self asString
 ]
 
 { #category : #accessing }
-Symbol >> hash [
+Symbol >> hash ^<Integer> [
 	<primitive: 122>
 	^ self primitiveFailed
 ]
 
 { #category : #accessing }
-Symbol >> isBinary [
+Symbol >> isBinary ^<Boolean> [
 	^ self notEmpty and: [(self first isLetter or: [self first = $_]) not]
 ]
 
 { #category : #accessing }
-Symbol >> isSymbol [
+Symbol >> isSymbol ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-Symbol >> keywords [
+Symbol >> keywords ^<Array[String]> [
 	"#at:put: -> #('at:' 'put:')"
 	| out s |
 	self numArgs = 0 ifTrue: [^ Array with: self asString].
@@ -53,7 +53,7 @@ Symbol >> keywords [
 ]
 
 { #category : #accessing }
-Symbol >> numArgs [
+Symbol >> numArgs ^<Integer> [
 	| first n |
 	self isEmpty ifTrue: [^ 0].
 	first := self first.
@@ -85,22 +85,22 @@ Symbol >> species [
 ]
 
 { #category : #accessing }
-Symbol >> value: anObject [
+Symbol >> value: anObject <Object> ^<Dynamic> [
 	^ anObject perform: self
 ]
 
 { #category : #accessing }
-Symbol >> value: anObject value: anArgument [
+Symbol >> value: anObject <Object> value: anArgument <Object> ^<Dynamic> [
 	^ anObject perform: self with: anArgument
 ]
 
 { #category : #accessing }
-Symbol class >> intern: aString [
+Symbol class >> intern: aString <String> ^<Symbol> [
 	^ aString asSymbol
 ]
 
 { #category : #accessing }
-Symbol class >> lookup: aString [
+Symbol class >> lookup: aString <String> ^<Symbol | Nil> [
 	"The Symbol with these bytes, nil if none was interned."
 	<primitive: 135>
 	^ nil

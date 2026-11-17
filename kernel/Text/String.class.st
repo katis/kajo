@@ -2,11 +2,12 @@
 Class {
 	#name : #String,
 	#superclass : #ArrayedCollection,
+	#superclassType : 'ArrayedCollection[Character]',
 	#type : #bytes
 }
 
 { #category : #bytes }
-String >> asByteArray [
+String >> asByteArray ^<ByteArray> [
 	| b |
 	b := ByteArray new: self byteSize.
 	1 to: b size do: [:i | b at: i put: (self byteAt: i)].
@@ -14,13 +15,13 @@ String >> asByteArray [
 ]
 
 { #category : #bytes }
-String >> byteAt: offset [
+String >> byteAt: offset <Integer> ^<Integer> [
 	<primitive: 132>
 	^ self indexError: offset
 ]
 
 { #category : #bytes }
-String >> byteSize [
+String >> byteSize ^<Integer> [
 	<primitive: 133>
 	^ 0
 ]
@@ -32,64 +33,64 @@ String >> utf8 [
 ]
 
 { #category : #bytes }
-String >> utf8Size [
+String >> utf8Size ^<Integer> [
 	^ self byteSize
 ]
 
 { #category : #comparing }
-String >> < aString [
+String >> < aString <String> ^<Boolean> [
 	^ (self compare: aString) < 0
 ]
 
 { #category : #comparing }
-String >> <= aString [
+String >> <= aString <String> ^<Boolean> [
 	^ (self compare: aString) <= 0
 ]
 
 { #category : #comparing }
-String >> = anObject [
+String >> = anObject <Object> ^<Boolean> [
 	"Equal bytes; a Symbol is never equal to a String."
 	^ (anObject isString and: [anObject isSymbol not and: [self isSymbol not]]) and: [self sameBytesAs: anObject]
 ]
 
 { #category : #comparing }
-String >> > aString [
+String >> > aString <String> ^<Boolean> [
 	^ (self compare: aString) > 0
 ]
 
 { #category : #comparing }
-String >> >= aString [
+String >> >= aString <String> ^<Boolean> [
 	^ (self compare: aString) >= 0
 ]
 
 { #category : #comparing }
-String >> compare: aString [
+String >> compare: aString <String> ^<Integer> [
 	"-1, 0 or 1: byte order, which is scalar order."
 	<primitive: 120>
 	^ self error: 'compare: takes a String'
 ]
 
 { #category : #comparing }
-String >> hash [
+String >> hash ^<Integer> [
 	<primitive: 122>
 	^ self primitiveFailed
 ]
 
 { #category : #comparing }
-String >> sameBytesAs: aString [
+String >> sameBytesAs: aString <String> ^<Boolean> [
 	<primitive: 121>
 	^ false
 ]
 
 { #category : #converting }
-String >> asFloat [
+String >> asFloat ^<Float> [
 	"The double a decimal String names (Swift's reading)."
 	<primitive: 78>
 	^ self error: self printString , ' is not a float'
 ]
 
 { #category : #converting }
-String >> asInteger [
+String >> asInteger ^<Integer | Nil> [
 	"The integer the leading digits (after an optional -) name, nil if there are none."
 	| n neg any |
 	n := 0. neg := false. any := false.
@@ -103,39 +104,39 @@ String >> asInteger [
 ]
 
 { #category : #converting }
-String >> asLowercase [
+String >> asLowercase ^<String> [
 	^ self collect: [:c | c asLowercase]
 ]
 
 { #category : #converting }
-String >> asNumber [
+String >> asNumber ^<Number | Nil> [
 	((self includes: $.) or: [self includes: $e]) ifTrue: [^ self asFloat].
 	^ self asInteger
 ]
 
 { #category : #converting }
-String >> asString [
+String >> asString ^<String> [
 	^ self
 ]
 
 { #category : #converting }
-String >> asSymbol [
+String >> asSymbol ^<Symbol> [
 	<primitive: 129>
 	^ self primitiveFailed
 ]
 
 { #category : #converting }
-String >> asUppercase [
+String >> asUppercase ^<String> [
 	^ self collect: [:c | c asUppercase]
 ]
 
 { #category : #converting }
-String >> displayString [
+String >> displayString ^<String> [
 	^ self
 ]
 
 { #category : #converting }
-String >> lines [
+String >> lines ^<Array[String]> [
 	"The lines, separated by LF, CR LF or CR; no empty last line for a trailing separator."
 	| out s |
 	out := OrderedCollection new.
@@ -154,12 +155,12 @@ String >> lines [
 ]
 
 { #category : #converting }
-String >> readStream [
+String >> readStream ^<ReadStream[String]> [
 	^ ReadStream on: self
 ]
 
 { #category : #converting }
-String >> replaceAll: old with: new [
+String >> replaceAll: old <String> with: new <String> ^<String> [
 	"A new String with every occurrence of the String old replaced by new."
 	| s i j |
 	old isEmpty ifTrue: [^ self].
@@ -178,7 +179,7 @@ String >> species [
 ]
 
 { #category : #converting }
-String >> splitOn: separator [
+String >> splitOn: separator <String | Character> ^<Array[String]> [
 	"The pieces between occurrences of separator (a String or a Character), empty ones included."
 	| sep out i j |
 	sep := separator isCharacter ifTrue: [separator asString] ifFalse: [separator].
@@ -192,7 +193,7 @@ String >> splitOn: separator [
 ]
 
 { #category : #converting }
-String >> substrings [
+String >> substrings ^<Array[String]> [
 	"The pieces between runs of separators."
 	| out s |
 	out := OrderedCollection new.
@@ -206,7 +207,7 @@ String >> substrings [
 ]
 
 { #category : #converting }
-String >> trimmed [
+String >> trimmed ^<String> [
 	| start stop |
 	start := 1.
 	[start <= self byteSize and: [(self scalarAt: start) isSeparator]] whileTrue: [start := start + (self scalarSizeAt: start)].
@@ -216,25 +217,25 @@ String >> trimmed [
 ]
 
 { #category : #copying }
-String >> , aString [
+String >> , aString <String> ^<String> [
 	<primitive: 123>
 	^ self error: ', takes a String (use printString or displayString for other objects)'
 ]
 
 { #category : #copying }
-String >> copyFrom: start to: stop [
+String >> copyFrom: start <Integer> to: stop <Integer> ^<String> [
 	"Bytes start to stop, both at scalar boundaries (stop the last byte of a scalar)."
 	<primitive: 127>
 	^ self boundaryError: start
 ]
 
 { #category : #copying }
-String >> copyReplaceAll: old with: new [
+String >> copyReplaceAll: old <String> with: new <String> ^<String> [
 	^ self replaceAll: old with: new
 ]
 
 { #category : #copying }
-String >> copyWith: aCharacter [
+String >> copyWith: aCharacter <Character> ^<String> [
 	^ self , aCharacter asString
 ]
 
@@ -249,7 +250,7 @@ String >> shallowCopy [
 ]
 
 { #category : #enumerating }
-String >> asArray [
+String >> asArray ^<Array[Character]> [
 	| out |
 	out := OrderedCollection new.
 	self do: [:c | out add: c].
@@ -257,7 +258,7 @@ String >> asArray [
 ]
 
 { #category : #enumerating }
-String >> collect: aBlock [
+String >> collect: aBlock <[Character, ^Character]> ^<String> [
 	"A String: the block answers Characters."
 	| s |
 	s := WriteStream on: String new.
@@ -266,7 +267,7 @@ String >> collect: aBlock [
 ]
 
 { #category : #enumerating }
-String >> do: aBlock [
+String >> do: aBlock <[Character, ^Dynamic]> ^<Self> [
 	"Each scalar's Character. When every byte is a scalar (scalarCount, one primitive pass, equals byteSize) the next offset is the next byte and scalarSizeAt: is not sent (the collections-speed module)."
 	| i end |
 	end := self byteSize.
@@ -280,7 +281,7 @@ String >> do: aBlock [
 ]
 
 { #category : #enumerating }
-String >> keysAndValuesDo: aBlock [
+String >> keysAndValuesDo: aBlock <[Integer, Character, ^Dynamic]> ^<Self> [
 	"The byte offset and the Character of each scalar."
 	| i end |
 	i := 1.
@@ -291,7 +292,7 @@ String >> keysAndValuesDo: aBlock [
 ]
 
 { #category : #enumerating }
-String >> reverseDo: aBlock [
+String >> reverseDo: aBlock <[Character, ^Dynamic]> ^<Self> [
 	| i |
 	i := self byteSize + 1.
 	[i > 1] whileTrue: [
@@ -300,7 +301,7 @@ String >> reverseDo: aBlock [
 ]
 
 { #category : #enumerating }
-String >> reversed [
+String >> reversed ^<String> [
 	| s |
 	s := WriteStream on: String new.
 	self reverseDo: [:c | s nextPut: c].
@@ -308,7 +309,7 @@ String >> reversed [
 ]
 
 { #category : #enumerating }
-String >> select: aBlock [
+String >> select: aBlock <[Character, ^Boolean]> ^<String> [
 	| s |
 	s := WriteStream on: String new.
 	self do: [:c | (aBlock value: c) ifTrue: [s nextPut: c]].
@@ -316,19 +317,19 @@ String >> select: aBlock [
 ]
 
 { #category : #printing }
-String >> displayOn: aStream [
+String >> displayOn: aStream <WriteStream> ^<Self> [
 	aStream nextPutAll: self
 ]
 
 { #category : #printing }
-String >> printOn: aStream [
+String >> printOn: aStream <WriteStream> ^<Self> [
 	aStream nextPut: $'.
 	self do: [:c | c = $' ifTrue: [aStream nextPut: $']. aStream nextPut: c].
 	aStream nextPut: $'
 ]
 
 { #category : #printing }
-String >> storeString [
+String >> storeString ^<String> [
 	^ self printString
 ]
 
@@ -348,14 +349,14 @@ String >> boundaryError: offset [
 ]
 
 { #category : #scalars }
-String >> isBoundary: offset [
+String >> isBoundary: offset <Integer> ^<Boolean> [
 	"Whether the offset starts a scalar (the end, byteSize + 1, included)."
 	<primitive: 125>
 	^ false
 ]
 
 { #category : #scalars }
-String >> previousBoundary: offset [
+String >> previousBoundary: offset <Integer> ^<Integer> [
 	| j |
 	j := offset - 1.
 	[j > 1 and: [(self isBoundary: j) not]] whileTrue: [j := j - 1].
@@ -363,26 +364,26 @@ String >> previousBoundary: offset [
 ]
 
 { #category : #scalars }
-String >> scalarAt: offset [
+String >> scalarAt: offset <Integer> ^<Character> [
 	"The Character starting at this byte offset; fails inside a scalar or past the end."
 	<primitive: 124>
 	^ self boundaryError: offset
 ]
 
 { #category : #scalars }
-String >> scalarCount [
+String >> scalarCount ^<Integer> [
 	<primitive: 126>
 	^ self primitiveFailed
 ]
 
 { #category : #scalars }
-String >> scalarSizeAt: offset [
+String >> scalarSizeAt: offset <Integer> ^<Integer> [
 	<primitive: 136>
 	^ self boundaryError: offset
 ]
 
 { #category : #scalars }
-String >> scalars [
+String >> scalars ^<Self> [
 	^ self
 ]
 
@@ -392,14 +393,14 @@ String >> size [
 ]
 
 { #category : #searching }
-String >> beginsWith: aString [
+String >> beginsWith: aString <String> ^<Boolean> [
 	aString byteSize > self byteSize ifTrue: [^ false].
 	1 to: aString byteSize do: [:i | (self byteAt: i) = (aString byteAt: i) ifFalse: [^ false]].
 	^ true
 ]
 
 { #category : #searching }
-String >> endsWith: aString [
+String >> endsWith: aString <String> ^<Boolean> [
 	| d |
 	d := self byteSize - aString byteSize.
 	d < 0 ifTrue: [^ false].
@@ -408,53 +409,53 @@ String >> endsWith: aString [
 ]
 
 { #category : #searching }
-String >> includesSubstring: aString [
+String >> includesSubstring: aString <String> ^<Boolean> [
 	^ (self indexOfSubstring: aString startingAt: 1) > 0
 ]
 
 { #category : #searching }
-String >> indexOf: aCharacter [
+String >> indexOf: aCharacter <Character> ^<Integer> [
 	"The byte offset of the first occurrence, 0 if none."
 	self keysAndValuesDo: [:i :c | c = aCharacter ifTrue: [^ i]].
 	^ 0
 ]
 
 { #category : #searching }
-String >> indexOfSubstring: aString [
+String >> indexOfSubstring: aString <String> ^<Integer> [
 	^ self indexOfSubstring: aString startingAt: 1
 ]
 
 { #category : #searching }
-String >> indexOfSubstring: aString startingAt: offset [
+String >> indexOfSubstring: aString <String> startingAt: offset <Integer> ^<Integer> [
 	<primitive: 134>
 	^ self boundaryError: offset
 ]
 
 { #category : #searching }
-String >> occurrencesOf: aCharacter [
+String >> occurrencesOf: aCharacter <Character> ^<Integer> [
 	^ self count: [:c | c = aCharacter]
 ]
 
 { #category : #testing }
-String >> allButFirst [
+String >> allButFirst ^<String> [
 	self isEmpty ifTrue: [^ self].
 	^ self copyFrom: 1 + (self scalarSizeAt: 1) to: self byteSize
 ]
 
 { #category : #testing }
-String >> allButLast [
+String >> allButLast ^<String> [
 	self isEmpty ifTrue: [^ self].
 	^ self copyFrom: 1 to: (self previousBoundary: self byteSize + 1) - 1
 ]
 
 { #category : #testing }
-String >> first [
+String >> first ^<Character> [
 	self isEmpty ifTrue: [^ self error: 'the String is empty'].
 	^ self scalarAt: 1
 ]
 
 { #category : #testing }
-String >> first: n [
+String >> first: n <Integer> ^<String> [
 	"The first n scalars."
 	| i |
 	i := 1.
@@ -463,7 +464,7 @@ String >> first: n [
 ]
 
 { #category : #testing }
-String >> isEmpty [
+String >> isEmpty ^<Boolean> [
 	^ self byteSize = 0
 ]
 
@@ -473,38 +474,38 @@ String >> isLiteral [
 ]
 
 { #category : #testing }
-String >> isString [
+String >> isString ^<Boolean> [
 	^ true
 ]
 
 { #category : #testing }
-String >> last [
+String >> last ^<Character> [
 	self isEmpty ifTrue: [^ self error: 'the String is empty'].
 	^ self scalarAt: (self previousBoundary: self byteSize + 1)
 ]
 
 { #category : #testing }
-String >> notEmpty [
+String >> notEmpty ^<Boolean> [
 	^ self byteSize > 0
 ]
 
 { #category : #'instance creation' }
-String class >> cr [
+String class >> cr ^<String> [
 	^ self with: Character cr
 ]
 
 { #category : #'instance creation' }
-String class >> fromUtf8: aByteArray [
+String class >> fromUtf8: aByteArray <ByteArray> ^<String> [
 	^ aByteArray asStringValidating
 ]
 
 { #category : #'instance creation' }
-String class >> lf [
+String class >> lf ^<String> [
 	^ self with: Character lf
 ]
 
 { #category : #'instance creation' }
-String class >> new [
+String class >> new ^<Instance> [
 	"The empty String."
 	^ self basicNew: 0
 ]
@@ -515,7 +516,7 @@ String class >> new: n [
 ]
 
 { #category : #'instance creation' }
-String class >> new: n withAll: aCharacter [
+String class >> new: n <Integer> withAll: aCharacter <Character> ^<String> [
 	| s |
 	s := WriteStream on: String new.
 	n timesRepeat: [s nextPut: aCharacter].
@@ -523,12 +524,12 @@ String class >> new: n withAll: aCharacter [
 ]
 
 { #category : #'instance creation' }
-String class >> space [
+String class >> space ^<String> [
 	^ self with: Character space
 ]
 
 { #category : #'instance creation' }
-String class >> streamContents: aBlock [
+String class >> streamContents: aBlock <[WriteStream[String], ^Dynamic]> ^<String> [
 	| s |
 	s := WriteStream on: String new.
 	aBlock value: s.
@@ -536,16 +537,16 @@ String class >> streamContents: aBlock [
 ]
 
 { #category : #'instance creation' }
-String class >> tab [
+String class >> tab ^<String> [
 	^ self with: Character tab
 ]
 
 { #category : #'instance creation' }
-String class >> with: aCharacter [
+String class >> with: aCharacter <Character> ^<String> [
 	^ (WriteStream on: String new) nextPut: aCharacter; contents
 ]
 
 { #category : #'instance creation' }
-String class >> with: a with: b [
+String class >> with: a <Character> with: b <Character> ^<String> [
 	^ (WriteStream on: String new) nextPut: a; nextPut: b; contents
 ]

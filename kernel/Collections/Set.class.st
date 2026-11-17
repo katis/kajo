@@ -1,7 +1,10 @@
 "Unordered, no duplicates (by = and hash)."
 Class {
 	#name : #Set,
-	#superclass : #HashedCollection
+	#superclass : #HashedCollection,
+	#typeParameters : [
+		'E'
+	]
 }
 
 { #category : #accessing }
@@ -13,7 +16,7 @@ Set >> = aSet [
 ]
 
 { #category : #accessing }
-Set >> add: anObject [
+Set >> add: anObject <E> ^<E> [
 	| i |
 	anObject == nil ifTrue: [^ self error: 'a Set cannot hold nil'].
 	i := self indexFor: anObject.
@@ -25,7 +28,7 @@ Set >> add: anObject [
 ]
 
 { #category : #accessing }
-Set >> collect: aBlock [
+Set >> collect: aBlock <[E, ^:X]> ^<Set[X]> [
 	| out |
 	out := Set new.
 	self do: [:e | out add: (aBlock value: e)].
@@ -33,7 +36,7 @@ Set >> collect: aBlock [
 ]
 
 { #category : #accessing }
-Set >> do: aBlock [
+Set >> do: aBlock <[E, ^Dynamic]> ^<Self> [
 	array do: [:e | e == nil ifFalse: [aBlock value: e]]
 ]
 
@@ -43,13 +46,13 @@ Set >> hash [
 ]
 
 { #category : #accessing }
-Set >> includes: anObject [
+Set >> includes: anObject <Object> ^<Boolean> [
 	anObject == nil ifTrue: [^ false].
 	^ (array at: (self indexFor: anObject)) notNil
 ]
 
 { #category : #accessing }
-Set >> remove: anObject ifAbsent: aBlock [
+Set >> remove: anObject <E> ifAbsent: aBlock <[^:X]> ^<E | X> [
 	| i |
 	anObject == nil ifTrue: [^ aBlock value].
 	i := self indexFor: anObject.

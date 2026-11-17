@@ -5,51 +5,51 @@ Class {
 }
 
 { #category : #accessing }
-UndefinedObject >> ifNil: nilBlock [
+UndefinedObject >> ifNil: nilBlock <[^:R]> ^<R> [
 	^ nilBlock value
 ]
 
 { #category : #accessing }
-UndefinedObject >> ifNil: nilBlock ifNotNil: aBlock [
+UndefinedObject >> ifNil: nilBlock <[^:R]> ifNotNil: aBlock <Dynamic> ^<R> [
 	^ nilBlock value
 ]
 
 { #category : #accessing }
-UndefinedObject >> ifNotNil: aBlock [
+UndefinedObject >> ifNotNil: aBlock <Dynamic> ^<Nil> [
 	^ nil
 ]
 
 { #category : #accessing }
-UndefinedObject >> ifNotNil: aBlock ifNil: nilBlock [
+UndefinedObject >> ifNotNil: aBlock <Dynamic> ifNil: nilBlock <[^:R]> ^<R> [
 	^ nilBlock value
 ]
 
 { #category : #accessing }
-UndefinedObject >> isEmptyOrNil [
+UndefinedObject >> isEmptyOrNil ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-UndefinedObject >> isLiteral [
+UndefinedObject >> isLiteral ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-UndefinedObject >> isNil [
+UndefinedObject >> isNil ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-UndefinedObject >> notNil [
+UndefinedObject >> notNil ^<Boolean> [
 	^ false
 ]
 
 { #category : #accessing }
-UndefinedObject >> printOn: aStream [
+UndefinedObject >> printOn: aStream <WriteStream> ^<Self> [
 	aStream nextPutAll: 'nil'
 ]
 
 { #category : #accessing }
-UndefinedObject >> shallowCopy [
+UndefinedObject >> shallowCopy ^<Self> [
 	^ self
 ]

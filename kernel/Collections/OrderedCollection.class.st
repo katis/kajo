@@ -2,46 +2,49 @@
 Class {
 	#name : #OrderedCollection,
 	#superclass : #SequenceableCollection,
+	#typeParameters : [
+		'E'
+	],
 	#instVars : [
-		'array',
-		'firstIndex',
-		'lastIndex'
+		'array <Array[E | Nil]>',
+		'firstIndex <Integer>',
+		'lastIndex <Integer>'
 	]
 }
 
 { #category : #accessing }
-OrderedCollection >> , aCollection [
+OrderedCollection >> , aCollection <Collection[E]> ^<Self> [
 	^ self copy addAll: aCollection; yourself
 ]
 
 { #category : #accessing }
-OrderedCollection >> add: anObject [
+OrderedCollection >> add: anObject <E> ^<E> [
 	^ self addLast: anObject
 ]
 
 { #category : #accessing }
-OrderedCollection >> add: anObject beforeIndex: index [
+OrderedCollection >> add: anObject <E> beforeIndex: index <Integer> ^<E> [
 	self addLast: nil.
 	self size to: index + 1 by: -1 do: [:i | self at: i put: (self at: i - 1)].
 	^ self at: index put: anObject
 ]
 
 { #category : #accessing }
-OrderedCollection >> addFirst: anObject [
+OrderedCollection >> addFirst: anObject <E> ^<E> [
 	firstIndex = 1 ifTrue: [self grow].
 	firstIndex := firstIndex - 1.
 	^ array at: firstIndex put: anObject
 ]
 
 { #category : #accessing }
-OrderedCollection >> addLast: anObject [
+OrderedCollection >> addLast: anObject <E> ^<E> [
 	lastIndex = array size ifTrue: [self grow].
 	lastIndex := lastIndex + 1.
 	^ array at: lastIndex put: anObject
 ]
 
 { #category : #accessing }
-OrderedCollection >> asArray [
+OrderedCollection >> asArray ^<Array[E]> [
 	| a |
 	a := Array new: self size.
 	a replaceFrom: 1 to: self size with: array startingAt: firstIndex.
@@ -49,19 +52,19 @@ OrderedCollection >> asArray [
 ]
 
 { #category : #accessing }
-OrderedCollection >> at: index [
+OrderedCollection >> at: index <Integer> ^<E> [
 	(index isInteger and: [index between: 1 and: self size]) ifFalse: [^ self indexError: index].
 	^ array at: firstIndex + index - 1
 ]
 
 { #category : #accessing }
-OrderedCollection >> at: index put: anObject [
+OrderedCollection >> at: index <Integer> put: anObject <E> ^<E> [
 	(index isInteger and: [index between: 1 and: self size]) ifFalse: [^ self indexError: index].
 	^ array at: firstIndex + index - 1 put: anObject
 ]
 
 { #category : #accessing }
-OrderedCollection >> collect: aBlock [
+OrderedCollection >> collect: aBlock <[E, ^:X]> ^<OrderedCollection[X]> [
 	| out |
 	out := OrderedCollection new: self size.
 	self do: [:e | out addLast: (aBlock value: e)].
@@ -69,7 +72,7 @@ OrderedCollection >> collect: aBlock [
 ]
 
 { #category : #accessing }
-OrderedCollection >> copyFrom: start to: stop [
+OrderedCollection >> copyFrom: start <Integer> to: stop <Integer> ^<OrderedCollection[E]> [
 	| out |
 	out := OrderedCollection new: stop - start + 1.
 	start to: stop do: [:i | out addLast: (self at: i)].
@@ -77,17 +80,17 @@ OrderedCollection >> copyFrom: start to: stop [
 ]
 
 { #category : #accessing }
-OrderedCollection >> copyWith: anObject [
+OrderedCollection >> copyWith: anObject <E> ^<Self> [
 	^ self copy add: anObject; yourself
 ]
 
 { #category : #accessing }
-OrderedCollection >> do: aBlock [
+OrderedCollection >> do: aBlock <[E, ^Dynamic]> ^<Self> [
 	firstIndex to: lastIndex do: [:i | aBlock value: (array at: i)]
 ]
 
 { #category : #accessing }
-OrderedCollection >> grow [
+OrderedCollection >> grow ^<Self> [
 	| bigger n start |
 	n := self size.
 	bigger := Array new: (array size * 2 max: 8).
@@ -104,18 +107,18 @@ OrderedCollection >> postCopy [
 ]
 
 { #category : #accessing }
-OrderedCollection >> remove: anObject ifAbsent: aBlock [
+OrderedCollection >> remove: anObject <E> ifAbsent: aBlock <[^:X]> ^<E | X> [
 	1 to: self size do: [:i | (self at: i) = anObject ifTrue: [^ self removeIndex: i]].
 	^ aBlock value
 ]
 
 { #category : #accessing }
-OrderedCollection >> removeAll [
+OrderedCollection >> removeAll ^<Self> [
 	self setCapacity: 8
 ]
 
 { #category : #accessing }
-OrderedCollection >> removeFirst [
+OrderedCollection >> removeFirst ^<E> [
 	| x |
 	self isEmpty ifTrue: [^ self error: 'the collection is empty'].
 	x := array at: firstIndex.
@@ -125,12 +128,12 @@ OrderedCollection >> removeFirst [
 ]
 
 { #category : #accessing }
-OrderedCollection >> removeFirst: n [
+OrderedCollection >> removeFirst: n <Integer> ^<SequenceableCollection[E]> [
 	^ (1 to: n) collect: [:i | self removeFirst]
 ]
 
 { #category : #accessing }
-OrderedCollection >> removeIndex: index [
+OrderedCollection >> removeIndex: index <Integer> ^<E> [
 	| x |
 	x := self at: index.
 	index to: self size - 1 do: [:i | self at: i put: (self at: i + 1)].
@@ -140,7 +143,7 @@ OrderedCollection >> removeIndex: index [
 ]
 
 { #category : #accessing }
-OrderedCollection >> removeLast [
+OrderedCollection >> removeLast ^<E> [
 	| x |
 	self isEmpty ifTrue: [^ self error: 'the collection is empty'].
 	x := array at: lastIndex.
@@ -150,17 +153,17 @@ OrderedCollection >> removeLast [
 ]
 
 { #category : #accessing }
-OrderedCollection >> removeLast: n [
+OrderedCollection >> removeLast: n <Integer> ^<SequenceableCollection[E]> [
 	^ ((1 to: n) collect: [:i | self removeLast]) reversed
 ]
 
 { #category : #accessing }
-OrderedCollection >> reverseDo: aBlock [
+OrderedCollection >> reverseDo: aBlock <[E, ^Dynamic]> ^<Self> [
 	lastIndex to: firstIndex by: -1 do: [:i | aBlock value: (array at: i)]
 ]
 
 { #category : #accessing }
-OrderedCollection >> reversed [
+OrderedCollection >> reversed ^<OrderedCollection[E]> [
 	| out |
 	out := OrderedCollection new: self size.
 	self reverseDo: [:e | out addLast: e].
@@ -168,7 +171,7 @@ OrderedCollection >> reversed [
 ]
 
 { #category : #accessing }
-OrderedCollection >> select: aBlock [
+OrderedCollection >> select: aBlock <[E, ^Boolean]> ^<OrderedCollection[E]> [
 	| out |
 	out := OrderedCollection new.
 	self do: [:e | (aBlock value: e) ifTrue: [out addLast: e]].
@@ -176,48 +179,48 @@ OrderedCollection >> select: aBlock [
 ]
 
 { #category : #accessing }
-OrderedCollection >> setCapacity: n [
+OrderedCollection >> setCapacity: n <Integer> ^<Self> [
 	array := Array new: (n max: 2).
 	firstIndex := array size // 4 + 1.
 	lastIndex := firstIndex - 1
 ]
 
 { #category : #accessing }
-OrderedCollection >> size [
+OrderedCollection >> size ^<Integer> [
 	^ lastIndex - firstIndex + 1
 ]
 
 { #category : #accessing }
-OrderedCollection >> species [
+OrderedCollection >> species ^<Behavior> [
 	^ OrderedCollection
 ]
 
 { #category : #accessing }
-OrderedCollection class >> new [
+OrderedCollection class >> new ^<Instance> [
 	^ self new: 8
 ]
 
 { #category : #accessing }
-OrderedCollection class >> new: capacity [
+OrderedCollection class >> new: capacity <Integer> ^<Instance> [
 	^ self basicNew setCapacity: capacity
 ]
 
 { #category : #accessing }
-OrderedCollection class >> with: a [
+OrderedCollection class >> with: a <:X> ^<Instance[X]> [
 	^ self new add: a; yourself
 ]
 
 { #category : #accessing }
-OrderedCollection class >> with: a with: b [
+OrderedCollection class >> with: a <:X> with: b <X> ^<Instance[X]> [
 	^ self new add: a; add: b; yourself
 ]
 
 { #category : #accessing }
-OrderedCollection class >> with: a with: b with: c [
+OrderedCollection class >> with: a <:X> with: b <X> with: c <X> ^<Instance[X]> [
 	^ self new add: a; add: b; add: c; yourself
 ]
 
 { #category : #accessing }
-OrderedCollection class >> withAll: aCollection [
+OrderedCollection class >> withAll: aCollection <Collection[:X]> ^<Instance[X]> [
 	^ self new addAll: aCollection; yourself
 ]

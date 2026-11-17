@@ -5,7 +5,7 @@ Class {
 }
 
 { #category : #arithmetic }
-Integer >> / aNumber [
+Integer >> / aNumber <Number> ^<Number> [
 	aNumber isInteger ifTrue: [
 		aNumber = 0 ifTrue: [^ ZeroDivide new dividend: self; signal: 'division by zero'].
 		^ (Fraction numerator: self denominator: aNumber) normalized].
@@ -13,22 +13,22 @@ Integer >> / aNumber [
 ]
 
 { #category : #arithmetic }
-Integer >> << n [
+Integer >> << n <Integer> ^<Integer> [
 	^ self bitShift: n
 ]
 
 { #category : #arithmetic }
-Integer >> >> n [
+Integer >> >> n <Integer> ^<Integer> [
 	^ self bitShift: n negated
 ]
 
 { #category : #arithmetic }
-Integer >> asCharacter [
+Integer >> asCharacter ^<Character> [
 	^ Character value: self
 ]
 
 { #category : #arithmetic }
-Integer >> factorial [
+Integer >> factorial ^<Integer> [
 	| r |
 	self < 0 ifTrue: [^ self error: 'factorial of a negative number'].
 	r := 1.
@@ -37,7 +37,7 @@ Integer >> factorial [
 ]
 
 { #category : #arithmetic }
-Integer >> gcd: anInteger [
+Integer >> gcd: anInteger <Integer> ^<Integer> [
 	| a b t |
 	a := self abs. b := anInteger abs.
 	[b = 0] whileFalse: [t := a \\ b. a := b. b := t].
@@ -45,7 +45,7 @@ Integer >> gcd: anInteger [
 ]
 
 { #category : #arithmetic }
-Integer >> isPrime [
+Integer >> isPrime ^<Boolean> [
 	| i |
 	self < 2 ifTrue: [^ false].
 	i := 2.
@@ -54,12 +54,12 @@ Integer >> isPrime [
 ]
 
 { #category : #arithmetic }
-Integer >> lcm: anInteger [
+Integer >> lcm: anInteger <Integer> ^<Integer> [
 	^ (self * anInteger) abs // (self gcd: anInteger)
 ]
 
 { #category : #arithmetic }
-Integer >> sqrtFloor [
+Integer >> sqrtFloor ^<Integer> [
 	| lo hi mid |
 	self < 0 ifTrue: [^ self error: 'sqrtFloor of a negative number'].
 	lo := 0. hi := self + 1.
@@ -70,41 +70,41 @@ Integer >> sqrtFloor [
 ]
 
 { #category : #arithmetic }
-Integer >> timesRepeat: aBlock [
+Integer >> timesRepeat: aBlock <[^Dynamic]> ^<Self> [
 	| i |
 	i := 1.
 	[i <= self] whileTrue: [aBlock value. i := i + 1]
 ]
 
 { #category : #coercion }
-Integer >> asFraction [
+Integer >> asFraction ^<Fraction> [
 	^ Fraction numerator: self denominator: 1
 ]
 
 { #category : #printing }
-Integer >> asString [
+Integer >> asString ^<String> [
 	^ self printString
 ]
 
 { #category : #printing }
-Integer >> printOn: aStream base: base [
+Integer >> printOn: aStream <WriteStream> base: base <Integer> ^<Self> [
 	aStream nextPutAll: (self printString: base)
 ]
 
 { #category : #printing }
-Integer >> printPaddedWith: aCharacter to: width [
+Integer >> printPaddedWith: aCharacter <Character> to: width <Integer> ^<String> [
 	| s |
 	s := self printString.
 	^ (String new: width - s scalarCount withAll: aCharacter) , s
 ]
 
 { #category : #printing }
-Integer >> printString [
+Integer >> printString ^<String> [
 	^ self printString: 10
 ]
 
 { #category : #printing }
-Integer >> printString: base [
+Integer >> printString: base <Integer> ^<String> [
 	"The digits counted first, then written from the right into a ByteArray that becomes the String: no stream and no reversal, a few sends a number rather than a few a digit (the collections-speed module). A LargeInteger is divided twice as often as it would be with a stream."
 	| n k d bytes |
 	(base < 2 or: [base > 36]) ifTrue: [^ self error: 'the base must be from 2 to 36'].
@@ -126,7 +126,7 @@ Integer >> printString: base [
 ]
 
 { #category : #printing }
-Integer >> storeString [
+Integer >> storeString ^<String> [
 	^ self printString
 ]
 
@@ -136,12 +136,12 @@ Integer >> even [
 ]
 
 { #category : #testing }
-Integer >> isInteger [
+Integer >> isInteger ^<Boolean> [
 	^ true
 ]
 
 { #category : #truncation }
-Integer >> asInteger [
+Integer >> asInteger ^<Self> [
 	^ self
 ]
 
@@ -151,7 +151,7 @@ Integer >> ceiling [
 ]
 
 { #category : #truncation }
-Integer >> denominator [
+Integer >> denominator ^<Integer> [
 	^ 1
 ]
 
@@ -161,7 +161,7 @@ Integer >> floor [
 ]
 
 { #category : #truncation }
-Integer >> numerator [
+Integer >> numerator ^<Integer> [
 	^ self
 ]
 
@@ -176,6 +176,6 @@ Integer >> truncated [
 ]
 
 { #category : #printing }
-Integer class >> readFrom: aString [
+Integer class >> readFrom: aString <String> ^<Integer | Nil> [
 	^ aString asInteger
 ]

@@ -1,71 +1,74 @@
 "Collections with integer positions from 1: at:, at:put: and size are the subclass's."
 Class {
 	#name : #SequenceableCollection,
-	#superclass : #Collection
+	#superclass : #Collection,
+	#typeParameters : [
+		'E'
+	]
 }
 
 { #category : #accessing }
-SequenceableCollection >> allButFirst [
+SequenceableCollection >> allButFirst ^<Self> [
 	^ self copyFrom: 2 to: self size
 ]
 
 { #category : #accessing }
-SequenceableCollection >> allButLast [
+SequenceableCollection >> allButLast ^<Self> [
 	^ self copyFrom: 1 to: self size - 1
 ]
 
 { #category : #accessing }
-SequenceableCollection >> atAllPut: anObject [
+SequenceableCollection >> atAllPut: anObject <E> ^<Self> [
 	1 to: self size do: [:i | self at: i put: anObject]
 ]
 
 { #category : #accessing }
-SequenceableCollection >> first [
+SequenceableCollection >> first ^<E> [
 	self isEmpty ifTrue: [^ self error: 'the collection is empty'].
 	^ self at: 1
 ]
 
 { #category : #accessing }
-SequenceableCollection >> first: n [
+SequenceableCollection >> first: n <Integer> ^<Self> [
 	^ self copyFrom: 1 to: n
 ]
 
 { #category : #accessing }
-SequenceableCollection >> indexOf: anObject [
+SequenceableCollection >> indexOf: anObject <Object> ^<Integer> [
 	^ self indexOf: anObject ifAbsent: [0]
 ]
 
 { #category : #accessing }
-SequenceableCollection >> indexOf: anObject ifAbsent: aBlock [
+SequenceableCollection >> indexOf: anObject <Object> ifAbsent: aBlock <[^:X]> ^<Integer | X> [
 	1 to: self size do: [:i | (self at: i) = anObject ifTrue: [^ i]].
 	^ aBlock value
 ]
 
 { #category : #accessing }
-SequenceableCollection >> last [
+SequenceableCollection >> last ^<E> [
 	self isEmpty ifTrue: [^ self error: 'the collection is empty'].
 	^ self at: self size
 ]
 
 { #category : #accessing }
-SequenceableCollection >> last: n [
+SequenceableCollection >> last: n <Integer> ^<Self> [
 	^ self copyFrom: self size - n + 1 to: self size
 ]
 
 { #category : #accessing }
-SequenceableCollection >> replaceFrom: start to: stop with: aCollection [
+SequenceableCollection >> replaceFrom: start <Integer> to: stop <Integer> with: aCollection <SequenceableCollection[E]> ^<Self> [
 	^ self replaceFrom: start to: stop with: aCollection startingAt: 1
 ]
 
 { #category : #accessing }
-SequenceableCollection >> replaceFrom: start to: stop with: aCollection startingAt: from [
+SequenceableCollection >> replaceFrom: start <Integer> to: stop <Integer> with: aCollection <SequenceableCollection[E]> startingAt: from <Integer> ^<Self> [
 	| j |
 	j := from.
 	start to: stop do: [:i | self at: i put: (aCollection at: j). j := j + 1]
 ]
 
 { #category : #accessing }
-SequenceableCollection >> swap: i with: j [
+SequenceableCollection >> swap: i <Integer> with: j <Integer> ^<Self> [
 	| t |
 	t := self at: i.
 	self at: i put: (self at: j).
@@ -73,7 +76,7 @@ SequenceableCollection >> swap: i with: j [
 ]
 
 { #category : #comparing }
-SequenceableCollection >> = aCollection [
+SequenceableCollection >> = aCollection <Object> ^<Boolean> [
 	self == aCollection ifTrue: [^ true].
 	self class == aCollection class ifFalse: [^ false].
 	self size = aCollection size ifFalse: [^ false].
@@ -82,7 +85,7 @@ SequenceableCollection >> = aCollection [
 ]
 
 { #category : #comparing }
-SequenceableCollection >> hash [
+SequenceableCollection >> hash ^<Integer> [
 	| h |
 	h := self size.
 	1 to: (self size min: 4) do: [:i | h := (h * 31 + (self at: i) hash) bitAnd: 16r3FFFFFFF].
@@ -90,7 +93,7 @@ SequenceableCollection >> hash [
 ]
 
 { #category : #copying }
-SequenceableCollection >> , aCollection [
+SequenceableCollection >> , aCollection <SequenceableCollection[E]> ^<Self> [
 	| out |
 	out := self species new: self size + aCollection size.
 	out replaceFrom: 1 to: self size with: self startingAt: 1.
@@ -99,7 +102,7 @@ SequenceableCollection >> , aCollection [
 ]
 
 { #category : #copying }
-SequenceableCollection >> copyFrom: start to: stop [
+SequenceableCollection >> copyFrom: start <Integer> to: stop <Integer> ^<Self> [
 	| out |
 	stop < start ifTrue: [^ self species new: 0].
 	out := self species new: stop - start + 1.
@@ -108,7 +111,7 @@ SequenceableCollection >> copyFrom: start to: stop [
 ]
 
 { #category : #copying }
-SequenceableCollection >> copyWith: anObject [
+SequenceableCollection >> copyWith: anObject <E> ^<Self> [
 	| out |
 	out := self species new: self size + 1.
 	out replaceFrom: 1 to: self size with: self startingAt: 1.
@@ -117,7 +120,7 @@ SequenceableCollection >> copyWith: anObject [
 ]
 
 { #category : #copying }
-SequenceableCollection >> reversed [
+SequenceableCollection >> reversed ^<Self> [
 	| out n |
 	n := self size.
 	out := self species new: n.
@@ -126,7 +129,7 @@ SequenceableCollection >> reversed [
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> collect: aBlock [
+SequenceableCollection >> collect: aBlock <[E, ^:X]> ^<SequenceableCollection[X]> [
 	| out |
 	out := self species new: self size.
 	1 to: self size do: [:i | out at: i put: (aBlock value: (self at: i))].
@@ -134,27 +137,27 @@ SequenceableCollection >> collect: aBlock [
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> do: aBlock [
+SequenceableCollection >> do: aBlock <[E, ^Dynamic]> ^<Self> [
 	1 to: self size do: [:i | aBlock value: (self at: i)]
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> doWithIndex: aBlock [
+SequenceableCollection >> doWithIndex: aBlock <[E, Integer, ^Dynamic]> ^<Self> [
 	1 to: self size do: [:i | aBlock value: (self at: i) value: i]
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> keysAndValuesDo: aBlock [
+SequenceableCollection >> keysAndValuesDo: aBlock <[Integer, E, ^Dynamic]> ^<Self> [
 	1 to: self size do: [:i | aBlock value: i value: (self at: i)]
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> reverseDo: aBlock [
+SequenceableCollection >> reverseDo: aBlock <[E, ^Dynamic]> ^<Self> [
 	self size to: 1 by: -1 do: [:i | aBlock value: (self at: i)]
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> select: aBlock [
+SequenceableCollection >> select: aBlock <[E, ^Boolean]> ^<Self> [
 	| s |
 	s := WriteStream on: (self species new: 0).
 	self do: [:e | (aBlock value: e) ifTrue: [s nextPut: e]].
@@ -162,7 +165,7 @@ SequenceableCollection >> select: aBlock [
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> with: aCollection collect: aBlock [
+SequenceableCollection >> with: aCollection <SequenceableCollection[:Y]> collect: aBlock <[E, Y, ^:X]> ^<SequenceableCollection[X]> [
 	| out |
 	out := self species new: self size.
 	1 to: self size do: [:i | out at: i put: (aBlock value: (self at: i) value: (aCollection at: i))].
@@ -170,17 +173,17 @@ SequenceableCollection >> with: aCollection collect: aBlock [
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> with: aCollection do: aBlock [
+SequenceableCollection >> with: aCollection <SequenceableCollection[:Y]> do: aBlock <[E, Y, ^Dynamic]> ^<Self> [
 	1 to: self size do: [:i | aBlock value: (self at: i) value: (aCollection at: i)]
 ]
 
 { #category : #enumerating }
-SequenceableCollection >> withIndexDo: aBlock [
+SequenceableCollection >> withIndexDo: aBlock <[E, Integer, ^Dynamic]> ^<Self> [
 	1 to: self size do: [:i | aBlock value: (self at: i) value: i]
 ]
 
 { #category : #sorting }
-SequenceableCollection >> insertionSortFrom: lo to: hi by: aBlock [
+SequenceableCollection >> insertionSortFrom: lo <Integer> to: hi <Integer> by: aBlock <[E, E, ^Boolean]> ^<Self> [
 	lo + 1 to: hi do: [:i | | x j |
 		x := self at: i.
 		j := i - 1.
@@ -191,7 +194,7 @@ SequenceableCollection >> insertionSortFrom: lo to: hi by: aBlock [
 ]
 
 { #category : #sorting }
-SequenceableCollection >> merge: src from: lo mid: mid to: hi into: dst by: aBlock [
+SequenceableCollection >> merge: src <Array[E]> from: lo <Integer> mid: mid <Integer> to: hi <Integer> into: dst <Array[E]> by: aBlock <[E, E, ^Boolean]> ^<Self> [
 	"src lo..mid and mid+1..hi are sorted: merge them into dst lo..hi, the left run first among equals."
 	| i j k |
 	i := lo.
@@ -207,12 +210,12 @@ SequenceableCollection >> merge: src from: lo mid: mid to: hi into: dst by: aBlo
 ]
 
 { #category : #sorting }
-SequenceableCollection >> sort [
+SequenceableCollection >> sort ^<Self> [
 	^ self sort: [:a :b | a <= b]
 ]
 
 { #category : #sorting }
-SequenceableCollection >> sort: aBlock [
+SequenceableCollection >> sort: aBlock <[E, E, ^Boolean]> ^<Self> [
 	"In place, stable: a merge sort (module 9c: the browser sorts thousands of names) with runs of up to 8 sorted by insertion first."
 	| n src dst width |
 	n := self size.
@@ -231,16 +234,16 @@ SequenceableCollection >> sort: aBlock [
 ]
 
 { #category : #streams }
-SequenceableCollection >> readStream [
+SequenceableCollection >> readStream ^<ReadStream[Self]> [
 	^ ReadStream on: self
 ]
 
 { #category : #streams }
-SequenceableCollection >> writeStream [
+SequenceableCollection >> writeStream ^<WriteStream[Self]> [
 	^ WriteStream on: self
 ]
 
 { #category : #testing }
-SequenceableCollection >> isSequenceable [
+SequenceableCollection >> isSequenceable ^<Boolean> [
 	^ true
 ]

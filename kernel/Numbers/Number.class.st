@@ -5,52 +5,52 @@ Class {
 }
 
 { #category : #arithmetic }
-Number >> * aNumber [
+Number >> * aNumber <Number> ^<Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
-Number >> + aNumber [
+Number >> + aNumber <Number> ^<Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
-Number >> - aNumber [
+Number >> - aNumber <Number> ^<Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
-Number >> / aNumber [
+Number >> / aNumber <Number> ^<Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #arithmetic }
-Number >> // aNumber [
+Number >> // aNumber <Number> ^<Integer> [
 	^ (self / aNumber) floor
 ]
 
 { #category : #arithmetic }
-Number >> \\ aNumber [
+Number >> \\ aNumber <Number> ^<Number> [
 	^ self - (self // aNumber * aNumber)
 ]
 
 { #category : #arithmetic }
-Number >> abs [
+Number >> abs ^<Number> [
 	^ self negative ifTrue: [self negated] ifFalse: [self]
 ]
 
 { #category : #arithmetic }
-Number >> negated [
+Number >> negated ^<Number> [
 	^ 0 - self
 ]
 
 { #category : #arithmetic }
-Number >> quo: aNumber [
+Number >> quo: aNumber <Number> ^<Integer> [
 	^ (self / aNumber) truncated
 ]
 
 { #category : #arithmetic }
-Number >> raisedTo: anInteger [
+Number >> raisedTo: anInteger <Integer> ^<Number> [
 	"An integer power, by squaring."
 	| result base n |
 	anInteger isInteger ifFalse: [^ self error: 'raisedTo: takes an integer in 8b'].
@@ -64,47 +64,47 @@ Number >> raisedTo: anInteger [
 ]
 
 { #category : #arithmetic }
-Number >> reciprocal [
+Number >> reciprocal ^<Number> [
 	^ 1 / self
 ]
 
 { #category : #arithmetic }
-Number >> rem: aNumber [
+Number >> rem: aNumber <Number> ^<Number> [
 	^ self - ((self quo: aNumber) * aNumber)
 ]
 
 { #category : #arithmetic }
-Number >> squared [
+Number >> squared ^<Number> [
 	^ self * self
 ]
 
 { #category : #coercion }
-Number >> asFloat [
+Number >> asFloat ^<Float> [
 	^ self subclassResponsibility
 ]
 
 { #category : #coercion }
-Number >> asInteger [
+Number >> asInteger ^<Integer> [
 	^ self truncated
 ]
 
 { #category : #coercion }
-Number >> asNumber [
+Number >> asNumber ^<Self> [
 	^ self
 ]
 
 { #category : #coercion }
-Number >> coerce: aNumber [
+Number >> coerce: aNumber <Number> ^<Number> [
 	^ self subclassResponsibility
 ]
 
 { #category : #coercion }
-Number >> generality [
+Number >> generality ^<Integer> [
 	^ self subclassResponsibility
 ]
 
 { #category : #coercion }
-Number >> retry: aSelector coercing: aNumber [
+Number >> retry: aSelector <Symbol> coercing: aNumber <Object> ^<Dynamic> [
 	aNumber isNumber ifFalse: [
 		aSelector == #= ifTrue: [^ false].
 		aSelector == #~= ifTrue: [^ true].
@@ -115,17 +115,17 @@ Number >> retry: aSelector coercing: aNumber [
 ]
 
 { #category : #intervals }
-Number >> to: stop [
+Number >> to: stop <Number> ^<Interval[Self]> [
 	^ Interval from: self to: stop
 ]
 
 { #category : #intervals }
-Number >> to: stop by: step [
+Number >> to: stop <Number> by: step <Number> ^<Interval[Number]> [
 	^ Interval from: self to: stop by: step
 ]
 
 { #category : #intervals }
-Number >> to: stop by: step do: aBlock [
+Number >> to: stop <Number> by: step <Number> do: aBlock <[Self, ^Dynamic]> ^<Self> [
 	| i |
 	step = 0 ifTrue: [^ self error: 'step must not be zero'].
 	i := self.
@@ -135,29 +135,29 @@ Number >> to: stop by: step do: aBlock [
 ]
 
 { #category : #intervals }
-Number >> to: stop do: aBlock [
+Number >> to: stop <Number> do: aBlock <[Self, ^Dynamic]> ^<Self> [
 	| i |
 	i := self.
 	[i <= stop] whileTrue: [aBlock value: i. i := i + 1]
 ]
 
 { #category : #printing }
-Number >> displayString [
+Number >> displayString ^<String> [
 	^ self printString
 ]
 
 { #category : #printing }
-Number >> printOn: aStream [
+Number >> printOn: aStream <WriteStream> ^<Self> [
 	aStream nextPutAll: self printString
 ]
 
 { #category : #printing }
-Number >> shallowCopy [
+Number >> shallowCopy ^<Self> [
 	^ self
 ]
 
 { #category : #testing }
-Number >> even [
+Number >> even ^<Boolean> [
 	^ self \\ 2 = 0
 ]
 
@@ -172,57 +172,57 @@ Number >> isNumber [
 ]
 
 { #category : #testing }
-Number >> isZero [
+Number >> isZero ^<Boolean> [
 	^ self = 0
 ]
 
 { #category : #testing }
-Number >> negative [
+Number >> negative ^<Boolean> [
 	^ self < 0
 ]
 
 { #category : #testing }
-Number >> odd [
+Number >> odd ^<Boolean> [
 	^ self even not
 ]
 
 { #category : #testing }
-Number >> positive [
+Number >> positive ^<Boolean> [
 	^ self >= 0
 ]
 
 { #category : #testing }
-Number >> sign [
+Number >> sign ^<Integer> [
 	self > 0 ifTrue: [^ 1].
 	self < 0 ifTrue: [^ -1].
 	^ 0
 ]
 
 { #category : #testing }
-Number >> strictlyPositive [
+Number >> strictlyPositive ^<Boolean> [
 	^ self > 0
 ]
 
 { #category : #truncation }
-Number >> ceiling [
+Number >> ceiling ^<Integer> [
 	| t |
 	t := self truncated.
 	^ (self > 0 and: [t ~= self]) ifTrue: [t + 1] ifFalse: [t]
 ]
 
 { #category : #truncation }
-Number >> floor [
+Number >> floor ^<Integer> [
 	| t |
 	t := self truncated.
 	^ (self < 0 and: [t ~= self]) ifTrue: [t - 1] ifFalse: [t]
 ]
 
 { #category : #truncation }
-Number >> rounded [
+Number >> rounded ^<Integer> [
 	^ (self + (self sign / 2)) truncated
 ]
 
 { #category : #truncation }
-Number >> truncated [
+Number >> truncated ^<Integer> [
 	^ self subclassResponsibility
 ]

@@ -2,42 +2,46 @@
 Class {
 	#name : #PositionableStream,
 	#superclass : #Object,
+	#typeParameters : [
+		'C'
+	],
+	#superclassType : 'Object',
 	#instVars : [
-		'collection',
-		'position',
-		'readLimit',
-		'isText'
+		'collection <Dynamic>',
+		'position <Integer>',
+		'readLimit <Integer>',
+		'isText <Boolean>'
 	]
 }
 
 { #category : #accessing }
-PositionableStream >> atEnd [
+PositionableStream >> atEnd ^<Boolean> [
 	^ position >= readLimit
 ]
 
 { #category : #accessing }
-PositionableStream >> collection [
+PositionableStream >> collection ^<C> [
 	^ collection
 ]
 
 { #category : #accessing }
-PositionableStream >> contents [
+PositionableStream >> contents ^<C> [
 	isText ifTrue: [^ collection copyFrom: 1 to: readLimit].
 	^ collection copyFrom: 1 to: readLimit
 ]
 
 { #category : #accessing }
-PositionableStream >> do: aBlock [
+PositionableStream >> do: aBlock <[Dynamic, ^Dynamic]> ^<Self> [
 	[self atEnd] whileFalse: [aBlock value: self next]
 ]
 
 { #category : #accessing }
-PositionableStream >> isEmpty [
+PositionableStream >> isEmpty ^<Boolean> [
 	^ readLimit = 0
 ]
 
 { #category : #accessing }
-PositionableStream >> next [
+PositionableStream >> next ^<Dynamic> [
 	| c |
 	self atEnd ifTrue: [^ nil].
 	isText ifTrue: [
@@ -49,7 +53,7 @@ PositionableStream >> next [
 ]
 
 { #category : #accessing }
-PositionableStream >> next: n [
+PositionableStream >> next: n <Integer> ^<C> [
 	| s |
 	s := WriteStream on: (isText ifTrue: [String new] ifFalse: [collection species new: 0]).
 	n timesRepeat: [self atEnd ifFalse: [s nextPut: self next]].
@@ -57,7 +61,7 @@ PositionableStream >> next: n [
 ]
 
 { #category : #accessing }
-PositionableStream >> peek [
+PositionableStream >> peek ^<Dynamic> [
 	| p c |
 	self atEnd ifTrue: [^ nil].
 	p := position.
@@ -67,30 +71,30 @@ PositionableStream >> peek [
 ]
 
 { #category : #accessing }
-PositionableStream >> peekFor: anObject [
+PositionableStream >> peekFor: anObject <Object> ^<Boolean> [
 	self peek = anObject ifTrue: [self next. ^ true].
 	^ false
 ]
 
 { #category : #accessing }
-PositionableStream >> position [
+PositionableStream >> position ^<Integer> [
 	^ position
 ]
 
 { #category : #accessing }
-PositionableStream >> position: anInteger [
+PositionableStream >> position: anInteger <Integer> ^<Self> [
 	(anInteger between: 0 and: readLimit) ifFalse: [^ self error: 'position out of range'].
 	(isText and: [(collection isBoundary: anInteger + 1) not]) ifTrue: [^ self error: 'position inside a scalar'].
 	position := anInteger
 ]
 
 { #category : #accessing }
-PositionableStream >> reset [
+PositionableStream >> reset ^<Self> [
 	position := 0
 ]
 
 { #category : #accessing }
-PositionableStream >> setOn: aCollection [
+PositionableStream >> setOn: aCollection <C> ^<Self> [
 	collection := aCollection.
 	isText := aCollection isString.
 	position := 0.
@@ -98,18 +102,18 @@ PositionableStream >> setOn: aCollection [
 ]
 
 { #category : #accessing }
-PositionableStream >> skip: n [
+PositionableStream >> skip: n <Integer> ^<Self> [
 	isText ifTrue: [n timesRepeat: [self next]. ^ self].
 	position := ((position + n) max: 0) min: readLimit
 ]
 
 { #category : #accessing }
-PositionableStream >> skipSeparators [
+PositionableStream >> skipSeparators ^<Self> [
 	[self atEnd not and: [self peek isSeparator]] whileTrue: [self next]
 ]
 
 { #category : #accessing }
-PositionableStream >> upTo: anObject [
+PositionableStream >> upTo: anObject <Object> ^<C> [
 	| s c |
 	s := WriteStream on: (isText ifTrue: [String new] ifFalse: [collection species new: 0]).
 	[self atEnd or: [(c := self next) = anObject]] whileFalse: [s nextPut: c].
@@ -117,7 +121,7 @@ PositionableStream >> upTo: anObject [
 ]
 
 { #category : #accessing }
-PositionableStream >> upToEnd [
+PositionableStream >> upToEnd ^<C> [
 	| s |
 	s := WriteStream on: (isText ifTrue: [String new] ifFalse: [collection species new: 0]).
 	[self atEnd] whileFalse: [s nextPut: self next].
@@ -125,6 +129,6 @@ PositionableStream >> upToEnd [
 ]
 
 { #category : #accessing }
-PositionableStream class >> on: aCollection [
+PositionableStream class >> on: aCollection <:X> ^<Instance[X]> [
 	^ self basicNew setOn: aCollection
 ]

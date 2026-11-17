@@ -5,71 +5,71 @@ Class {
 }
 
 { #category : #accessing }
-Boolean >> & aBoolean [
+Boolean >> & aBoolean <Boolean> ^<Boolean> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> and: aBlock [
+Boolean >> and: aBlock <[^Boolean]> ^<Boolean> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> eqv: aBoolean [
+Boolean >> eqv: aBoolean <Boolean> ^<Boolean> [
 	^ self == aBoolean
 ]
 
 { #category : #accessing }
-Boolean >> ifFalse: aBlock [
+Boolean >> ifFalse: aBlock <[^:X]> ^<X | Nil> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> ifFalse: falseBlock ifTrue: trueBlock [
+Boolean >> ifFalse: falseBlock <[^:X]> ifTrue: trueBlock <[^:Y]> ^<X | Y> [
 	^ self ifTrue: trueBlock ifFalse: falseBlock
 ]
 
 { #category : #accessing }
-Boolean >> ifTrue: aBlock [
+Boolean >> ifTrue: aBlock <[^:X]> ^<X | Nil> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> ifTrue: trueBlock ifFalse: falseBlock [
+Boolean >> ifTrue: trueBlock <[^:X]> ifFalse: falseBlock <[^:Y]> ^<X | Y> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> isBoolean [
+Boolean >> isBoolean ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-Boolean >> isLiteral [
+Boolean >> isLiteral ^<Boolean> [
 	^ true
 ]
 
 { #category : #accessing }
-Boolean >> not [
+Boolean >> not ^<Boolean> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> or: aBlock [
+Boolean >> or: aBlock <[^Boolean]> ^<Boolean> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Boolean >> shallowCopy [
+Boolean >> shallowCopy ^<Self> [
 	^ self
 ]
 
 { #category : #accessing }
-Boolean >> xor: aBoolean [
+Boolean >> xor: aBoolean <Boolean> ^<Boolean> [
 	^ self ~~ aBoolean value
 ]
 
 { #category : #accessing }
-Boolean >> | aBoolean [
+Boolean >> | aBoolean <Boolean> ^<Boolean> [
 	^ self subclassResponsibility
 ]

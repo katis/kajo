@@ -3,7 +3,7 @@ Class {
 	#name : #Exception,
 	#superclass : #Object,
 	#instVars : [
-		'messageText',
+		'messageText <String | Nil>',
 		'signalContext',
 		'handlerContext',
 		'outerContext'
@@ -14,12 +14,12 @@ Class {
 }
 
 { #category : #defaults }
-Exception >> defaultAction [
+Exception >> defaultAction ^<Dynamic> [
 	^ self subclassResponsibility
 ]
 
 { #category : #defaults }
-Exception >> description [
+Exception >> description ^<String> [
 	^ self class name asString
 ]
 
@@ -37,22 +37,22 @@ Exception >> frames [
 ]
 
 { #category : #defaults }
-Exception >> isResumable [
+Exception >> isResumable ^<Boolean> [
 	^ true
 ]
 
 { #category : #defaults }
-Exception >> messageText [
+Exception >> messageText ^<String> [
 	^ messageText ifNil: [self description]
 ]
 
 { #category : #defaults }
-Exception >> messageText: aString [
+Exception >> messageText: aString <String> ^<Self> [
 	messageText := aString
 ]
 
 { #category : #defaults }
-Exception >> printOn: aStream [
+Exception >> printOn: aStream <WriteStream> ^<Self> [
 	aStream nextPutAll: self class name.
 	messageText ifNotNil: [:t | aStream nextPutAll: ': '; nextPutAll: t]
 ]
@@ -63,7 +63,7 @@ Exception >> handlerContext [
 ]
 
 { #category : #handling }
-Exception >> outer [
+Exception >> outer ^<Dynamic> [
 	"The enclosing handler's action; a resumption answers from outer, and the handler that sent outer is the active one again (the review fixes, item 9: return:, retry, resume: and falling off it act on its on:do:, and it stays busy). A resumption returns from outerSearch, so the restore below runs; a return or a retry by the enclosing handler unwinds past it."
 	| saved value |
 	self isResumable ifFalse: [^ self pass].
@@ -83,7 +83,7 @@ Exception >> outerSearch [
 ]
 
 { #category : #handling }
-Exception >> pass [
+Exception >> pass ^<Dynamic> [
 	"The enclosing handler handles the receiver as if this one did not exist. With none, the default action's value resumes a resumable exception at its signal (the review fixes, item 9, ANSI's rule) and is returned from this on:do: otherwise. An enclosing handler that resumes or returns never comes back here."
 	| value |
 	handlerContext tempAt: 3 put: nil.
@@ -102,12 +102,12 @@ Exception >> receiver [
 ]
 
 { #category : #handling }
-Exception >> resume [
+Exception >> resume ^<Dynamic> [
 	^ self resume: nil
 ]
 
 { #category : #handling }
-Exception >> resume: aValue [
+Exception >> resume: aValue <Object> ^<Dynamic> [
 	"Answer aValue from signal (or from outer, when it was outer that found the handler)."
 	| ctx |
 	self isResumable ifFalse: [^ IllegalResumeAttempt new signal: self class name , ' is not resumable'].
@@ -119,14 +119,14 @@ Exception >> resume: aValue [
 ]
 
 { #category : #handling }
-Exception >> retry [
+Exception >> retry ^<Dynamic> [
 	"Unwind to the on:do: and run its protected block again."
 	handlerContext tempAt: 3 put: nil.
 	handlerContext return: Exception retryMarker
 ]
 
 { #category : #handling }
-Exception >> retryUsing: aBlock [
+Exception >> retryUsing: aBlock <[^Dynamic]> ^<Dynamic> [
 	"Unwind to the on:do: and run aBlock in place of its protected block, under the same handler (the review fixes, item 9: aBlock ran before the unwinding, inside the busy handler). The on:do: frame (the handler frame's sender) takes aBlock in its fifth temp."
 	handlerContext tempAt: 3 put: nil.
 	handlerContext sender tempAt: 5 put: aBlock.
@@ -134,12 +134,12 @@ Exception >> retryUsing: aBlock [
 ]
 
 { #category : #handling }
-Exception >> return [
+Exception >> return ^<Dynamic> [
 	^ self return: nil
 ]
 
 { #category : #handling }
-Exception >> return: aValue [
+Exception >> return: aValue <Object> ^<Dynamic> [
 	"Answer aValue from the on:do: whose handler is running."
 	handlerContext tempAt: 3 put: nil.
 	handlerContext return: aValue
@@ -151,7 +151,7 @@ Exception >> signalContext [
 ]
 
 { #category : #handling }
-Exception >> signalerContext [
+Exception >> signalerContext ^<Context | Nil> [
 	^ signalContext ifNotNil: [:c | c sender]
 ]
 
@@ -175,24 +175,24 @@ Exception >> searchFrom: aContext [
 ]
 
 { #category : #signaling }
-Exception >> signal [
+Exception >> signal ^<Dynamic> [
 	signalContext := thisContext.
 	^ self searchFrom: thisContext sender
 ]
 
 { #category : #signaling }
-Exception >> signal: aString [
+Exception >> signal: aString <String> ^<Dynamic> [
 	messageText := aString.
 	^ self signal
 ]
 
 { #category : #accessing }
-Exception class >> , anExceptionClass [
+Exception class >> , anExceptionClass <Exception class | ExceptionSet> ^<ExceptionSet> [
 	^ ExceptionSet with: self with: anExceptionClass
 ]
 
 { #category : #accessing }
-Exception class >> handles: anException [
+Exception class >> handles: anException <Exception> ^<Boolean> [
 	^ anException isKindOf: self
 ]
 
@@ -214,11 +214,11 @@ Exception class >> retryMarker [
 ]
 
 { #category : #accessing }
-Exception class >> signal [
+Exception class >> signal ^<Dynamic> [
 	^ self new signal
 ]
 
 { #category : #accessing }
-Exception class >> signal: aString [
+Exception class >> signal: aString <String> ^<Dynamic> [
 	^ self new signal: aString
 ]

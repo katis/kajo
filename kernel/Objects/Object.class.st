@@ -5,81 +5,81 @@ Class {
 }
 
 { #category : #accessing }
-Object >> -> anObject [
+Object >> -> anObject <Object> ^<Association[Self, Object]> [
 	^ Association key: self value: anObject
 ]
 
 { #category : #accessing }
-Object >> at: index [
+Object >> at: index <Integer> ^<Dynamic> [
 	<primitive: 1>
 	^ self indexError: index
 ]
 
 { #category : #accessing }
-Object >> at: index put: anObject [
+Object >> at: index <Integer> put: anObject <Object> ^<Object> [
 	<primitive: 2>
 	^ self indexError: index
 ]
 
 { #category : #accessing }
-Object >> basicAt: index [
+Object >> basicAt: index <Integer> ^<Dynamic> [
 	<primitive: 1>
 	^ self indexError: index
 ]
 
 { #category : #accessing }
-Object >> basicAt: index put: anObject [
+Object >> basicAt: index <Integer> put: anObject <Object> ^<Object> [
 	<primitive: 2>
 	^ self indexError: index
 ]
 
 { #category : #accessing }
-Object >> basicSize [
+Object >> basicSize ^<Integer> [
 	<primitive: 95>
 	^ 0
 ]
 
 { #category : #accessing }
-Object >> in: aBlock [
+Object >> in: aBlock <[Self, ^:X]> ^<X> [
 	^ aBlock value: self
 ]
 
 { #category : #accessing }
-Object >> instVarAt: index [
+Object >> instVarAt: index <Integer> ^<Dynamic> [
 	<primitive: 91>
 	^ self indexError: index
 ]
 
 { #category : #accessing }
-Object >> instVarAt: index put: anObject [
+Object >> instVarAt: index <Integer> put: anObject <Object> ^<Object> [
 	<primitive: 92>
 	^ self indexError: index
 ]
 
 { #category : #accessing }
-Object >> size [
+Object >> size ^<Integer> [
 	<primitive: 95>
 	^ 0
 ]
 
 { #category : #accessing }
-Object >> value [
+Object >> value ^<Self> [
 	^ self
 ]
 
 { #category : #accessing }
-Object >> yourself [
+Object >> yourself ^<Self> [
 	^ self
 ]
 
 { #category : #'class membership' }
-Object >> class [
+Object >> class ^<Self class> [
 	<primitive: 5>
 	^ self primitiveFailed
 ]
 
 { #category : #'class membership' }
-Object >> isKindOf: aClass [
+Object >> isKindOf: aClass <Behavior> ^<Boolean> [
 	| c |
 	c := self class.
 	[c == nil] whileFalse: [
@@ -89,82 +89,82 @@ Object >> isKindOf: aClass [
 ]
 
 { #category : #'class membership' }
-Object >> isMemberOf: aClass [
+Object >> isMemberOf: aClass <Behavior> ^<Boolean> [
 	^ self class == aClass
 ]
 
 { #category : #'class membership' }
-Object >> respondsTo: aSymbol [
+Object >> respondsTo: aSymbol <Symbol> ^<Boolean> [
 	<primitive: 90>
 	^ false
 ]
 
 { #category : #comparing }
-Object >> = anObject [
+Object >> = anObject <Object> ^<Boolean> [
 	^ self == anObject
 ]
 
 { #category : #comparing }
-Object >> == anObject [
+Object >> == anObject <Object> ^<Boolean> [
 	"Identity. The VM answers it inline; this method serves perform:."
 	<primitive: 18>
 	^ self primitiveFailed
 ]
 
 { #category : #comparing }
-Object >> hash [
+Object >> hash ^<Integer> [
 	^ self identityHash
 ]
 
 { #category : #comparing }
-Object >> identityHash [
+Object >> identityHash ^<Integer> [
 	<primitive: 19>
 	^ self primitiveFailed
 ]
 
 { #category : #comparing }
-Object >> ~= anObject [
+Object >> ~= anObject <Object> ^<Boolean> [
 	^ (self = anObject) not
 ]
 
 { #category : #comparing }
-Object >> ~~ anObject [
+Object >> ~~ anObject <Object> ^<Boolean> [
 	^ (self == anObject) not
 ]
 
 { #category : #copying }
-Object >> copy [
+Object >> copy ^<Self> [
 	^ self shallowCopy postCopy
 ]
 
 { #category : #copying }
-Object >> postCopy [
+Object >> postCopy ^<Self> [
 	^ self
 ]
 
 { #category : #copying }
-Object >> shallowCopy [
+Object >> shallowCopy ^<Self> [
 	<primitive: 96>
 	^ self primitiveFailed
 ]
 
 { #category : #'error handling' }
-Object >> assert: aBlockOrBoolean [
+Object >> assert: aBlockOrBoolean <Boolean | [^Boolean]> ^<Self> [
 	aBlockOrBoolean value ifFalse: [^ AssertionFailure new signal: 'assertion failed']
 ]
 
 { #category : #'error handling' }
-Object >> error: aString [
+Object >> error: aString <String> ^<Dynamic> [
 	^ Error new signal: aString
 ]
 
 { #category : #'error handling' }
-Object >> halt [
+Object >> halt ^<Self> [
 	^ Halt new signal
 ]
 
 { #category : #'error handling' }
-Object >> indexError: index [
+Object >> indexError: index <Integer> ^<Dynamic> [
 	index isInteger ifFalse: [^ self error: 'index ' , index printString , ' is not an integer'].
 	^ SubscriptOutOfBounds signalFor: index in: self
 ]
@@ -176,56 +176,56 @@ Object >> methodRemovedByRedefinition [
 ]
 
 { #category : #'error handling' }
-Object >> primitiveFailed [
+Object >> primitiveFailed ^<Dynamic> [
 	^ PrimitiveFailed new signal: 'a primitive failed in ' , thisContext sender method printString
 ]
 
 { #category : #'error handling' }
-Object >> shouldNotImplement [
+Object >> shouldNotImplement ^<Dynamic> [
 	^ self error: thisContext sender method printString , ' is not part of this class''s protocol'
 ]
 
 { #category : #'error handling' }
-Object >> subclassResponsibility [
+Object >> subclassResponsibility ^<Dynamic> [
 	^ self error: 'a subclass should have implemented ' , thisContext sender method printString
 ]
 
 { #category : #initialization }
-Object >> initialize [
+Object >> initialize ^<Self> [
 	^ self
 ]
 
 { #category : #'message handling' }
-Object >> become: anObject [
+Object >> become: anObject <Object> ^<Self> [
 	<primitive: 8>
 	^ self error: 'become: refused'
 ]
 
 { #category : #'message handling' }
-Object >> doesNotUnderstand: aMessage [
+Object >> doesNotUnderstand: aMessage <Message> ^<Dynamic> [
 	^ MessageNotUnderstood new message: aMessage receiver: self; signal
 ]
 
 { #category : #'message handling' }
-Object >> perform: aSymbol [
+Object >> perform: aSymbol <Symbol> ^<Dynamic> [
 	<primitive: 86>
 	^ self perform: aSymbol withArguments: #()
 ]
 
 { #category : #'message handling' }
-Object >> perform: aSymbol with: anObject [
+Object >> perform: aSymbol <Symbol> with: anObject <Object> ^<Dynamic> [
 	<primitive: 87>
 	^ self perform: aSymbol withArguments: {anObject}
 ]
 
 { #category : #'message handling' }
-Object >> perform: aSymbol with: first with: second [
+Object >> perform: aSymbol <Symbol> with: first <Object> with: second <Object> ^<Dynamic> [
 	<primitive: 88>
 	^ self perform: aSymbol withArguments: {first. second}
 ]
 
 { #category : #'message handling' }
-Object >> perform: aSymbol withArguments: anArray [
+Object >> perform: aSymbol <Symbol> withArguments: anArray <Array> ^<Dynamic> [
 	<primitive: 89>
 	aSymbol isSymbol ifFalse: [^ self error: 'perform: needs a Symbol'].
 	aSymbol numArgs = anArray size ifFalse: [^ self error: 'wrong number of arguments for ' , aSymbol].
@@ -233,59 +233,59 @@ Object >> perform: aSymbol withArguments: anArray [
 ]
 
 { #category : #'nil handling' }
-Object >> ifNil: nilBlock [
+Object >> ifNil: nilBlock <[^:R]> ^<Self> [
 	^ self
 ]
 
 { #category : #'nil handling' }
-Object >> ifNil: nilBlock ifNotNil: aBlock [
+Object >> ifNil: nilBlock <[^:R]> ifNotNil: aBlock <[Self, ^:S]> ^<S> [
 	^ aBlock cull: self
 ]
 
 { #category : #'nil handling' }
-Object >> ifNotNil: aBlock [
+Object >> ifNotNil: aBlock <[Self, ^:R]> ^<R> [
 	^ aBlock cull: self
 ]
 
 { #category : #'nil handling' }
-Object >> ifNotNil: aBlock ifNil: nilBlock [
+Object >> ifNotNil: aBlock <[Self, ^:S]> ifNil: nilBlock <[^:R]> ^<S> [
 	^ aBlock cull: self
 ]
 
 { #category : #printing }
-Object >> asString [
+Object >> asString ^<String> [
 	^ self printString
 ]
 
 { #category : #printing }
-Object >> displayNl [
+Object >> displayNl ^<Self> [
 	Transcript show: self displayString; cr
 ]
 
 { #category : #printing }
-Object >> displayOn: aStream [
+Object >> displayOn: aStream <WriteStream> ^<Self> [
 	aStream nextPutAll: self displayString
 ]
 
 { #category : #printing }
-Object >> displayString [
+Object >> displayString ^<String> [
 	^ self printString
 ]
 
 { #category : #printing }
-Object >> printNl [
+Object >> printNl ^<Self> [
 	Transcript show: self printString; cr
 ]
 
 { #category : #printing }
-Object >> printOn: aStream [
+Object >> printOn: aStream <WriteStream> ^<Self> [
 	| name |
 	name := self class name.
 	aStream nextPutAll: (name first isVowel ifTrue: ['an '] ifFalse: ['a ']); nextPutAll: name
 ]
 
 { #category : #printing }
-Object >> printString [
+Object >> printString ^<String> [
 	| s |
 	s := WriteStream on: String new.
 	self printOn: s.
@@ -313,19 +313,19 @@ Object >> fork: aSelector with: anArgument priority: aPriority main: aBoolean ex
 ]
 
 { #category : #processes }
-Object >> slotAt: index [
+Object >> slotAt: index <Integer> ^<Dynamic> [
 	"Read a pointer slot of any object, sealed ones included (classes, methods, Processes)."
 	<primitive: 117>
 	^ self indexError: index
 ]
 
 { #category : #'read-only' }
-Object >> beReadOnly [
+Object >> beReadOnly ^<Self> [
 	self setReadOnly: true
 ]
 
 { #category : #'read-only' }
-Object >> beWritable [
+Object >> beWritable ^<Self> [
 	self setReadOnly: false
 ]
 
@@ -336,14 +336,14 @@ Object >> modificationForbiddenAt: index value: aValue [
 ]
 
 { #category : #'read-only' }
-Object >> setReadOnly: aBoolean [
+Object >> setReadOnly: aBoolean <Boolean> ^<Boolean> [
 	"Answer whether the receiver was read-only."
 	<primitive: 93>
 	^ self error: 'this object cannot change its read-only state'
 ]
 
 { #category : #reflection }
-Object >> pointerCount [
+Object >> pointerCount ^<Integer> [
 	"How many objects hold the receiver in a slot (primitive 170: the walk of pointersTo, nothing allocated). See pointersTo."
 	| n |
 	n := Smalltalk primPointerCountTo: self.
@@ -352,13 +352,13 @@ Object >> pointerCount [
 ]
 
 { #category : #reflection }
-Object >> pointersTo [
+Object >> pointersTo ^<Array> [
 	"Every object with a slot holding the receiver, as Pharo's pointersTo, with no limit but the largest Array's (16 777 215; pointersTo: takes a smaller one: the owner's answer of 2026-11-09). Beware: nil pointersTo or 3 pointersTo can be a long Array made in one stop; ask for a limit where that matters. The objects are found in one stop of the world after every young object is promoted, by comparing every slot of every object in the heap with the receiver: named and indexed slots, a weak slot as any other, every slot of an Array past 4095 slots. An object's class is not a slot (see allInstances). A method whose literals include the receiver is listed itself, not its literal frame. Garbage counts until a collection frees it (send Smalltalk garbageCollect first for the live holders only). The stacks of running Processes are not in the heap and are not searched: an object held only by a temporary or an argument of a running method answers #(). The world runs again between two sends, so a holder that stores or drops the receiver afterwards is not seen. The receiver may be an immediate (3 pointersTo lists every object holding 3), and the receiver holding itself is listed; the answer is never one of its own elements."
 	^ self pointersTo: 16777215
 ]
 
 { #category : #reflection }
-Object >> pointersTo: aLimit [
+Object >> pointersTo: aLimit <Integer> ^<Array> [
 	"As pointersTo, at most aLimit holders (an Integer from 0 to 16777215, the largest Array): primitive 169, one walk of old space in a stop."
 	| a |
 	(aLimit isInteger and: [aLimit between: 0 and: 16777215]) ifFalse: [
@@ -369,103 +369,103 @@ Object >> pointersTo: aLimit [
 ]
 
 { #category : #testing }
-Object >> isArray [
+Object >> isArray ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isBehavior [
+Object >> isBehavior ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isBlock [
+Object >> isBlock ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isBoolean [
+Object >> isBoolean ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isCharacter [
+Object >> isCharacter ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isClass [
+Object >> isClass ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isCollection [
+Object >> isCollection ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isCompiledMethod [
+Object >> isCompiledMethod ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isContext [
+Object >> isContext ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isEmptyOrNil [
+Object >> isEmptyOrNil ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isFloat [
+Object >> isFloat ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isFraction [
+Object >> isFraction ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isInteger [
+Object >> isInteger ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isLiteral [
+Object >> isLiteral ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isNil [
+Object >> isNil ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isNumber [
+Object >> isNumber ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isReadOnly [
+Object >> isReadOnly ^<Boolean> [
 	"Immediates are read-only; method literals are."
 	<primitive: 94>
 	^ self primitiveFailed
 ]
 
 { #category : #testing }
-Object >> isString [
+Object >> isString ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> isSymbol [
+Object >> isSymbol ^<Boolean> [
 	^ false
 ]
 
 { #category : #testing }
-Object >> notNil [
+Object >> notNil ^<Boolean> [
 	^ true
 ]

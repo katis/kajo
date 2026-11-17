@@ -11,25 +11,25 @@ Class {
 }
 
 { #category : #arithmetic }
-Float >> * aNumber [
+Float >> * aNumber <Number> ^<Float> [
 	<primitive: 62>
 	^ self retry: #* coercing: aNumber
 ]
 
 { #category : #arithmetic }
-Float >> + aNumber [
+Float >> + aNumber <Number> ^<Float> [
 	<primitive: 60>
 	^ self retry: #+ coercing: aNumber
 ]
 
 { #category : #arithmetic }
-Float >> - aNumber [
+Float >> - aNumber <Number> ^<Float> [
 	<primitive: 61>
 	^ self retry: #- coercing: aNumber
 ]
 
 { #category : #arithmetic }
-Float >> / aNumber [
+Float >> / aNumber <Number> ^<Float> [
 	<primitive: 63>
 	aNumber = 0 ifTrue: [^ ZeroDivide new dividend: self; signal: 'division by zero'].
 	^ self retry: #/ coercing: aNumber
@@ -82,12 +82,12 @@ Float >> ~= aNumber [
 ]
 
 { #category : #coercion }
-Float >> asFloat [
+Float >> asFloat ^<Self> [
 	^ self
 ]
 
 { #category : #coercion }
-Float >> asFraction [
+Float >> asFraction ^<Number> [
 	"The exact value of the double."
 	| e m |
 	self isFinite ifFalse: [^ self error: 'not a finite number'].
@@ -113,7 +113,7 @@ Float >> printOn: aStream [
 ]
 
 { #category : #printing }
-Float >> printString [
+Float >> printString ^<String> [
 	"The shortest digits that read back as the same double."
 	<primitive: 75>
 	^ self primitiveFailed
@@ -127,7 +127,7 @@ Float >> hash [
 ]
 
 { #category : #testing }
-Float >> isFinite [
+Float >> isFinite ^<Boolean> [
 	^ (self - self) = 0.0
 ]
 
@@ -137,23 +137,23 @@ Float >> isFloat [
 ]
 
 { #category : #testing }
-Float >> isInfinite [
+Float >> isInfinite ^<Boolean> [
 	^ self isNaN not and: [(self - self) isNaN]
 ]
 
 { #category : #testing }
-Float >> isNaN [
+Float >> isNaN ^<Boolean> [
 	^ self ~= self
 ]
 
 { #category : #truncation }
-Float >> exponent [
+Float >> exponent ^<Integer> [
 	<primitive: 72>
 	^ self primitiveFailed
 ]
 
 { #category : #truncation }
-Float >> fractionPart [
+Float >> fractionPart ^<Float> [
 	<primitive: 71>
 	^ self primitiveFailed
 ]
@@ -164,13 +164,13 @@ Float >> rounded [
 ]
 
 { #category : #truncation }
-Float >> sqrt [
+Float >> sqrt ^<Float> [
 	<primitive: 74>
 	^ self negative ifTrue: [Float nan] ifFalse: [self primitiveFailed]
 ]
 
 { #category : #truncation }
-Float >> timesTwoPower: anInteger [
+Float >> timesTwoPower: anInteger <Integer> ^<Float> [
 	<primitive: 73>
 	^ self primitiveFailed
 ]
@@ -182,12 +182,12 @@ Float >> truncated [
 ]
 
 { #category : #printing }
-Float class >> e [
+Float class >> e ^<Float> [
 	^ 2.718281828459045
 ]
 
 { #category : #printing }
-Float class >> infinity [
+Float class >> infinity ^<Float> [
 	^ Infinity ifNil: [self initialize. Infinity]
 ]
 
@@ -200,21 +200,21 @@ Float class >> initialize [
 ]
 
 { #category : #printing }
-Float class >> nan [
+Float class >> nan ^<Float> [
 	^ NaN ifNil: [self initialize. NaN]
 ]
 
 { #category : #printing }
-Float class >> negativeInfinity [
+Float class >> negativeInfinity ^<Float> [
 	^ NegativeInfinity ifNil: [self initialize. NegativeInfinity]
 ]
 
 { #category : #printing }
-Float class >> pi [
+Float class >> pi ^<Float> [
 	^ 3.141592653589793
 ]
 
 { #category : #printing }
-Float class >> readFrom: aString [
+Float class >> readFrom: aString <String> ^<Float> [
 	^ aString asFloat
 ]

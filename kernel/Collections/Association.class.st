@@ -2,39 +2,44 @@
 Class {
 	#name : #Association,
 	#superclass : #Magnitude,
+	#typeParameters : [
+		'K',
+		'V'
+	],
+	#superclassType : 'Magnitude',
 	#instVars : [
-		'key',
-		'value'
+		'key <K>',
+		'value <V>'
 	]
 }
 
 { #category : #accessing }
-Association >> < anAssociation [
+Association >> < anAssociation <Association> ^<Boolean> [
 	^ key < anAssociation key
 ]
 
 { #category : #accessing }
-Association >> = anObject [
+Association >> = anObject <Object> ^<Boolean> [
 	^ (anObject isKindOf: Association) and: [key = anObject key and: [value = anObject value]]
 ]
 
 { #category : #accessing }
-Association >> hash [
+Association >> hash ^<Integer> [
 	^ key hash
 ]
 
 { #category : #accessing }
-Association >> key [
+Association >> key ^<K> [
 	^ key
 ]
 
 { #category : #accessing }
-Association >> key: k [
+Association >> key: k <K> ^<Self> [
 	key := k
 ]
 
 { #category : #accessing }
-Association >> key: k value: v [
+Association >> key: k <K> value: v <V> ^<Self> [
 	key := k.
 	value := v
 ]
@@ -45,16 +50,16 @@ Association >> printOn: aStream [
 ]
 
 { #category : #accessing }
-Association >> value [
+Association >> value ^<V> [
 	^ value
 ]
 
 { #category : #accessing }
-Association >> value: v [
+Association >> value: v <V> ^<Self> [
 	value := v
 ]
 
 { #category : #accessing }
-Association class >> key: k value: v [
+Association class >> key: k <:X> value: v <:Y> ^<Instance[X, Y]> [
 	^ self basicNew key: k value: v
 ]

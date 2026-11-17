@@ -5,36 +5,36 @@ Class {
 }
 
 { #category : #accessing }
-Magnitude >> < aMagnitude [
+Magnitude >> < aMagnitude <Magnitude> ^<Boolean> [
 	^ self subclassResponsibility
 ]
 
 { #category : #accessing }
-Magnitude >> <= aMagnitude [
+Magnitude >> <= aMagnitude <Magnitude> ^<Boolean> [
 	^ (aMagnitude < self) not
 ]
 
 { #category : #accessing }
-Magnitude >> > aMagnitude [
+Magnitude >> > aMagnitude <Magnitude> ^<Boolean> [
 	^ aMagnitude < self
 ]
 
 { #category : #accessing }
-Magnitude >> >= aMagnitude [
+Magnitude >> >= aMagnitude <Magnitude> ^<Boolean> [
 	^ (self < aMagnitude) not
 ]
 
 { #category : #accessing }
-Magnitude >> between: min and: max [
+Magnitude >> between: min <Magnitude> and: max <Magnitude> ^<Boolean> [
 	^ min <= self and: [self <= max]
 ]
 
 { #category : #accessing }
-Magnitude >> max: aMagnitude [
+Magnitude >> max: aMagnitude <Magnitude> ^<Magnitude> [
 	^ self > aMagnitude ifTrue: [self] ifFalse: [aMagnitude]
 ]
 
 { #category : #accessing }
-Magnitude >> min: aMagnitude [
+Magnitude >> min: aMagnitude <Magnitude> ^<Magnitude> [
 	^ self < aMagnitude ifTrue: [self] ifFalse: [aMagnitude]
 ]

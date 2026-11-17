@@ -10,6 +10,6 @@ Error >> defaultAction [
 ]
 
 { #category : #accessing }
-Error >> isResumable [
+Error >> isResumable ^<Boolean> [
 	^ false
 ]
