@@ -4,8 +4,9 @@
 
 Briefed by the main session on 2026-11-18. The owner approved the follow-up
 on 2026-11-18 (Types 2's question 2, `docs/decisions/45-types-2.md`) and
-chose it as the next module ("delay fix"). Not started. Starting commit:
-the head of master when the owner says start.
+chose it as the next module ("delay fix"). Starting commit 0395be3.
+Built by the build agent on 2026-11-18 (part 1 82919c7, the fix 075d2a4;
+"Part 1" and "As built" below), not yet verified by the main session.
 
 ## What it is
 
@@ -241,3 +242,281 @@ still holds the old values, the read succeeds and the push lands in freed
 memory); it crashes when the memory has been reused, as in Types 2's run
 minutes later. The test reuses it on purpose, and then fails in every
 build, every run.
+
+## As built
+
+Built by the build agent on 2026-11-18 from 0395be3: part 1 in 82919c7,
+the fix and its tests in 075d2a4 (the final code commit; this doc after). Toolchain: swiftly's swift.org 6.4.2
+first on PATH (every gate line names it). Raw outputs in
+`~/kajo-scratch/delay-outlives-vm/` (`part1/`, `work/`, `broken/`,
+`check/`).
+
+### The fix: a liveness cell (open question 1)
+
+`VMLife` (`Processes/External.swift`) is a `final class` with a
+`Mutex` around `ended`, `timersPending` and `lateSignals`, allocated by
+`VM.init` apart from the VM state and held by three owners: the `VM`
+object (so its counts stay readable after `destroy`), the VM state
+(`VMState.life`, for `startDelay`), and every `VMRef` and every Delay
+timer's closure. Every touch of the VM from a thread the VM does not join
+runs inside `whileLive` (signals and `rootPending`) or `timerFired` (a
+Delay's timer) under the cell's lock; `VM.destroy` calls `end()` right
+after the final collection and before it frees anything, which sets
+`ended` under the same lock. So a signal that holds the lock when the end
+comes finishes first (its node is freed by `destroy` with the others, as
+before), and every later one sees `ended`, touches nothing and is counted.
+The push itself moved unchanged into `pushExternal`; the VM's own threads
+(`signalFinalization`, the saved-image load) call it directly, since a VM
+thread runs only while the VM lives.
+
+Why the cell and not cancellable timers: cancelling a GCD timer
+(`DispatchSourceTimer.cancel`) does not stop a handler that has begun, so a
+registry would still need a lock the end takes and the handler holds, plus
+a wait for handlers in flight: the cell's lock is that lock, and with it
+the registry, the cancel and the wait add nothing to safety. The cell keeps
+`asyncAfter` (no new thread, no timed wait, no source per Delay) and is one
+allocation per VM. Its cost: an ended VM's timer still runs at its time and
+holds the cell (a few dozen bytes) until then; a 600 s Delay keeps a
+dispatch timer for 600 s after its VM. The owner's answer to Types 2's
+question 2 said "cancelled": the timers are neutralised, not cancelled;
+said here so the owner can ask for the registry if the armed GCD timers
+matter.
+
+Lock order: the cell's lock, then the scheduler and pending-root mutexes,
+never the reverse (`startDelay` takes it on a VM thread holding no lock).
+The host's `wakeMain` hook runs under it, as it ran inside
+`signalFromOutside` before; the shells' hooks only schedule a turn.
+
+The two comments are rewritten: `VMRef` "may outlive the VM: after
+`VM.destroy` its calls do nothing but count", `destroy` "Delays may still
+be pending ... a timer that comes later does nothing and is counted".
+
+### The counters (part 3)
+
+`VMEndReport.timersPending` (timers armed and not fired when the VM
+ended) and `VMEndReport.undeliveredSignals` (external signals queued after
+the last drain, freed by `destroy`), both set by `VM.destroy` whatever the
+VM's nurseries. `VM.lateSignals` (the cell's count of refused signals,
+roots and timers, readable after `destroy`) and `VM.timersPending` (tests
+only: open question 3 answered "only if a test needs it"; the shell's
+host surface does not get it). Not on the run line: `kajo run` and `kajo
+test` call `destroy` in a `defer` after the line is written, and nothing
+of a Delay is the run's measurement.
+
+One run (`work/tests-debug-1.txt`, `aDelayPendingWhenTheVMEndsDoesNotTouchIt`
+asserts them): `end.timersPending == 1`, `end.undeliveredSignals == 0`,
+then `vm.lateSignals == 1` once the timer fired. The race test's lines in the gates:
+`delay-race vms=16 pendingAtEnd=8 undelivered=1 delivered=7`
+(`swift-test-load`), `pendingAtEnd=3 undelivered=5 delivered=8` (`tsan`),
+`pendingAtEnd=7 undelivered=1 delivered=8` (`tsan-load`),
+`pendingAtEnd=8 undelivered=0 delivered=8` (`test-release`).
+
+### The pending root (part 4)
+
+A timer that will never deliver keeps its Semaphore's pending root until
+`destroy` frees the table, as a signal queued after `shutdown` always has:
+the final collection treats it as a root (the Semaphore stays in the
+image, reachable from none of the image's roots, for the next VM's
+collector), and `pendingRootCount` read before the end still counts it. Nothing
+reads the table after the end, so no count changes meaning:
+`delayWaitUsesAGCDTimerAndPendingRoot` and `pendingRootsSurviveACollection`
+pass unchanged, and the reproducing test asserts the count 1 before the
+end.
+
+### Other paths (part 5)
+
+None reaches a destroyed VM after the fix, and the one theoretical bridge
+path is closed by the same check: the bridge's `ref` (never cleared) is a
+`VMRef`, whose `rootPending` answers -1 and whose `signalFromOutside`
+does nothing once the VM has ended (`aVMRefHeldPastTheEndIsRefused`).
+`ShellVM.close`, `ShellBridge` and `ClientHost` are unchanged.
+
+### Tests
+
+`Tests/KajoVMTests/Processes/DelayEndTests.swift` (and `Runtime.stop`
+answers the end report, with `shutdown: false` for a test that shut down
+itself):
+
+| Test | Claim | Starting commit | After |
+| --- | --- | --- | --- |
+| `aDelayPendingWhenTheVMEndsDoesNotTouchIt` | a 2 s Delay pending at the end, the freed state overwritten: the timer fires into nothing; `timersPending` 1, `lateSignals` 1 | signal 11 3/3 debug, ThreadSanitizer SEGV External.swift:30 3/3 (part 1) | passes debug, sanitizer, sanitizer under load |
+| `aTimerFiringBetweenShutdownAndDestroyIsTaken` | a timer between `shutdown` and `destroy` is queued and freed: `undeliveredSignals` 1, nothing late | (the API did not exist) | passes |
+| `aVMRefHeldPastTheEndIsRefused` | `signalFromOutside` and `rootPending` after the end, from another thread too: -1, counted 3 | (would touch freed memory) | passes |
+| `aTimerAndTheEndAtTheSameMomentAreDecidedByTheLock` | 16 VMs, each ended by its own thread (started at a gate) at 150 ms before to 300 ms after its 1.5 s Delay: per VM `lateSignals == timersPending`, at most one of pending and undelivered | | passes; debug 8 pending at the end, 8 delivered; sanitizer under twelve loops 6 pending, 1 undelivered, 9 delivered (`work/tsan-load-1.txt`) |
+| `brokenVariantALateTimerTouchesTheFreedVM` | the fix switched off (`VMTestSwitches.lateSignalsIgnoreEnd`), by hand only (`KAJO_BROKEN_DELAY_END=1`) | | debug signal 11 3/3 (`broken/debug-run{1,2,3}.txt`); sanitizer "ThreadSanitizer: SEGV on unknown address 0x4b4b1b4b4b4b4b40 ... #1 pushExternal(_:_:handle:) External.swift:120, #2 closure #1 in VMRef.timerFired(_:handle:), #4 closure #1 in VMLife.timerFired(_:)" (`broken/tsan-run1.txt`) |
+
+The race test asserts agreement and not that every outcome occurred (a
+GCD timer under the sanitizer and load can be seconds late, and then every
+VM ends first); it prints its tally (`delay-race ...`), and both runs above
+saw the lock decide both ways. No variant fails a named check instead of
+crashing (without the check the timer's push is itself the
+use-after-free), so the broken variant is a test switch run by hand, the
+house rule for trapping variants.
+
+The new tests ran once under ThreadSanitizer with twelve busy loops before
+the tier (`work/tsan-load-1.txt`, `scripts/tsan-load.sh`: 29 tests with
+`ProcessTests` and the saved-Process tests, 0 reports). The kernel's
+`ProcessTest>>testDelay` and module 8c's re-arm tests run in the gates
+unchanged.
+
+### Starting positions
+
+1. Right, with a correction: the 2 s Delay test crashes only when the freed
+   memory is reused (part 1); ThreadSanitizer does not see the late read.
+   With the reuse: 3 of 3 in each build.
+2. Right that the timer is the one path in practice; wrong that the
+   bridge's `ref` is cleared (it never is). The bridge is protected by
+   `close` clearing its Semaphores, and a post racing a close with a full
+   pending table could reach a destroyed VM. The fix covers both.
+3. Right: nothing in the interpreter, the collectors or the scheduler's
+   hot paths; the cell is its own allocation with its own lock, outside the
+   VM state's memory.
+4. (a) chosen, for the reason above.
+5. Right: `just arc-check` passes ("OK: no retain or release on the
+   checked paths; the dispatch loop is one jump table", `check/arc-check.txt`);
+   `interpret` 1403 instructions, one indirect branch, one jump table;
+   `drainExternal` 154 instructions, ARC 0, the same line as in earlier
+   modules' runs. `startDelay` is `@inline(never)`.
+6. Right: no kernel, tools or types file changed.
+
+### Unsafe surface
+
+Lines naming `unsafe` in `Sources/KajoVM`: 5926 on 0395be3, 5928 on
+075d2a4 (`part1/unsafe-lines-0395be3.txt`, `work/unsafe-lines-075d2a4.txt`;
+`git diff 0395be3 075d2a4`: 19 added, 17 removed, nearly all the push
+moving into `pushExternal`). The new ones are `registerPending` and
+`pushExternal` inside the cell's closures, `VMState.life` read in
+`startDelay`, and the two moved callers. `VMLife` itself has no `unsafe`;
+no new `@safe` type but `VMLife` (a class holding a `Mutex`). The clean
+build and `just ios-check` (strict memory safety, Swift 6 mode) report 0
+warnings and 0 errors (`check/clean-build.txt`, `check/ios-check.txt`).
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/delay-outlives-vm/check just check 0395be3`
+on 075d2a4, the core tier, 20 gates (no gate script changed, so no
+`check-tier-test`): every gate `rc=0`, `check-tier done core failed=0
+11835s` (`check/gates.log`).
+
+| Gate | 075d2a4 | a89dd0e (core) | 7ac2711 (Swift) |
+| --- | --: | --: | --: |
+| clean-build | 20 | 19 | 20 |
+| swift-test-load | 830 | 811 | (swift-test 696) |
+| tsan | 3015 | 2898 | 3017 |
+| tsan-load | 4128 | 3653 (rc=1) | - |
+| ios-check | 17 | 17 | - |
+| arc-check | 63 | 6 | - |
+| golden | 77 | 77 | - |
+| native-golden | 167 | 162 | - |
+| native-kernel-test | 72 | 70 | - |
+| native-cc | 39 | 37 | - |
+| test-release | 126 | 121 | - |
+| model-check | 35 | 52 | - |
+| soak | 64 | 61 | - |
+| fuzz (4 x 600 s) | 666 | 666 | (2 x 120 s) 125 |
+| apps | 139 | 125 | 133 |
+| kernel-test | 122 | 108 | 119 |
+| new-check | 268 | 264 | 268 |
+| ab | 332 | 329 | - |
+| matrix-mac | 795 | 670 | - |
+| matrix-iphone | 860 | 738 | - |
+
+`arc-check` rebuilt its release build because core files changed (a89dd0e's
+6 s was a cached build). `tsan-load` is 475 s longer than a89dd0e's,
+which failed and is no clean baseline; the matrices run 153 rows since
+main flips (a89dd0e's ran 147). The new tests' bodies take 2 to 4.5 s each
+(their reported durations in the parallel suites, 325 to 1104 s, are the
+cooperative pool's wait, AGENTS.md); 0 ThreadSanitizer warnings in `tsan`
+and `tsan-load`; the suites 471 and 176 tests passed in each test gate;
+`kajo test` 255 of 255 (`ProcessTest>>testDelay` among them, 29 ms);
+`SnapshotScenarioTests` (the saved image's `delay` scenario re-arms)
+passed. Fuzzers: kasm 2 073 186, snapshot 3 101 768, syntax 750 708,
+protocol 1 728 061 runs in 601 s each, "build=ok" on each line.
+
+**The aligned A/B** (`check/ab/table.md`, base 0395be3) against the base
+against itself (`work/ab-base-base/table.md`, the same script run from a
+worktree of 0395be3, removed afterwards):
+
+| | 1 worker | 8 workers |
+| --- | --- | --- |
+| head / base, time | 0.990 to 1.004 | 0.943 to 1.085 |
+| base / base, time | 0.992 to 1.000 | 0.939 to 1.082 |
+| head / base, cycles | 0.994 to 1.003 | 0.980 to 1.020 |
+| base / base, cycles | 0.999 to 1.001 | 0.983 to 1.021 |
+
+Not every row is inside the base's own range, by at most 0.4 points:
+at one worker `alloc` 1.004 (cycles 1.003, instructions 1.000) is 0.4
+points over the base's highest (1.000), `fib` 0.990 and `st-closures`
+0.991 under its lowest (0.992); at 8 workers `arith` 1.085 (cycles 1.017,
+instructions 1.003) is 0.3 points over the base's highest time ratio
+(1.082), and inside its cycles range. Instruction ratios 0.998 to 1.005
+on every row. With `interpret` identical (below) and nothing of the
+change on a kernel's path (no kernel arms a Delay), the agent reads these
+as the spread of five runs, not a cost; said so the owner can ask for
+more runs. Checksums the same in every row.
+`interpret` in the A/B's own objects (`Dispatch.o` of both builds,
+`otool -tV` with addresses stripped, `work/interpret-{base,head}.txt`):
+1817 lines each, identical instruction for instruction.
+
+**The matrices** (`check/matrix-mac.txt`, `check/matrix-iphone.txt`,
+`shell-report.py --bar` over every raw row, as the gate ran them, blocks
+back to back, neither interleaved nor cooled):
+
+| | rows | launches failed | checksums not ok | frames missed (rows) | fallbacks | unjustified | stalls (longest ms) | sweep stops | young on main | main flips | main waits | longest stop ms | longest wait for a safepoint ms |
+| --- | --: | --: | --: | --- | --: | --: | --- | --: | --: | --: | --: | --- | --- |
+| Mac | 153 | 0 | 0 | 1785 (3, the hog rows with the budget off, by design) | 0 | 0 | 652 (21.61) | 0 | 0 | 357 | 0 | 15.52 scavenge, ring `young=stw` | 0.72 finalMark, w6/poll |
+| iPhone 13 Pro | 153 | 0 | 0 | 3584 (5: 3 hog rows 1191 to 1193, and the ring under `young=stw` runs 2 and 3, 5 and 3 frames, thermal serious) | 0 | 0 | 0 | 0 | 0 | 366 | 0 | 18.08 scavenge, storm mainload `young=stw` | 2.32 scavenge, marker/poll |
+
+a89dd0e's bar for the same columns: the Mac 147 rows, 1786 frames in 3
+hog rows, 658 stalls (28.93), longest stop 11.62; the iPhone 147 rows,
+3588 frames in 6 rows, longest stop 17.03. Thermal states on the iPhone's
+lines: 238 nominal, 330 fair, 122 serious (the device warmed over the
+matrix; every frame missed outside the hog rows was at serious).
+
+### The idle VM
+
+No thread and no wait is added: the timers are the GCD timers they were,
+the cell's lock is taken only by a signal, a timer's arming and firing,
+and the end. An idle VM's threads wait as before.
+
+### Deviations
+
+- The reproducing test overwrites the freed VM state (part 1): without it
+  the test passes on the starting commit under ThreadSanitizer, so the
+  brief's test alone does not fail.
+- `VMRef` checks the cell for every call, not only the Delay's timer: the
+  bridge's rare path is closed by the same lock (part 5 needed no code of
+  its own).
+- `Runtime.stop` answers the end report and takes `shutdown:`.
+- The bar's "inside the base-against-base spread": two rows of eighteen
+  sit 0.3 and 0.4 points past it in time (above), with `interpret`
+  identical and the cycle ratios inside at 8 workers.
+
+### Not done
+
+- The run line carries no Delay counter (above).
+- `ShellVM.close` still waits up to 3 s and leaks (found, below).
+
+### Found, not this module's
+
+- `ShellVM.close` waits up to 3 s for the pending count to fall to the
+  finalization root's, but no worker drains after `shutdown`, so the count
+  never falls: every `close` with a Delay, an event or a request still
+  pending waits 3 s and leaks the VM and its image. With the cell the wait
+  protects nothing (open question 4). Its comment ("they would signal a
+  freed VM") is no longer true.
+- `ShellVM`'s host calls (`spawn`, `liveProcessCount`, `post`'s queue
+  aside) do not check `closed`; a host that calls one after `close` reads
+  a freed VM. No host does today.
+
+### Open questions
+
+1. Decided: the cell (above).
+2. `destroy` does not refuse a VM with timers pending (as recommended): a
+   host cannot know, and `VMEndReport.timersPending` says it.
+3. `VM.timersPending` exists for the tests only; no host surface reads it
+   (as recommended).
+4. New: should `ShellVM.close` stop waiting for the pending count and
+   destroy at once? Recommended: yes, in a small follow-up with a test
+   that closes a shell with a Delay pending and reads that the VM was
+   freed; the wait leaks every such VM and the cell makes it unnecessary.
