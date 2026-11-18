@@ -96,6 +96,11 @@ import Synchronization
     /// allocation, poll, stall or park in it.
     let intern: UnsafeMutablePointer<InternState>
     let internLock: UnsafeMutablePointer<pthread_mutex_t>
+    /// A Delay does not outlive its VM (docs/modules/delay-outlives-vm.md):
+    /// the cell every Delay's timer and every `VMRef` holds, a separate
+    /// reference-counted object with its own lock that outlives this
+    /// struct. Read by `startDelay` (a primitive's out-of-line slow path).
+    let life: VMLife
 }
 
 /// Symbol interning without a stop: what the inserts did. Under

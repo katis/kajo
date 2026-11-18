@@ -12,7 +12,7 @@ func signalFinalization(_ vm: VMPointer) {
     unsafe pthread_mutex_lock(vm.pointee.pendingLock)
     let sem = unsafe vm.pointee.finalization.pointee.semaphore
     unsafe pthread_mutex_unlock(vm.pointee.pendingLock)
-    if sem != .none { unsafe VMRef(vm: vm).signalFromOutside(sem, handle: nil) }
+    if sem != .none { unsafe pushExternal(vm, sem, handle: nil) }  // a VM thread: the VM lives
 }
 
 /// Module 4's primitives: 35 `scavenge` (module 7: the caller's nursery

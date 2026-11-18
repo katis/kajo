@@ -9,40 +9,131 @@ import Synchronization
 // each Semaphore. The pending-root table keeps a Semaphore alive while an
 // operation that will signal it is outstanding.
 
+/// The VM's end as the threads it does not join see it
+/// (docs/modules/delay-outlives-vm.md): a small reference-counted cell with
+/// its own lock, allocated apart from the VM state, so that a holder can
+/// still consult it after `VM.destroy` has freed that state. Every way into
+/// the VM from such a thread (`VMRef`, each Delay's timer) holds it and
+/// touches the VM only inside `whileLive`, under the lock; `end` sets
+/// `ended` under the same lock before `destroy` frees anything, so a signal
+/// either finished before the end or does nothing and is counted. Lock
+/// order: this lock, then the scheduler and pending-root mutexes (never the
+/// other way: no VM thread takes it while holding those). The host's
+/// `wakeMain` hook runs under it, so a hook may not signal the VM
+/// synchronously (the shells' hooks only schedule a turn).
+@safe final class VMLife: Sendable {
+    struct State: Sendable {
+        var ended = false
+        /// Delay timers armed and not yet fired.
+        var timersPending = 0
+        /// Signals and roots refused because the VM had ended (a timer's
+        /// included).
+        var lateSignals: UInt64 = 0
+    }
+    private let state = Mutex(State())
+    /// The broken variant (`TestSwitches.lateSignalsIgnoreEnd`), copied at
+    /// the VM's making because the VM's config dies with it: the check is
+    /// skipped and a late signal touches the freed VM. Run by hand only.
+    let ignoresEnd: Bool
+
+    init(ignoresEnd: Bool = false) { self.ignoresEnd = ignoresEnd }
+
+    /// Run `body` (which touches the VM) if the VM has not ended, holding
+    /// the lock so the end waits for it. False, counted, when it had ended.
+    @discardableResult
+    func whileLive(_ body: () -> Void) -> Bool {
+        state.withLock { s in
+            if s.ended && !ignoresEnd {
+                s.lateSignals &+= 1
+                return false
+            }
+            body()
+            return true
+        }
+    }
+
+    /// A Delay's timer was armed (on a VM thread: the VM lives).
+    func armTimer() { state.withLock { $0.timersPending += 1 } }
+
+    /// A Delay's timer fired: `body` signals, if the VM still lives.
+    func timerFired(_ body: () -> Void) {
+        state.withLock { s in
+            s.timersPending -= 1
+            if s.ended && !ignoresEnd {
+                s.lateSignals &+= 1
+                return
+            }
+            body()
+        }
+    }
+
+    /// The VM ends: from here every signal is refused. Answers the timers
+    /// still pending, each of which will fire into nothing.
+    func end() -> Int {
+        state.withLock { s in
+            s.ended = true
+            return s.timersPending
+        }
+    }
+
+    var snapshot: State { state.withLock { $0 } }
+}
+
 /// A handle to a VM that any thread may hold: for `signalFromOutside`
-/// from completion handlers and the shell. Valid until the VM is destroyed.
+/// from completion handlers and the shell. It may outlive the VM: after
+/// `VM.destroy` its calls do nothing but count (`VM.lateSignals`), decided
+/// under `VMLife`'s lock, which the end takes before freeing the VM.
 @safe struct VMRef: @unchecked Sendable {
     let vm: VMPointer
+    let life: VMLife
+
+    /// Root `sem` in the pending-root table from any thread, for a signal
+    /// whose drain frees it (`signalFromOutside`'s handle); -1 when the
+    /// table is full or the VM has ended. The caller must know `sem` rooted
+    /// while it asks.
+    func rootPending(_ sem: Oop) -> Int {
+        var h = -1
+        life.whileLive { h = unsafe registerPending(vm, sem) }
+        return h
+    }
 
     /// Signal `sem` from any thread, VM or not. `handle` is the pending-root
     /// slot to free when the signal is drained (nil: `sem` is rooted some
-    /// other way). Takes no lock for the push; waking an idle worker takes
-    /// the scheduler mutex, so the untimed idle wait cannot miss it.
-    /// Root `sem` in the pending-root table from any thread, for a signal
-    /// whose drain frees it (`signalFromOutside`'s handle); -1 when the
-    /// table is full. The caller must know `sem` rooted while it asks.
-    func rootPending(_ sem: Oop) -> Int { unsafe registerPending(vm, sem) }
-
+    /// other way). Nothing when the VM has ended.
     func signalFromOutside(_ sem: Oop, handle: Int?) {
-        let node = UnsafeMutablePointer<ExternalNode>.allocate(capacity: 1)
-        unsafe node.initialize(to: ExternalNode(sem: sem, handle: handle ?? -1, next: 0))
-        let head = unsafe vm.pointee.externalHead
-        var old = unsafe head.pointee.load(ordering: .relaxed)
-        while true {
-            unsafe node.pointee.next = old
-            let (done, cur) = unsafe head.pointee.compareExchange(
-                expected: old, desired: UInt(bitPattern: node), successOrdering: .releasing, failureOrdering: .relaxed)
-            if done { break }
-            old = cur
-        }
-        unsafe pthread_mutex_lock(vm.pointee.schedLock)
-        let idle = unsafe vm.pointee.sched.pointee.idleWorkers > 0
-        if idle { unsafe pthread_cond_signal(vm.pointee.schedCond) }
-        unsafe pthread_mutex_unlock(vm.pointee.schedLock)
-        // With no background worker to drain it, the main worker must.
-        if unsafe !idle && vm.pointee.config.backgroundWorkers == 0, let h = unsafe vm.pointee.hooks.wakeMain {
-            unsafe h(vm.pointee.hooks.context)
-        }
+        life.whileLive { unsafe pushExternal(vm, sem, handle: handle) }
+    }
+
+    /// A Delay's timer fired (`startDelay`).
+    func timerFired(_ sem: Oop, handle: Int?) {
+        life.timerFired { unsafe pushExternal(vm, sem, handle: handle) }
+    }
+}
+
+/// Push a signal of `sem` onto the external queue and wake a worker to
+/// drain it. Any thread while the VM lives: its own threads call it
+/// directly, any other through `VMRef`. `handle` as `signalFromOutside`'s.
+/// Takes no lock for the push; waking an idle worker takes the scheduler
+/// mutex, so the untimed idle wait cannot miss it.
+func pushExternal(_ vm: VMPointer, _ sem: Oop, handle: Int?) {
+    let node = UnsafeMutablePointer<ExternalNode>.allocate(capacity: 1)
+    unsafe node.initialize(to: ExternalNode(sem: sem, handle: handle ?? -1, next: 0))
+    let head = unsafe vm.pointee.externalHead
+    var old = unsafe head.pointee.load(ordering: .relaxed)
+    while true {
+        unsafe node.pointee.next = old
+        let (done, cur) = unsafe head.pointee.compareExchange(
+            expected: old, desired: UInt(bitPattern: node), successOrdering: .releasing, failureOrdering: .relaxed)
+        if done { break }
+        old = cur
+    }
+    unsafe pthread_mutex_lock(vm.pointee.schedLock)
+    let idle = unsafe vm.pointee.sched.pointee.idleWorkers > 0
+    if idle { unsafe pthread_cond_signal(vm.pointee.schedCond) }
+    unsafe pthread_mutex_unlock(vm.pointee.schedLock)
+    // With no background worker to drain it, the main worker must.
+    if unsafe !idle && vm.pointee.config.backgroundWorkers == 0, let h = unsafe vm.pointee.hooks.wakeMain {
+        unsafe h(vm.pointee.hooks.context)
     }
 }
 
@@ -142,14 +233,20 @@ func drainExternal(_ vm: VMPointer, _ w: WorkerPointer) {
 }
 
 /// `nil delay: ms signal: sem`: a one-shot GCD timer signals `sem` from
-/// outside after `ms`. Not a VM wakeup: no VM thread waits on a timer.
+/// outside after `ms`. Not a VM wakeup: no VM thread waits on a timer. The
+/// timer holds the VM's life cell, not only its pointer: if the VM has
+/// ended when it fires, it does nothing (docs/modules/delay-outlives-vm.md;
+/// `VMEndReport.timersPending` counts the timers pending at the end). Out
+/// of line: the closure and the cell's retain stay off the primitive path.
+@inline(never)
 func startDelay(_ vm: VMPointer, ms: Int, sem: Oop) -> Bool {
     let h = unsafe vm.pointee.config.testSwitches.noPendingRoots ? -1 : registerPending(vm, sem)
     let unrooted = unsafe vm.pointee.config.testSwitches.noPendingRoots
     if h < 0 && !unrooted { return false }
-    let ref = unsafe VMRef(vm: vm)
+    let ref = unsafe VMRef(vm: vm, life: vm.pointee.life)
+    ref.life.armTimer()
     DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(ms)) {
-        ref.signalFromOutside(sem, handle: h < 0 ? nil : h)
+        ref.timerFired(sem, handle: h < 0 ? nil : h)
     }
     return true
 }

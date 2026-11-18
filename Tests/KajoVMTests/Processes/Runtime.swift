@@ -81,17 +81,20 @@ final class Runtime {
         return ok
     }
 
-    /// Joins the workers, checks the heap, and releases everything.
-    func stop(verifyHeap: Bool = true) {
-        vm.shutdown()
+    /// Joins the workers, checks the heap, and releases everything; the
+    /// VM's end report. `shutdown: false`: the test shut the VM down itself.
+    @discardableResult
+    func stop(verifyHeap: Bool = true, shutdown: Bool = true) -> VMEndReport {
+        if shutdown { vm.shutdown() }
         if verifyHeap {
             image.om.retireAllContexts()  // the verifiers read blocks' used bytes
             let reports = image.om.verifyHeap() + image.om.verifyFreeLists()
             #expect(reports == [], "\(reports.prefix(3))")
             #expect(image.om.counters.verifierFailures == 0, "\(image.om.verifierReports.prefix(3))")
         }
-        vm.destroy()
+        let end = vm.destroy()
         image.destroy()
+        return end
     }
 }
 

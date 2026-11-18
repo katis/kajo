@@ -387,6 +387,14 @@ struct VMEndReport: Sendable {
     /// Module 10: blocks old space grew past the promotion reserve's limit
     /// into the final collection's growth (`ObjectMemoryConfig.endGrowthBytes`).
     var grownBlocks = 0
+    /// A Delay does not outlive its VM (docs/modules/delay-outlives-vm.md):
+    /// Delay timers still pending when the VM ended (each fires into
+    /// nothing and is counted in `VM.lateSignals`), and external signals
+    /// queued and never drained (pushed after the last drain, between
+    /// `shutdown` and the end), freed with their nodes. Set by
+    /// `VM.destroy` whether or not the VM had nurseries.
+    var timersPending = 0
+    var undeliveredSignals = 0
 }
 
 /// The VM's end (docs/modules/vm-teardown.md): every thread has joined;

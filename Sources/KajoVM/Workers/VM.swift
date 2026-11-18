@@ -17,6 +17,9 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
 @safe final class VM: @unchecked Sendable {
     let image: Image
     let state: VMPointer
+    /// The VM's end as threads it does not join see it (`VMLife`): held
+    /// here too, so the counts stay readable after `destroy`.
+    let life: VMLife
     private var hostRoots: [Oop: RootHandle] = [:]  // under hostLock
     private var started = false
 
@@ -49,6 +52,8 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         let pendingBuilding = UnsafeMutablePointer<UInt8>.allocate(capacity: config.pendingCapacity)
         unsafe pendingBuilding.initialize(repeating: 0, count: config.pendingCapacity)
         let stops = unsafe UnsafeMutablePointer<StopRecord>.allocate(capacity: SafepointState.stopLog)
+        let life = VMLife(ignoresEnd: config.testSwitches.lateSignalsIgnoreEnd)
+        self.life = life
         let raw = unsafe UnsafeMutableRawPointer.allocate(byteCount: MemoryLayout<VMState>.stride, alignment: 128)
         unsafe state = raw.bindMemory(to: VMState.self, capacity: 1)
         unsafe state.initialize(to: VMState(
@@ -62,7 +67,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             workerShared: shared, errors: lined(ErrorLog()), errorsLock: makeMutex(), counters: counters,
             finalization: lined(FinalizationState()), epoch: lined(Atomic<UInt64>(1)), hazardsHeld: lined(Atomic<Int>(0)),
             enterWindow: lined(EnterWindowHook()), saveHold: lined(Atomic<Bool>(false)), slowPolls: lined(Atomic<Int>(0)),
-            savedImages: SavedImages(), intern: lined(InternState()), internLock: makeMutex()))
+            savedImages: SavedImages(), intern: lined(InternState()), internLock: makeMutex(), life: life))
         let seed = config.perturb?.seed ?? 0x9E37_79B9_7F4A_7C15
         for i in 0..<workerCount {
             unsafe workers[i] = Worker.make(image: image, vm: state, index: i, isMain: i == 0, flag: flag,
@@ -115,7 +120,15 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     func takeSavedImages() -> [[UInt8]] { unsafe state.pointee.savedImages.take() }
 
     var config: VMConfig { unsafe state.pointee.config }
-    var ref: VMRef { unsafe VMRef(vm: state) }
+    var ref: VMRef { unsafe VMRef(vm: state, life: life) }
+
+    /// Signals and roots refused because the VM had ended, a late Delay's
+    /// timer included (readable after `destroy`).
+    var lateSignals: UInt64 { life.snapshot.lateSignals }
+
+    /// Delay timers armed and not yet fired (tests: open question 3 of
+    /// docs/modules/delay-outlives-vm.md; no host surface reads it).
+    var timersPending: Int { life.snapshot.timersPending }
 
     /// Set before `start` (no closure built in `@MainActor` context may run
     /// on a VM thread; these are C function pointers).
@@ -172,14 +185,23 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     }
 
     /// Release the VM (after `shutdown`). Stacks of live Processes are
-    /// freed; the image is the caller's. Outstanding Delays must have fired.
+    /// freed; the image is the caller's. Delays may still be pending: after
+    /// the final collection the VM ends under `VMLife`'s lock, so a timer
+    /// (or any `VMRef` call) that comes later does nothing and is counted
+    /// (`lateSignals`); the report says how many timers were pending then
+    /// and how many queued signals were never delivered. Their pending
+    /// roots are freed with the table (docs/modules/delay-outlives-vm.md).
     /// First the final collection (docs/modules/vm-teardown.md): the image
     /// the host holds afterwards is whole, nothing young, every entry the
     /// VM took and did not use back in a free list, so `Image.saveImage`
     /// and another VM over the same image work.
     @discardableResult
     func destroy() -> VMEndReport {
-        let end = unsafe host { w in unsafe endYoungGeneration(state, w) }
+        var end = unsafe host { w in unsafe endYoungGeneration(state, w) }
+        // The end: from here no thread the VM does not join touches it. A
+        // signal that holds the lock now finishes first; its node is freed
+        // below with the others.
+        end.timersPending = life.end()
         let s = unsafe state.pointee
         for i in unsafe 0..<s.sched.pointee.recordHighWater {
             unsafe s.records[i].base?.deallocate()
@@ -189,6 +211,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             let n = unsafe UnsafeMutablePointer<ExternalNode>(bitPattern: node).unsafelyUnwrapped
             node = unsafe n.pointee.next
             unsafe n.deallocate()
+            end.undeliveredSignals += 1
         }
         if let b = unsafe s.native {
             unsafe unbindNative(image, b.pointee)

@@ -154,6 +154,12 @@ struct VMTestSwitches: Sendable {
     /// (`allocateOld`) and takes the lock again, the path a full context
     /// takes; the tests run it too.
     var internSlowAllocation = false
+    /// A Delay does not outlive its VM (docs/modules/delay-outlives-vm.md):
+    /// the broken variant in which a signal or a timer that comes after the
+    /// VM's end is not refused and touches the freed VM. It crashes (signal
+    /// 11, or a ThreadSanitizer SEGV), so it runs by hand only
+    /// (`KAJO_BROKEN_DELAY_END=1`), never in the suite.
+    var lateSignalsIgnoreEnd = false
 }
 
 /// C-convention hooks the shell sets before any worker starts, so no

@@ -440,7 +440,7 @@ func installSavedProcesses(_ vm: VMPointer, _ w: WorkerPointer) -> (processes: [
         unsafe vm.pointee.finalization.pointee = FinalizationState(semaphore: fin, handle: h)
         unsafe pthread_mutex_unlock(vm.pointee.pendingLock)
         // Ephemerons queued before the save: their signal was not saved.
-        if om.finalizationQueueCount > 0 { unsafe VMRef(vm: vm).signalFromOutside(fin, handle: nil) }
+        if om.finalizationQueueCount > 0 { unsafe pushExternal(vm, fin, handle: nil) }  // inside VM.init
     }
     // The chunks are garbage from here on.
     unsafe clearingStore(w, image.specialObjects, SpecialObjects.scheduler, nilObj)
