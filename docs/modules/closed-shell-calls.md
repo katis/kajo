@@ -161,3 +161,158 @@ answered as right or wrong.
 1. Should the rule "a host closes from the thread that drives the VM" be
    enforced, not only written? Recommended: no; it would need the lock
    this brief keeps out of the frame.
+
+## Part 1
+
+Read and reproduced by the build agent on 2026-11-18 from 0e30cff,
+swiftly's swift.org 6.4.2 toolchain first on PATH (`part1/path.txt`).
+Raw outputs in `~/kajo-scratch/closed-shell-calls/part1/`. Nothing here
+changes `Sources/`: part 1 adds the hand-run test and this section.
+
+### Every member of `ShellVM` after a close
+
+What each member touches once `close` has returned: the VM (its
+`VMState` and everything hanging off it, freed by `VM.destroy`), the
+image (the object memory, freed by `image.destroy`), the bridge (the
+`ShellBridge`, which lives as long as the `ShellVM`), or nothing freed.
+"VM object" means a Swift property of the `VM` class itself, which the
+`ShellVM` still holds: readable, but it describes a VM that is gone.
+
+| Member | Touches after close | Part 2 |
+| --- | --- | --- |
+| `init(image:options:callbacks:)`, `init(imageAt:…)` | nothing (comes before any close) | exempt |
+| `deinit` | `close()` again: `closed` under `closeLock`, nothing freed | exempt |
+| `start()` | VM (`vm.start`); already refused by `precondition(!started && !closed)`, with no message | checked (message) |
+| `close()` | `closed` under `closeLock`; a second call frees nothing | exempt |
+| `static now()` | nothing (the clock) | exempt |
+| `openProtocol()` | bridge only (`stopsForDebugger`, `protocolOpen`) | checked (decision below) |
+| `postRequest(connection:json:)` | bridge only: the request Semaphore is unregistered, so no `VMRef` call; even a post that read it before goes through `VMLife` | exempt |
+| `queuedRequests` | bridge only (its lock) | exempt |
+| `stopsForDebugger` (get, set) | bridge only (an `Atomic<Bool>` in the bridge) | checked (decision below) |
+| `runTurn(budgetNs:minPriority:)` | VM (`vm.runMain`: worker 0, the scheduler, the safepoint) | checked |
+| `checkStuck(limitNs:)` | VM (the records and the scheduler lock) | checked |
+| `post(_:)` | bridge only: the event Semaphore is unregistered (as `postRequest`) | exempt |
+| `queuedEvents` | bridge only | exempt |
+| `spawn(_:receiver:arguments:main:priority:)` | image (`classOop`, `entryPoint` read the heap; `classIndex(named:)` is a Swift dictionary), VM (`newString`, `vm.spawn`, `inspect`) | checked |
+| `hostValues(_:)` (private) | image, VM; called only by `spawn` | covered by `spawn` |
+| `holds(_:)` (internal) | `held` under `heldLock` only | not a host call |
+| `state(of:)` | `held`, then VM (`vm.state(of:)`: the Process's slots) | checked |
+| `result(of:)` | VM, image (`vm.host`, `shellValue`) | checked |
+| `failure(of:)` | VM (the error log) | checked |
+| `waitUntilTerminated(_:)` | VM (the scheduler's condition) | checked |
+| `terminate(_:)` | VM | checked |
+| `release(_:)` | `held`, then VM (`vm.release`: the host roots) | checked |
+| `liveProcessCount` | VM (`schedRead`: the scheduler's lock and state) | checked |
+| `resumedProcessCount` | VM object (a Swift array of oops): nothing freed, but stale | checked |
+| `isReleaseImage` | image (`om.isReleaseImage` reads the freed shared GC state) | checked |
+| `nativeBindReport` | VM object (a Swift optional): nothing freed, but stale | checked |
+| `nativeGenerated` | VM (`vm.config` reads `state.pointee`) | checked |
+| `snapshot(to:)` | VM and image, through `spawn` and the Process calls | checked |
+| `counters` | image (`om.counters`) and VM (the counter array) | checked |
+| `collectorReport(seconds:)` | VM (stops, the collectors' states) | checked |
+| `mainThreadCounters` | VM (worker 0's young counters) | checked |
+| `pauses` | VM (the stop log) | checked |
+| `threads` | VM (the worker table, the marker and collector states) | checked |
+| `hopLatencies` | VM (the scheduler's ring) | checked |
+| `closeObserver`, `afterShutdownForTests`, `brokenOldWaitSeconds` (internal) | nothing: test seams read by `close` | not host calls |
+| `image`, `vm`, `bridge` (internal stored) | tests reach through them; after a close the suite reads only `vm.vm.life` and `vm.vm.lateSignals`, which read the life cell that outlives the VM | not host calls |
+| `isStoppedForDebugger(_:)` (KajoApp's extension) | through `spawn`, `state(of:)`, `result(of:)`, `release` | covered by those |
+
+Starting position 4 is right: `post`, `postRequest`, `queuedEvents` and
+`queuedRequests` read only the bridge after the unregistering (its two
+locks, its queues, and `bridge.ref`, used only when a Semaphore is
+registered and then only through `VMLife`'s lock).
+
+The brief's list of "calls that enter the VM or its image" is right but
+for two: `openProtocol` and `stopsForDebugger` read only the bridge, and
+`resumedProcessCount` and `nativeBindReport` read a Swift property of
+the `VM` object, not freed memory. Part 2 checks all four anyway, with
+the brief's rule turned round: everything is checked but the four bridge
+calls that other threads make at any time (and so can always race a
+close), `close`, the initializers and the clock. Each of the four is a
+host bug after a close (a protocol opened on, or a setting given to, a
+VM that is gone; a count of a VM that is gone) and none is called from
+another thread by design, so a message serves the host better than a
+quiet answer, and the table test's rule stays one sentence.
+
+### The hand-run on 0e30cff
+
+`Tests/KajoCompilerTests/ClosedShellCallsTests.swift`,
+`aCallAfterCloseByHand`, enabled only by `KAJO_CLOSED_SHELL_CALL=<call>`:
+a started shell runs `buildCounter`, is closed (`destroyed=true`), the
+freed `VMState` is reused by 4096 allocations of its size and alignment
+filled with 0xA5 (`DelayEndTests`' `Scribble`), and the named call is made.
+
+Debug build, three runs of each call (`part1/debug-<call>-<n>.txt`): 9 of
+9 end with "exited with unexpected signal code 11" after the line
+`closed-shell-call <call>: calling after close (destroyed=true
+pendingRoots=0 timersPending=0 undeliveredSignals=0)`; no run prints
+"returned".
+
+ThreadSanitizer build (`--sanitize=thread`, `TSAN_OPTIONS=abort_on_error=0`),
+three runs of `liveProcessCount` (`part1/tsan-liveProcessCount-<n>.txt`):
+3 of 3 report
+
+    ==51058==ERROR: ThreadSanitizer: SEGV on unknown address 0x52d2f2d2d2d2d2d0 ...
+        #2 pthread_mutex_lock
+        #3 VM.schedRead<A>(_:) VM.swift:380
+        #4 VM.liveProcessCount.getter VM.swift:346
+    SUMMARY: ThreadSanitizer: SEGV VM.swift:380 in VM.schedRead<A>(_:)
+
+(the scheduler's mutex pointer read from the overwritten `VMState`). One
+run each of the other two calls: `runTurn` "SUMMARY: ThreadSanitizer:
+SEGV VMState.swift:445 in UnsafeMutablePointer<A>.worker(_:)", `spawn`
+"KajoVM/RawArray.swift:44: Precondition failed" (signal 5: a bounds
+check met a garbage count), `part1/tsan-{runTurn,spawn}-1.txt`. Without
+`abort_on_error=0` the first sanitizer run sat in `abort` at 100 percent
+CPU for 15 minutes after the SEGV (`part1/tsan-sample.txt`) and was ended
+by its bound with its output lost; the option makes the runtime exit
+instead.
+
+So starting position 1 is right: one small test shows it, and it cannot
+live in the suite.
+
+### Who else holds a `ShellVM`
+
+- `DevTarget` (`Sources/KajoDev/Target.swift`): `run()` calls `runTurn`
+  in a loop until `stop()`; `close()` is documented "after `run`
+  returned, or instead of it". `kajo run --protocol` calls `run()` and
+  then `close()` on the same thread. The tests' `RunningTarget.close()`
+  (`Tests/KajoCompilerTests/DevProtocolTests.swift`) stops the target,
+  waits for its run thread at most 30 s, ignores the wait's answer and
+  closes: if the wait ever ran out, `close` would race a running
+  `runTurn` on another thread, which no check can make safe (found, not
+  this module's; below). The protocol server's connection threads reach
+  the VM only through `postRequest`.
+- `ShellRuntime` (`Sources/KajoApp/ShellRuntime.swift`): its calls are
+  `runTurn` (in `turn`), `post` and `checkStuck` (in `tick` and
+  `deliver`) and `start`. Its follow-up turn and its `wakeMain` turn are
+  dispatched to the main queue holding the runtime weakly
+  (`[weak self]`, `RuntimeLink.runtime`). The apps and the shells never
+  close their VM (the shells end with `exit`). Only tests close a
+  runtime's VM (`closeApp` in `AppServingTests.swift`), always at the end
+  of the scope that holds the runtime; `aTurnLeftForLaterDoesNotOutlive
+  ItsHost` schedules a follow-up, closes, leaves the scope and then
+  awaits, so the follow-up runs and finds the runtime gone. A turn can
+  reach a closed VM only if something keeps the runtime alive past its
+  VM's close, which no host does. Starting position 6 is right; the
+  runtime gets no check of its own.
+- The hosts (`AppKitHost`, `UIKitHost`) hold no `ShellVM`: their
+  display links and event handlers reach the runtime (weakly for events;
+  the shells' display-link closures are `[unowned self]` on a mode that
+  lives for the process).
+- `ClientHost` reaches the VM only through its sink (`post`).
+- KajoApp's `ShellVM.isStoppedForDebugger` calls only `spawn`, `state`,
+  `result` and `release`.
+
+### Starting positions answered from the code
+
+1. Right (above).
+4. Right (above), and the brief's list of entering calls is right but for
+   `openProtocol`, `stopsForDebugger`, `resumedProcessCount` and
+   `nativeBindReport` (the table).
+6. Right (above).
+8. Right: the fix is `Sources/KajoVM/Shell/Shell.swift` alone, and
+   `Shell/` is not a core directory. `scripts/check-tier.sh --dry-run
+   0e30cff` on part 1's working tree: "tier: swift", fuzzers none
+   (`part1/dry-run.txt`).
