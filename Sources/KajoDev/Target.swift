@@ -113,11 +113,14 @@ public final class DevTarget: @unchecked Sendable {
         wake.signal()
     }
 
-    /// Close the socket and the VM (after `run` returned, or instead of it).
-    public func close() {
+    /// Close the socket and the VM (after `run` returned, or instead of it):
+    /// the VM is freed at once (docs/modules/shell-close.md), and the
+    /// answer says what was left undelivered. Idempotent.
+    @discardableResult
+    public func close() -> ShellCloseReport {
         advertiser?.stop()
         server.stop()
-        vm.close()
+        return vm.close()
     }
 }
 

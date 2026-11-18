@@ -67,7 +67,7 @@ public final class ShellVM: @unchecked Sendable
   init(image: [UInt8], options: Headless.Options = .init(), callbacks: ShellCallbacks) throws(ShellError)
   convenience init(imageAt: String, options: Headless.Options = .init(), callbacks: ShellCallbacks) throws(ShellError)
   func start()                                   // workers, marker, young collector; saved Processes resume
-  func close(timeoutSeconds: Double = 3)         // terminate all, join, free; idempotent
+  func close() -> ShellCloseReport               // terminate all, join, free at once; idempotent
   static func now() -> UInt64                    // the uptime clock events are stamped on (ns)
   func runTurn(budgetNs: UInt64, minPriority: Int = 0) -> ShellTurn   // the shell's main thread
   func checkStuck(limitNs: UInt64)                                    // the shell's main thread
@@ -151,10 +151,14 @@ answers true) and the file exists. A resumed image's event loop registers
 its Semaphore with the new shell (`UIEventLoop resumeAfterSnapshot`) and
 its view wrappers come back detached (`View resumeAfterSnapshot`).
 
-**Close.** `close` terminates every Process, joins the threads, then waits
-(at most `timeoutSeconds`) until no Delay's timer is outstanding, because a
-GCD timer firing into a freed VM would write freed memory; past the bound
-the VM is leaked, not freed.
+**Close.** `close` terminates every Process, joins the threads,
+unregisters the bridge's Semaphores and frees the VM and its image at
+once, answering a `ShellCloseReport` (destroyed, pending roots left, Delay
+timers pending, signals undelivered). Until the shell-close follow-up
+(`docs/modules/shell-close.md`) it waited up to 3 s for the pending roots
+to fall, which no worker could make happen after `shutdown`, and leaked
+the VM; since the Delay fix every late signal is refused by `VMLife`
+instead.
 
 ## The event queue
 

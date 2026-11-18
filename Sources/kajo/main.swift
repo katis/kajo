@@ -399,7 +399,13 @@ func serveTarget(image: [UInt8], options: Headless.Options, socket: String, name
     }
     target.run()
     _ = sources
-    target.close()
+    // A shell-close answer: a line only when signals were left undelivered
+    // (a request or an event that came after the last drain); Delays still
+    // pending are a sleeping Process's normal state and say nothing.
+    let closed = target.close()
+    if closed.undeliveredSignals > 0 {
+        FileHandle.standardError.write("kajo: closed with \(closed.undeliveredSignals) signals undelivered (\(closed))\n".data(using: .utf8)!)
+    }
     exit(0)
 }
 

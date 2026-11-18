@@ -262,6 +262,34 @@ public struct ShellPause: Sendable {
     public let pauseNs: UInt64
 }
 
+/// What `ShellVM.close` did (docs/modules/shell-close.md). No oop.
+public struct ShellCloseReport: Sendable, Equatable, CustomStringConvertible {
+    /// This call freed the VM and its image. The first `close` always does;
+    /// a later one finds it closed and answers false with zero counts.
+    public let destroyed: Bool
+    /// Pending roots left besides the finalization Semaphore's when the VM
+    /// ended: a Delay's Semaphore, or a signal's that no worker drained
+    /// (what the old 3 s wait waited for in vain). Freed with the VM.
+    public let pendingRoots: Int
+    /// Delay timers armed and not yet fired when the VM ended; each fires
+    /// later into nothing.
+    public let timersPending: Int
+    /// External signals queued after the workers' last drain (an event's,
+    /// a request's, a Delay's), freed undelivered.
+    public let undeliveredSignals: Int
+
+    public init(destroyed: Bool, pendingRoots: Int = 0, timersPending: Int = 0, undeliveredSignals: Int = 0) {
+        self.destroyed = destroyed
+        self.pendingRoots = pendingRoots
+        self.timersPending = timersPending
+        self.undeliveredSignals = undeliveredSignals
+    }
+
+    public var description: String {
+        "destroyed=\(destroyed) pendingRoots=\(pendingRoots) timersPending=\(timersPending) undeliveredSignals=\(undeliveredSignals)"
+    }
+}
+
 /// A Process spawned by the shell, rooted until `ShellVM.release`.
 public struct ShellProcess: Sendable, Hashable {
     let oop: Oop
@@ -347,30 +375,64 @@ public final class ShellVM: @unchecked Sendable {
         vm.start()
     }
 
-    /// Terminate every Process, stop the threads and free the VM and its
-    /// image. Waits up to `timeoutSeconds` for outstanding Delays' timers
-    /// (they would signal a freed VM); past it the VM is leaked, not freed.
-    /// Idempotent; not from inside a callback.
-    public func close(timeoutSeconds: Double = 3) {
+    /// Terminate every Process, stop and join the VM's threads, and free the
+    /// VM and its image, at once (docs/modules/shell-close.md). A Delay's
+    /// timer, an event's or a request's signal may still hold a pending
+    /// root: after `shutdown` no worker drains, so nothing would ever
+    /// release it, and nothing needs to. Every thread the VM does not join
+    /// reaches it through `VMLife`'s lock (`VMRef`, each Delay's timer), and
+    /// `VM.destroy` ends the VM under that lock before it frees anything, so
+    /// a signal that comes later does nothing and is counted
+    /// (docs/modules/delay-outlives-vm.md). The bridge's Semaphores are
+    /// unregistered first: a post after `close` takes no root and signals
+    /// nothing. Answers what it did. Idempotent: a later call frees nothing
+    /// and answers `destroyed` false. Not from inside a callback.
+    @discardableResult
+    public func close() -> ShellCloseReport {
+        let r = closeOnce()
+        closeObserver?(r)
+        return r
+    }
+
+    /// Tests: sees every `close`'s report, `deinit`'s included (the one
+    /// destroy is counted across a close, a second close and the deinit).
+    var closeObserver: (@Sendable (ShellCloseReport) -> Void)?
+    /// Tests: runs inside the first `close` after `shutdown`, before the
+    /// Semaphores are unregistered (a post there is the window the old
+    /// wait waited on).
+    var afterShutdownForTests: (@Sendable () -> Void)?
+    /// The broken variant (docs/modules/shell-close.md): the old wait put
+    /// back, for this many seconds, leaking the VM when the pending count
+    /// has not fallen. Set by the reproducing test only under
+    /// `KAJO_BROKEN_SHELL_CLOSE=1`.
+    var brokenOldWaitSeconds: Double? = nil
+
+    private func closeOnce() -> ShellCloseReport {
         closeLock.lock()
         defer { closeLock.unlock() }
-        if closed { return }
+        if closed { return ShellCloseReport(destroyed: false) }
         closed = true
         if started {
             vm.terminateAll()
             vm.waitUntilAllTerminated()
             vm.shutdown()
         }
+        afterShutdownForTests?()
         let h = bridge.unregister()
         if h >= 0 { unsafe unregisterPending(vm.state, h) }
         let ph = bridge.unregisterProtocol()
         if ph >= 0 { unsafe unregisterPending(vm.state, ph) }
         let fin = unsafe vm.state.pointee.finalization.pointee.handle >= 0 ? 1 : 0
-        let deadline = ShellVM.now() + UInt64(timeoutSeconds * 1e9)
-        while vm.pendingRootCount > fin && ShellVM.now() < deadline { usleep(5_000) }
-        if vm.pendingRootCount > fin { return }
-        vm.destroy()
+        if let seconds = brokenOldWaitSeconds {
+            let deadline = ShellVM.now() + UInt64(seconds * 1e9)
+            while vm.pendingRootCount > fin && ShellVM.now() < deadline { usleep(5_000) }
+            if vm.pendingRootCount > fin { return ShellCloseReport(destroyed: false, pendingRoots: vm.pendingRootCount - fin) }
+        }
+        let pending = max(0, vm.pendingRootCount - fin)
+        let end = vm.destroy()
         image.destroy()
+        return ShellCloseReport(destroyed: true, pendingRoots: pending, timersPending: end.timersPending,
+                                undeliveredSignals: end.undeliveredSignals)
     }
 
     /// The uptime clock events are stamped on, in nanoseconds.
