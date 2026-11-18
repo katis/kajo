@@ -316,3 +316,214 @@ live in the suite.
    `Shell/` is not a core directory. `scripts/check-tier.sh --dry-run
    0e30cff` on part 1's working tree: "tier: swift", fuzzers none
    (`part1/dry-run.txt`).
+
+## As built
+
+Built by the build agent on 2026-11-18 from 0e30cff, swiftly's swift.org
+6.4.2 toolchain first on PATH. Commits: 7f34d15 (part 1), e1506f1 (part
+2, the check), 5ce3d0e (part 3, the tests; the last code commit) and
+this section. Raw files in `~/kajo-scratch/closed-shell-calls/`
+(`part1/`, `work/`, `broken/`, `check/`, `scripts/`). Only
+`Sources/KajoVM/Shell/Shell.swift`, the new test file and this doc
+changed: no core directory. `scripts/check-tier.sh --dry-run 0e30cff` on
+5ce3d0e: "tier: swift", fuzzers none.
+
+### What was built
+
+- `ShellVM.closed` is an `Atomic<Bool>` (a `let` in the class; a class
+  holds a non-copyable `Atomic` without becoming awkward, so starting
+  position 2's fallback was not needed). `close` reads and sets it under
+  `closeLock` as before; every checked member reads it with one relaxed
+  load and no lock. Relaxed because the check is for calls ordered after
+  the close by the caller's own synchronization (the same thread, or a
+  join); it is not a protocol against a racing close.
+- `refusal(_:)` (internal) answers "ShellVM.<call> after close" or nil:
+  the one place the rule and its message live. `checkOpen(_:)` (private,
+  `@inline(__always)`) is the load and a branch; the message is built in
+  `refuse` (`@inline(never)`), which calls `fatalError` with the
+  member's own file and line. `fatalError`, not `preconditionFailure`,
+  so the message is printed in a release build too.
+- 24 public members check, each with its own name: `start` (its old
+  message-less `precondition(!closed)` replaced; "ShellVM.start twice"
+  for the other half), `openProtocol`, `stopsForDebugger` (get and set),
+  `runTurn`, `checkStuck`, `spawn`, `state`, `result`, `failure`,
+  `waitUntilTerminated`, `terminate`, `release`, `liveProcessCount`,
+  `resumedProcessCount`, `isReleaseImage`, `nativeBindReport`,
+  `nativeGenerated`, `snapshot`, `counters`, `collectorReport`,
+  `mainThreadCounters`, `pauses`, `threads`, `hopLatencies`. Exempt, with
+  their reasons in the table test: the two initializers, `close`, `now`,
+  `post`, `postRequest`, `queuedEvents`, `queuedRequests`.
+- `close`'s comment and the class comment say what the check does and
+  does not do (starting position 3), with the rule that a host closes
+  from the thread that drives the VM.
+- `ShellRuntime`, `DevTarget` and the hosts are unchanged (part 1:
+  nothing of theirs outlives the VM in any host that exists).
+
+Machine code (aligned release builds, `work/bench/runTurn-{base,fix}.s`):
+`runTurn` gained `ldrb w8, [x20, #0x40]` and `tbnz w8, #0, <cold>` before
+the call to `runMainTurn`; the trap's block sits after the return. No
+`swift_retain` or `swift_release` on either side.
+
+### Tests
+
+`Tests/KajoCompilerTests/ClosedShellCallsTests.swift`:
+
+- `theGuardRefusesEveryCheckedCallAfterClose`: `refusal` answers nil for
+  every listed name while open and "ShellVM.<name> after close" for
+  every checked one after; after the close `post`, `postRequest`,
+  `queuedEvents`, `queuedRequests` and a second `close` work and trap
+  nothing (`lateSignals` 0). shell-close's
+  `aCloseWithAnEventNotTakenFreesItsVM`, `aCloseWithARequestQueuedFrees
+  ItsVM` and `aCloseRacingPostsIsDecidedByTheLocks` keep covering posts
+  after and during a close.
+- `everyPublicMemberIsCheckedOrExempt`: reads `Shell.swift`, lists the
+  class's public members (32: 24 checked names, 7 exempt names, two
+  initializers) and requires each to be checked, with
+  `checkOpen("<its name>")` once per accessor, or exempt; a listed name
+  that is not declared fails, and so does a public member of an
+  `extension ShellVM` anywhere under `Sources/` that is not on the
+  delegating list (one: KajoApp's `isStoppedForDebugger`).
+- `aCallAfterCloseByHand` (part 1's), by hand only.
+
+The broken variants, by hand on the source the table test reads
+(`broken/`; nothing rebuilt, the file restored and compared byte for
+byte):
+
+- the check removed from `liveProcessCount` (`broken/broken.diff`,
+  `broken/broken-run1.txt`):
+
+      ✘ Test everyPublicMemberIsCheckedOrExempt() recorded an issue at ClosedShellCallsTests.swift:162:17: Expectation failed: checks == accessors
+      ↳ ShellVM.liveProcessCount is listed as checked but calls checkOpen("liveProcessCount") 0 times for 1 accessors
+
+- a new public member `workerCount` with no check
+  (`broken/broken-run2-newmember.txt`):
+
+      ↳ ShellVM.workerCount is neither checked nor exempt: check it with checkOpen("workerCount") or say why it is exempt
+
+### The hand-run on the fix
+
+Debug build, `KAJO_CLOSED_SHELL_CALL=<call> swift test --filter
+aCallAfterCloseByHand` (`work/fix-handrun-{runTurn,spawn}.txt`):
+
+    closed-shell-call runTurn: calling after close (destroyed=true pendingRoots=0 timersPending=0 undeliveredSignals=0)
+    KajoVM/Shell.swift:530: Fatal error: ShellVM.runTurn after close
+
+    closed-shell-call spawn: calling after close (destroyed=true pendingRoots=0 timersPending=0 undeliveredSignals=0)
+    KajoVM/Shell.swift:563: Fatal error: ShellVM.spawn after close
+
+(lines 530 and 563 are the `checkOpen` lines of the two members).
+
+### The empty turn (starting position 7)
+
+`scripts/bench/` in the scratch directory (not committed): a small
+package over each tree's `KajoVM` (0e30cff exported with `git archive`,
+and e1506f1), both `-c release -enable-testing` with
+`-align-all-nofallthru-blocks=5 -align-loops=32`; the kernel image, two
+background workers, nothing main-affine ready; per launch 100 000 warm-up
+turns then 5 × 1 000 000 `runTurn(budgetNs: 1_000_000)`, the mean per
+turn; five rounds, base and fix alternating which goes first; two blocks
+back to back (`work/bench/turns.txt`, `turns2.txt`, `table.txt`; thermal
+state 0 on every line, 0 slices):
+
+| Block | Base median (range) ns | Fix median (range) ns | Fix / base |
+| --- | --- | --- | --- |
+| 1 | 302.70 (300.80 to 305.06, 1.4 %) | 304.51 (304.04 to 305.75) | 1.006 |
+| 2 | 305.80 (299.54 to 306.91, 2.4 %) | 303.68 (301.26 to 305.73) | 0.993 |
+
+Over both blocks the medians are 304.68 (base) and 304.18 ns (fix). The
+difference changes sign between blocks and stays inside the base's own
+spread (1.4 to 2.4 percent, 4 to 7 ns); the check is two instructions
+off the critical path of a turn that costs about 300 ns. Starting
+position 7 is right.
+
+### The full suite after the fix
+
+One full `swift test` on the working tree of e1506f1 plus the tests
+(`work/swift-test-fix.txt`): 471 and 184 tests, all pass. No existing
+test calls a checked member after `close` (a call would have trapped
+with its message); none had to be reordered. The new suite with
+shell-close's under ThreadSanitizer with twelve busy loops
+(`work/tsan-load-newsuite.txt`): 8 tests pass, 0 "WARNING:
+ThreadSanitizer".
+
+### Unsafe
+
+Lines naming `unsafe` (`grep -rw unsafe … | wc -l`): `Sources/KajoVM`
+5928 before and after (`Shell/` 88 both), outside `Sources/KajoVM` 154
+before and after. (shell-close's doc gave 5929 for the same tree with a
+different count; this count is `grep -rw`.)
+
+### Gates
+
+`~/kajo-scratch/closed-shell-calls/check/gates.log`: the Swift tier on
+5ce3d0e, swift.org 6.4.2, "check-tier done swift failed=0 4287s"; every
+gate `rc=0`. No fuzzer: the diff touches no reader a fuzzer covers.
+
+| Gate | 5240ac7 (shell-close) | 5ce3d0e |
+| --- | --- | --- |
+| clean-build | 20 s | 21 s |
+| swift-test | 728 s | 716 s |
+| tsan | 3156 s | 3030 s (0 "WARNING: ThreadSanitizer") |
+| kernel-test | 121 s | 120 s |
+| apps | 137 s | 131 s |
+| new-check | 268 s | 269 s |
+| fuzz (protocol) | 168 s | not in the tier this time |
+| total | 4598 s | 4287 s |
+
+Test counts: 471 and 184 in both test gates (181 compiler tests before:
+the three new ones; the hand-run is disabled). The compiler bundle took
+84.1 s in swift-test (83.7 before) and 2129.2 s under the sanitizer
+(2108.9); the VM bundle 628.2 (630.7) and 876.5 s (1034.8). The new
+suite took 14.8 s and 151.7 s as Swift Testing reports it (pool waits
+included); its two tests' bodies are 1.7 s and 0.04 s alone
+(`work/closedtests-1.txt`). The lower totals are the tier without a
+fuzzer and the VM bundle's spread, not this module.
+
+### Starting positions
+
+1. Right (part 1).
+2. Right: one relaxed atomic load at the top of each call and a trap
+   naming it; the lock is not taken. `fatalError` in place of
+   `preconditionFailure` (above).
+3. Right, and written in `close`'s comment.
+4. Right (part 1). The brief's list of entering calls included four
+   that read only the bridge or a Swift property of the `VM` object; they
+   are checked anyway (part 1's decision).
+5. Right, built as written; the table test also reads the extensions.
+6. Right: no runtime check.
+7. Right (above).
+8. Right: "tier: swift".
+
+### Deviations
+
+- `fatalError` rather than `preconditionFailure`, so the message survives
+  a release build; the trap names the member's line, not the guard's.
+- `openProtocol`, `stopsForDebugger`, `resumedProcessCount` and
+  `nativeBindReport` are checked though they touch no freed memory: the
+  exempt list is exactly the brief's four plus `close`, the initializers
+  and the clock.
+- The sanitizer hand-run needs `TSAN_OPTIONS=abort_on_error=0`: without
+  it the runtime's `abort` after the SEGV spun for 15 minutes.
+- The sanitizer hand-run ran `liveProcessCount` three times and the other
+  two calls once each; debug ran each of the three calls three times.
+
+### Not done
+
+- Nothing makes a call safe against a racing `close` (not this module).
+
+### Found, not this module's
+
+- `RunningTarget.close()` (`Tests/KajoCompilerTests/DevProtocolTests.swift`)
+  waits for its run thread at most 30 s, ignores the answer and closes:
+  if the wait ran out, `close` would race a `runTurn` already running on
+  that thread, a use after free no check can catch. It has not been seen
+  to run out. Recommended: record an issue when the wait runs out and
+  leak the target rather than close it under a running turn.
+
+### Open questions
+
+1. Should the rule "a host closes from the thread that drives the VM" be
+   enforced, not only written? Recommended: no, as the brief says; the
+   check catches every call after `close` returned on the closing thread
+   or after a join, and enforcing the rest would put a lock or a thread
+   check in every frame.
