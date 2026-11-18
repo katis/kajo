@@ -1462,8 +1462,8 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/44-types-1.md`: Types 1: the syntax
  - `docs/decisions/45-types-2.md`: Types 2: the checker in the development image
 
-Awaiting the owner: which comes next, the Delay fix or the next types
-module. Types 2's five questions were answered as recommended on
+Awaiting the owner: the word to start the Delay fix (the owner on
+2026-11-18: "delay fix"; briefed as `docs/modules/delay-outlives-vm.md`). Types 2's five questions were answered as recommended on
 2026-11-18 (appended to `45-types-2.md`; one changes what is built and is
 a row of `docs/PLAN.md`: a VM's pending timers cancelled at its end). Types 1's questions were answered on
 2026-11-17 (appended to `44-types-1.md`): for the 45 signatures "`Self`
