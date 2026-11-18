@@ -1483,9 +1483,10 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/46-delay-outlives-vm.md`: A Delay does not outlive its VM
  - `docs/decisions/47-shell-close.md`: A closed shell frees its VM
 
-Awaiting the owner: shell-close's question 1 (`47-shell-close.md`: should
-`ShellVM`'s host calls refuse after `close`; recommended yes, a
-precondition, `post` and `postRequest` excepted). Types 2's five questions were answered as recommended on
+Awaiting the owner: the word to start the closed-shell-calls follow-up
+(shell-close's question 1, answered "brief it" on 2026-11-18, appended to
+`47-shell-close.md`; briefed as `docs/modules/closed-shell-calls.md`,
+Swift tier). Types 2's five questions were answered as recommended on
 2026-11-18 (appended to `45-types-2.md`; one changes what is built and is
 a row of `docs/PLAN.md`: a VM's pending timers cancelled at its end). Types 1's questions were answered on
 2026-11-17 (appended to `44-types-1.md`): for the 45 signatures "`Self`

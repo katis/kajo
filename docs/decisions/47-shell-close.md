@@ -114,3 +114,12 @@ load of the new suite.
 2. Should a development target log undelivered signals at its close?
    Built as recommended: `kajo` prints a line only when the count is above
    zero.
+
+## The owner's answer (2026-11-18)
+
+Question 1: "brief it", after asking what the question is and whether the
+check would cost performance (the main session's answer: one atomic flag
+read per host call, `runTurn` once a frame the only frequent one, `post`
+and `postRequest` unchecked; the brief has the measurement as a position).
+Briefed the same day as `docs/modules/closed-shell-calls.md` (a row of
+`docs/PLAN.md`). Question 2 stands as built.
