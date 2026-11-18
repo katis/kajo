@@ -155,3 +155,95 @@ answered as right or wrong.
    with a message is the smallest answer.
 2. Should a development target log undelivered signals at its close?
    Recommended: no line unless the count is above zero.
+
+## Part 1
+
+Built by the build agent from 5778e78 on 2026-11-18, swiftly's swift.org
+6.4.2 toolchain first on PATH. Raw outputs in
+`~/kajo-scratch/shell-close/part1/`.
+
+### The reproducing test
+
+`Tests/KajoCompilerTests/ShellCloseTests.swift`,
+`aShellClosedWithADelayPendingFreesItsVM`: a started shell (two workers)
+runs `(Delay forSeconds: 60) wait` on a background worker; once the Delay's
+timer is armed (`VM.timersPending == 1`, a bounded wait for something that
+must come) the shell is closed. The check reads the VM's life cell, held by
+the test before the close: `VMLife`'s `ended` is set by `VM.destroy` and by
+nothing else, and the cell outlives the VM, so the test reads what `close`
+did without a clock and without touching freed memory. On 5778e78 it fails
+3 runs of 3 (`repro-run{1,2,3}.txt`):
+
+    Expectation failed: life.snapshot.ended
+    ↳ close left the VM undestroyed
+    Test aShellClosedWithADelayPendingFreesItsVM() failed after 4.715 seconds with 1 issue.
+
+(4.700 and 4.712 s in the other two: the 3 s wait is in each.)
+
+### How many closes leak today
+
+A temporary log line in `close` (`part1/instrumentation.diff`, not
+committed; `KAJO_CLOSE_LOG`) wrote each close's outcome, its pending count
+and its caller, and every host call made after `close` had begun. One full
+`swift test` on 5778e78 with it (`swift-test-before.txt`,
+`close-log-before.txt`; 471 and 177 tests, the new test the only failure):
+
+- 61 closes: 27 destroyed (none of them waited: their pending count was
+  already at the finalization root's), **34 leaked**, the new test's one
+  included. So a full `swift test` leaks **33 VMs and their images** on
+  5778e78, each after a 3 s wait: 102.1 s of waiting in all (spread over
+  parallel tests).
+- The 33 by caller: `DevTarget.close` 27 (the tests' `RunningTarget` and
+  `TCPTarget`), the tools tests' `LocalTools.close` 4, `closeApp` (a
+  development app's runtime) 1, and
+  `aQueuedShellSignalRootsItsSemaphoreUntilItIsDrained` 1 (a VM never
+  started, with two signals queued on purpose).
+- What held them: only 2 had a Delay's timer pending. A second run of five
+  leaking tests that also named the pending roots (`close-log-detail.txt`)
+  found every leftover root a Semaphore and, in every one of the five, an
+  external signal queued and never drained: a signal pushed after the
+  workers' last drain (a request, an event, a lost connection), whose
+  root only a drain could release. So the leak is not rare and not about
+  Delays: almost every development target the suite closes leaks.
+- Host calls after `close` had begun: 56 `post`s (the tools tests'
+  `ClientHost` sink, its connections' `lost` events and timers) and 2
+  `postRequest`s (a `DevTarget` connection thread after `server.stop`).
+  Both touch only the bridge (the Semaphores are unregistered, so no root
+  and no signal) and are safe after the VM is freed. No `runTurn`,
+  `checkStuck`, `spawn`, Process call, `liveProcessCount` or counters read
+  came after a close. So no test leans on the leaked VM staying readable.
+
+### Every way a thread can still reach the VM during and after `close`
+
+The VM's own threads (background workers, the marker, the young
+collector) are joined by `shutdown`. What is left:
+
+| Path | Covered by |
+| --- | --- |
+| A Delay's timer (`startDelay`'s GCD block, holding a `VMRef`) | `VMLife`: `timerFired` runs under the cell's lock; before the end it pushes a signal (freed by `destroy`, counted `undeliveredSignals`), after it does nothing (counted `lateSignals`); `destroy` answers `timersPending`. |
+| `ShellVM.post`, `postRequest` and the bridge's `putBack`s from any thread (native callbacks, `ClientHost`'s sink and its `timer` op's GCD block, a `ProtocolServer` connection thread) | The bridge's locks, then `VMLife`. A post that read its Semaphore before `close`'s `unregister`/`unregisterProtocol` (which take the same bridge locks) takes its root through `VMRef.rootPending` and signals through `signalFromOutside`, both under the cell's lock: before the end they work on a live VM (the root and the node die with it), after it they are refused and counted. A post after the unregistering finds no Semaphore and touches only the bridge's queue. The bridge itself lives as long as the `ShellVM`, which the poster holds. |
+| `pushExternal`'s `wakeMain` hook (context: the bridge, unretained), for a VM with no background worker | It runs inside `VMLife`'s lock, so only while the VM lives, and `close` runs on a `ShellVM` that is alive. On 5778e78 a leaked VM kept its timers able to reach this hook after the `ShellVM` and its bridge were freed; `ShellVM` always has a background worker (`--workers` is at least 1), so the branch was not taken, but the fix removes the leaked VM that made it possible. |
+| `ClientHost`'s connections and `ProtocolServer`'s threads | They reach the VM only through `post` and `postRequest` (the row above). `DevTarget.close` stops the server before `vm.close`. |
+| `ShellVM`'s other host calls (`runTurn`, `spawn`, the Process calls, counters) from another thread | Not covered (the brief's "not in this module", open question 1). After the fix a call after `close` reads freed memory for certain; on 5778e78 it read a leaked VM most of the time. The suite makes none (above). |
+| The shells' `ShellRuntime` turns scheduled on the main queue | They hold the runtime weakly (`RuntimeLink.runtime`), and the apps never close their VM; tests that close a runtime's VM (`closeApp`, the development answers' tests) made no turn after the close in the run above. |
+
+So starting position 2 is right: with the wait gone, every path that can
+still run either finished before the end or is refused by `VMLife`.
+
+### The starting positions
+
+1. Right. One small test shows it and reads what `close` did through the
+   life cell, not the clock.
+2. Right (the table above), with one path that is not covered and is not
+   this module's: host calls after `close`.
+3. To be built (part 3): today nothing says what `close` did; the leak was
+   found by reading the code.
+4. Right: no caller passes `timeoutSeconds` (`grep -rn timeoutSeconds
+   Sources Tests apps`: only the declaration and its two uses).
+5. Right: `VM.destroy` already answers the `VMEndReport` with
+   `timersPending` and `undeliveredSignals`, and the fix is in
+   `Sources/KajoVM/Shell/Shell.swift` alone. `check-tier.sh --dry-run
+   5778e78` on part 1's working tree: "tier: swift".
+6. Wrong about the size: not "several" but 33 of the suite's 61 closes
+   wait the 3 s and leak, 27 of them `DevTarget`s. To be measured after
+   the fix.
