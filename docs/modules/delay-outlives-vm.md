@@ -179,3 +179,65 @@ answered as right or wrong.
    cannot know, and the counter says it.
 3. Whether a host should be able to read the count of pending timers
    before it ends a VM. Recommended: only if a test needs it.
+
+## Part 1
+
+Built by the build agent from 0395be3 on 2026-11-18, swiftly's swift.org
+6.4.2 toolchain first on PATH. Raw outputs in
+`~/kajo-scratch/delay-outlives-vm/part1/`.
+
+### Every way a thread the VM does not join can reach the VM
+
+Read from `grep -rn "VMRef\|signalFromOutside\|\.ref\b\|asyncAfter\|startDelay\|rootPending"`
+over `Sources` and `Tests`, and every `DispatchQueue`, `pthread_create`
+and `Thread` in `Sources/KajoVM`. The VM joins its background workers,
+the marker and the young collector in `shutdown`; everything below is
+outside that.
+
+| Path | Who holds the way to the VM | What ends it before `destroy` on 0395be3 |
+| --- | --- | --- |
+| `startDelay`'s timer (`Processes/External.swift:151`) | a GCD block holding a `VMRef` (a raw `VMPointer`) | nothing. It fires at its time, whatever the VM's state. **Reaches a destroyed VM.** |
+| `VM.ref` held by the shell's bridge (`Shell/Shell.swift:321`, `Shell/ShellBridge.swift:27`): `post`, `putBack`, `postRequest`, `putBackRequest` from any thread (native callbacks, the client host's connection threads, a server's connection threads) | `ShellBridge.ref`, set once and **never cleared** | `ShellVM.close` clears the bridge's two Semaphores (`unregister`, `unregisterProtocol`) under the bridge's locks before `destroy`, so a later post finds no Semaphore and takes neither `rootPending` nor `signalFromOutside`. A post that read its Semaphore before that holds a pending root, and `close` then waits for the pending count (below). Only if the table was full (`rootPending` answered -1) could such a post's signal pass `close`'s wait and land after `destroy`: a path, but one that needs a full pending table. |
+| The client host's `timer` op (`Sources/KajoDev/ClientHost.swift:436`) | a GCD block holding the `ClientHost`, whose sink holds the `ShellVM` (`Sources/KajoAppDevelopment/Serving.swift:167`) | it reaches the VM only through the bridge's `post`: the row above. |
+| `Nursery/Finalization.swift:15`, `Processes/SavedProcesses.swift:443` | a `VMRef` made and used at once on a VM thread (after a stop; at the load) | the VM's own threads: joined, or the host inside `VM.init`/`destroy`. Not a late path. |
+| Tests: `ProcessTests.externalSignalFromANonVMThread`, `SafepointTests` | `rt.vm.ref` on a `TestThread` | joined before `rt.stop()`. |
+| `ShellCallbacks` (`wakeMain`, `release`, `views`) | VM to host, not host to VM | not a way into the VM. |
+
+So starting position 2 is right that the Delay's timer is the one path
+that reaches a destroyed VM in practice, and wrong in its reason: the
+bridge's `ref` is never cleared. What protects the bridge is `close`
+clearing its Semaphores, plus a wait whose own failure mode is a leak.
+`ShellVM.close` waits up to 3 s for the pending count to fall to the
+finalization root's, but after `shutdown` no worker drains external
+signals, so the count never falls: every `close` with a Delay, an event
+or a request still pending waits 3 s and leaks the VM and its image
+(found, not this module's; open question 4 below).
+
+The fix (part 2) puts the check on the way itself (`VMRef`), so the
+bridge's rare path and any future holder of `VM.ref` are covered by the
+same lock as the timer.
+
+### The reproducing test
+
+`Tests/KajoVMTests/Processes/DelayEndTests.swift`,
+`aDelayPendingWhenTheVMEndsDoesNotTouchIt`: one Process waits on a 2 s
+Delay (the pending table holds its Semaphore: count 1), the VM is shut
+down and destroyed at once (`Runtime.stop`), then 4096 allocations of
+`VMState`'s size and alignment are filled with `0xA5` and held while the
+test waits 4 s.
+
+On 0395be3:
+
+| Build | Runs | Result | File |
+| --- | --- | --- | --- |
+| ThreadSanitizer, without the overwrite | 1 | passed, no report | `repro-tsan-run1.txt` |
+| debug, with the overwrite | 3 | 3 of 3 signal 11 | `repro-debug-run{1,2,3}.txt` |
+| ThreadSanitizer, with the overwrite | 3 | 3 of 3 "ThreadSanitizer: SEGV on unknown address 0x4b4b1b4b4b4b4b40 ... #1 VMRef.signalFromOutside(_:handle:) External.swift:30, #2 closure #1 in startDelay(_:ms:sem:) External.swift:152", register x19 = 0xa5a5a5a5a5a5a5a5 | `repro-tsan-run{2,3,4}.txt` |
+
+The frames are Types 2's (`~/kajo-scratch/types-2/check-1-aborted/tsan.txt`,
+the same two lines). Starting position 1 is right with one correction:
+ThreadSanitizer does not report the late read as such (the freed state
+still holds the old values, the read succeeds and the push lands in freed
+memory); it crashes when the memory has been reused, as in Types 2's run
+minutes later. The test reuses it on purpose, and then fails in every
+build, every run.
