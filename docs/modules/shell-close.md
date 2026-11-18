@@ -247,3 +247,178 @@ still run either finished before the end or is refused by `VMLife`.
 6. Wrong about the size: not "several" but 33 of the suite's 61 closes
    wait the 3 s and leak, 27 of them `DevTarget`s. To be measured after
    the fix.
+
+## As built
+
+Built by the build agent on 2026-11-18 from 5778e78, swiftly's swift.org
+6.4.2 toolchain first on PATH. Commits: 35e0aab (part 1), 5240ac7 (parts 2
+to 4, the last code commit), and this section. Raw files in
+`~/kajo-scratch/shell-close/` (`part1/`, `work/`, `broken/`, `check/`).
+Only `Sources/KajoVM/Shell/Shell.swift`, `Sources/KajoDev/Target.swift`,
+`Sources/kajo/main.swift`, the new test file and the docs changed: no core
+directory, no kernel, tools or types file. `check-tier.sh --dry-run
+5778e78` on 5240ac7: "tier: swift", fuzzers: protocol (the diff touches
+`Sources/KajoDev`).
+
+### What was built
+
+- `ShellVM.close()` (the `timeoutSeconds` parameter is gone; no caller
+  passed one) terminates every Process, waits for them, shuts the VM down,
+  unregisters the bridge's two Semaphores and calls `vm.destroy()` and
+  `image.destroy()` at once. The comment says why that is safe now
+  (`VMLife`), not that timers "would signal a freed VM".
+- `ShellCloseReport` (public, `Sendable`, `Equatable`, no oop):
+  `destroyed`, `pendingRoots` (left besides the finalization root's when
+  the VM ended: what the old wait waited for), `timersPending` and
+  `undeliveredSignals` (from `VM.destroy`'s `VMEndReport`). A second
+  `close` answers `destroyed: false` with zero counts. Printed:
+  `destroyed=true pendingRoots=1 timersPending=1 undeliveredSignals=0`
+  (the reproducing test's line).
+- The callers: `deinit` ignores the report. `DevTarget.close()` answers it
+  (`@discardableResult`); its three failure paths in `init` ignore it.
+  `kajo run --protocol` prints `kajo: closed with N signals undelivered
+  (<report>)` on stderr only when `undeliveredSignals` is above zero (open
+  question 2's recommended answer, built); a Delay pending at the end is a
+  sleeping Process's normal state and prints nothing. One run (`work/
+  serve-std{out,err}.txt`): `kajo run kernel.img --protocol <socket>`,
+  SIGTERM, exit 0, no line (nothing undelivered). No caller depended on
+  the old wait (part 1: no host call but `post` and `postRequest` came
+  after a close).
+- Three internal seams for the tests in `ShellVM`: `closeObserver` (sees
+  every close's report, `deinit`'s included), `afterShutdownForTests`
+  (runs inside the first close after `shutdown`, before the unregistering:
+  the window the old wait was for) and `brokenOldWaitSeconds` (the broken
+  variant: the old wait and leak put back).
+
+### Tests
+
+`Tests/KajoCompilerTests/ShellCloseTests.swift`, five tests:
+
+- `aShellClosedWithADelayPendingFreesItsVM`, the reproducing test: fails
+  on 5778e78 3 runs of 3 ("close left the VM undestroyed", part 1),
+  passes on 5240ac7 with the report above.
+- `aCloseWithAnEventNotTakenFreesItsVM`: an event posted before the loop
+  exists (no root): `destroyed=true` and zeros; an event posted after
+  `shutdown` with the loop's Semaphore registered: one root, one signal
+  undelivered; a post after the close is refused nothing (it touches only
+  the bridge, `lateSignals` 0).
+- `aCloseWithARequestQueuedFreesItsVM`: the same for a protocol request.
+- `closeTwiceThenDeinitDestroysOnce`: the observer reads `[true, false,
+  false]` for close, close, deinit, and `[true]` for a shell dropped
+  without a close.
+- `aCloseRacingPostsIsDecidedByTheLocks`: 8 rounds, 4 posters (events and
+  requests, both Semaphores registered) and the closer start at a gate;
+  the posters go on 200 posts past the close. Every round destroys and
+  its undelivered signals are at most its posts. Tallies: plain
+  `rounds=8 posters=4 posts=35034 pendingRoots=441 undelivered=441
+  late=0`; under the sanitizer with twelve busy loops `posts=125988
+  pendingRoots=8821 undelivered=8821 late=0`, 0 sanitizer warnings
+  (`work/tsan-load-closetests.txt`, all five pass). No round produced a
+  late (refused) signal: the window between a post's reading its
+  Semaphore and the end is a few instructions wide; the refusal itself is
+  `DelayEndTests.aVMRefHeldPastTheEndIsRefused`'s.
+
+The broken variant by hand (`broken/broken-run1.txt`):
+`KAJO_BROKEN_SHELL_CLOSE=1 swift test --filter aShellClosedWithADelay`
+fails the named check, as on 5778e78:
+
+    Expectation failed: life.snapshot.ended
+    ↳ close left the VM undestroyed
+    ↳   life.snapshot → State(ended: false, timersPending: 1, lateSignals: 0)
+
+It is not in the suite: it leaks a VM by construction.
+
+### The leak count after
+
+The same temporary log line (`work/after-instrumentation.diff`, not
+committed) over one full `swift test` on the fix (`work/swift-test-after.txt`,
+`work/close-log-after.txt`; 471 and 181 tests, all pass): 111 `close`
+calls, 74 of them first closes, **74 destroyed, 0 leaked** (before: 61
+closes, 34 leaked). The other 37 are `deinit`s after a close and the two
+tests' second closes, each `destroyed=false`. Of the 74: 30 had nothing
+left; 29 had one Delay pending (`timersPending=1`), 23 of them
+`DevTarget`s; the rest had signals undelivered, up to 12 597 in the race
+test's rounds.
+
+Found while reading those 29: the Delay a closing development target
+holds is `DevProtocol`'s reaper (`reapEndedRequests`, a 100 ms Delay in a
+loop while any request is pending). On 5778e78 it fired inside the 3 s
+wait, its signal was queued with no worker left to drain it, and that
+undrained signal's root is what part 1's detail run found in every
+leaking target: the reaper, not the requests, made almost every
+development target leak.
+
+### Unsafe
+
+Lines naming `unsafe`: `Sources/KajoVM` 5929 before and after (the fix
+adds none; `Shell/` 88 both), outside `Sources/KajoVM` 154 before and
+after.
+
+### Gates
+
+`~/kajo-scratch/shell-close/check/gates.log`: the Swift tier on 5240ac7,
+swift.org 6.4.2, "check-tier done swift failed=0 4598s"; every gate
+`rc=0`: clean-build 20 s, swift-test 728 s, tsan 3156 s (0 "WARNING:
+ThreadSanitizer"), kernel-test 121 s, apps 137 s, new-check 268 s, fuzz
+168 s (protocol only, 373 349 runs, "build=ok"). Against 7ac2711's Swift
+tier (`~/kajo-scratch/types-2/check/gates.log`, 4384 s): swift-test 728
+against 696 s, tsan 3156 against 3017 s. Split by bundle: the
+KajoCompilerTests run (where every `close` is) took 83.7 s against 81.9
+in swift-test (181 tests against 176) and 2108.9 s against 2085.4 under
+the sanitizer (2139.1 on 075d2a4, the same code as 5778e78); the rest of
+both gates' growth is the KajoVMTests run (630.7 against 613.4 s, 1034.8
+against 918.4 s under the sanitizer; 860.6 on 075d2a4), which this
+module does not touch and which gained the Delay fix's tests since
+7ac2711. The five new tests' bodies take 1.9 to 3.2 s each alone
+(`work/close-tests-1.txt`); the durations the gates print (12 to 16 s,
+138 s under the sanitizer) are Swift Testing's, pool waits included. The
+removed waits were 33 times 3 s (102 s of waiting spread over parallel
+tests); in the measured wall time they show as the compiler bundle
+holding level (93.0 s on 5778e78 with the new test, `part1/swift-test-
+before.txt`, 86.7 and 83.7 s after) while it gained five tests.
+
+The gates' race tallies: swift-test `posts=1028726 pendingRoots=86541
+undelivered=86541 late=0`; tsan `posts=110875 pendingRoots=2104
+undelivered=2103 late=1`: one post took its root before the end and was
+refused at its signal, the path the table in part 1 gives to `VMLife`.
+
+### Deviations
+
+- Parts 2 to 4 are one commit (5240ac7): the fix, the report and the
+  callers change the same function's signature together.
+- The reproducing test reads the VM's life cell, which the brief did not
+  name: on 5778e78 `close` answers nothing, so the cell is the one
+  witness that needs no new API and touches no freed memory.
+- The race test asserts "destroyed" and "undelivered at most posts"; an
+  exact account of every post (drained, freed, refused) would need
+  counters in the bridge, which the brief did not ask for.
+- The broken variant is an internal property set by the reproducing test
+  under `KAJO_BROKEN_SHELL_CLOSE=1`, run by hand: in the suite it would
+  leak a VM and the leak count would no longer read 0.
+
+### Not done
+
+- `ShellVM`'s host calls still do not check `closed` (open question 1).
+- No counter on the run line (not in this module).
+
+### Found, not this module's
+
+- `DevProtocol`'s reaper Delay is what a closing development target
+  holds (above); harmless now, but it is a 100 ms wake-up while any
+  request pends.
+- Before the fix, a timer of a leaked VM could reach `pushExternal`'s
+  `wakeMain` branch with the `ShellVM`'s bridge already freed; the
+  branch needs a VM with no background worker, which `ShellVM` cannot
+  make, so it was never taken.
+
+### Open questions
+
+1. Should `ShellVM`'s host calls refuse after `close`? Recommended: yes,
+   now that `close` always frees: a `precondition(!closed)` with a message
+   in each call that enters the VM (`runTurn`, `checkStuck`, `spawn`, the
+   Process calls, counters, `snapshot`), and `post`/`postRequest` left as
+   they are (they touch only the bridge after a close, which the suite
+   does 58 times).
+2. Should a development target log undelivered signals at its close?
+   Built as recommended: `kajo` prints a line only when the count is above
+   zero; `DevTarget` itself logs nothing and answers the report.
