@@ -146,3 +146,21 @@ run of the new suites under load were not run again.
    later, after its count on the image is measured.
 5. `BlockClosure>>ifError:`'s type. Recommended: corrected in the next
    annotation pass.
+
+## 2026-11-18, the owner's answer
+
+"Approve all". So:
+
+1. The checker starts at the first `diagnostics` request.
+2. The Delay that outlives its VM gets a core follow-up: a VM's pending
+   timers are cancelled when it ends, with a test that ends a VM with a
+   long Delay pending. Core tier. Not briefed yet.
+3. `species` is annotated `^<Self class>` where it is true (not Interval)
+   in the next annotation pass, measured first.
+4. The narrowing check for a typed method over a typed one comes later,
+   after its count on the image is measured.
+5. `BlockClosure>>ifError:`'s type is corrected in the next annotation
+   pass.
+
+The order of what follows (the Delay fix, or the next types module) was
+asked of the owner in the same report and is not answered by this.

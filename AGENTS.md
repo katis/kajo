@@ -1462,9 +1462,10 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/44-types-1.md`: Types 1: the syntax
  - `docs/decisions/45-types-2.md`: Types 2: the checker in the development image
 
-Awaiting the owner: Types 2's five questions (`45-types-2.md`: when the
-checker starts, the Delay that outlives its VM, `species`, the narrowing
-check for typed overrides, `ifError:`'s type). Types 1's questions were answered on
+Awaiting the owner: which comes next, the Delay fix or the next types
+module. Types 2's five questions were answered as recommended on
+2026-11-18 (appended to `45-types-2.md`; one changes what is built and is
+a row of `docs/PLAN.md`: a VM's pending timers cancelled at its end). Types 1's questions were answered on
 2026-11-17 (appended to `44-types-1.md`): for the 45 signatures "`Self`
 where possible", then a signature without a method, a method entry with
 no body (approved, not built); `kajo seal` stays as it is; types in the
