@@ -315,6 +315,14 @@ public enum ShellError: Error, CustomStringConvertible, Sendable {
 /// `checkStuck` on the shell's main thread (the main worker is that
 /// thread); `post`, `spawn`, the Process calls, the counters and `snapshot`
 /// from any thread (each enters the VM like a primitive does).
+///
+/// After `close` (docs/modules/closed-shell-calls.md) the VM and its image
+/// are freed, and every member but `post`, `postRequest`, `queuedEvents`,
+/// `queuedRequests` and `close` itself stops the process with a message
+/// naming the call ("ShellVM.spawn after close"). The check catches a call
+/// made after `close` returned; it does not make a call safe to race with
+/// `close` on another thread. A host closes from the thread that drives
+/// the VM, once nothing else calls it but the four bridge calls.
 public final class ShellVM: @unchecked Sendable {
     let image: Image
     let vm: VM
@@ -326,8 +334,13 @@ public final class ShellVM: @unchecked Sendable {
     /// released one is refused and never reads whatever reused its entry.
     private let heldLock = NSLock()
     private var held: [Int64: Oop] = [:]  // under heldLock
-    private var closed = false
-    private var started = false
+    /// Set by the first `close` (under `closeLock`), read by every checked
+    /// member with one relaxed load: an atomic, so a call on any thread
+    /// reads it without the lock and ThreadSanitizer sees no race; relaxed,
+    /// because it catches calls ordered after the close by the caller's own
+    /// synchronization (the same thread, or a join), not racing ones.
+    private let closed = Atomic<Bool>(false)
+    private var started = false  // under closeLock
 
     /// Open a VM over image bytes (the kernel image, or one with saved
     /// Processes, which resume when the VM starts). `options` are
@@ -365,12 +378,33 @@ public final class ShellVM: @unchecked Sendable {
 
     deinit { close() }
 
+    /// The refusal of `call` (a member's name) on a closed shell, or nil
+    /// while it is open: the one place the rule and its message live. The
+    /// checked members trap on it; the tests ask it for every name.
+    func refusal(_ call: String) -> String? {
+        closed.load(ordering: .relaxed) ? "ShellVM.\(call) after close" : nil
+    }
+
+    /// The check at the top of every member that enters the VM or the
+    /// image: one relaxed load and a branch; the message is built out of
+    /// line, only on the way to the trap, which names the member's line.
+    @inline(__always)
+    private func checkOpen(_ call: StaticString, file: StaticString = #fileID, line: UInt = #line) {
+        if closed.load(ordering: .relaxed) { refuse(call, file: file, line: line) }
+    }
+
+    @inline(never)
+    private func refuse(_ call: StaticString, file: StaticString, line: UInt) -> Never {
+        fatalError(refusal("\(call)") ?? "ShellVM.\(call) refused", file: file, line: line)
+    }
+
     /// Start the background workers, the marker and the young collector.
     /// Saved Processes resume from here (main-affine ones at the next turn).
     public func start() {
         closeLock.lock()
         defer { closeLock.unlock() }
-        precondition(!started && !closed)
+        checkOpen("start")
+        precondition(!started, "ShellVM.start twice")
         started = true
         vm.start()
     }
@@ -386,7 +420,12 @@ public final class ShellVM: @unchecked Sendable {
     /// (docs/modules/delay-outlives-vm.md). The bridge's Semaphores are
     /// unregistered first: a post after `close` takes no root and signals
     /// nothing. Answers what it did. Idempotent: a later call frees nothing
-    /// and answers `destroyed` false. Not from inside a callback.
+    /// and answers `destroyed` false. Not from inside a callback, and from
+    /// the thread that drives the VM: every member but `post`,
+    /// `postRequest`, `queuedEvents` and `queuedRequests` stops with a
+    /// message once `close` has returned, but a call already running on
+    /// another thread when `close` begins reads freed memory, which no
+    /// check can prevent (docs/modules/closed-shell-calls.md).
     @discardableResult
     public func close() -> ShellCloseReport {
         let r = closeOnce()
@@ -410,8 +449,8 @@ public final class ShellVM: @unchecked Sendable {
     private func closeOnce() -> ShellCloseReport {
         closeLock.lock()
         defer { closeLock.unlock() }
-        if closed { return ShellCloseReport(destroyed: false) }
-        closed = true
+        if closed.load(ordering: .relaxed) { return ShellCloseReport(destroyed: false) }
+        closed.store(true, ordering: .relaxed)
         if started {
             vm.terminateAll()
             vm.waitUntilAllTerminated()
@@ -449,6 +488,7 @@ public final class ShellVM: @unchecked Sendable {
     /// ask for it before the image resumes; this covers one that starts
     /// serving later or did not ask).
     public func openProtocol() {
+        checkOpen("openProtocol")
         stopsForDebugger = true
         bridge.openProtocol()
     }
@@ -469,8 +509,14 @@ public final class ShellVM: @unchecked Sendable {
     /// at the open; a host that starts serving sets it too. A release image
     /// never stops whatever it says. Any thread.
     public var stopsForDebugger: Bool {
-        get { bridge.stopsForDebugger.load(ordering: .acquiring) }
-        set { bridge.stopsForDebugger.store(newValue, ordering: .releasing) }
+        get {
+            checkOpen("stopsForDebugger")
+            return bridge.stopsForDebugger.load(ordering: .acquiring)
+        }
+        set {
+            checkOpen("stopsForDebugger")
+            bridge.stopsForDebugger.store(newValue, ordering: .releasing)
+        }
     }
 
     // MARK: turns
@@ -481,6 +527,7 @@ public final class ShellVM: @unchecked Sendable {
     /// ADR 0004). External signals, the event queue's included, are drained
     /// at its start.
     public func runTurn(budgetNs: UInt64, minPriority: Int = 0) -> ShellTurn {
+        checkOpen("runTurn")
         let t = vm.runMain(budgetNs: budgetNs, minPriority: minPriority)
         return ShellTurn(ns: t.ns, cpuNs: t.cpuNs, enterWaitNs: t.enterWaitNs, leaveWaitNs: t.leaveWaitNs,
                          parkNs: t.parkNs, collectorNs: t.collectorNs, stopNs: t.stopNs, youngNs: t.youngNs,
@@ -489,7 +536,10 @@ public final class ShellVM: @unchecked Sendable {
 
     /// The stuck report: every main-affine Process runnable for longer than
     /// `limitNs` is reported once through `callbacks.stuck`.
-    public func checkStuck(limitNs: UInt64) { vm.checkStuck(limitNs: limitNs) }
+    public func checkStuck(limitNs: UInt64) {
+        checkOpen("checkStuck")
+        vm.checkStuck(limitNs: limitNs)
+    }
 
     // MARK: events
 
@@ -510,6 +560,7 @@ public final class ShellVM: @unchecked Sendable {
     /// be made, or the record table is full. Rooted until `release`.
     public func spawn(_ selector: String, receiver: String? = nil, arguments: [ShellValue] = [],
                       main: Bool = false, priority: Int = 1) -> ShellProcess? {
+        checkOpen("spawn")
         guard (0..<Priority.count).contains(priority) else { return nil }
         let rcv: Oop
         if let receiver {
@@ -557,6 +608,7 @@ public final class ShellVM: @unchecked Sendable {
 
     /// A released Process reads as terminated: the shell let it go.
     public func state(of p: ShellProcess) -> ShellProcess.State {
+        checkOpen("state")
         guard holds(p) else { return .terminated }
         switch vm.state(of: p.oop) {
         case .ready: return .ready
@@ -569,6 +621,7 @@ public final class ShellVM: @unchecked Sendable {
     /// What a terminated Process answered, as a value (nil for an object
     /// that is not one).
     public func result(of p: ShellProcess) -> ShellValue? {
+        checkOpen("result")
         guard holds(p) else { return nil }
         let r = vm.result(of: p.oop)
         return unsafe vm.host { w in shellValue(unsafe vm.machine(w), r) }
@@ -576,6 +629,7 @@ public final class ShellVM: @unchecked Sendable {
 
     /// Why a Process was terminated by the VM (an error), if it was.
     public func failure(of p: ShellProcess) -> String? {
+        checkOpen("failure")
         guard holds(p) else { return "released by the shell" }
         return vm.error(of: p.oop).map { "\($0)" }
     }
@@ -583,17 +637,20 @@ public final class ShellVM: @unchecked Sendable {
     /// Block until `p` has terminated (one watcher at a time). Not on the
     /// main thread while `p` needs main turns.
     public func waitUntilTerminated(_ p: ShellProcess) {
+        checkOpen("waitUntilTerminated")
         guard holds(p) else { return }
         vm.waitUntilTerminated(p.oop)
     }
 
     public func terminate(_ p: ShellProcess) {
+        checkOpen("terminate")
         guard holds(p) else { return }
         vm.terminate(p.oop)
     }
 
     /// The shell no longer needs `p`.
     public func release(_ p: ShellProcess) {
+        checkOpen("release")
         heldLock.lock()
         let mine = held[p.id] == p.oop
         if mine { held[p.id] = nil }
@@ -601,17 +658,30 @@ public final class ShellVM: @unchecked Sendable {
         if mine { vm.release(p.oop) }
     }
 
-    public var liveProcessCount: Int { vm.liveProcessCount }
+    public var liveProcessCount: Int {
+        checkOpen("liveProcessCount")
+        return vm.liveProcessCount
+    }
 
     /// Processes the image held and the VM resumed (module 8c).
-    public var resumedProcessCount: Int { vm.resumedProcesses.count }
+    public var resumedProcessCount: Int {
+        checkOpen("resumedProcessCount")
+        return vm.resumedProcesses.count
+    }
     /// Module 8d: the image is a release image (its header's flag).
-    public var isReleaseImage: Bool { image.isRelease }
+    public var isReleaseImage: Bool {
+        checkOpen("isReleaseImage")
+        return image.isRelease
+    }
     /// AOT 2: what binding the native module did (nil: none was given).
-    public var nativeBindReport: NativeBindReport? { vm.nativeReport }
+    public var nativeBindReport: NativeBindReport? {
+        checkOpen("nativeBindReport")
+        return vm.nativeReport
+    }
     /// AOT 2: the methods the given module's generator wrote and declined.
     public var nativeGenerated: (generated: UInt64, declined: UInt64)? {
-        vm.config.native.map { ($0.methodsGenerated, $0.methodsDeclined) }
+        checkOpen("nativeGenerated")
+        return vm.config.native.map { ($0.methodsGenerated, $0.methodsDeclined) }
     }
 
     // MARK: snapshot
@@ -622,6 +692,7 @@ public final class ShellVM: @unchecked Sendable {
     /// true there. Call it off the main thread when main-affine Processes
     /// must run for the save to finish.
     public func snapshot(to path: String) -> Bool {
+        checkOpen("snapshot")
         guard let p = spawn("snapshot:", arguments: [.string(path)]) else { return false }
         defer { release(p) }
         waitUntilTerminated(p)
@@ -633,6 +704,7 @@ public final class ShellVM: @unchecked Sendable {
     /// The VM's counters (module 3's and this module's) and the object
     /// memory's, in a stable order.
     public var counters: [(name: String, value: UInt64)] {
+        checkOpen("counters")
         let m = image.om.counters
         return vm.counters.named + [("collections", m.collections), ("allocations", m.allocations),
                                     ("allocatedBytes", m.allocatedBytes)]
@@ -641,6 +713,7 @@ public final class ShellVM: @unchecked Sendable {
     /// The collectors' report lines of `kajo run` (modules 4 to 7): pauses,
     /// cycles, relocation, young collection and the collector's QoS and CPU.
     public func collectorReport(seconds: Double) -> [(name: String, value: String)] {
+        checkOpen("collectorReport")
         let stops = vm.stops
         return nurseryReport(vm, stops: stops, ms: seconds * 1000) + markingReport(vm, stops: stops)
             + relocationReport(vm) + youngReport(vm, ms: seconds * 1000)
@@ -649,6 +722,7 @@ public final class ShellVM: @unchecked Sendable {
     /// The main worker's young-collection counters, cumulative. Read on the
     /// main thread between turns.
     public var mainThreadCounters: MainThreadCounters {
+        checkOpen("mainThreadCounters")
         let y = vm.youngWorkerCounters(0)
         return MainThreadCounters(
             acksOwn: y.acksOwn, acksOwnNs: y.acksOwnNs, acksOther: y.acksOther, acksOtherNs: y.acksOtherNs,
@@ -660,15 +734,24 @@ public final class ShellVM: @unchecked Sendable {
     }
 
     /// Every stop so far (the last 65 536).
-    public var pauses: [ShellPause] { vm.stops.map { ShellPause(kind: "\($0.kind)", atNs: $0.atNs, pauseNs: $0.pauseNs) } }
+    public var pauses: [ShellPause] {
+        checkOpen("pauses")
+        return vm.stops.map { ShellPause(kind: "\($0.kind)", atNs: $0.atNs, pauseNs: $0.pauseNs) }
+    }
 
     /// The VM's threads that exist: background workers, the marker, the
     /// young collector (the main worker is the shell's thread).
-    public var threads: [ShellThread] { vm.shellThreads() }
+    public var threads: [ShellThread] {
+        checkOpen("threads")
+        return vm.shellThreads()
+    }
 
     /// How long each hop to main took, from the hop to the retried send on
     /// the main worker (ns).
-    public var hopLatencies: [UInt64] { vm.hopLatencies }
+    public var hopLatencies: [UInt64] {
+        checkOpen("hopLatencies")
+        return vm.hopLatencies
+    }
 }
 
 /// A host-readable value (inside the VM).
