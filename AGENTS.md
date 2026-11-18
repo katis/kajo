@@ -1477,9 +1477,10 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/45-types-2.md`: Types 2: the checker in the development image
  - `docs/decisions/46-delay-outlives-vm.md`: A Delay does not outlive its VM
 
-Awaiting the owner: the Delay fix's question 4 (`46-delay-outlives-vm.md`:
-should `ShellVM.close` destroy at once instead of waiting 3 s and leaking;
-recommended yes, a small follow-up). Types 2's five questions were answered as recommended on
+Awaiting the owner: the word to start the shell-close follow-up (the
+Delay fix's question 4, answered "Yes, brief it" on 2026-11-18, appended
+to `46-delay-outlives-vm.md`; briefed as `docs/modules/shell-close.md`,
+Swift tier). Types 2's five questions were answered as recommended on
 2026-11-18 (appended to `45-types-2.md`; one changes what is built and is
 a row of `docs/PLAN.md`: a VM's pending timers cancelled at its end). Types 1's questions were answered on
 2026-11-17 (appended to `44-types-1.md`): for the 45 signatures "`Self`

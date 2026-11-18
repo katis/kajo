@@ -6,7 +6,8 @@ Briefed by the main session on 2026-11-18. The owner approved the follow-up
 on 2026-11-18 (Types 2's question 2, `docs/decisions/45-types-2.md`) and
 chose it as the next module ("delay fix"). Starting commit 0395be3.
 Built by the build agent on 2026-11-18 (part 1 82919c7, the fix 075d2a4;
-"Part 1" and "As built" below), not yet verified by the main session.
+"Part 1" and "As built" below), verified and recorded by the main session
+the same day (`docs/decisions/46-delay-outlives-vm.md`).
 
 ## What it is
 

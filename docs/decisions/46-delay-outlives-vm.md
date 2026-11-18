@@ -151,3 +151,12 @@ on 0395be3 (read in the files, not rerun), the `unsafe` line counts.
 4. New: should `ShellVM.close` destroy at once instead of waiting and
    leaking? Recommended: yes, a small follow-up with a test that closes a
    shell with a Delay pending and reads that the VM was freed.
+
+## The owner's answer (2026-11-18)
+
+Question 4: "Yes, brief it". Briefed the same day as
+`docs/modules/shell-close.md` (a row of `docs/PLAN.md`). The main session's
+report of the hand-back called the follow-up a core-tier change; it is not:
+`Sources/KajoVM/Shell/` is outside the core directories and
+`check-tier.sh --dry-run` gives the Swift tier. Questions 1 to 3 stand as
+built.
