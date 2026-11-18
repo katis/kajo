@@ -5,7 +5,9 @@
 Briefed by the main session on 2026-11-18. The owner approved the follow-up
 on 2026-11-18 (the Delay fix's question 4,
 `docs/decisions/46-delay-outlives-vm.md`: "Yes, brief it"). Starting commit:
-the commit that adds this file. Not started.
+5778e78. Built by the build agent on 2026-11-18 (part 1 35e0aab, the fix
+5240ac7), verified and recorded by the main session the same day
+(`docs/decisions/47-shell-close.md`).
 
 ## What it is
 
