@@ -699,3 +699,134 @@ commit (`~/kajo-scratch/types-1/check/new-check.txt`): Mac binary 5 220 736 →
 | Self in an argument place read as the declared class (Number) when the overload is chosen | `TypeCheckerTest>>testSelfInAnArgumentPlaceWithAnOverload`: "3 + 4.5: argument 1 of #+ is Float, expected Integer" |
 | no recheck after a signature change (every method change taken as a body change) | `TypeServiceTest>>testLiveRechecks` ("Assertion failed": the caller is not rechecked) |
 | the release build handed the signatures | `SignatureTests.theProbeRoundTripsAndAReleaseBuildDropsItsSignatures` and `TypeCheckerTests.aReleaseImageHoldsNoCheckerAndNoSignature` |
+
+### Other checks
+
+- `scripts/canonical-tonel.sh --check` lists nothing (kernel/, tools/ and
+  types/).
+- The kernel's tests 255 of 255 and the development image's 333 of 333
+  (aligned release `kajo`, `kajo test`), the experiment's checker still runs
+  on its own image (part 1's and `measure/`'s runs; its side files and
+  package are unchanged).
+- The new suites once under ThreadSanitizer with twelve busy loops
+  (`work/tsan-load.txt`, `work/tsan-load-2.txt`): the first run failed (the
+  live tests' whole check took past their 600 s bound, and the protocol
+  test's request past the service's own); after the live tests stopped
+  checking the whole image and the request's bound went, 25 tests passed,
+  0 reports, 1632 s (`TypeCheckerTests` 1632 s of it, its protocol test
+  1116 s).
+- `scripts/check-tier-test.sh` (107 checks, ok) and `just new-check` alone
+  (rc=0, `work/new-check-alone.txt`) after their scripts changed.
+- The syntax fuzzer's kernel mode, which the tier does not run, 120 s:
+  "libFuzzer build: ok (Apple Swift version 6.4.2)", 3426 runs, no crash
+  (`work/fuzz-syntax-kernel.txt`).
+- Before any change, `just golden` and the Mac shell's tests mode on
+  1e8f324 (part 1: rc=0, 255 of 255).
+
+### Deviations
+
+- Starting position 1 as written was wrong (part 1); the checker built
+  answers it with two rules of its own (`self class new` is Self; a value
+  typed some Behavior makes Dynamic instances), which the brief did not
+  name.
+- Starting position 4 for the whole image is wrong by 14 to 17 percent.
+- `Behavior>>signature:classified:` refuses a selector that has a method
+  with an Error (and a malformed text with a CompileError), not the
+  ClassDefinitionError part 1 named.
+- The request is the Types package's (`types/DevSession.extension.st`), not
+  the kernel's: a target without the package answers "unknown request
+  diagnostics", the protocol's own clean refusal, and no kernel image or
+  release image holds the name of a checker class.
+- The shells' scenario images (`kernel.img`, `shell.img`, `st-*.img`) do not
+  hold the package; the development images do (part 1's decision, so the
+  matrices measure what they measured).
+- The live tests start the service without the whole check
+  (`startCheckingAll: false`), and the request's wait is untimed (above);
+  the protocol test checks the whole image.
+- `TypeServiceTest` is one test of four of the brief's live cases (a body,
+  a signature, a removed class, a file loaded) plus the idle test, so that
+  a sanitizer run pays for few service starts.
+
+### Not done
+
+- The narrowing check covers signatures without a method, not a typed
+  method that overrides a typed one (the experiment's "override
+  consistency"; the brief asked for signatures).
+- A class's diagnostics are not in the tools' windows (out of the brief).
+- `BlockClosure>>ifError:`'s block type (`[^Dynamic]` for blocks of one and
+  two arguments) is not corrected; its five `arity` diagnostics are in
+  `BlockClosureTest`.
+- No device run (none asked); the checker's memory in a Debug app was
+  measured on the Mac.
+
+### Found, not this module's
+
+- **A Delay outlives its VM.** `startDelay` (`Sources/KajoVM/Processes/External.swift`)
+  arms a GCD timer holding a `VMRef`, "valid until the VM is destroyed";
+  nothing cancels it when the Delay's waiter is terminated or the VM ends,
+  so a VM destroyed before the timer fires is signalled after its end. The
+  first gate run of this module (`check-1-aborted/tsan.txt`, 44d4738)
+  died there: "ThreadSanitizer: SEGV External.swift:30 in
+  VMRef.signalFromOutside", from a 600 s Delay the service's bounded wait
+  had armed in a test VM that ended minutes earlier. The service no longer
+  arms one; any short-lived VM with a pending Delay (a test, a headless
+  run) can still hit it.
+- A started `TypeService` keeps `kajo run` from ending: its Process waits on
+  its Semaphore and the run waits for it (the scratch measurement stops the
+  service at its end).
+- The image's diagnostics name a wrong annotation (`BlockClosure>>ifError:`)
+  and three unguarded `lookupSelector:` results (`DevProtocol class>>describe`,
+  `run:in:with:replyTo:`, `TestCase>>tags`).
+
+### Open questions (built as recommended where there was one)
+
+1. **When the checker starts.** Built: at the first `diagnostics` request
+   (or `TypeService start`), so a development app nobody asks pays only the
+   classes' memory. Recommended: keep it; the alternative, starting at a
+   session's open, would put a whole check (1.7 s on the Mac, more on a
+   phone) behind every connection whether or not the client reads types.
+2. **The Delay that outlives its VM.** Recommended: a follow-up in the VM
+   core (core tier) that cancels a VM's pending timers when it ends, with a
+   test that ends a VM with a long Delay pending; until then no package
+   arms a long Delay it may abandon.
+3. **`species ^<Behavior>`.** Collection's, Interval's and
+   OrderedCollection's `species` say Behavior, so what they make is Dynamic
+   to the checker. Recommended: annotate them `^<Self class>` where it is
+   true (not Interval: an Interval's species is Array) in the module that
+   annotates more of the kernel, measured as part 1 measured the 45.
+4. **The narrowing check for typed overrides.** Recommended: the same rule
+   for a typed method over a typed one, in a later module, after its count
+   on the image is measured (the experiment named it, the brief did not).
+5. **`BlockClosure>>ifError:`'s type.** Recommended: `<[^Dynamic] |
+   [Error, ^Dynamic] | [String, Object, ^Dynamic]>` or Dynamic, decided
+   with the next annotation pass; five test diagnostics name it.
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/types-2/check just check 1e8f324` on 7ac2711
+(the last code commit): the Swift tier (Sources/KajoCompiler and
+Sources/KajoGenerator changed, nothing under the core directories), with
+`check-tier-test` (gate scripts changed) and the syntax and protocol
+fuzzers, 8 gates, every one `rc=0`, 4 384 s
+(`~/kajo-scratch/types-2/check/gates.log`; swift.org 6.4.2 first on PATH).
+Against Types 1's run (bef504a, the same code as the starting commit,
+4 333 s):
+
+| gate | s | bef504a |
+|---|---|---|
+| check-tier-test | 6 | (not owed) |
+| clean-build | 20 | 21 |
+| swift-test (466 + 176 tests) | 696 | 716 (466 + 168) |
+| tsan (0 reports) | 3 017 | 2 962 |
+| kernel-test (255 tests) | 119 | 119 |
+| apps | 133 | 127 |
+| new-check | 268 | 265 |
+| fuzz (syntax 95 076 runs, protocol 365 638 runs, both "build=ok") | 125 | 123 (syntax only) |
+
+The new tests cost about 55 s of `tsan` (the protocol test checks the whole
+image under the sanitizer) and nothing visible in `swift-test`. An earlier
+run on 44d4738 (`check-1-aborted/`) failed `tsan` with the SEGV in "Found"
+and was stopped; 7ac2711 is its fix. The Smalltalk tier's two gates the
+Swift tier lacks, run by hand on 7ac2711: `just golden` 12 of 12 ok
+(`check/golden-final.txt`) and the Mac shell's tests mode 255 of 255
+(`check/mac-tests-final.txt`).
