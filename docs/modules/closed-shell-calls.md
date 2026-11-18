@@ -5,7 +5,9 @@
 Briefed by the main session on 2026-11-18. The owner approved the follow-up
 on 2026-11-18 (shell-close's question 1, `docs/decisions/47-shell-close.md`:
 "brief it", after asking what it is and whether it costs performance).
-Starting commit: the commit that adds this file. Not started.
+Starting commit: 0e30cff. Built by the build agent on 2026-11-18 (part 1
+7f34d15, the check e1506f1, the tests 5ce3d0e), verified and recorded by
+the main session the same day (`docs/decisions/48-closed-shell-calls.md`).
 
 ## What it is
 
