@@ -231,3 +231,15 @@ ThreadSanitizer with twelve busy loops: 13 of 13, 0 reports, 1700 s.
    request gets a timeout of its own.
 5. Typed overrides (155 of 617). Recommended: before the narrowing rule
    is built, count how many contradictions it would report.
+
+## The owner's answers (2026-11-19)
+
+"yes", to the five recommendations.
+
+1. The mark stays a pale orange background. No underline is built.
+2. The "  ⚠" on a selector with a diagnostic stays.
+3. The checker starts at a session's first class selection.
+4. The first request is measured on the iPhone in the next device run.
+   It gets a timeout of its own only if that number asks for one.
+5. The contradictions the narrowing rule would report are counted before
+   the rule is built. The count is part 1 of the module that builds it.

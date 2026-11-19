@@ -1508,12 +1508,14 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/48-closed-shell-calls.md`: A closed shell refuses its host's calls
  - `docs/decisions/49-types-3.md`: Types 3: diagnostics in the tools
 
-Awaiting the owner: Types 3's five questions (`49-types-3.md`: the mark
-stays a pale background; the selectors table's mark stays; the checker
-starts at a session's first class selection; the first request is
-measured on the iPhone before it gets a timeout of its own; the typed
-overrides' contradictions are counted before the narrowing rule is
-built; each recommended as written). Closed-shell-calls' two questions were
+Awaiting the owner: the word for the next module; no question is open.
+Types 3's five questions were answered as recommended on 2026-11-19
+(appended to `49-types-3.md`: the mark stays a pale background; the
+selectors table's mark stays; the checker starts at a session's first
+class selection; the first request is measured on the iPhone in the next
+device run before it gets a timeout of its own; the typed overrides'
+contradictions are counted before the narrowing rule is built).
+Closed-shell-calls' two questions were
 answered as recommended on 2026-11-19 (appended to
 `48-closed-shell-calls.md`: the closing thread's rule is not enforced;
 `RunningTarget.close()` is fixed with the next change to the development
