@@ -247,3 +247,162 @@ files in `~/kajo-scratch/types-3/`.
    With this module the first request comes when the first method is
    shown, so a session pays the whole-image check once, in the
    background of the target. Recommended: keep it; say the time.
+
+## Part 1: measured and decided (2026-11-19, ef2f0f2)
+
+Measured on the mini with swiftly's swift.org 6.4.2 the first Swift on PATH
+(`part1/env.txt`). Raw files are in `~/kajo-scratch/types-3/part1/`, scripts
+in `~/kajo-scratch/types-3/scripts/` (`T3Live/T3Measure`, a scratch
+measurement package after Types 2's `TypeMeasure`; `t3-run.sh`; `rt.py`, a
+protocol client that reads the token from `kajo run`'s stdout in memory and
+never writes or prints it; `patch-bench.py`, a scratch-only change to a copy's
+`DevSessionBench` whose scripted session times the diagnostics request through
+the tools' client; `shell-runs.sh`; `typing-table.py`). The headless numbers
+use one aligned release `kajo` built from the starting commit
+(`-enable-testing`, `-align-all-nofallthru-blocks=5 -align-loops=32`); the
+VM's Swift does not change in this module, so the same binary serves the
+images of both sides. The shell numbers use the starting commit's Release
+Kajo app built from `git archive ef2f0f2` with the patched bench
+(`work/dd-base`). Nothing was built in the repository.
+
+### The baseline
+
+- **The image's diagnostics: 81**, as Types 2 said (`part1/image-1/image.txt`:
+  3181 methods and signatures checked in 1747 ms, the slice's 27 classes 24).
+  By class (`image-1/image-diagnostics.txt`, column 1): TypeCheckerSample 20,
+  OrderedCollection 9, Interval 7, BlockClosureTest 7, DiscoverabilityTest 5,
+  LiveCompileTest 4, DevelopmentTest 4, ObjectTest 3, TypeCheckerNarrowSample
+  2, String 2, FractionTest 2, Fraction 2, ExceptionTest 2, DevProtocol 2,
+  ByteArray 2, and 1 each in WriteStream, TestCase, ReflectionTest,
+  OrganizationTest, Number, IntegerTest, Float and Collection.
+- **The first request, headless** (`kajo run <development image> --protocol`,
+  `rt-headless-1.txt` to `-3.txt`): 1743 ms for the image's, 1725 and 1732 ms
+  for one method's. In the target alone (`target/target.txt`,
+  `TypeService diagnosticsOf:` with no protocol) 1709 ms: the whole-image
+  check is the first request's time, whatever its scope.
+- **Later round trips, headless**, five each (`rt-headless-1.txt`): one method
+  0.18 to 0.29 ms; one class, TypeCheckerSample (44 checked, 20 diagnostics),
+  3.0 to 3.7 ms; String (81 checked) 2.2 to 2.4 ms; the image (3172 checked,
+  81 diagnostics) 6.8 to 7.6 ms; `package.list` for reference 0.55 to 0.70
+  ms. In the target alone: a method 18 to 26 µs, a class 2.3 to 2.4 ms, the
+  image 4.2 to 5.1 ms.
+- **In the Mac shell** (the Release app, the tools on the image's own socket,
+  three launches, `shell-diag.txt`, the session's `diagnostics` round trips
+  in order): the first 1886, 1890 and 1894 ms; a method 0.33 to 0.47 ms; the
+  class 7.9 to 11.7 ms (p50 9.4); the image 17.5 to 26.7 ms.
+- **The typing rows, the starting commit against itself** (five interleaved
+  launches of the same app as A and B, `mode=devsession classes=0
+  typing=200`, `typing-base-base-none.txt`, `-storm.txt`, the table in
+  `typing-base-base-table.txt`, thermal nominal on every line). Medians
+  [range] for A and B:
+
+  | load | key to redraw p50 ms | p99 ms | max ms | colour p50 ms | colour p99 ms | missed (of about 1259) |
+  |---|---|---|---|---|---|---|
+  | none, A | 5.4 [3.7–9.0] | 8.6 [6.0–10.2] | 16.5 [9.6–22.3] | 2.4 [2.3–3.1] | 7.1 [4.6–8.1] | 25 [2–191] |
+  | none, B | 8.1 [4.0–9.4] | 9.4 [6.0–10.3] | 11.1 [10.8–19.5] | 2.9 [2.4–3.0] | 6.1 [4.1–7.9] | 2 [1–62] |
+  | storm, A | 8.2 [5.2–8.4] | 8.2 [5.3–8.4] | 8.6 [6.4–12.0] | 0.89 [0.80–0.91] | 4.2 [1.2–4.6] | 0 [0–1] |
+  | storm, B | 3.3 [1.4–7.6] | 5.9 [3.3–9.3] | 6.6 [6.5–9.3] | 0.89 [0.81–0.90] | 1.4 [1.1–3.9] | 1 [0–197] |
+
+  The same app's two medians of the key to redraw differ by 2.7 ms idle and
+  4.9 ms under the storm; the colouring is the tighter column (2.4 against
+  2.9 ms idle, 0.89 against 0.89 under the storm). The bar's "inside the
+  starting commit's own spread" is read against these ranges.
+- **The gates the tier runs, timed once on the starting commit** (the
+  repository's debug `kajo`, after a build, `base-test-times.txt`): the
+  kernel's tests 121 s (255), the development image's tests 158 s (333).
+
+### The starting positions
+
+1. **Right for the product code; the tier is the Swift tier because of one
+   test.** The hosts already know a background of a named colour
+   (`Sources/KajoApp/TextOffsets.swift` reads `background:<name>`;
+   `AppKitViews.swift:589` draws any name but `highlight` at 0.3 alpha,
+   `UIKitHost.swift:284` every name at 0.3), and `orange` is a name both
+   hosts have (`AppKitHost.swift` `color`, `UIKitHost.swift` `color`). So a
+   diagnostic is `background:orange`: pale, not the compile error's
+   `background:red`, not the debugger's `background:highlight` (open
+   question 1). No primitive and no new request: the request and the event
+   exist. One answer of an existing request grows: `method.source` of a
+   signature without a method answers its text with `signature` true
+   (`DevSession>>methodSource:selector:side:`, kernel), because nothing else
+   gives the browser a signature's text and the brief asks it to show one.
+   The brief's one test against a real target (no fake) needs the tools'
+   test shell, which is `Tests/KajoCompilerTests/ToolsTests.swift` with its
+   probe `Fixtures/toolsprobe/ToolsProbe.class.st`: a change under `Tests/`
+   makes `check-tier.sh` choose the Swift tier. No file under `Sources/`
+   changes; the tier is run as the Swift tier, and the Smalltalk tier's
+   gates that the Swift tier lacks (the two image builds, the development
+   image's tests, golden, the Mac shell's tests mode) are run by hand on the
+   same commit.
+2. **Right, and already built by Types 2.** `DevClient>>diagnostics:selector:
+   side:then:` and its row in `DevClient class>>requests` exist, and
+   `DevClientTest>>testEveryRequestHasItsMessage` counts the one request of
+   another package only where `TypeService` is. It passes in a development
+   image built with and without `--with types` (`base-notypes-devclient.txt`:
+   16 of 16 in each).
+3. **Right that nothing should wait; the time is far under the timeout on
+   the mini.** The first request is 1.7 s headless and 1.9 s in the Mac
+   shell against the client's 30 s; a Debug app's 2.6 to 4.0 times gives 5
+   to 8 s, which still fits; a phone's Debug app was not measured (no device
+   in this module). Decided: the browser's request is a reply like any other
+   (nothing waits for it); a timeout fails it quietly (no status line, the
+   error kept for the tests as `diagnosticsFailure`), and the marks come with
+   the next class selection, accept or event. A diagnostics list, which the
+   developer asked for, says its error on the status line.
+4. To be built (part 2): the refusal is remembered by the client per session
+   (`DevClient>>refuses:`), for any kind the target answers "unknown request
+   <kind>:".
+5. **Right.** `start` and `end` are byte offsets in the method's installed
+   source, from 0, `end` exclusive; the styles are byte offsets from 1, both
+   ends in. `offsets/offsets.txt`: a method of 58 bytes and 53 scalars
+   (`é`, `ü`, `✓` and `ä` before or in the send) gets a `dnu` at start 49,
+   end 58, and bytes 50 to 58 are the send `'ä' zork` exactly; its byte offset
+   is 49, its scalar offset 44. So a mark is `{start + 1. end. style}`, and
+   the source the browser shows (`method.source`, `Smalltalk sourceOf:`) is
+   the source the checker read (`installedEqual=true`).
+6. to 8. Built and measured in parts 3 to 5 and 7.
+9. Measured in part 6, before each change is kept.
+
+### Types 2's question 4: typed methods over typed methods
+
+`overrides/overrides.txt` (`T3Measure overrides`): of the image's 617 typed
+methods (a type in the pattern), 155 override something typed: 152 the first
+method of their selector above their class with a type, 3 a signature
+without a method (`Interval>>at:`, `OrderedCollection>>at:` and `at:put:`
+over SequenceableCollection's); none overrides an untyped method and 462
+override nothing. Three rows checked by hand: `Array>>asArray ^<Self>` over
+`Collection>>asArray ^<Array[E]>` (ArrayedCollection and
+SequenceableCollection define none); `Association>>= anObject <Object>
+^<Boolean>` over `Object>>=` (Magnitude defines none);
+`ArrayedCollection class>>new ^<Instance>` over `Behavior>>new ^<Instance>`
+(through the metaclass chain: no `new` in SequenceableCollection class,
+Collection class, Object class, Class or ClassDescription).
+
+### Decided
+
+- **The mark** (open question 1): `background:orange` over the range, the
+  whole first line when a diagnostic has none (a signature's, a `checker`
+  one), the compile error's red line drawn after it so it wins where they
+  meet.
+- **Marks in the selectors table** (open question 2): yes, with one change.
+  The class-scope request is 2.2 to 3.7 ms headless but 7.9 to 11.7 ms (p50
+  9.4) in the Mac shell, at the bar's 10 ms. Its time is
+  `TypeService classKeysOf:`, a scan of every checked key of the image for
+  the class's prefix (2.3 ms of the 2.4 in the target, where one method is
+  20 µs). Part 3 reads the class's own selectors and signatures instead
+  (`TypeService keysOfClass:`, the scan kept for a removed class) and is
+  measured again. With that, the browser asks **one class-scope request per
+  class selection** (and after an accept, and after an event that names the
+  class): the selectors' marks and the shown method's come from the same
+  reply, so showing a method asks nothing, and a window has at most one
+  request outstanding.
+- **The checker's start** (open question 3): the first request, which with
+  this module is the first class selection of a session's first browser;
+  1.7 to 1.9 s on the mini, in the background of the target.
+- **The list's keys**: two Smalltalk menu items bound in the browser's source
+  pane, Type diagnostics of the class (⇧⌘E) and of the image (⇧⌘D), free in
+  every menu (`DevTools` lists them); no option-key combination, whose
+  character AppKit turns into a dead key.
+- **A signature without a method** is shown read-only (`#signature`): an
+  accept of it says the browser does not change signatures yet, rather than
+  compiling the bare pattern into a method that answers self.
