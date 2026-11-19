@@ -243,3 +243,15 @@ ThreadSanitizer with twelve busy loops: 13 of 13, 0 reports, 1700 s.
    It gets a timeout of its own only if that number asks for one.
 5. The contradictions the narrowing rule would report are counted before
    the rule is built. The count is part 1 of the module that builds it.
+
+## The thin test fixed (2026-11-19)
+
+The owner: "Just fix them now". `aShellClosedWithADelayPendingFreesItsVM`
+waits (bounded) until the Process is waiting, in ec0a6ef, with
+`RunningTarget.close()` (`48-closed-shell-calls.md`). The test has no
+broken variant of its own: its old form failed 1 full run in 5, and
+two full runs do not prove that rate gone.
+The Swift tier on ec0a6ef, swift.org 6.4.2
+(`~/kajo-scratch/test-waits/check/gates.log`): "check-tier done swift
+failed=0 4740s", six gates `rc=0` (swift-test 714 s, tsan 3490 s with 0
+reports, 471 and 185 tests pass in both).

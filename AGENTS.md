@@ -1518,8 +1518,8 @@ contradictions are counted before the narrowing rule is built).
 Closed-shell-calls' two questions were
 answered as recommended on 2026-11-19 (appended to
 `48-closed-shell-calls.md`: the closing thread's rule is not enforced;
-`RunningTarget.close()` is fixed with the next change to the development
-protocol's tests). Types 2's five questions were answered as recommended on
+`RunningTarget.close()` was fixed on the owner's word the same day,
+ec0a6ef, with the shell-close reproduction's wait). Types 2's five questions were answered as recommended on
 2026-11-18 (appended to `45-types-2.md`; one changes what is built and is
 a row of `docs/PLAN.md`: a VM's pending timers cancelled at its end). Types 1's questions were answered on
 2026-11-17 (appended to `44-types-1.md`): for the 45 signatures "`Self`

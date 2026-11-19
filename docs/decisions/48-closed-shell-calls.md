@@ -158,3 +158,18 @@ touched `Sources/KajoDev`).
 2. `RunningTarget.close()` is fixed with the next change that touches the
    development protocol's tests (record an issue when the 30 s wait runs
    out and leak the target). It gets no module and no gate run of its own.
+
+## Fixed (2026-11-19)
+
+The owner: "Just fix them now" (this and the thin test of
+`49-types-3.md`). Fixed by the main session in ec0a6ef:
+`RunningTarget.close()` reads its 30 s wait's answer, and when the run
+thread did not end it records an issue and leaks the target. By hand,
+the stop left out and the wait 2 s: the run fails with one issue,
+"RunningTarget.close: the run thread did not end in 30 s; the target is
+leaked, not closed" (`~/kajo-scratch/test-waits/broken-no-stop.txt`).
+The Swift tier on ec0a6ef, swift.org 6.4.2
+(`~/kajo-scratch/test-waits/check/gates.log`): "check-tier done swift
+failed=0 4740s", six gates `rc=0` (swift-test 714 s, tsan 3490 s with 0
+reports, 471 and 185 tests pass in both).
+The owner's word made this a gate run of its own, against answer 2.
