@@ -1492,7 +1492,8 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/47-shell-close.md`: A closed shell frees its VM
  - `docs/decisions/48-closed-shell-calls.md`: A closed shell refuses its host's calls
 
-Awaiting the owner: nothing. Closed-shell-calls' two questions were
+Awaiting the owner: nothing (Types 3 is briefed, `docs/modules/types-3.md`,
+and started on the owner's word of 2026-11-19). Closed-shell-calls' two questions were
 answered as recommended on 2026-11-19 (appended to
 `48-closed-shell-calls.md`: the closing thread's rule is not enforced;
 `RunningTarget.close()` is fixed with the next change to the development
