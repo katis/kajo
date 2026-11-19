@@ -406,3 +406,416 @@ Collection class, Object class, Class or ClassDescription).
 - **A signature without a method** is shown read-only (`#signature`): an
   accept of it says the browser does not change signatures yet, rather than
   compiling the bare pattern into a method that answers self.
+
+## As built (2026-11-19)
+
+Built on the mini with swiftly's swift.org 6.4.2 the first Swift on PATH.
+Commits on master after ef2f0f2: 7c84479 (part 1), 0e08b2e (part 2),
+47d3f07 (parts 3 to 5), cf36665 (part 6), and this doc. Work files in
+`~/kajo-scratch/types-3/` (`part1/`, `measure/`, `broken/`, `work/`,
+`check/`, `scripts/`). No file under `Sources/` changed; `Tests/` gained one
+test and its probe (the tier is the Swift tier, part 1).
+
+### What was built
+
+- **The client** (part 2, `tools/Client/DevClient.class.st`): a kind the
+  target answers as "unknown request <kind>:" is remembered for the session
+  (`refuses:`, `noteRefusal:of:`): it is not sent again, a request of it
+  fails at once with "the target refused it earlier in this session", and a
+  new session (the session reply, a reconnect's included) forgets it. The
+  request method and its table row were Types 2's. `FakeDevClient` answers
+  the request (`diagnostics:`, `diagnostic:class:side:selector:line:start:
+  end:text:`, `refuseDiagnostics`) and emits the event
+  (`diagnosticsChanged:`), and has `lastId` to answer a held request.
+- **The browser** (part 3, `tools/Models/BrowserModel.class.st`,
+  `tools/Windows/BrowserWindow.class.st`): one class-scope `diagnostics`
+  request when a class is selected, after a method is accepted and after a
+  class definition is accepted; at most one outstanding (one wanted
+  meanwhile is asked when the reply comes); its reply holds both sides of the
+  class (`classDiagnostics`), from which the selectors table's marks
+  (`diagnosedSelectors`, a "  ⚠" after the selector) and the shown method's
+  diagnostics (`diagnostics`, filtered by side and selector) come, so showing
+  a method asks nothing. The window marks each diagnostic with
+  `background:orange` over `{start + 1. end}` (the whole first line, its line
+  feed included as the compile error's line is, when it has no range), the
+  compile error's red line drawn after it; the status line says
+  "N type diagnostic(s): <the first one's text>" when a method with
+  diagnostics is shown or its diagnostics arrive, unless a compile error is
+  named. The marks follow a three-state `marks`: `#shown`; `#dropped` at the
+  first edit of the text (`BrowserWindow>>edited` tells the model before it
+  colours); `#awaiting` after an accept, until the diagnostics reply that
+  follows it. A reply for a class no longer shown is dropped. A target that
+  refused the request is not asked again in the session and nothing reaches
+  the status line; a failed request (a timeout, a class gone) is kept as
+  `diagnosticsFailure` and dropped. A signature without a method is shown as
+  `#signature` (`method.source` answers it, below), marked, and accepting it
+  says the browser does not change signatures yet.
+- **The list** (part 4): the Smalltalk menu's items 20 "Type diagnostics of
+  the class" (⇧⌘E) and 21 "Type diagnostics of the image" (⇧⌘D), bound in the
+  browser's source pane (`DevTools smalltalkItems`, `paneKeys`,
+  `BrowserWindow>>sourceKey:`), so they are in its context menu and in Help >
+  Keyboard Shortcuts. `BrowserModel>>listDiagnostics:` fills the messages
+  window the senders use with four columns (Class, Side, Selector,
+  Diagnostic), one row per diagnostic, the title "type diagnostics of
+  <class or the image>: <count>" (the reply's count), and a row goes to its
+  method (`selectMessageAt:`; a diagnostic of a class's own types goes to
+  the class). Senders or implementors replace it (`showMessages:title:`), and
+  its window closing (`listClosed`) ends it. A list asked of a target without
+  the checker says so on the status line.
+- **Live** (part 5): the browser's listener on `diagnostics.changed`
+  (`listen`, from its first request; removed in `closed`) asks again when the
+  event names a method of the shown class (`Foo>>…` or `Foo class>>…`) or
+  is cut short (`truncated`), and asks the list again when it is the image's
+  or the event names its class. A malformed event asks nothing.
+- **In the kernel and the checker**: `DevSession>>methodSource:selector:side:`
+  answers a signature without a method (its text, category, package and
+  `signature` true) where there is no method; `TypeService keysOfClass:`
+  makes the class scope read the class's own methods and signatures (the scan
+  `classKeysOf:` stays for a removed class); `DevProtocol class>>describe` is
+  made from the request methods themselves and `run:in:with:replyTo:` answers
+  an error when the request's method is gone (part 6's guards, below).
+- **The annotation pass** (part 6): `Collection>>species ^<Self class>`,
+  `OrderedCollection>>species ^<Self class>` (it has no subclass; Interval
+  keeps `^<Behavior>`), `BlockClosure>>ifError: aBlock <[^Dynamic] |
+  [String, ^Dynamic] | [String, Object, ^Dynamic]>`, and `TestCase>>tags`
+  answers none for a test whose selector names no method.
+- **Tests**: `DevClientTest` 2 (the request's line, result and event; the
+  refusal remembered and asked once per session), `BrowserModelTest` 9,
+  `ToolWindowTest` 2, `DiscoverabilityTest`'s context menu list, `TypeCheckerTest`
+  2 (species, ifError:), `TypeServiceTest` (the class keys against the scan),
+  `DevelopmentTest` 2 (the signature's source; a request whose method is
+  gone), `SUnitTest` 1 (tags), and `ToolsTests.theBrowserMarksADiagnosticAndFollowsTheFix`
+  (Swift, the real target: a class defined and a method with a `returnType`
+  compiled through the browser, the browser holds the diagnostic with its
+  mark, its row mark and its status line, the fix accepted, the browser
+  holds none and the event that named it came; the waits on the browser's
+  state with `typesWait`; the checker started without the whole check, the
+  reason in the probe: under the sanitizer a whole check took 1116 s of one
+  request in Types 2). The development image has 351 tests (333 before), the
+  kernel 258 (255).
+
+### The starting positions, answered
+
+1. **Right for the product code, with one grown answer; the tier is the
+   Swift tier** (part 1): `background:orange`, no primitive, no new request;
+   `method.source` answers a signature's text; one test under `Tests/`.
+2. **Right, already built by Types 2** (part 1). After this module the map
+   check passes in the development image (351 of 351, `work/head-dev.img`)
+   and in one built without `--with types` (318 of 318, the 33 the Types
+   package brings left out), both by the aligned release `kajo`.
+3. **Right**: the first request takes 1.7 s headless and 2.0 s in the Mac
+   shell against the client's 30 s, and nothing waits for it. Five interleaved
+   launches each of the starting commit and the head
+   (`measure/rt/base-*.txt`, `head-*.txt`, the same `kajo` binary, images of
+   each tree): the first request 1680 to 1691 ms on the base, 1739 to 1746 ms
+   on the head (3243 methods and signatures against 3181: this module's code
+   and tests, 62 more to check); in the target alone 1766 ms
+   (`measure/target/target.txt`). In the Mac shell (`measure/shell-diag.txt`,
+   three launches each, interleaved): 1904 to 1936 ms on the base, 1969 to
+   2032 ms on the head. When it times out (a slow target, a sanitizer) the
+   browser drops it quietly (`diagnosticsFailure`), the late reply is dropped
+   by the client (no pending entry), and the marks come with the next class
+   selection, accept or event (`testAFailedRequestIsDroppedAndAskedAgainLater`).
+4. **Built**: asked once per session, nothing on the status line, the browser
+   as before (`testATargetWithoutTheCheckerIsAskedOnceAndSaysNothing`:
+   five selections, a side change and an event make one request; a new
+   session asks once again).
+5. **Right** (part 1, `part1/offsets/offsets.txt`), and the window test
+   checks a mark after four extra bytes of multi-byte characters
+   (`ToolWindowTest>>testTheSourceMarksEachDiagnosticAtItsBytes`).
+6. **Built as written**, with the accept's own state: the marks go at the
+   first edit and stay away through the accept until the diagnostics reply
+   that follows it (`#awaiting`), so offsets of the old text are never drawn
+   on the new.
+7. **Built, with the class as the unit**: the browser asks again when the
+   event names any method of the shown class (its selectors table shows them
+   all), not only the shown method; a list when it names its class or the
+   list is the image's. A burst of five events while a request is
+   outstanding makes no request until the reply, then one
+   (`testABurstOfEventsMakesOneRequest`).
+8. **Right: the typing rows are inside the starting commit's own spread.**
+   Five interleaved launches of each (`measure/typing-none.txt`,
+   `typing-storm.txt`, the table `measure/typing-table.txt`, thermal nominal
+   on every line), beside part 1's base against itself:
+
+   | load | side | key to redraw p50 ms | p99 ms | max ms | colour p50 ms | colour p99 ms | missed |
+   |---|---|---|---|---|---|---|---|
+   | none | base | 5.7 [4.6–7.4] | 8.4 [7.2–19.0] | 16.1 [7.8–20.9] | 3.0 [2.7–4.3] | 6.2 [5.2–9.5] | 39 [3–195] |
+   | none | head | 5.0 [4.5–8.4] | 7.9 [6.9–9.0] | 9.6 [7.9–10.5] | 2.8 [2.6–4.5] | 6.5 [5.1–7.3] | 26 [1–88] |
+   | none | part 1, base A / B | 5.4 / 8.1 | 8.6 / 9.4 | 16.5 / 11.1 | 2.4 / 2.9 | 7.1 / 6.1 | 25 / 2 |
+   | storm | base | 3.3 [2.6–6.2] | 3.5 [3.0–6.3] | 6.9 [6.5–6.9] | 1.03 [1.02–1.83] | 1.9 [1.3–4.0] | 1 [1–1] |
+   | storm | head | 3.3 [1.4–7.9] | 4.8 [1.9–8.0] | 8.3 [7.1–11.6] | 1.02 [0.99–3.22] | 1.9 [1.3–5.0] | 1 [0–186] |
+   | storm | part 1, base A / B | 8.2 / 3.3 | 8.2 / 5.9 | 8.6 / 6.6 | 0.89 / 0.89 | 4.2 / 1.4 | 0 / 1 |
+
+   Every head median lies between the two medians of the base against itself
+   or within the base's range; the one storm launch of the head that missed
+   186 frames has its like in part 1 (a base launch missed 197). The head's
+   browser asks the class's diagnostics when it opens the method, so the
+   first request's whole check runs in the image while the typing starts;
+   the longest turn is unchanged (14.0 to 15.6 ms against 13.9 to 15.8).
+9. **Wrong for `species`, right for `ifError:`.** Each change measured on the
+   whole development image before it was kept (`T3Measure image`, the
+   aligned release `kajo`; raw files in `measure/ann-*`):
+
+   | step | diagnostics | known receivers | known results | file |
+   |---|---|---|---|---|
+   | the tools' code of parts 2 to 5 (after one of its own was fixed: a `maybeNil` in `diagnosticStylesIn:`'s first version) | 81 | 15 879 | 10 668 | `ann-0-tools/` |
+   | `Collection>>species ^<Self class>` | 81 | 15 890 | 10 684 | `ann-1-collection/` |
+   | and `OrderedCollection>>species ^<Self class>` | 81 | 15 890 | 10 684 | `ann-2-species/` |
+   | `BlockClosure>>ifError:` with a union of three block types | 76 | 15 890 | 10 684 | `ann-3-iferror/` |
+   | the three `lookupSelector:` results (part 6) | 73 | 15 964 | 10 733 | `ann-4-guards/` |
+   | the final code | 73 | 16 002 | 10 763 | `final-image/` |
+
+   `species` removes no diagnostic: Types 2's rule that a value typed only as
+   some Behavior makes Dynamic instances had already answered the slice's
+   `self species new:` diagnostics, so `^<Self class>` types 11 more
+   receivers and 16 more results instead (`c species new` is now the
+   receiver's class, `TypeCheckerTest>>testSpeciesIsSelfClassWhereItIsTrue`).
+   `ifError:` removes the five `arity` diagnostics of `BlockClosureTest>>
+   testIfError` and adds none; a block of three arguments is still a
+   diagnostic, `argType` rather than `arity` (it is none of the union's
+   three). The kernel's own `species` methods outside the brief (String's,
+   Symbol's, Utf8View's) carry no type and were left so.
+
+### The image's diagnostics, before and after
+
+81 on the starting commit (`part1/image-1/`), 73 on the final code
+(`measure/final-image/image-diagnostics.txt`; the request answers the same
+count, `measure/rt/head-1.txt`). By class, before → after: TypeCheckerSample
+20 → 20, OrderedCollection 9 → 9, Interval 7 → 7, BlockClosureTest 7 → 2,
+DiscoverabilityTest 5 → 5, LiveCompileTest 4 → 4, DevelopmentTest 4 → 4,
+ObjectTest 3 → 3, TypeCheckerNarrowSample 2 → 2, String 2 → 2, FractionTest
+2 → 2, Fraction 2 → 2, ExceptionTest 2 → 2, DevProtocol 2 → 0, ByteArray 2 → 2,
+TestCase 1 → 0, and WriteStream, ReflectionTest, OrganizationTest, Number,
+IntegerTest, Float and Collection 1 → 1. The 8 that went: the five `arity`
+of `testIfError` and the three `maybeNil` of the unguarded lookups.
+
+The slice's 27 classes keep their 24, each as Types 2 classified it
+(`final-image/image-diagnostics.txt` against Types 2's list): 19 of the
+experiment's 20 limits (OrderedCollection's nil slots 8 and
+`add:beforeIndex:` 1; `Interval[N]` without a bound 5, in `last:` twice,
+`setFrom:to:by:` and `size` twice; `Collection>>sum:` 1; `String>>splitOn:`'s
+union 2; `WriteStream>>nextPutAll:`'s `byteSize` 1; `Fraction>>coerce:`'s
+`asFraction` 1); the 3 limits of Self from arithmetic (`Number`, `Float` and
+`Fraction>>negated`); the 1 method variable without a bound
+(`Interval class>>from:to:by:`); and the 1 narrowing signature
+(`Interval>>select:`). The rest of the 73: 22 written on purpose in the
+checker's samples, 25 in kernel and tools tests (faults on purpose, methods
+compiled at run time), ByteArray's E 2.
+
+The three lookups (part 6): `TestCase>>tags` answers none for a test whose
+selector names no method (`SUnitTest>>testATestWithoutItsMethodHasNoTags`
+reaches the nil); `DevProtocol class>>run:in:with:replyTo:` answers an error
+when the request's method is gone since `take:` chose it
+(`DevelopmentTest>>testARequestWhoseMethodIsGoneIsAnErrorReply` reaches the
+nil by running a selector no method has); `DevProtocol class>>describe` is
+made from the request methods the pragmas name, so it looks nothing up again
+(the nil could come only from a request method removed between the table's
+rebuild and the lookup, by another Process; the same test checks every
+entry names a method).
+
+### Round trips, before and after
+
+| scope | headless base ms | headless head ms | in the target, head | Mac shell base ms | Mac shell head ms |
+|---|---|---|---|---|---|
+| the first (any scope) | 1680–1691 | 1739–1746 | 1766 | 1904–1936 | 1969–2032 |
+| one method | 0.17–0.27 | 0.17–0.28 | 0.019–0.024 | 0.34–0.42 | 0.36–0.46 |
+| one class (TypeCheckerSample, 44) | 2.84–3.39 | 0.96–1.09 | 0.30–0.31 | 4.5–10.8 (p50 9.4) | 2.4–9.9 (p50 2.5) |
+| String (81) | 2.12–2.18 | 0.32–0.38 | 0.16 | | |
+| the image (3172 / 3243) | 6.42–6.96 | 6.15–6.73 | 4.3–4.8 | 17.6–26.7 | 16.9–26.2 |
+
+Headless: five rounds in each of three launches per side, interleaved
+(`measure/rt/`); the Mac shell: five rounds in each of three launches per
+side, interleaved (`measure/shell-diag.txt`, the session's `diagnostics`
+array). `TypeService keysOfClass:` agrees with the scan for all 239 classes
+of the image after a whole check and takes 3.7 ms for all of them against
+the scan's 467 ms (`measure/classkeys/classkeys.txt`). The Mac shell's round
+trips have a second mode near 9 ms (the base's class scope in 14 of 15
+rounds, the head's in 4 of 15) that the headless ones lack; not explained
+here (found, below).
+
+### The real target in the Mac shell
+
+The bar asks for the mark in the Mac shell's tests mode, which runs the
+kernel image only (`Sources/KajoShellCore/Modes.swift`, `TestsMode` makes its
+runtime from `resources.kernelImage`), so the tools' tests cannot run there
+without a Swift change. In its place, the head's Release app with the scratch
+bench (`scripts/patch-bench.py`, its `showDiagnosed` step) opened the tools
+on the image's own socket and the browser on `TypeCheckerSample>>badReturn`
+in the AppKit views (`measure/shell-shown.txt`, `"shown"` in the session's
+JSON): 1 diagnostic, the status line "1 type diagnostic: answers String |
+Nil where String is declared", the window's mark `[24, 27,
+"background:orange"]` over `name` in "badReturn ^<String>\n\t^ name\n", and
+the selector marked in the table. In the tools' tests the same holds against
+fakes (`ToolWindowTest`) and against the real target in the test shell
+(`ToolsTests.theBrowserMarksADiagnosticAndFollowsTheFix`, body 1.1 s,
+`work/toolstests-2.txt`).
+
+### Typed methods over typed methods
+
+155 of 617 typed methods (part 1, unchanged by this module's code: the
+count is of the kernel's patterns).
+
+### Broken variants (run by hand, `scripts/broken.sh`, `scripts/broken.py`, outputs in `broken/`)
+
+| variant | the check that failed |
+|---|---|
+| the model keeps the marks after an edit (`keep-marks.txt`) | `BrowserModelTest>>testAnAcceptAsksAgainAndTheFirstEditDropsTheMarks`: "Expected #dropped but was #shown"; `ToolWindowTest>>testTheSourceMarksEachDiagnosticAtItsBytes`: "Denial failed" (the orange still there after the edit) |
+| the event handler asks again on every event (`every-event.txt`) | `testABurstOfEventsMakesOneRequest`: "Expected 2 but was 6" (the five events each asked) |
+| the unknown request asked again at every selection (`ask-again.txt`) | `testATargetWithoutTheCheckerIsAskedOnceAndSaysNothing`: "Expected 1 but was 5"; `DevClientTest>>testAnUnknownRequestIsRememberedAndAskedOncePerSession`: "Assertion failed" |
+| the offsets taken as characters and turned into bytes (`characters.txt`) | `ToolWindowTest>>testTheSourceMarksEachDiagnosticAtItsBytes`: "Assertion failed" (the mark four bytes late) |
+| no guard in `run:in:with:replyTo:` (`no-run-guard.txt`) | `DevelopmentTest>>testARequestWhoseMethodIsGoneIsAnErrorReply`: "nil does not understand #hasPragma:" |
+| no guard in `TestCase>>tags` (`no-tags-guard.txt`) | `SUnitTest>>testATestWithoutItsMethodHasNoTags`: "nil does not understand #pragmas" |
+
+The brief named the fourth "the offsets are taken as bytes"; bytes are the
+right unit (position 5), so its broken variant takes them as characters.
+
+### Deviations
+
+- **The tier is the Swift tier**: the brief's real-target test lives in
+  `Tests/KajoCompilerTests/ToolsTests.swift` with its probe (part 1). No file
+  under `Sources/` changed. The Smalltalk tier's gates were run by hand on the
+  same commit (below).
+- **One class-scope request per class selection, not one per method shown.**
+  The brief has the model ask for the shown method's diagnostics when a
+  method is shown and after an accept; part 1's round trips made the class
+  scope cheap enough for the selectors' marks (open question 2), and the
+  shown method's diagnostics are then a filter of the same reply. So the
+  browser asks at a class selection, after an accept (of a method or a class
+  definition) and after an event naming the class; showing a method asks
+  nothing.
+- **An event naming another method of the shown class asks again** (the
+  selectors table shows that method's mark); one naming another class does
+  not.
+- **`method.source` answers a signature without a method**, the one way the
+  browser can show one; no new request.
+- **`TypeService keysOfClass:`** in the Types package, decided in part 1 from
+  the Mac shell's 9.4 ms.
+- **The real-target test starts the checker without the whole check**
+  (`TypeService startCheckingAll: false` from the probe, which names
+  TypeService; the probe is a test fixture, not `tools/` or `kernel/`), the
+  reason beside it: a whole check under the sanitizer took 1116 s of a
+  request in Types 2, and the first request's time is measured apart. The
+  other tools tests in `ToolsTests` now start the whole check when their
+  browser first selects a class; it runs in their VM's background and ends
+  with the VM.
+- **`DevProtocol class>>describe` was restructured** (made from the request
+  methods), not guarded: it then looks nothing up and has no nil to guard.
+- **The fourth broken variant takes the offsets as characters**, since bytes
+  are the right unit.
+- **The bar's Mac shell tests mode** runs only the kernel image; the mark was
+  shown in the Mac shell's own views through the scratch bench instead (The
+  real target in the Mac shell, above).
+
+### Not done
+
+- The first request on a phone or in a Debug app (no device in this module;
+  2.6 to 4.0 times the Mac's 1.7 s for a Debug app is 5 to 8 s, inside the 30
+  s timeout, not measured).
+- An underline in place of the background (a Swift change in both hosts;
+  open question 1).
+- Changing or adding a signature from the browser (shown read-only).
+- The narrowing check for a typed method over a typed one: only its count
+  (155).
+- Diagnostics in the workspace, the debugger and the inspector (out of the
+  brief).
+
+### Found, not this module's
+
+- **The Mac shell's round trips have a second mode near 9 ms** that the
+  headless ones do not: the base's class scope in 14 of 15 rounds, the
+  head's in 4 of 15 (`measure/shell-diag.txt`), one method's never. Not
+  explained; one guess to test is the client's reply waiting for the main
+  thread's next turn behind a frame.
+- **The test shell's view host does not keep a text view's styles**:
+  `(sourceView get: 'styles')` answered 0 in `ToolsTests`' `ToolsShell` while
+  the headless wrapper answers the styles; the probe's first version read it
+  and its Process stopped on `0 includes:`. The probe now asks the window
+  for its marks. The 9c lesson (read-backs a host has no get for) again.
+- The nil in `DevProtocol class>>run:in:with:replyTo:` was reachable before
+  this module: a request whose method another request removed got a
+  doesNotUnderstand of nil in its Process (a stop, in a host that stops for
+  the debugger), not an error reply. Fixed in part 6 as the brief asked.
+
+- **`ShellCloseTests.aShellClosedWithADelayPendingFreesItsVM` is thin**: it
+  failed once in the Smalltalk tier's `compiler-tests` (Gates, below) by
+  reading the Process's state right after the Delay's timer was armed.
+
+### Open questions (built as recommended where there was one)
+
+1. **The mark's look.** Built: `background:orange`, pale on both hosts.
+   Recommended: keep it until an underline is wanted, which is a Swift change
+   in both hosts.
+2. **Marks in the selectors table.** Built: yes; the class scope is 0.3 ms in
+   the target, 1.0 ms headless and 2.5 ms p50 in the Mac shell after part 3's
+   class keys (9.4 ms before). Recommended: keep.
+3. **The checker's start.** Built: the first request, which is now a
+   session's first class selection; 1.7 s headless and 2.0 s in the Mac
+   shell, in the target's background. Recommended: keep.
+4. **The first request's timeout on a slow target.** The client's 30 s
+   covers the Mac and, by the Debug factor, a Debug app on the Mac; a phone's
+   Debug app is not measured. Recommended: measure the first request on the
+   iPhone in the next device run before giving this request a bound of its
+   own; until then a timeout only delays the marks to the next selection.
+5. **Typed methods over typed methods.** 155 of 617 typed methods override
+   something typed (152 a typed method, 3 a signature). Recommended: measure
+   what the narrowing rule would report on them (the count of
+   contradictions, not of overrides) before deciding to build it.
+
+### Other checks
+
+- `scripts/canonical-tonel.sh --check` lists nothing (rc=0) after the last
+  Tonel edit.
+- The kernel's tests 258 of 258, the development image's 351 of 351 and a
+  development image without `--with types` 318 of 318 (aligned release
+  `kajo`, `kajo test`; `work/head-kernel-tests.txt`, `work/head-dev-tests.txt`).
+- The changed Swift suites (`ToolsTests`, `TypeCheckerTests`) once under
+  ThreadSanitizer with twelve busy loops (`scripts/tsan-load.sh`,
+  `work/tsan-load.txt`): 13 tests passed, 0 sanitizer reports, 1753 s; the
+  new test's body 44.7 s there (1.1 s without the sanitizer,
+  `work/toolstests-2.txt`).
+- `ToolsTests.aClassDefinedIntoATagFromTheBrowserMovesWithItsTag` (the thin
+  test named in the brief) passed in every run of the suite here.
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/types-3/check just check ef2f0f2` on cf36665
+(the last code commit): the Swift tier (chosen by
+`Tests/KajoCompilerTests/ToolsTests.swift`, `TypeCheckerTests.swift` and the
+probe; no fuzzer's reader touched), 6 gates, every one `rc=0`, 4 329 s
+(`check/gates.log`; swift.org 6.4.2 first on PATH). Against Types 2's run of
+the same tier (7ac2711, 4 384 s with `check-tier-test` and two fuzzers this
+run did not owe):
+
+| gate | s | 7ac2711 |
+|---|---|---|
+| clean-build | 20 | 20 |
+| swift-test (471 + 185 tests) | 714 | 696 |
+| tsan (0 reports) | 3 074 | 3 017 |
+| kernel-test (258 tests) | 121 | 119 |
+| apps (0 warnings, 0 errors) | 130 | 133 |
+| new-check | 270 | 268 |
+
+`new-check` (`check/new-check.txt`, `measure/checker-classes.txt`):
+`checker_classes=0 signature_text=0` on macos-release, macos-release-off,
+ios-release and ios-release-off; `checker_classes=441 signature_text=2` on
+macos-debug (the count of byte lines naming TypeChecker or MethodTypeCheck,
+437 in Types 2; not read further). The new tests cost about 18 s of `swift-test` and 57 s of `tsan`
+(the new test 45 s under the sanitizer; the other tools tests now start a
+whole check in their VM's background).
+
+The Smalltalk tier's gates, which the Swift tier lacks, run on the same
+commit (`scripts/check-tier.sh --tier smalltalk ef2f0f2`,
+`check/smalltalk/gates.log`): build-image 3 s, dev-image 3 s, kernel-test
+120 s (258), tools-test 159 s (351 of 351; the starting commit's 158 s for
+333, part 1), golden 78 s (every kernel ok), the Mac shell's tests mode 90 s
+(258 of 258), all `rc=0` but **compiler-tests, `rc=1` in 81 s: one failure
+not this module's**, `ShellCloseTests.aShellClosedWithADelayPendingFreesItsVM`
+at `ShellCloseTests.swift:74` (`vm.state(of: p) == .waiting` read right after
+`timersPending == 1`: the Delay arms its timer before its Process waits on
+the Semaphore, so the state can still be running; the "wait on what the
+program set, not on the state" lesson). It passed in the Swift tier's
+`swift-test` and `tsan` on the same commit, 8 of 8 alone
+(`work/shellclose-alone.txt`), and the whole `KajoCompilerTests` passed when
+run once more (`check/smalltalk/compiler-tests-again.txt`, 185 of 185, 85 s).
+No Swift file of the shell or the VM changed in this module.
