@@ -142,7 +142,7 @@ BlockClosure >> ifCurtailed: aBlock <[^Dynamic]> ^<Dynamic> [
 ]
 
 { #category : #exceptions }
-BlockClosure >> ifError: aBlock <[^Dynamic]> ^<Dynamic> [
+BlockClosure >> ifError: aBlock <[^Dynamic] | [String, ^Dynamic] | [String, Object, ^Dynamic]> ^<Dynamic> [
 	^ self on: Error do: [:e | aBlock cull: e messageText cull: e receiver]
 ]
 

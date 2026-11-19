@@ -115,6 +115,17 @@ TypeCheckerTest >> testHandlerArgumentFromTheExceptionClass [
 ]
 
 { #category : #tests }
+TypeCheckerTest >> testIfErrorTakesABlockOfNoneOneOrTwoArguments [
+	"Types 3's annotation pass (Types 2's answer 5): BlockClosure>>ifError: runs its block with cull:cull: (the error's text, the receiver of the method that signalled it), so a block of none, one or two arguments checks clean and one of three is a diagnostic (#argType: a block that is none of the union's three)."
+	| kinds |
+	kinds := [:src | ((checker checkSource: src named: 'test' bindings: Dictionary new) diagnostics collect: [:d | d kind]) asArray].
+	self assert: (kinds value: '[3 + 4] ifError: [0]') equals: #().
+	self assert: (kinds value: '[3 + 4] ifError: [:text | text]') equals: #().
+	self assert: (kinds value: '[3 + 4] ifError: [:text :receiver | receiver]') equals: #().
+	self assert: (kinds value: '[3 + 4] ifError: [:a :b :c | c]') equals: #(#argType)
+]
+
+{ #category : #tests }
 TypeCheckerTest >> testIfNotNilBySignaturesAlone [
 	"The ifNil: family typed member by member from three signatures each on Object (with Self) and UndefinedObject (with Dynamic), stated over the image's own (the table's overlay), no T - Nil operator and no rule of the checker's own."
 	#('ifNotNil: aBlock <[Self, ^:R]> ^<R>' 'ifNil: aBlock <[^:R]> ^<Self>' 'ifNil: aBlock <[^:R]> ifNotNil: notNilBlock <[Self, ^:S]> ^<S>')
@@ -166,6 +177,16 @@ TypeCheckerTest >> testSendCounts [
 	self assert: mc sends equals: 4.
 	self assert: mc knownSends equals: 4.
 	self assert: mc typedSends equals: 4
+]
+
+{ #category : #tests }
+TypeCheckerTest >> testSpeciesIsSelfClassWhereItIsTrue [
+	"Types 3's annotation pass (Types 2's answer 3): Collection's and OrderedCollection's species answer the receiver's class (^<Self class>), so what self species makes is of the receiver's class; an Interval's species is Array and stays ^<Behavior>, whose instances are Dynamic."
+	self assert: (self resultOf: 'c species' bindings: {'c'. 'OrderedCollection[Integer]'}) equals: 'OrderedCollection class'.
+	self assert: (self resultOf: 'c species new' bindings: {'c'. 'OrderedCollection[Integer]'}) equals: 'OrderedCollection'.
+	self assert: (self resultOf: 's species' bindings: {'s'. 'Set[Integer]'}) equals: 'Set class'.
+	self assert: (self resultOf: 'i species' bindings: {'i'. 'Interval[Integer]'}) equals: 'Behavior'.
+	self assert: (self resultOf: 'i species new: 3' bindings: {'i'. 'Interval[Integer]'}) equals: 'Dynamic'
 ]
 
 { #category : #tests }

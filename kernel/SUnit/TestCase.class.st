@@ -57,7 +57,10 @@ TestCase >> setUp [
 
 { #category : #accessing }
 TestCase >> tags [
-	^ (self method pragmas collect: [:p | p selector]) asArray
+	"The test method's pragmas' selectors; none for a test whose selector names no method (Types 3: TestCase selector: #nope, which the type checker reported as CompiledMethod | Nil)."
+	^ self method
+		ifNil: [#()]
+		ifNotNil: [:m | (m pragmas collect: [:p | p selector]) asArray]
 ]
 
 { #category : #accessing }

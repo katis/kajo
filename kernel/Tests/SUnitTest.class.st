@@ -5,6 +5,13 @@ Class {
 }
 
 { #category : #accessing }
+SUnitTest >> testATestWithoutItsMethodHasNoTags [
+	"Types 3: a TestCase whose selector names no method (an evaluated (FooTest selector: #nope) runCase) answers no tags rather than a doesNotUnderstand of nil."
+	self assert: (SUnitSample selector: #noSuchTest) tags equals: #().
+	self assert: (SUnitSample selector: #noSuchTest) method isNil
+]
+
+{ #category : #accessing }
 SUnitTest >> testFilterPatterns [
 	| runner |
 	runner := TestRunner new.

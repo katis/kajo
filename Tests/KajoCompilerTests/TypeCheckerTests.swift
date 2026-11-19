@@ -35,7 +35,7 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
             print("types-tests \(name) total=\(report.total) passed=\(report.passed) body_s=\(String(format: "%.1f", Date().timeIntervalSince(t0)))")
             total += report.total
         }
-        #expect(total == 31)
+        #expect(total == 33)
     }
 
     @Test func theDiagnosticsRequestAnswersItsScopesAndTheEventFollowsAChange() throws {

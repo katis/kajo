@@ -69,7 +69,7 @@ Collection >> sorted: aBlock <[E, E, ^Boolean]> ^<Array[E]> [
 ]
 
 { #category : #converting }
-Collection >> species ^<Behavior> [
+Collection >> species ^<Self class> [
 	^ self class
 ]
 

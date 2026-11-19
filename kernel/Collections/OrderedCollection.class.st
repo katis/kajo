@@ -191,7 +191,7 @@ OrderedCollection >> size ^<Integer> [
 ]
 
 { #category : #accessing }
-OrderedCollection >> species ^<Behavior> [
+OrderedCollection >> species ^<Self class> [
 	^ OrderedCollection
 ]
 
