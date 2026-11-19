@@ -79,6 +79,18 @@ DevelopmentTest >> testARemovedClassStillNamedIsKept [
 ]
 
 { #category : #tests }
+DevelopmentTest >> testARequestWhoseMethodIsGoneIsAnErrorReply [
+	"Types 3: a request whose method is gone between take: and its Process (another request removed it) is answered with an error, not a doesNotUnderstand of nil in the request's Process; its reply is taken. Headless the reply goes nowhere (no transport: start answers false and leaves the protocol's tables made)."
+	| s |
+	DevProtocol isServing ifFalse: [DevProtocol start].
+	s := DevSession conn: 0 client: 'developer' package: nil.
+	DevProtocol run: #noSuchRequest: in: s with: #(1) replyTo: #(-1 -1).
+	self assert: (DevProtocol takeReplyOf: ProcessorScheduler activeProcess) isNil.
+	"describe is made from the request methods: every entry names one."
+	DevProtocol describe do: [:d | self assert: (DevSession includesSelector: (d at: 'selector'))]
+]
+
+{ #category : #tests }
 DevelopmentTest >> testAnAgentsAuthorMarkIsOnePragma [
 	"The rule a session follows (TonelWriter source:author:, the development answers): an agent's compile leaves exactly one author pragma, its own, after the pattern, the comment and the pragmas before the temporaries; a developer's source is compiled as written."
 	| lf tab mark |
@@ -210,6 +222,21 @@ DevelopmentTest >> testJsonRoundTrip [
 	self assert: (back at: 'a') = ('x"y\z', (String with: Character lf)).
 	self assert: (Json read: '"é"') = 'é'.
 	self should: [Json read: '{"a":}'] raise: Error
+]
+
+{ #category : #tests }
+DevelopmentTest >> testMethodSourceOfASignatureWithoutAMethod [
+	"Types 3: method.source answers a signature without a method (Types 2) as its text with signature true, so the browser can show it; a method answers no signature."
+	| s r |
+	s := DevSession conn: 0 client: 'developer' package: nil.
+	r := s methodSource: 'Integer' selector: 'bitAnd:' side: nil.
+	self assert: (r at: 'signature') == true.
+	self assert: ((r at: 'source') beginsWith: 'bitAnd: ').
+	self assert: ((r at: 'source') includesSubstring: '^<Integer>').
+	self assert: (r at: 'category') asString = 'bits'.
+	r := s methodSource: 'Integer' selector: 'isPrime' side: nil.
+	self assert: (r at: 'signature') isNil.
+	self assert: ((r at: 'source') beginsWith: 'isPrime')
 ]
 
 { #category : #tests }

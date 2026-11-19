@@ -304,7 +304,7 @@ DevTools class >> paneKeys [
 	| evaluating |
 	evaluating := #('cmd-d' 'cmd-p' 'cmd-i' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b' 'cmd-shift-i' 'cmd-shift-o').
 	^ {{'Workspace'. evaluating}.
-		{'Browser source'. #('cmd-s' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b')}.
+		{'Browser source'. #('cmd-s' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b' 'cmd-shift-e' 'cmd-shift-d')}.
 		{'Inspector evaluation pane'. evaluating}.
 		{'Debugger source'. #('cmd-s' 'cmd-shift-n' 'cmd-shift-m' 'cmd-shift-b')}.
 		{'Debugger evaluation pane'. evaluating}}
@@ -348,10 +348,11 @@ DevTools class >> smalltalkItem: anId [
 
 { #category : #menus }
 DevTools class >> smalltalkItems [
-	"The Smalltalk menu (the discoverability follow-up): id, title, key. Do it, Print it and Inspect it evaluate the selection or the line; Accept compiles the pane; Senders, Implementors and Browse act on the selection or the word at the insertion point, Instances of it on the class an evaluation of it answers, Objects pointing to it (the pointersTo: follow-up) on the object it answers. The shifted keys are free in the Tools, Edit and app menus."
+	"The Smalltalk menu (the discoverability follow-up): id, title, key. Do it, Print it and Inspect it evaluate the selection or the line; Accept compiles the pane; Senders, Implementors and Browse act on the selection or the word at the insertion point, Instances of it on the class an evaluation of it answers, Objects pointing to it (the pointersTo: follow-up) on the object it answers; Type diagnostics of the class and of the image (Types 3, a browser's source pane) list the type checker's diagnostics of the browser's class or of the whole image in its messages list. The shifted keys are free in the Tools, Edit and app menus."
 	^ #(#(11 'Do it' 'cmd-d') #(12 'Print it' 'cmd-p') #(13 'Inspect it' 'cmd-i') #(14 'Accept' 'cmd-s')
 		#(15 'Senders of it' 'cmd-shift-n') #(16 'Implementors of it' 'cmd-shift-m') #(17 'Browse it' 'cmd-shift-b')
-		#(18 'Instances of it' 'cmd-shift-i') #(19 'Objects pointing to it' 'cmd-shift-o'))
+		#(18 'Instances of it' 'cmd-shift-i') #(19 'Objects pointing to it' 'cmd-shift-o')
+		#(20 'Type diagnostics of the class' 'cmd-shift-e') #(21 'Type diagnostics of the image' 'cmd-shift-d'))
 ]
 
 { #category : #menus }

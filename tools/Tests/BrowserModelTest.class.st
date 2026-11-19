@@ -7,6 +7,224 @@ Class {
 	]
 }
 
+{ #category : #diagnostics }
+BrowserModelTest >> testABurstOfEventsMakesOneRequest [
+	"Five events naming the shown class while its request is outstanding: no more requests until the reply, then one that covers them all."
+	| c m |
+	c := self diagnosedFake: [:args | self circleDiagnostics].
+	m := BrowserModel new client: c; yourself.
+	m selectClass: 'Circle'.
+	self assert: (self diagnosticsSent: c) equals: 1.
+	c hold: true.
+	c diagnosticsChanged: #('Circle>>radius').
+	self assert: (self diagnosticsSent: c) equals: 2.
+	4 timesRepeat: [c diagnosticsChanged: #('Circle>>radius')].
+	self assert: (self diagnosticsSent: c) equals: 2.
+	c hold: false.
+	c answer: c lastId with: self circleDiagnostics.
+	self assert: (self diagnosticsSent: c) equals: 3.
+	self assert: c pendingCount equals: 0
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testAFailedRequestIsDroppedAndAskedAgainLater [
+	"A request that times out (a whole check slower than the client's timeout on a slow target) shows nothing and says nothing; the next class selection asks again."
+	| c m |
+	c := self diagnosedFake: [:args | self circleDiagnostics].
+	c hold: true.
+	m := BrowserModel new client: c; yourself.
+	m selectClass: 'Circle'.
+	c fireRequestTimer: (c requestTimers detect: [:t | (t at: 3) = (c sentKinds indexOf: 'diagnostics')]).
+	self assert: (m diagnosticsFailure includesSubstring: 'no reply').
+	self deny: (m status includesSubstring: 'no reply').
+	self assert: m diagnostics isEmpty.
+	c hold: false.
+	m selectClass: 'Circle'.
+	self assert: (self diagnosticsSent: c) equals: 2.
+	self assert: m diagnosticsFailure isNil
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testAMethodHoldsItsDiagnosticsAndTheStatusSaysThem [
+	| c m |
+	c := self diagnosedFake: [:args | self circleDiagnostics].
+	m := BrowserModel new client: c; yourself.
+	m selectClass: 'Circle'.
+	self assert: (self diagnosticsSent: c) equals: 1.
+	self assert: ((c sent detect: [:s | s first = 'diagnostics']) last at: 'className') equals: 'Circle'.
+	self assert: ((c sent detect: [:s | s first = 'diagnostics']) last at: 'selector') isNil.
+	self assert: (m diagnosedSelectors asArray sort: [:a :b | a <= b]) equals: #('drawOn:' 'radius').
+	m selectSelector: 'radius'.
+	self assert: m diagnostics size equals: 2.
+	self assert: m status equals: '2 type diagnostics: Integer does not understand #foo'.
+	m selectSelector: 'radius:'.
+	self assert: m diagnostics isEmpty.
+	self assert: m status equals: 'Circle>>radius:'.
+	m selectSelector: 'drawOn:'.
+	self assert: m diagnostics size equals: 1.
+	self assert: m status equals: '1 type diagnostic: argument 1 of #drawOn: is Integer, expected Canvas'.
+	"One request per class selection: the methods of the class ask nothing."
+	self assert: (self diagnosticsSent: c) equals: 1
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testASignatureWithoutAMethodShowsItsDiagnostics [
+	"A signature without a method (Types 2) comes from method.source with signature true: the browser shows it, its diagnostics marked, and does not accept it."
+	| c m |
+	c := FakeDevClient on: [:kind :args |
+		kind = 'diagnostics'
+			ifTrue: [FakeDevClient diagnostics: {FakeDevClient diagnostic: 'signature' class: 'Circle' side: 'instance' selector: 'at:' line: 1 start: nil end: nil text: 'no class answers Circle>>at:'}]
+			ifFalse: [kind = 'method.source'
+				ifTrue: [JsonObject new at: 'class' put: 'Circle'; at: 'selector' put: 'at:'; at: 'source' put: 'at: index <Integer> ^<Object>'; at: 'signature' put: true; yourself]
+				ifFalse: [self answer: kind args: args]]].
+	m := BrowserModel new client: c; yourself.
+	m selectClass: 'Circle'.
+	m selectSelector: 'at:'.
+	self assert: m sourceKind equals: #signature.
+	self assert: m diagnostics size equals: 1.
+	self assert: m status equals: '1 type diagnostic: no class answers Circle>>at:'.
+	m accept: 'at: index <Integer> ^<Object>'.
+	self deny: (c sentKinds includes: 'method.compile').
+	self assert: (m status includesSubstring: 'signature')
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testATargetWithoutTheCheckerIsAskedOnceAndSaysNothing [
+	"A target without the Types package answers the protocol's own refusal: asked once in the session, the browser then works as before this module, with nothing on its status line."
+	| c m |
+	c := self diagnosedFake: [:args | FakeDevClient refuseDiagnostics].
+	m := BrowserModel new client: c; yourself.
+	m refresh.
+	m selectClass: 'Circle'.
+	m selectSelector: 'radius'.
+	self assert: m status equals: 'Circle>>radius'.
+	m selectClass: 'Square'.
+	m toggleSide.
+	m selectClass: 'Circle'.
+	m selectSelector: 'radius'.
+	c diagnosticsChanged: #('Circle>>radius').
+	self assert: (self diagnosticsSent: c) equals: 1.
+	self assert: (c refuses: 'diagnostics').
+	self assert: m diagnostics isEmpty.
+	self assert: m status equals: 'Circle>>radius'.
+	"A new session asks once again."
+	c sessionOpened.
+	m selectClass: 'Circle'.
+	self assert: (self diagnosticsSent: c) equals: 2
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testAnAcceptAsksAgainAndTheFirstEditDropsTheMarks [
+	| c m n |
+	n := 0.
+	c := self diagnosedFake: [:args |
+		n := n + 1.
+		n = 1
+			ifTrue: [self circleDiagnostics]
+			ifFalse: [FakeDevClient diagnostics: {FakeDevClient diagnostic: 'returnType' class: 'Circle' side: 'instance' selector: 'area' line: 2 start: 7 end: 10 text: 'answers Integer where String is declared'}]].
+	m := BrowserModel new client: c; yourself.
+	m selectClass: 'Circle'.
+	m selectSelector: 'radius'.
+	self assert: m diagnostics size equals: 2.
+	m sourceEdited.
+	self assert: m marks equals: #dropped.
+	self assert: m diagnostics isEmpty.
+	m sourceEdited.
+	self assert: m diagnostics isEmpty.
+	c hold: true.
+	m accept: 'area
+	^ 3'.
+	c answer: c lastId with: ((JsonObject new) at: 'selector' put: 'area'; at: 'files' put: #(); yourself).
+	"Accepted: the marks wait for the reply that follows."
+	self assert: m marks equals: #awaiting.
+	self assert: m diagnostics isEmpty.
+	self assert: (self diagnosticsSent: c) equals: 2.
+	c hold: false.
+	c answer: c lastId - 1 with: (self answer: 'class.selectors' args: nil).
+	c answer: c lastId with: (FakeDevClient diagnostics: {FakeDevClient diagnostic: 'returnType' class: 'Circle' side: 'instance' selector: 'area' line: 2 start: 7 end: 10 text: 'answers Integer where String is declared'}).
+	self assert: m marks equals: #shown.
+	self assert: m diagnostics size equals: 1.
+	self assert: m status equals: '1 type diagnostic: answers Integer where String is declared'
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testAnEventNamingTheShownClassAsksAgainAndAnotherDoesNot [
+	| c m |
+	c := self diagnosedFake: [:args | self circleDiagnostics].
+	m := BrowserModel new client: c; yourself.
+	m selectClass: 'Circle'.
+	m selectSelector: 'radius'.
+	c diagnosticsChanged: #('Square>>side' 'Circles>>radius').
+	self assert: (self diagnosticsSent: c) equals: 1.
+	c diagnosticsChanged: #('Circle>>radius').
+	self assert: (self diagnosticsSent: c) equals: 2.
+	c diagnosticsChanged: #('Circle class>>new').
+	self assert: (self diagnosticsSent: c) equals: 3.
+	"A malformed event asks nothing and is no error."
+	c event: 'diagnostics.changed' with: {'methods'. 7}.
+	c event: 'diagnostics.changed' with: #().
+	self assert: (self diagnosticsSent: c) equals: 3.
+	"Cut short: it may name anything."
+	c event: 'diagnostics.changed' with: {'methods'. #('Square>>side'). 'truncated'. true}.
+	self assert: (self diagnosticsSent: c) equals: 4.
+	self assert: m diagnostics size equals: 2
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testTheDiagnosticsListOfAClassAndOfTheImage [
+	| c m n |
+	n := 0.
+	c := self diagnosedFake: [:args |
+		(args at: 'className') isNil
+			ifTrue: [n := n + 1. FakeDevClient diagnostics: ((self circleDiagnostics at: 'diagnostics') , {FakeDevClient diagnostic: 'dnu' class: 'Square' side: 'class' selector: 'unit' line: 2 start: 4 end: 8 text: 'Nil does not understand #x'}) , (n > 1 ifTrue: [#()] ifFalse: [{FakeDevClient diagnostic: 'annotation' class: 'Canvas' side: 'instance' selector: nil line: 0 start: nil end: nil text: 'unknown class Pen'}])]
+			ifFalse: [self circleDiagnostics]].
+	m := BrowserModel new client: c; yourself.
+	m refresh.
+	m listDiagnostics: 'Circle'.
+	self assert: m isListing.
+	self assert: m messagesTitle equals: 'type diagnostics of Circle: 3'.
+	self assert: m messages equals: #('Circle>>radius' 'Circle>>radius' 'Circle>>drawOn:').
+	self assert: m messageColumns equals: #('Class' 'Side' 'Selector' 'Diagnostic').
+	self assert: m messageRows first equals: #('Circle' 'instance' 'radius' 'Integer does not understand #foo').
+	m selectMessageAt: 1.
+	self assert: m className equals: 'Circle'.
+	self assert: m selector equals: 'radius'.
+	self assert: m diagnostics size equals: 2.
+	"The image: count and rows equal the request's; a class-side method and a class's own type go where they are."
+	m listDiagnostics: nil.
+	self assert: m messagesTitle equals: 'type diagnostics of the image: 5'.
+	self assert: m messages size equals: 5.
+	self assert: (m messages at: 4) equals: 'Square class>>unit'.
+	self assert: (m messages at: 5) equals: 'Canvas'.
+	self assert: (m messageRows at: 5) equals: #('Canvas' 'instance' '' 'unknown class Pen').
+	m selectMessageAt: 4.
+	self assert: m className equals: 'Square'.
+	self assert: m isClassSide.
+	"The list follows the event: the image's list asks again whatever the event names."
+	c diagnosticsChanged: #('Canvas>>paint').
+	self assert: m messagesTitle equals: 'type diagnostics of the image: 4'.
+	self assert: m messages size equals: 4.
+	"Senders replace the list: it no longer follows."
+	m sendersOf: 'radius'.
+	self deny: m isListing.
+	self assert: m messageColumns equals: #('Method').
+	n := (c sentKinds select: [:k | k = 'diagnostics']) size.
+	c diagnosticsChanged: #('Canvas>>paint').
+	self assert: (c sentKinds select: [:k | k = 'diagnostics']) size equals: n
+]
+
+{ #category : #diagnostics }
+BrowserModelTest >> testTheListOnATargetWithoutTheCheckerSaysSo [
+	| c m |
+	c := self diagnosedFake: [:args | FakeDevClient refuseDiagnostics].
+	m := BrowserModel new client: c; yourself.
+	m listDiagnostics: nil.
+	self assert: (m status includesSubstring: 'unknown request diagnostics').
+	m listDiagnostics: nil.
+	self assert: m status equals: 'the target has no type checker'.
+	self assert: (self diagnosticsSent: c) equals: 1
+]
+
 { #category : #helpers }
 BrowserModelTest >> answer: kind args: args [
 	| o |
@@ -45,6 +263,26 @@ BrowserModelTest >> answer: kind args: args [
 	kind = 'method.senders' ifTrue: [^ #('Canvas>>paint' 'Circle>>drawOn:')].
 	kind = 'method.remove' ifTrue: [^ (JsonObject new) at: 'files' put: #(); yourself].
 	^ nil
+]
+
+{ #category : #helpers }
+BrowserModelTest >> circleDiagnostics [
+	"Circle's diagnostics as a class-scope request answers them: two of radius (within its source, 'radius', a line feed, a tab, '^ radius'), one of drawOn: without a range."
+	^ FakeDevClient diagnostics: {
+		FakeDevClient diagnostic: 'dnu' class: 'Circle' side: 'instance' selector: 'radius' line: 2 start: 10 end: 16 text: 'Integer does not understand #foo'.
+		FakeDevClient diagnostic: 'returnType' class: 'Circle' side: 'instance' selector: 'radius' line: 2 start: 8 end: 16 text: 'answers Integer where String is declared'.
+		FakeDevClient diagnostic: 'argType' class: 'Circle' side: 'instance' selector: 'drawOn:' line: 0 start: nil end: nil text: 'argument 1 of #drawOn: is Integer, expected Canvas'}
+]
+
+{ #category : #helpers }
+BrowserModelTest >> diagnosedFake: aBlock [
+	"A fake target whose diagnostics request is answered by aBlock (its arguments), the rest as answer:args: answers."
+	^ FakeDevClient on: [:kind :args | kind = 'diagnostics' ifTrue: [aBlock value: args] ifFalse: [self answer: kind args: args]]
+]
+
+{ #category : #helpers }
+BrowserModelTest >> diagnosticsSent: aFake [
+	^ (aFake sentKinds select: [:k | k = 'diagnostics']) size
 ]
 
 { #category : #helpers }

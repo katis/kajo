@@ -45,11 +45,15 @@ DevProtocol class >> commentOf: aCompiledMethod [
 
 { #category : #describing }
 DevProtocol class >> describe [
-	"Every request: kind, selector, arguments, comment, and whether its errors stop for the debugger."
+	"Every request: kind, selector, arguments, comment, and whether its errors stop for the debugger. Made from the request methods themselves (Types 3: a selector looked up again could be a method removed meanwhile, which the type checker reported as CompiledMethod | Nil)."
+	| methods |
 	self rebuildKinds.
-	^ (kinds keys asArray sort: [:a :b | a <= b]) collect: [:k | | sel m o |
-		sel := kinds at: k.
-		m := DevSession lookupSelector: sel.
+	methods := Dictionary new.
+	(Pragma allNamed: #devProtocol) do: [:p |
+		(p method methodClass == DevSession) ifTrue: [methods at: (self kindOf: p method selector) put: p method]].
+	^ (methods keys asArray sort: [:a :b | a <= b]) collect: [:k | | sel m o |
+		m := methods at: k.
+		sel := m selector.
 		o := JsonObject new.
 		o at: 'kind' put: k; at: 'selector' put: sel; at: 'arguments' put: (self argumentNamesOf: sel);
 			at: 'comment' put: (self commentOf: m); at: 'debuggable' put: (m hasPragma: #debuggable).
@@ -173,6 +177,8 @@ DevProtocol class >> run: aSelector in: aSession with: anArray replyTo: aReplyTo
 		pending at: ProcessorScheduler activeProcess put: (Array with: aReplyTo with: aSession).
 		reaper isNil ifTrue: [reaper := [self reapEndedRequests] forkAt: 1]].
 	method := DevSession lookupSelector: aSelector.
+	"Types 3: the request's method can be gone since take: chose it (another request removed it): an error reply, never a doesNotUnderstand in the request's Process."
+	method isNil ifTrue: [^ self finishActiveWithError: 'the request''s method ' , aSelector printString , ' is gone'].
 	[(method hasPragma: #debuggable)
 		ifTrue: [value := aSession perform: aSelector withArguments: anArray]
 		ifFalse: [value := [aSession perform: aSelector withArguments: anArray] on: Error do: [:e |

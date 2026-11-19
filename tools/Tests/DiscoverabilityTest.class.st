@@ -76,7 +76,7 @@ DiscoverabilityTest >> testEachPanesContextMenuListsTheItemsThatApply [
 	titles := [:pane | ((self contextMenuOf: pane) items collect: [:i | i at: 2]) asArray].
 	self assert: (titles value: (tools at: 1) textView)
 		equals: #('Do it' 'Print it' 'Inspect it' 'Senders of it' 'Implementors of it' 'Browse it' 'Instances of it' 'Objects pointing to it').
-	self assert: (titles value: (tools at: 2) sourceView) equals: #('Accept' 'Senders of it' 'Implementors of it' 'Browse it').
+	self assert: (titles value: (tools at: 2) sourceView) equals: #('Accept' 'Senders of it' 'Implementors of it' 'Browse it' 'Type diagnostics of the class' 'Type diagnostics of the image').
 	self assert: (titles value: (tools at: 4) sourceView) equals: #('Accept' 'Senders of it' 'Implementors of it' 'Browse it').
 	self assert: (titles value: (tools at: 4) workspaceView) equals: (titles value: (tools at: 1) textView)
 ]

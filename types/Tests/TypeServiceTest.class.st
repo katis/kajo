@@ -85,6 +85,9 @@ TypeServiceTest >> testLiveRechecks [
 	self assert: TypeService passes equals: passes + 1.
 	self assert: TypeService lastRechecked >= 21.
 	self assert: (TypeService hasResultFor: 'TypeLiveProbe>>m20').
+	"Types 3: the class scope reads the class's own keys, and finds what a scan of every key finds."
+	self assert: (TypeService keysOfClass: (Smalltalk at: #TypeLiveProbe)) asSet equals: (TypeService classKeysOf: 'TypeLiveProbe') asSet.
+	self assert: ((TypeService diagnosticsOf: 'TypeLiveProbe' selector: nil side: nil) at: 'checked') equals: 21.
 	Smalltalk readTonel: self callerText.
 	self waitIdle.
 	self assert: (TypeService diagnosticsAt: 'TypeLiveCaller>>use') isEmpty.

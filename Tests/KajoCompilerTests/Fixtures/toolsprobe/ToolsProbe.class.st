@@ -8,7 +8,9 @@ Class {
 		'listed',
 		'hierarchy',
 		'framesBefore',
-		'remoteProcess'
+		'remoteProcess',
+		'typesEvents',
+		'typesMark'
 	]
 }
 
@@ -342,4 +344,87 @@ ToolsProbe class >> pickerShows: aDirectory for: aTarget [
 ToolsProbe class >> connect: aPath naming: aDirectory [
 	"Primitive 164's connect with a fourth argument, a directory the image names: the host refuses it (nil)."
 	^ (ClientTransport primCall: 'connect' handle: nil with: {aPath. 'developer'. nil. aDirectory}) isNil
+]
+
+{ #category : #types }
+ToolsProbe class >> startTypesWithoutTheWholeCheck [
+	"Types 3: the type checker started before the tools ask, without its first check of the whole image (TypeService startCheckingAll: false, as Types 2's live tests start it): the whole check took 1116 s of a request under ThreadSanitizer, and the first request's time is measured apart (docs/modules/types-3.md). What changes from here on is checked, so the class this test defines is."
+	TypeService startCheckingAll: false.
+	^ true
+]
+
+{ #category : #types }
+ToolsProbe class >> defineTypesProbe [
+	"Types 3: through the first browser, a class (its definition accepted) and then, once it is there, a method with a known diagnostic (it answers an Integer where String is declared)."
+	| m |
+	typesEvents := 0.
+	DevTools local on: 'diagnostics.changed' do: [:e | ((e at: 'methods') includes: 'ToolsTypesProbe>>answer') ifTrue: [typesEvents := typesEvents + 1]].
+	m := self browser model.
+	m selectPackage: 'Tools'.
+	m newClassTemplate.
+	m accept: 'Object subclass: #ToolsTypesProbe
+	instanceVariableNames: ''''
+	classVariableNames: ''''
+	package: #Tools'.
+	^ true
+]
+
+{ #category : #types }
+ToolsProbe class >> typesProbeDefined [
+	^ (Smalltalk includesKey: #ToolsTypesProbe) and: [self browser model className = 'ToolsTypesProbe']
+]
+
+{ #category : #types }
+ToolsProbe class >> compileTypesProbe: aSource [
+	| m |
+	m := self browser model.
+	m selectClass: 'ToolsTypesProbe'.
+	m newMethodTemplate.
+	m accept: aSource.
+	^ true
+]
+
+{ #category : #types }
+ToolsProbe class >> typesProbeShows: aCount [
+	"The first browser shows ToolsTypesProbe>>answer as installed (marks shown) holding aCount diagnostics, and when it holds one, its kind, its mark in the source and the status line's text."
+	| m d |
+	m := self browser model.
+	(m className = 'ToolsTypesProbe' and: [m selector = 'answer' and: [m marks == #shown]]) ifFalse: [^ false].
+	m diagnostics size = aCount ifFalse: [^ false].
+	aCount = 0 ifTrue: [^ (m diagnosedSelectors includes: 'answer') not].
+	d := m diagnostics first.
+	^ (d at: 'kind') = 'returnType'
+		and: [(m diagnosedSelectors includes: 'answer')
+		and: [(m status beginsWith: '1 type diagnostic: ')
+		and: [(self browser diagnosticStylesIn: m source) includes: BrowserWindow diagnosticStyle]]]
+]
+
+{ #category : #types }
+ToolsProbe class >> typesEvents [
+	"diagnostics.changed events the local client got that named ToolsTypesProbe>>answer."
+	^ typesEvents ifNil: [0]
+]
+
+{ #category : #types }
+ToolsProbe class >> typesState [
+	"What the browser holds of the probe, for a failure message."
+	| m |
+	m := self browser model.
+	^ String streamContents: [:s |
+		s nextPutAll: 'class '; print: m className; nextPutAll: ' selector '; print: m selector; nextPutAll: ' marks '; print: m marks;
+			nextPutAll: ' diagnostics '; print: (m diagnostics collect: [:d | d at: 'text']) asArray;
+			nextPutAll: ' failure '; print: m diagnosticsFailure; nextPutAll: ' events '; print: self typesEvents;
+			nextPutAll: ' status '; print: m status; nextPutAll: ' '; nextPutAll: self state]
+]
+
+{ #category : #types }
+ToolsProbe class >> markTypesEvents [
+	"The events counted so far; typesEventCame answers whether one more came."
+	typesMark := self typesEvents.
+	^ true
+]
+
+{ #category : #types }
+ToolsProbe class >> typesEventCame [
+	^ self typesEvents > (typesMark ifNil: [0])
 ]

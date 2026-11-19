@@ -238,11 +238,18 @@ DevSession >> methodSenders: selector [
 
 { #category : #'requests-browse' }
 DevSession >> methodSource: className selector: selector side: side [
-	"A method's source, category, package and author."
+	"A method's source, category, package and author; for a signature without a method (Types 2), its text, category and package, and signature true (Types 3: the browser shows it)."
 	<devProtocol>
-	| b sel m o |
+	| b sel m o sig |
 	b := self behaviorNamed: className side: side.
 	sel := selector asSymbol.
+	(b includesSelector: sel) ifFalse: [
+		sig := Smalltalk signatureOf: sel in: b.
+		sig isNil ifFalse: [
+			o := JsonObject new.
+			o at: 'class' put: b name; at: 'selector' put: sel; at: 'category' put: (sig at: 2);
+				at: 'package' put: (sig at: 3); at: 'author' put: nil; at: 'source' put: sig first; at: 'signature' put: true.
+			^ o]].
 	m := b compiledMethodAt: sel.
 	o := JsonObject new.
 	o at: 'class' put: b name; at: 'selector' put: sel; at: 'category' put: (b categoryOf: sel);

@@ -198,6 +198,22 @@ TypeService class >> invalidationOf: changes [
 ]
 
 { #category : #checking }
+TypeService class >> keysOfClass: aClass [
+	"The checked keys of aClass, both sides, from its own methods and signatures (Types 3: the class scope of the request, which the browser asks at every class selection, reads the class, not every key of the image as classKeysOf: does for a class that may be gone). Called under checkLock."
+	| out |
+	out := OrderedCollection new.
+	(Array with: aClass with: aClass class) do: [:b |
+		b selectors do: [:sel | | k |
+			k := checker keyOf: sel in: b.
+			(checker hasResultFor: k) ifTrue: [out add: k]].
+		(Smalltalk typesOf: aClass) ifNotNil: [:t |
+			(t signatureSelectorsMeta: b isMeta) do: [:sel | | k |
+				k := checker keyOf: sel in: b.
+				(checker hasResultFor: k) ifTrue: [out add: k]]]].
+	^ out
+]
+
+{ #category : #checking }
 TypeService class >> withDependents: aKeyCollection [
 	"The methods that read any of the keys (each key invalidated: the inferred results that read it forgotten)."
 	| out |
@@ -232,7 +248,7 @@ TypeService class >> diagnosticsOf: aClassName selector: aSelector side: aSide [
 			ifTrue: [keys := checker resultKeys reject: [:k | (k indexOfSubstring: '>>') = 0]]
 			ifFalse: [
 				aSelector isNil
-					ifTrue: [keys := self classKeysOf: cls name]
+					ifTrue: [keys := self keysOfClass: cls]
 					ifFalse: [
 						b := aSide = 'class' ifTrue: [cls class] ifFalse: [cls].
 						keys := Array with: (checker keyOf: aSelector asSymbol in: b)]].

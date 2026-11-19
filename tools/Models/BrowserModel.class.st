@@ -1,4 +1,4 @@
-"The browser's model (module 9c): packages, the classes of the selected package as a tree by superclass or grouped by tag (tags as subdirectories: a tag is a parent row, a class with none is at the root), the instance or class side, a class's method categories and selectors, and the source pane (a method, a class definition, a comment, or a template for a new method or class). Accepting the pane compiles the method, defines the class or sets the comment through the protocol; the target answers the files the change touched, which the client's transport writes into the project directory. A compile error is shown at its line. Senders and implementors fill a list of methods to go to. defineMethod:in:then: is the debugger's define-and-retry: a template for the missing method, and a block run when it compiles."
+"The browser's model (module 9c): packages, the classes of the selected package as a tree by superclass or grouped by tag (tags as subdirectories: a tag is a parent row, a class with none is at the root), the instance or class side, a class's method categories and selectors, and the source pane (a method, a class definition, a comment, or a template for a new method or class). Accepting the pane compiles the method, defines the class or sets the comment through the protocol; the target answers the files the change touched, which the client's transport writes into the project directory. A compile error is shown at its line. Senders and implementors fill a list of methods to go to. defineMethod:in:then: is the debugger's define-and-retry: a template for the missing method, and a block run when it compiles. Types 3 (docs/modules/types-3.md): the type checker's diagnostics of the shown class, asked with one class-scope diagnostics request when a class is selected and after a method is accepted (at most one outstanding; asked once more when wanted meanwhile), give the selectors that have one and the shown method's or signature's marks; the marks are dropped at the first edit of the shown text and come back with the reply that follows an accept. The checker's event diagnostics.changed asks again when it names a method of the shown class, and a diagnostics list (the shown class's or the image's) in the messages list follows it too. A target that refused the request (no checker) is not asked again in the session and nothing goes to the status line; a failed request (a timeout) is dropped."
 Class {
 	#name : #BrowserModel,
 	#superclass : #ToolModel,
@@ -21,7 +21,20 @@ Class {
 		'afterSave',
 		'files',
 		'indexByName',
-		'sourceToken'
+		'sourceToken',
+		'classDiagnostics',
+		'diagnosticsClass',
+		'diagnosticsAsking',
+		'diagnosticsAgain',
+		'marks',
+		'diagnosticsListener',
+		'diagnosticsFailure',
+		'listing',
+		'listClass',
+		'listAsking',
+		'listAgain',
+		'messageRows',
+		'messageColumns'
 	]
 }
 
@@ -115,7 +128,7 @@ BrowserModel >> source [
 
 { #category : #accessing }
 BrowserModel >> sourceKind [
-	"#method, #definition, #comment, #newMethod, #newClass or #empty: what accepting the pane does."
+	"#method, #definition, #comment, #newMethod, #newClass, #signature (Types 3: a signature without a method, which accepting does not change) or #empty: what accepting the pane does."
 	^ sourceKind ifNil: [#empty]
 ]
 
@@ -125,6 +138,7 @@ BrowserModel >> accept: aString [
 	| k |
 	k := self sourceKind.
 	(k == #method or: [k == #newMethod]) ifTrue: [^ self compile: aString].
+	k == #signature ifTrue: [^ self status: 'a signature without a method: the browser does not change signatures yet'].
 	(k == #definition or: [k == #newClass]) ifTrue: [^ self define: aString].
 	k == #comment ifTrue: [
 		^ self request: 'class.comment' args: {'className'. className. 'comment'. aString} then: [:r |
@@ -148,9 +162,11 @@ BrowserModel >> compile: aString [
 			source := aString.
 			sourceKind := #method.
 			selector := sel.
+			marks := #awaiting.
 			self status: 'compiled ' , c , '>>' , sel.
 			self changed: #source; changed: #selector.
 			self loadSelectors.
+			self askDiagnostics.
 			after := afterSave.
 			afterSave := nil.
 			after isNil ifFalse: [after cull: sel]]
@@ -168,7 +184,8 @@ BrowserModel >> define: aString [
 			self status: 'defined ' , className.
 			self refresh.
 			self loadSelectors.
-			self showDefinition]
+			self showDefinition.
+			self askDiagnostics]
 ]
 
 { #category : #changes }
@@ -315,6 +332,202 @@ BrowserModel >> visibleEntries [
 	^ self hierarchy select: [:e | (e at: 'package') = package]
 ]
 
+{ #category : #closing }
+BrowserModel >> closed [
+	"The window closed: the checker's event no longer reaches this browser."
+	(diagnosticsListener notNil and: [client notNil]) ifTrue: [client removeListener: diagnosticsListener].
+	diagnosticsListener := nil.
+	listing := false.
+	^ super closed
+]
+
+{ #category : #diagnostics }
+BrowserModel >> askDiagnostics [
+	"One class-scope diagnostics request for the shown class (both sides), from which the selectors' marks and the shown method's come. At most one is outstanding: one wanted meanwhile is asked when the reply comes. Never asked without a client or of a target that refused it in this session (no checker); a failure (a timeout, a class gone) is kept for the tests and dropped: diagnostics never take the status line."
+	| c |
+	(client isNil or: [className isNil]) ifTrue: [^ self].
+	(client refuses: 'diagnostics') ifTrue: [^ self].
+	diagnosticsAsking == true ifTrue: [^ diagnosticsAgain := true].
+	self listen.
+	c := className.
+	diagnosticsAsking := true.
+	diagnosticsAgain := false.
+	client request: 'diagnostics' args: {'className'. c}
+		then: [:r | self diagnosticsOf: c are: r]
+		else: [:e | self diagnosticsOf: c failed: e]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosedSelectors [
+	"The selectors of the shown side that have a diagnostic (the selectors table marks them)."
+	| sideName out |
+	out := Set new.
+	(classDiagnostics isNil or: [diagnosticsClass ~= className]) ifTrue: [^ out].
+	sideName := self side.
+	classDiagnostics do: [:d | ((d at: 'side') = sideName and: [(d at: 'selector') isString]) ifTrue: [out add: (d at: 'selector')]].
+	^ out
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnostics [
+	"The type checker's diagnostics of the shown method or signature without a method, as the class's last reply has them; none while the shown text is not the installed one (from its first edit until the reply that follows its accept)."
+	| sideName |
+	(self marks == #shown and: [classDiagnostics notNil and: [selector notNil and: [diagnosticsClass = className]]]) ifFalse: [^ #()].
+	(sourceKind == #method or: [sourceKind == #signature]) ifFalse: [^ #()].
+	sideName := self side.
+	^ (classDiagnostics select: [:d | (d at: 'selector') = selector and: [(d at: 'side') = sideName]]) asArray
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosticsChanged: anEvent [
+	"The checker's event: the browser asks again when it names a method of the shown class (or was cut short), a diagnostics list when it names a method of its class or the list is the image's."
+	| keys cut |
+	keys := [anEvent at: 'methods'] on: Error do: [:e | nil].
+	keys isArray ifFalse: [keys := #()].
+	cut := ([anEvent at: 'truncated'] on: Error do: [:e | nil]) == true.
+	(className notNil and: [cut or: [self keys: keys name: className]]) ifTrue: [self askDiagnostics].
+	(listing == true and: [listClass isNil or: [cut or: [self keys: keys name: listClass]]]) ifTrue: [self askList]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosticsFailure [
+	"The last diagnostics request's error, when the last one failed (tests)."
+	^ diagnosticsFailure
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosticsIn: aResult [
+	"The diagnostics of a reply, each checked: a JsonObject with a String class, side and text; anything else is left out (a reply is never trusted to be well formed)."
+	| all |
+	all := [aResult at: 'diagnostics'] on: Error do: [:e | nil].
+	all isArray ifFalse: [^ #()].
+	^ (all select: [:d | (d isKindOf: JsonObject) and: [(d at: 'class') isString and: [(d at: 'side') isString and: [(d at: 'text') isString]]]]) asArray
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosticsLine [
+	"The status line's text for the shown method's diagnostics: how many, and the first one's text; nil when there are none."
+	| ds n |
+	ds := self diagnostics.
+	n := ds size.
+	n = 0 ifTrue: [^ nil].
+	^ n printString , (n = 1 ifTrue: [' type diagnostic: '] ifFalse: [' type diagnostics: ']) , (ds first at: 'text')
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosticsOf: aClassName are: aResult [
+	diagnosticsAsking := false.
+	diagnosticsFailure := nil.
+	aClassName = className ifTrue: [
+		classDiagnostics := self diagnosticsIn: aResult.
+		diagnosticsClass := aClassName.
+		marks == #awaiting ifTrue: [marks := #shown].
+		self changed: #diagnostics.
+		self noteDiagnostics].
+	diagnosticsAgain == true ifTrue: [self askDiagnostics]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> diagnosticsOf: aClassName failed: anError [
+	diagnosticsAsking := false.
+	diagnosticsFailure := anError.
+	diagnosticsAgain == true ifTrue: [self askDiagnostics]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> keys: anArray name: aClassName [
+	"Whether a method key of anArray (Foo>>bar, Foo class>>bar) is of the class aClassName."
+	^ anArray anySatisfy: [:k | k isString and: [(k beginsWith: aClassName , '>>') or: [k beginsWith: aClassName , ' class>>']]]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> listen [
+	"The checker's event reaches this browser from its first diagnostics request on."
+	(diagnosticsListener notNil or: [client isNil]) ifTrue: [^ self].
+	diagnosticsListener := client on: 'diagnostics.changed' do: [:e | self diagnosticsChanged: e]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> marks [
+	"#shown (the shown text is the installed one), #dropped (edited since) or #awaiting (accepted, the diagnostics reply that follows not come yet)."
+	^ marks ifNil: [#shown]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> noteDiagnostics [
+	"The status line says the shown method's diagnostics: how many and the first's text. A compile error keeps the line."
+	errorLine isNil ifFalse: [^ self].
+	self diagnosticsLine ifNotNil: [:s | self status: s]
+]
+
+{ #category : #diagnostics }
+BrowserModel >> sourceEdited [
+	"The shown text was edited: its marks are dropped (their offsets are the installed source's) until the reply that follows an accept. The window colours the text after telling this (BrowserWindow>>edited), so no aspect is announced."
+	marks := #dropped
+]
+
+{ #category : #list }
+BrowserModel >> askList [
+	"The diagnostics list's request (one outstanding at most, as the browser's)."
+	| scope |
+	listAsking == true ifTrue: [^ listAgain := true].
+	scope := listClass.
+	listAsking := true.
+	listAgain := false.
+	client request: 'diagnostics' args: {'className'. scope}
+		then: [:r | self list: scope is: r]
+		else: [:e | self list: scope failed: e]
+]
+
+{ #category : #list }
+BrowserModel >> isListing [
+	"Whether the messages list is a diagnostics list that follows the checker."
+	^ listing == true
+]
+
+{ #category : #list }
+BrowserModel >> list: aScope failed: anError [
+	listAsking := false.
+	listing == true ifTrue: [self status: 'type diagnostics: ' , anError displayString].
+	listAgain == true ifTrue: [self askList]
+]
+
+{ #category : #list }
+BrowserModel >> list: aScope is: aResult [
+	"The diagnostics list: one row per diagnostic (class, side, selector, text), its method to go to, the count in the title."
+	| ds count |
+	listAsking := false.
+	(listing == true and: [aScope = listClass]) ifTrue: [
+		ds := self diagnosticsIn: aResult.
+		count := [aResult at: 'count'] on: Error do: [:e | nil].
+		count isInteger ifFalse: [count := ds size].
+		messageColumns := #('Class' 'Side' 'Selector' 'Diagnostic').
+		messageRows := (ds collect: [:d | {d at: 'class'. d at: 'side'. (d at: 'selector') isString ifTrue: [d at: 'selector'] ifFalse: ['']. d at: 'text'}]) asArray.
+		messages := (ds collect: [:d | (d at: 'selector') isString
+			ifTrue: [(d at: 'class') , ((d at: 'side') = 'class' ifTrue: [' class'] ifFalse: ['']) , '>>' , (d at: 'selector')]
+			ifFalse: [d at: 'class']]) asArray.
+		messagesTitle := 'type diagnostics of ' , (aScope ifNil: ['the image']) , ': ' , count printString.
+		self changed: #messages].
+	listAgain == true ifTrue: [self askList]
+]
+
+{ #category : #list }
+BrowserModel >> listClosed [
+	"The messages window closed: a diagnostics list no longer follows the checker."
+	listing := false
+]
+
+{ #category : #list }
+BrowserModel >> listDiagnostics: aClassNameOrNil [
+	"Type diagnostics (the Smalltalk menu): the diagnostics of the class aClassNameOrNil (both sides), or of the image when nil, in the messages list, which follows the checker's event until it shows something else or closes. Asked for by the developer, so a target without the checker says so on the status line."
+	client isNil ifTrue: [^ self status: 'not connected'].
+	(client refuses: 'diagnostics') ifTrue: [^ self status: 'the target has no type checker'].
+	listing := true.
+	listClass := aClassNameOrNil.
+	self listen.
+	self askList
+]
+
 { #category : #messages }
 BrowserModel >> implementors [
 	selector isNil ifTrue: [^ self].
@@ -325,9 +538,19 @@ BrowserModel >> implementors [
 BrowserModel >> implementorsOf: aSelector [
 	"The methods named aSelector, in the messages list (the discoverability follow-up's Implementors of it)."
 	self request: 'method.implementors' args: {'selector'. aSelector} then: [:r |
-		messagesTitle := 'implementors of ' , aSelector.
-		messages := (r collect: [:c | c , '>>' , aSelector]) asArray.
-		self changed: #messages]
+		self showMessages: (r collect: [:c | c , '>>' , aSelector]) asArray title: 'implementors of ' , aSelector]
+]
+
+{ #category : #messages }
+BrowserModel >> messageColumns [
+	"The messages list's columns: one for senders and implementors, four for a diagnostics list."
+	^ messageColumns ifNil: [#('Method')]
+]
+
+{ #category : #messages }
+BrowserModel >> messageRows [
+	"The messages list's rows (Arrays of Strings, one per column)."
+	^ messageRows ifNil: [(self messages collect: [:m | {m}]) asArray]
 ]
 
 { #category : #messages }
@@ -348,6 +571,16 @@ BrowserModel >> selectMessage: aString [
 ]
 
 { #category : #messages }
+BrowserModel >> selectMessageAt: anIndex [
+	"The row anIndex of the messages list: its method (or, for a diagnostic of a class's own types, its class)."
+	| m |
+	(anIndex between: 1 and: self messages size) ifFalse: [^ self].
+	m := self messages at: anIndex.
+	(m includesSubstring: '>>') ifTrue: [^ self selectMessage: m].
+	self browseClass: m
+]
+
+{ #category : #messages }
 BrowserModel >> senders [
 	selector isNil ifTrue: [^ self].
 	self sendersOf: selector
@@ -357,9 +590,18 @@ BrowserModel >> senders [
 BrowserModel >> sendersOf: aSelector [
 	"The methods that send aSelector, in the messages list (the discoverability follow-up's Senders of it)."
 	self request: 'method.senders' args: {'selector'. aSelector} then: [:r |
-		messagesTitle := 'senders of ' , aSelector.
-		messages := r asArray.
-		self changed: #messages]
+		self showMessages: r asArray title: 'senders of ' , aSelector]
+]
+
+{ #category : #messages }
+BrowserModel >> showMessages: anArray title: aString [
+	"Senders or implementors: the list shows them, and no longer follows the type checker."
+	listing := false.
+	messageRows := nil.
+	messageColumns := nil.
+	messagesTitle := aString.
+	messages := anArray.
+	self changed: #messages
 ]
 
 { #category : #selecting }
@@ -404,16 +646,18 @@ BrowserModel >> selectCategory: aName [
 
 { #category : #selecting }
 BrowserModel >> selectClass: aName [
-	"A class: its categories and selectors, and its definition in the source pane."
+	"A class: its categories and selectors, its definition in the source pane, and its type diagnostics (Types 3)."
 	className := aName.
 	category := nil.
 	selector := nil.
 	selectorsByCategory := nil.
 	categories := #().
+	aName = diagnosticsClass ifFalse: [classDiagnostics := nil. diagnosticsClass := nil].
 	self changed: #class; changed: #categories; changed: #selectors.
 	aName isNil ifTrue: [^ self showSource: '' kind: #empty].
 	self loadSelectors.
-	self showDefinition
+	self showDefinition.
+	self askDiagnostics
 ]
 
 { #category : #selecting }
@@ -434,7 +678,8 @@ BrowserModel >> selectSelector: aSelector [
 	self request: 'method.source' args: {'className'. className. 'selector'. aSelector. 'side'. self side} then: [:r |
 		(t = sourceToken and: [selector = aSelector]) ifTrue: [
 			self status: (r at: 'class') , '>>' , aSelector , ((r at: 'author') ifNil: [''] ifNotNil: [:a | '  (' , a , ')']).
-			self showSource: (r at: 'source') kind: #method]]
+			self showSource: (r at: 'source') kind: ((r at: 'signature') == true ifTrue: [#signature] ifFalse: [#method]).
+			self noteDiagnostics]]
 ]
 
 { #category : #selecting }
@@ -532,6 +777,7 @@ BrowserModel >> showSource: aString kind: aSymbol [
 	source := aString.
 	sourceKind := aSymbol.
 	errorLine := nil.
+	marks := #shown.
 	self changed: #source
 ]
 

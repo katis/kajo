@@ -157,6 +157,18 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         vm.close()
     }
 
+    /// Turns until `ToolsProbe selector` answers true, `seconds` at most
+    /// (Types 3: a wait for the type checker, long everywhere).
+    func until(_ selector: String, _ args: [ShellValue] = [], seconds: Double, explain: String) -> Bool {
+        let end = ShellVM.now() + UInt64(seconds * 1e9)
+        while ShellVM.now() < end {
+            if (try? probe(selector, args)) == .bool(true) { return true }
+            for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
+        }
+        Issue.record("\(selector) never held: \((try? probe(explain))??.string ?? "?")")
+        return false
+    }
+
     /// `ToolsProbe selector` on main, run to its end with turns here.
     func probe(_ selector: String, _ args: [ShellValue] = []) throws -> ShellValue? {
         try run(vm, selector, on: "ToolsProbe", args, main: true)
@@ -294,6 +306,35 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         #expect(((try t.probe("latencyCount"))?.int ?? 0) >= 4)
         #expect(t.shell.count("call.setTree") >= 1)
         #expect(t.shell.count("call.setStyles") >= 1)
+    }
+
+    /// Types 3: the browser on a real target (the image it runs in, no
+    /// fake) marks a method's type diagnostic and says its text, and after
+    /// the method is fixed and accepted holds none, the checker's event
+    /// having named it. The waits are on the browser's own state, long
+    /// everywhere (`typesWait`). The checker starts without its whole check
+    /// (the probe says why); the first request's time is measured apart.
+    @Test func theBrowserMarksADiagnosticAndFollowsTheFix() throws {
+        let t0 = Date()
+        let t = try LocalTools()
+        defer { t.close() }
+        let project = try temporaryDirectory("types-project")
+        defer { try? FileManager.default.removeItem(at: project) }
+        _ = try t.host.setProject(project.path, for: "local").get()
+        #expect(try t.probe("startTypesWithoutTheWholeCheck") == .bool(true))
+        #expect(try t.probe("open:", [.string(t.path)]) == .bool(true))
+        #expect(t.until("ready"))
+        #expect(try t.probe("defineTypesProbe") == .bool(true))
+        #expect(t.until("typesProbeDefined", seconds: typesWait, explain: "typesState"))
+        #expect(try t.probe("compileTypesProbe:", [.string("answer ^<String>\n\t^ 3")]) == .bool(true))
+        #expect(t.until("typesProbeShows:", [.int(1)], seconds: typesWait, explain: "typesState"))
+        #expect(try t.probe("markTypesEvents") == .bool(true))
+        #expect(try t.probe("compileTypesProbe:", [.string("answer ^<String>\n\t^ 'three'")]) == .bool(true))
+        #expect(t.until("typesProbeShows:", [.int(0)], seconds: typesWait, explain: "typesState"))
+        // The event that named the fixed method came (two publications: its
+        // own wait, after the browser's).
+        #expect(t.until("typesEventCame", seconds: typesWait, explain: "typesState"))
+        print("types-tools body_s=\(String(format: "%.1f", Date().timeIntervalSince(t0)))")
     }
 
     /// Tags as subdirectories, from the tools: a class defined in the
