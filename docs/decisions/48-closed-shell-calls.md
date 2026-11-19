@@ -148,3 +148,13 @@ touched `Sources/KajoDev`).
    helper, Swift tier)? Recommended: yes, with the next change that
    touches the development protocol's tests; it is not worth a gate run
    of its own.
+
+## The owner's answers (2026-11-19)
+
+"Yes, as recommended", to both questions.
+
+1. The rule that a host closes from the thread that drives the VM stays
+   written and is not enforced.
+2. `RunningTarget.close()` is fixed with the next change that touches the
+   development protocol's tests (record an issue when the 30 s wait runs
+   out and leak the target). It gets no module and no gate run of its own.
