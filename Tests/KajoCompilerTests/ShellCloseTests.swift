@@ -71,7 +71,9 @@ private final class Race: @unchecked Sendable {
         let p = try #require(vm.spawn("evaluate:", receiver: "Compiler",
                                       arguments: [.string("(Delay forSeconds: 60) wait. nil")]))
         #expect(until { vm.vm.timersPending == 1 }, "the Delay was never armed")
-        #expect(vm.state(of: p) == .waiting)
+        // The timer is armed before the Process is waiting: wait for the
+        // state too (one read failed 1 full run in 5, Types 3's gates).
+        #expect(until { vm.state(of: p) == .waiting }, "the Process never waited: \(vm.state(of: p))")
         let life = vm.vm.life
         let r = vm.close()
         #expect(life.snapshot.ended, "close left the VM undestroyed")

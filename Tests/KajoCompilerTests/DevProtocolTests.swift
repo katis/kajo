@@ -58,9 +58,15 @@ final class RunningTarget: @unchecked Sendable {
         return c
     }
 
+    /// Closes the target once its run thread has ended. A `close` beside a
+    /// `runTurn` still on that thread is a race no check can catch, so a
+    /// wait that runs out is a recorded issue and the target is leaked.
     func close() {
         target.stop()
-        _ = done.wait(timeout: .now() + 30)
+        guard done.wait(timeout: .now() + 30) == .success else {
+            Issue.record("RunningTarget.close: the run thread did not end in 30 s; the target is leaked, not closed")
+            return
+        }
         target.close()
     }
 }
