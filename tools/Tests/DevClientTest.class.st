@@ -205,6 +205,29 @@ DevClientTest >> testAnErrorGoesToTheErrorBlockOrTheErrorAction [
 ]
 
 { #category : #tests }
+DevClientTest >> testAnUnknownRequestIsRememberedAndAskedOncePerSession [
+	"Types 3: the target's refusal of a kind it has no method for (a target without the type checker's package) is remembered: the request is not sent again in the session and fails at once; another error is not a refusal; a new session asks again."
+	| c errors |
+	c := FakeDevClient on: [:kind :args |
+		kind = 'diagnostics' ifTrue: [FakeDevClient refuseDiagnostics].
+		kind = 'class.definition' ifTrue: [self error: 'no class Nope'].
+		nil].
+	errors := OrderedCollection new.
+	c request: 'class.definition' args: {'className'. 'Nope'} then: [:r | nil] else: [:e | errors add: e].
+	self deny: (c refuses: 'class.definition').
+	c diagnostics: nil selector: nil side: nil then: [:r | errors add: #answered].
+	self assert: (c refuses: 'diagnostics').
+	c request: 'diagnostics' args: #() then: [:r | errors add: #answered] else: [:e | errors add: e].
+	self assert: (c sentKinds select: [:k | k = 'diagnostics']) size equals: 1.
+	self assert: (errors last includesSubstring: 'refused it earlier').
+	self deny: (errors includes: #answered).
+	c sessionOpened.
+	self deny: (c refuses: 'diagnostics').
+	c request: 'diagnostics' args: #() then: [:r | nil] else: [:e | nil].
+	self assert: (c sentKinds select: [:k | k = 'diagnostics']) size equals: 2
+]
+
+{ #category : #tests }
 DevClientTest >> testEventsReachTheirListeners [
 	| c lines all |
 	c := FakeDevClient on: [:k :a | nil].
@@ -260,6 +283,29 @@ DevClientTest >> testTheConnectionsEndFailsWhatIsPending [
 	self assert: lost equals: 'the target closed the connection'.
 	c classList: nil tag: nil then: [:r | failed := #sent].
 	self deny: failed == #sent
+]
+
+{ #category : #tests }
+DevClientTest >> testTheDiagnosticsRequestAndItsEvent [
+	"Types 3: the diagnostics request's line names its scope (nil arguments left out), its result reaches the block, and diagnostics.changed reaches the listeners of its kind."
+	| c got line events |
+	c := FakeDevClient on: [:kind :args |
+		kind = 'diagnostics'
+			ifTrue: [FakeDevClient diagnostics: {FakeDevClient diagnostic: 'dnu' class: (args at: 'className') side: 'instance' selector: 'bar' line: 2 start: 8 end: 13 text: 'Nil does not understand #x'}]
+			ifFalse: [nil]].
+	c diagnostics: 'Foo' selector: nil side: nil then: [:r | got := r].
+	self assert: c sent last first equals: 'diagnostics'.
+	self assert: (c sent last last at: 'className') equals: 'Foo'.
+	self deny: (c sent last last keys includes: 'selector').
+	self assert: (got at: 'count') equals: 1.
+	self assert: (((got at: 'diagnostics') first) at: 'start') equals: 8.
+	line := c lineFor: 'diagnostics' id: 9 args: c sent last last.
+	self assert: line equals: '{"v":1,"id":9,"kind":"diagnostics","args":{"className":"Foo"}}'.
+	events := OrderedCollection new.
+	c on: 'diagnostics.changed' do: [:e | events add: (e at: 'methods')].
+	c on: 'transcript' do: [:e | events add: #wrong].
+	c diagnosticsChanged: #('Foo>>bar').
+	self assert: events asArray equals: #(#('Foo>>bar'))
 ]
 
 { #category : #tests }

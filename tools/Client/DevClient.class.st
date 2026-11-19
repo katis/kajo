@@ -1,4 +1,4 @@
-"The development protocol's client in Smalltalk (module 9c, docs/modules/developer-ui.md): one connection to a target through the shell's transport (ClientTransport, primitive 164). Requests are messages, one per request of protocol.describe (the requests category; DevClient class>>requests maps each kind to its method and DevClientTest checks the map against DevProtocol describe), each taking the request's arguments and a block that gets the result; errors go to the error block given or to the client's error action. Replies come back as #line events on the UI's event loop, matched by id; the other lines are events (transcript, test.*, run.*, process.stopped, process.resumed) dispatched to whichever window registered for their kind (on:do:). A request that gets no reply within its timeout fails with an error (a timer event, never a wait in the UI). Module 9d: a connection that ends while its session was open (a dropped link: the phone left the network, the socket died) is the event 'connection.lost', and the client reconnects (timer events with backoff: 1, 2, 4, 8 s, up to a minute, until close): 'connection.reconnecting', then a new session as the same client in the same package and 'connection.open'; the requests pending at the loss are sent again, but for those that may not be (DevClient class>>notRetried: running them twice is not running them once), which fail as before. A request's timeout counts from its latest send (gate speed's follow-up, 2026-11-15, docs/modules/gate-speed.md, The agreed follow-ups): sending it again on a new session re-arms it, an outage still counts against the send before it, and a request is sent at most DevClient class>>sendLimit times, after which the next new session fails it instead of sending it again, so one that is never answered ends however often the link drops. A refused session or close ends it for good. Each reply's round trip is kept for the measurements, a retried one's from its first send. The project directory (2026-11-11, docs/modules/project-directory.md): the client keeps no directory and names none; the host writes the files of its replies into the directory it holds for the target, and project asks the host which one that is."
+"The development protocol's client in Smalltalk (module 9c, docs/modules/developer-ui.md): one connection to a target through the shell's transport (ClientTransport, primitive 164). Requests are messages, one per request of protocol.describe (the requests category; DevClient class>>requests maps each kind to its method and DevClientTest checks the map against DevProtocol describe), each taking the request's arguments and a block that gets the result; errors go to the error block given or to the client's error action. Replies come back as #line events on the UI's event loop, matched by id; the other lines are events (transcript, test.*, run.*, process.stopped, process.resumed) dispatched to whichever window registered for their kind (on:do:). A request that gets no reply within its timeout fails with an error (a timer event, never a wait in the UI). Module 9d: a connection that ends while its session was open (a dropped link: the phone left the network, the socket died) is the event 'connection.lost', and the client reconnects (timer events with backoff: 1, 2, 4, 8 s, up to a minute, until close): 'connection.reconnecting', then a new session as the same client in the same package and 'connection.open'; the requests pending at the loss are sent again, but for those that may not be (DevClient class>>notRetried: running them twice is not running them once), which fail as before. A request's timeout counts from its latest send (gate speed's follow-up, 2026-11-15, docs/modules/gate-speed.md, The agreed follow-ups): sending it again on a new session re-arms it, an outage still counts against the send before it, and a request is sent at most DevClient class>>sendLimit times, after which the next new session fails it instead of sending it again, so one that is never answered ends however often the link drops. A refused session or close ends it for good. Each reply's round trip is kept for the measurements, a retried one's from its first send. The project directory (2026-11-11, docs/modules/project-directory.md): the client keeps no directory and names none; the host writes the files of its replies into the directory it holds for the target, and project asks the host which one that is. Types 3 (docs/modules/types-3.md): a kind the target answers as an unknown request (a target without the type checker's package refuses diagnostics) is remembered for the session (refuses:): it is not sent again, its next request fails at once, and a new session asks again."
 Class {
 	#name : #DevClient,
 	#superclass : #Object,
@@ -25,7 +25,8 @@ Class {
 		'lostAt',
 		'outages',
 		'retried',
-		'retriedIds'
+		'retriedIds',
+		'refused'
 	],
 	#classInstVars : [
 		'connections',
@@ -103,6 +104,12 @@ DevClient >> project [
 DevClient >> reconnects [
 	"How many times a new session was asked for after a dropped link."
 	^ reconnects
+]
+
+{ #category : #accessing }
+DevClient >> refuses: aKind [
+	"Whether this session's target answered aKind as an unknown request (Types 3: a target without the type checker's package refuses diagnostics); such a request is not sent again in the session."
+	^ refused notNil and: [refused includes: aKind]
 ]
 
 { #category : #accessing }
@@ -225,6 +232,14 @@ DevClient >> lost: aReason [
 ]
 
 { #category : #receiving }
+DevClient >> noteRefusal: anError of: aKind [
+	"The target's own refusal of a kind it has no method for ('unknown request <kind>: ...', DevProtocol>>take:) is remembered for the session: the request is not sent again until a new session opens."
+	(anError isString and: [anError beginsWith: 'unknown request ' , aKind , ':']) ifFalse: [^ self].
+	refused isNil ifTrue: [refused := Set new].
+	refused add: aKind
+]
+
+{ #category : #receiving }
 DevClient >> receive: aJsonObject [
 	"One object the target sent: a reply (to session.open, or to a request by id) or an event."
 	| kind id entry |
@@ -236,6 +251,7 @@ DevClient >> receive: aJsonObject [
 			again := state == #reconnecting.
 			state := #open.
 			info := aJsonObject at: 'result'.
+			refused := nil.
 			again ifTrue: [self reopened].
 			^ self emit: 'connection.open' with: info].
 		"A refused session is not reconnected: the token was not the target's (a new one ends every session)."
@@ -249,7 +265,10 @@ DevClient >> receive: aJsonObject [
 		Smalltalk microsecondClock - (entry at: 2)}.
 	(aJsonObject at: 'ok') == true
 		ifTrue: [(entry at: 3) ifNotNil: [:b | b cull: (aJsonObject at: 'result')]]
-		ifFalse: [self fail: entry with: ((aJsonObject at: 'error') ifNil: ['an error without a message'])]
+		ifFalse: [ | error |
+			error := (aJsonObject at: 'error') ifNil: ['an error without a message'].
+			self noteRefusal: error of: (entry at: 1).
+			self fail: entry with: error]
 ]
 
 { #category : #receiving }
@@ -542,6 +561,9 @@ DevClient >> request: aKind args: anArray then: aBlock else: anErrorBlock [
 	| args id entry line |
 	state == #lost ifTrue: [
 		self fail: {aKind. 0. aBlock. anErrorBlock. nil. nil} with: 'not connected: ' , lostReason displayString.
+		^ nil].
+	(self refuses: aKind) ifTrue: [
+		self fail: {aKind. 0. aBlock. anErrorBlock. nil. nil} with: 'unknown request ' , aKind , ': the target refused it earlier in this session'.
 		^ nil].
 	args := JsonObject new.
 	1 to: anArray size by: 2 do: [:i | (anArray at: i + 1) isNil ifFalse: [args at: (anArray at: i) put: (anArray at: i + 1)]].

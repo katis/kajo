@@ -1,4 +1,4 @@
-"A DevClient for the tools' tests (module 9c): no connection; each request is answered at once by the responder block, which gets the kind and the arguments (a JsonObject) and answers the result, or signals an error that becomes the error reply. Events are given with event:. Module 9d: a link that drops: hold: keeps requests unanswered (answer:with: answers one), lost: drops the link, the reconnect's timers are kept (fireTimer runs the next) and its connections counted (opened), sessionOpened answers the new session. Gate speed's follow-up: the requests' timeouts are kept apart (requestTimers, {milliseconds. block. id}; fireRequestTimer: runs one), so a test fires a timeout without waiting for one."
+"A DevClient for the tools' tests (module 9c): no connection; each request is answered at once by the responder block, which gets the kind and the arguments (a JsonObject) and answers the result, or signals an error that becomes the error reply. Events are given with event:. Module 9d: a link that drops: hold: keeps requests unanswered (answer:with: answers one), lost: drops the link, the reconnect's timers are kept (fireTimer runs the next) and its connections counted (opened), sessionOpened answers the new session. Gate speed's follow-up: the requests' timeouts are kept apart (requestTimers, {milliseconds. block. id}; fireRequestTimer: runs one), so a test fires a timeout without waiting for one. Types 3: diagnosticsChanged: emits the type checker's event as a target does (diagnostics: answers the request's result, refuseDiagnostics the answer of a target without the checker)."
 Class {
 	#name : #FakeDevClient,
 	#superclass : #DevClient,
@@ -13,6 +13,12 @@ Class {
 }
 
 { #category : #accessing }
+FakeDevClient >> diagnosticsChanged: someKeys [
+	"The type checker's event after a recheck: the methods whose diagnostics changed (Class>>selector or Class class>>selector)."
+	self event: 'diagnostics.changed' with: {'count'. 0. 'pass'. 2. 'methods'. someKeys asArray. 'diagnostics'. #()}
+]
+
+{ #category : #accessing }
 FakeDevClient >> event: aKind with: anArray [
 	"An event from the target: its kind and fields as name, value pairs."
 	| o |
@@ -20,6 +26,12 @@ FakeDevClient >> event: aKind with: anArray [
 	o at: 'v' put: 1; at: 'kind' put: aKind.
 	1 to: anArray size by: 2 do: [:i | o at: (anArray at: i) put: (anArray at: i + 1)].
 	self receive: o
+]
+
+{ #category : #accessing }
+FakeDevClient >> lastId [
+	"The id of the latest request (answer:with: answers a held one by it)."
+	^ nextId
 ]
 
 { #category : #accessing }
@@ -148,6 +160,27 @@ FakeDevClient >> transmit: aLine kind: aKind id: anId args: aJsonObject [
 			^ self receive: reply].
 	reply at: 'ok' put: true; at: 'result' put: result.
 	self receive: reply
+]
+
+{ #category : #diagnostics }
+FakeDevClient class >> diagnostic: aKind class: aClassName side: aSide selector: aSelector line: aLine start: aStart end: anEnd text: aString [
+	"One diagnostic as the diagnostics request and the event carry it."
+	^ JsonObject new
+		at: 'kind' put: aKind; at: 'class' put: aClassName; at: 'side' put: aSide; at: 'selector' put: aSelector;
+		at: 'line' put: aLine; at: 'start' put: aStart; at: 'end' put: anEnd; at: 'text' put: aString;
+		yourself
+]
+
+{ #category : #diagnostics }
+FakeDevClient class >> diagnostics: anArray [
+	"The diagnostics request's result: count, checked and the diagnostics."
+	^ JsonObject new at: 'count' put: anArray size; at: 'checked' put: anArray size; at: 'diagnostics' put: anArray asArray; yourself
+]
+
+{ #category : #diagnostics }
+FakeDevClient class >> refuseDiagnostics [
+	"What a target without the type checker's package answers (DevProtocol>>take:), signalled from a responder."
+	^ self error: 'unknown request diagnostics: protocol.describe lists the requests'
 ]
 
 { #category : #'instance creation' }
