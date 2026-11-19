@@ -6,7 +6,9 @@ Briefed by the main session on 2026-11-19. The owner: "Start the next types
 module". The records are `docs/decisions/43-optional-types.md`,
 `44-types-1.md` and `45-types-2.md` (with the owner's "Approve all" for its
 five questions); the checker is `docs/modules/types-2.md`. Starting commit:
-the commit that adds this file. Not started.
+ef2f0f2. Built by the build agent on 2026-11-19 (the last code commit
+cf36665), verified and recorded by the main session the same day
+(`docs/decisions/49-types-3.md`).
 
 ## What it is
 
