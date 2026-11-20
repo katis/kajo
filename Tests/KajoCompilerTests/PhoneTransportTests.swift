@@ -293,7 +293,8 @@ final class TestClock: Sendable {
         // Gate speed: what the remote client did, for the failure message
         // (the reconnect's outage against the requests' 30 s timeout).
         let reconnected = t.until("reconnected")
-        #expect(reconnected, "\((try? t.probe("remoteState"))??.string ?? "?")")
+        #expect(reconnected, "\((try? t.probe("remoteState"))??.string ?? "?") | \((try? t.probe("remoteDebuggerState"))??.string ?? "?")")
+        print("reconnect-state reconnected=\(reconnected) \((try? t.probe("remoteDebuggerState"))??.string ?? "?") host \(t.hostLog.text)")
         #expect(((try t.probe("remoteRetried"))?.int ?? 0) >= 2)
         // One reconnect: the first new session opened (the drop is the only loss).
         #expect(try t.probe("remoteReconnects") == .int(1))

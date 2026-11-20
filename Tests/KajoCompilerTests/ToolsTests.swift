@@ -107,6 +107,36 @@ final class ToolsShell: Sendable {
 
 /// A development image in a test shell serving its own protocol, with the
 /// real client transport: what the macOS shell's `mode=dev` wires.
+/// What the host side of a test's tools did, in milliseconds after the drop
+/// (the failed sanitizer gate's part, docs/modules/review-3-small-fixes.md):
+/// the timers the image arms and when the host fires them, connects, lost
+/// connections and the first lines after a connect. Never an argument of a
+/// connect (the token is the host's).
+final class HostLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var t0: UInt64 = 0
+    private var entries: [(UInt64, String)] = []
+    private var linesSinceConnect = 0
+    func drop() { lock.lock(); if t0 == 0 { t0 = ShellVM.now() }; lock.unlock() }
+    func note(_ what: String, line: Bool = false) {
+        let now = ShellVM.now()
+        lock.lock()
+        defer { lock.unlock() }
+        guard entries.count < 400 else { return }
+        if line { guard linesSinceConnect < 2 else { return }; linesSinceConnect += 1 }
+        if what == "connect" { linesSinceConnect = 0 }
+        entries.append((now, what))
+    }
+    /// The entries from 40 s before the drop on (every arm), each at its milliseconds from the drop.
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        guard t0 != 0 else { return "no drop" }
+        return entries.filter { Int64($0.0) - Int64(t0) > -40_000_000_000 || $0.1.hasPrefix("arm") }
+            .map { "\((Int64($0.0) - Int64(t0)) / 1_000_000) \($0.1)" }.joined(separator: "; ")
+    }
+}
+
 final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConvertible {
     // A failed expectation prints its operands: never the token.
     var customMirror: Mirror { Mirror(self, children: [:]) }
@@ -117,6 +147,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     let host = ClientHost()
     let shell = ToolsShell()
     let path = socketNames.next()
+    let hostLog = HostLog()
 
     /// `dropOn`: a Transcript line that makes the client transport drop
     /// every socket as a dead link would (module 9d's tests).
@@ -124,19 +155,38 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         let box = ServerBox()
         var c = shell.callbacks
         let h = host
+        let log = hostLog
         c.events = { line in
             if let marker = dropOn, line.count < 200, String(decoding: line, as: UTF8.self).contains("\"text\":\"\(marker)\"") {
+                log.drop()
                 h.dropConnections()
             }
             box.server?.deliver(line)
         }
-        c.client = host.callback
+        let hc = host.callback
+        c.client = { call in
+            let r = hc(call)
+            switch call.op {
+            case "timer": log.note("arm \(call.arguments.first?.int ?? -1) ms token \(call.arguments.dropFirst().first?.int ?? -1)")
+            case "connect": log.note("connect")
+            default: break
+            }
+            return r
+        }
         var o = Headless.Options()
         o.heapMiB = 512
         o.workers = 2
         vm = try ShellVM(image: image, options: o, callbacks: c)
         let v = vm
-        host.setSink { e in v.post(e) }
+        host.setSink { e in
+            switch e.kind {
+            case .timer: log.note("fired token \(e.target)")
+            case .lost: log.note("lost \(e.target)")
+            case .line: log.note("line \(e.target)", line: true)
+            default: break
+            }
+            v.post(e)
+        }
         server = try ProtocolServer(path: path) { conn, json in v.postRequest(connection: conn, json: json) }
         box.server = server
         host.addTarget(ClientHost.Target(name: "local", path: path, token: server.token))

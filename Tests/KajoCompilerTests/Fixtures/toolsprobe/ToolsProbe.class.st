@@ -10,7 +10,10 @@ Class {
 		'framesBefore',
 		'remoteProcess',
 		'typesEvents',
-		'typesMark'
+		'typesMark',
+		'dropAt',
+		'trail',
+		'timerSeen'
 	]
 }
 
@@ -220,6 +223,13 @@ ToolsProbe class >> dropWithRequests [
 	listed := nil.
 	hierarchy := nil.
 	framesBefore := (c repliesOf: 'process.frames').
+	dropAt := Smalltalk microsecondClock.
+	trail := OrderedCollection new.
+	timerSeen := false.
+	c on: 'connection.lost' do: [:e | self trail: 'lost'].
+	c on: 'connection.reconnecting' do: [:e | self trail: 'reconnecting ' , e printString].
+	c on: 'connection.open' do: [:e | self trail: 'open stopped ' , ([(e at: 'stopped') size] on: Error do: [:x | -1]) printString].
+	c on: 'process.stopped' do: [:e | self trail: 'process.stopped ' , (e at: 'process') printString].
 	Transcript show: 'probe: drop'; cr; flush.
 	c processList: [:l | listed := l].
 	c classHierarchy: [:h | hierarchy := h size].
@@ -231,6 +241,7 @@ ToolsProbe class >> reconnected [
 	"The client is open again on a new session, both requests were answered, the stopped Process is listed stopped, and its debugger fetched its frames again."
 	| c d |
 	c := self remote.
+	(timerSeen == false and: [c reconnects > 0]) ifTrue: [timerSeen := true. self trail: 'timer fired (seen)'].
 	(c isOpen and: [c reconnects > 0 and: [listed notNil and: [hierarchy notNil]]]) ifFalse: [^ false].
 	(listed anySatisfy: [:p | (p at: 'process') = remoteProcess and: [(p at: 'stopped') notNil]]) ifFalse: [^ false].
 	d := DevTools debuggers last model.
@@ -250,6 +261,34 @@ ToolsProbe class >> remoteState [
 			nextPutAll: ' outages '; print: (c ifNotNil: [:x | x outages asArray]);
 			nextPutAll: ' listed '; print: listed notNil; nextPutAll: ' hierarchy '; print: hierarchy notNil;
 			nextPutAll: ' transcript '; print: (DevTools transcript lines last: (DevTools transcript lines size min: 6))]
+]
+
+{ #category : #remote }
+ToolsProbe class >> trail: aString [
+	"What the remote client did after the drop, each with the milliseconds since it (the reconnect test's failure message)."
+	trail isNil ifTrue: [^ self].
+	trail add: ((Smalltalk microsecondClock - dropAt) // 1000) printString , ' ' , aString
+]
+
+{ #category : #remote }
+ToolsProbe class >> remoteDebuggerState [
+	"The last clause of reconnected, for the failure message: the last debugger (its state, status, Process, client), the frames replies against framesBefore, the last replies with their round trips (ms), and the trail since the drop."
+	| c d |
+	c := self remote.
+	^ String streamContents: [:s |
+		s nextPutAll: 'now '; print: (dropAt ifNil: [-1] ifNotNil: [:t | (Smalltalk microsecondClock - t) // 1000]).
+		s nextPutAll: ' debuggers '; print: DevTools debuggers size.
+		DevTools debuggers isEmpty ifFalse: [
+			d := DevTools debuggers last model.
+			s nextPutAll: ' state '; print: d state; nextPutAll: ' status '; print: d status;
+				nextPutAll: ' process '; print: d process; nextPutAll: ' remoteProcess '; print: remoteProcess;
+				nextPutAll: ' sameClient '; print: d client == c; nextPutAll: ' frames '; print: d frames size].
+		c isNil ifFalse: [
+			s nextPutAll: ' framesReplies '; print: (c latencies count: [:l | l first = 'process.frames']); nextPutAll: ' before '; print: framesBefore;
+				nextPutAll: ' framesRetried '; print: (c latencies count: [:l | l first = 'process.frames (retried)']);
+				nextPutAll: ' replies '; print: c latencies size;
+				nextPutAll: ' last '; print: ((c latencies last: (c latencies size min: 10)) asArray collect: [:l | {l first. (l at: 2) // 1000}])].
+		s nextPutAll: ' trail '; print: (trail ifNil: [#()] ifNotNil: [:t | t asArray])]
 ]
 
 { #category : #remote }
