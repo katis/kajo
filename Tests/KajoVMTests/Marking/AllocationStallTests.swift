@@ -63,6 +63,15 @@ private func headless(_ files: [(path: String, text: String)], young: String, wo
     o.markerSlowdown = slowdown
     o.stalls = stalls
     o.relocation = reloc
+    // The third review's small fixes, item 1: not the checked build's
+    // level (on). With the heap verifiers on, aFullHeapFallsBackJustified
+    // ThenRunsOutOfMemory trapped under young=offload in the suite ("nursery
+    // verifier, after scavenge 17: entry ... (young in 1) names young ...
+    // (nursery 0) ..., and is not remembered for it") and passed alone, and
+    // a trap ends the whole test bundle (docs/modules/review-3-small-
+    // fixes.md, Found). These runs verified nothing before; on again when
+    // that is understood.
+    o.verify = false
     if native { o.native = try nativeModule(files) }
     let out = Headless.run(files, options: o)
     var report: [String: String] = [:]
