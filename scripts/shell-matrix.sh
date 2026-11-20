@@ -6,7 +6,7 @@
 #
 #   scripts/shell-matrix.sh mac|device <outdir> [parts]
 #
-# parts (default all): golden scenarios events hog mainload drift. RUNS (3),
+# parts (default all): drift golden scenarios events hog mainload drift. RUNS (3),
 # WORKERS (background workers in the scenarios: 7 on the Mac, 5 on the
 # phone), SECONDS_ (10) override; EXTRA_ARGS adds launch arguments (AOT 1:
 # native=1).

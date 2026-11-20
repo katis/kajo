@@ -368,11 +368,19 @@ func processAgeSeconds() -> Double {
 }
 
 /// The process's threads and CPU so far (proc_pidinfo PROC_PIDTASKINFO).
+/// The task's times are Mach time units, not nanoseconds (the third
+/// review's small fixes, item 8: a spin of 1.00 s of `getrusage` user time
+/// read 24 025 687, 1.00 s through the timebase 125/3;
+/// `~/kajo-scratch/review-3-small-fixes/part1/taskinfo-units.txt`), so the
+/// `procCpu=` of every `stall-diag` line read 41.67 times too little.
 private func processTask() -> (threads: Int32, cpuS: Double) {
     var ti = proc_taskinfo()
     let n = proc_pidinfo(getpid(), PROC_PIDTASKINFO, 0, &ti, Int32(MemoryLayout<proc_taskinfo>.size))
     guard n == Int32(MemoryLayout<proc_taskinfo>.size) else { return (-1, -1) }
-    return (ti.pti_threadnum, Double(ti.pti_total_user + ti.pti_total_system) / 1e9)
+    var tb = mach_timebase_info_data_t()
+    mach_timebase_info(&tb)
+    let ticks = Double(ti.pti_total_user + ti.pti_total_system)
+    return (ti.pti_threadnum, ticks * Double(tb.numer) / Double(max(1, tb.denom)) / 1e9)
 }
 
 /// A stall test explaining itself: at each wait, a line every 5 s with the
