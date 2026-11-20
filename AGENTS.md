@@ -1508,7 +1508,9 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/48-closed-shell-calls.md`: A closed shell refuses its host's calls
  - `docs/decisions/49-types-3.md`: Types 3: diagnostics in the tools
 
-Awaiting the owner: the word for the next module; no question is open.
+Awaiting the owner: nothing; the third review's small fixes, part 1, are
+briefed and building (`docs/modules/review-3-small-fixes.md`; the owner,
+2026-11-20: "Small safe fixes"), and no question is open.
 Types 3's five questions were answered as recommended on 2026-11-19
 (appended to `49-types-3.md`: the mark stays a pale background; the
 selectors table's mark stays; the checker starts at a session's first
