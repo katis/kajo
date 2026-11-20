@@ -116,7 +116,7 @@ ToolsProbe class >> installMenu [
 
 { #category : #probing }
 ToolsProbe class >> latencyCount [
-	^ DevTools local latencies size
+	^ DevTools local replyCount
 ]
 
 { #category : #probing }
@@ -219,7 +219,7 @@ ToolsProbe class >> dropWithRequests [
 	c := self remote.
 	listed := nil.
 	hierarchy := nil.
-	framesBefore := (c latencies select: [:l | l first = 'process.frames']) size.
+	framesBefore := (c repliesOf: 'process.frames').
 	Transcript show: 'probe: drop'; cr; flush.
 	c processList: [:l | listed := l].
 	c classHierarchy: [:h | hierarchy := h size].
@@ -234,7 +234,7 @@ ToolsProbe class >> reconnected [
 	(c isOpen and: [c reconnects > 0 and: [listed notNil and: [hierarchy notNil]]]) ifFalse: [^ false].
 	(listed anySatisfy: [:p | (p at: 'process') = remoteProcess and: [(p at: 'stopped') notNil]]) ifFalse: [^ false].
 	d := DevTools debuggers last model.
-	^ d state == #stopped and: [(c latencies select: [:l | l first = 'process.frames']) size > framesBefore]
+	^ d state == #stopped and: [(c repliesOf: 'process.frames') > framesBefore]
 ]
 
 { #category : #remote }

@@ -201,8 +201,7 @@ extension ShellVM {
 /// threads call it.
 nonisolated func appTranscriptSink() -> @Sendable ([UInt8]) -> Void {
     { bytes in
-        guard let o = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any],
-              o["kind"] as? String == "transcript", let t = o["text"] as? String else { return }
+        guard let t = transcriptText(ofLine: bytes) else { return }
         FileHandle.standardOutput.write(Data(("transcript: " + t + "\n").utf8))
     }
 }

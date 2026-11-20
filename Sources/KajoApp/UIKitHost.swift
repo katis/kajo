@@ -249,8 +249,22 @@ import UIKit
         case "appendLine":
             guard let t = e.view as? UITextView else { return nil }
             let line = args.first?.string ?? ""
-            t.text = (t.text ?? "").isEmpty ? line : t.text + "\n" + line
-            t.scrollRangeToVisible(NSRange(location: (t.text as NSString).length, length: 0))
+            // The third review's small fixes, item 6 (hosts.M6): the line
+            // is appended to the text storage, as the AppKit host does,
+            // with the text's own font and colour; reading and setting the
+            // whole text per line made a Transcript of n lines O(n^2). The
+            // first line still sets the text; the rest take the view's font
+            // and colour, which setting the whole text applied before.
+            let storage = t.textStorage
+            if storage.length == 0 {
+                t.text = line
+            } else {
+                var attributes: [NSAttributedString.Key: Any] = [:]
+                if let font = t.font { attributes[.font] = font }
+                if let colour = t.textColor { attributes[.foregroundColor] = colour }
+                storage.append(NSAttributedString(string: "\n" + line, attributes: attributes))
+            }
+            t.scrollRangeToVisible(NSRange(location: storage.length, length: 0))
             return .nil
         case "clear":
             (e.view as? UITextView)?.text = ""

@@ -26,7 +26,11 @@ Class {
 		'outages',
 		'retried',
 		'retriedIds',
-		'refused'
+		'refused',
+		'replyCounts',
+		'latenciesDropped',
+		'outageCount',
+		'outagesDropped'
 	],
 	#classInstVars : [
 		'connections',
@@ -58,8 +62,14 @@ DevClient >> isOpen [
 
 { #category : #accessing }
 DevClient >> latencies [
-	"{kind. microseconds} of every reply, from the send to its dispatch in the event loop ('kind (retried)' for a request sent again after a dropped link, counted from its first send)."
+	"{kind. microseconds} of the last DevClient class>>logBound replies, from the send to its dispatch in the event loop ('kind (retried)' for a request sent again after a dropped link, counted from its first send). The counts of every reply are replyCount and repliesOf:; latenciesDropped says how many records left the log (the third review's small fixes, item 7: it grew with every reply)."
 	^ latencies
+]
+
+{ #category : #accessing }
+DevClient >> latenciesDropped [
+	"The round-trip records that left the log (it keeps the last DevClient class>>logBound)."
+	^ latenciesDropped
 ]
 
 { #category : #accessing }
@@ -73,9 +83,21 @@ DevClient >> name [
 ]
 
 { #category : #accessing }
+DevClient >> outageCount [
+	"Every dropped link this client reopened, the ones that left the log included."
+	^ outageCount
+]
+
+{ #category : #accessing }
 DevClient >> outages [
-	"{microseconds from the loss to the new session. requests sent again} of every dropped link."
+	"{microseconds from the loss to the new session. requests sent again} of the last DevClient class>>logBound dropped links; outageCount counts them all and outagesDropped those that left the log."
 	^ outages
+]
+
+{ #category : #accessing }
+DevClient >> outagesDropped [
+	"The outage records that left the log (it keeps the last DevClient class>>logBound)."
+	^ outagesDropped
 ]
 
 { #category : #accessing }
@@ -110,6 +132,18 @@ DevClient >> reconnects [
 DevClient >> refuses: aKind [
 	"Whether this session's target answered aKind as an unknown request (Types 3: a target without the type checker's package refuses diagnostics); such a request is not sent again in the session."
 	^ refused notNil and: [refused includes: aKind]
+]
+
+{ #category : #accessing }
+DevClient >> repliesOf: aKind [
+	"The replies dispatched to requests of aKind counted under the label latencies gives them (a request sent again after a dropped link under 'kind (retried)')."
+	^ replyCounts at: aKind ifAbsent: [0]
+]
+
+{ #category : #accessing }
+DevClient >> replyCount [
+	"Every reply this client dispatched to a request, as latencies would count them if it kept them all."
+	^ replyCounts inject: 0 into: [:sum :n | sum + n]
 ]
 
 { #category : #accessing }
@@ -161,12 +195,16 @@ DevClient >> initialize [
 	nextId := 0.
 	listeners := Dictionary new.
 	latencies := OrderedCollection new.
+	replyCounts := Dictionary new.
+	latenciesDropped := 0.
 	timeoutMs := 30000.
 	closing := false.
 	reconnects := 0.
 	retried := 0.
 	backoffMs := 1000.
 	outages := OrderedCollection new.
+	outageCount := 0.
+	outagesDropped := 0.
 	retriedIds := Set new
 ]
 
@@ -242,7 +280,7 @@ DevClient >> noteRefusal: anError of: aKind [
 { #category : #receiving }
 DevClient >> receive: aJsonObject [
 	"One object the target sent: a reply (to session.open, or to a request by id) or an event."
-	| kind id entry |
+	| kind id entry label |
 	kind := aJsonObject at: 'kind'.
 	kind = 'reply' ifFalse: [^ self emit: kind with: aJsonObject].
 	id := aJsonObject at: 'id'.
@@ -261,8 +299,10 @@ DevClient >> receive: aJsonObject [
 	entry := pending removeKey: id ifAbsent: [^ nil].
 	self cancelRequestTimer: (entry at: 5).
 	"A request sent again after a dropped link is kept apart: its round trip counts from its first send, the outage included."
-	latencies add: {(retriedIds remove: id ifAbsent: [nil]) isNil ifTrue: [entry at: 1] ifFalse: [(entry at: 1) , ' (retried)'].
-		Smalltalk microsecondClock - (entry at: 2)}.
+	label := (retriedIds remove: id ifAbsent: [nil]) isNil ifTrue: [entry at: 1] ifFalse: [(entry at: 1) , ' (retried)'].
+	latencies addLast: {label. Smalltalk microsecondClock - (entry at: 2)}.
+	replyCounts at: label put: (replyCounts at: label ifAbsent: [0]) + 1.
+	latencies size > self class logBound ifTrue: [latencies removeFirst. latenciesDropped := latenciesDropped + 1].
 	(aJsonObject at: 'ok') == true
 		ifTrue: [(entry at: 3) ifNotNil: [:b | b cull: (aJsonObject at: 'result')]]
 		ifFalse: [ | error |
@@ -307,7 +347,9 @@ DevClient >> reconnect [
 DevClient >> reopened [
 	"The new session is open: the requests that waited are sent again (on this connection, with their ids), each with its timeout re-armed from this send, and the wait goes back to a second. A request already sent sendLimit times fails instead: it is not sent again."
 	| ids |
-	outages add: {Smalltalk microsecondClock - lostAt. pending size}.
+	outages addLast: {Smalltalk microsecondClock - lostAt. pending size}.
+	outageCount := outageCount + 1.
+	outages size > self class logBound ifTrue: [outages removeFirst. outagesDropped := outagesDropped + 1].
 	backoffMs := 1000.
 	ids := pending keys asArray sort: [:a :b | a <= b].
 	ids do: [:id |
@@ -638,6 +680,12 @@ DevClient class >> register: aClient [
 	"aClient's (new) connection's events reach it."
 	connections isNil ifTrue: [connections := Dictionary new].
 	connections at: aClient connection put: aClient
+]
+
+{ #category : #requests }
+DevClient class >> logBound [
+	"How many records each of a client's logs keeps (latencies, outages): the last ones (the third review's small fixes, item 7)."
+	^ 1024
 ]
 
 { #category : #requests }

@@ -283,4 +283,24 @@ final class LateReplyTarget: @unchecked Sendable {
     let after = c.waitForEvent(since: mark, timeout: 120) { $0["text"]?.string == "after" }
     #expect(after != nil, "the target's event did not come")
     #expect(c.pendingReplyCount == 0, "the late reply was kept")
+    #expect(c.lateReplies == 1, "the late reply was not counted")
+}
+
+// MARK: - item 5: one transcript sink
+
+/// The hosts' one sink decides a Transcript line by the event writer's
+/// prefix and parses only that line: a transcript event gives its text, a
+/// reply (whatever its strings hold), another event, a line that holds the
+/// prefix inside a string, an empty line and a cut line give nothing.
+@Test func theTranscriptSinkReadsOnlyTranscriptLines() {
+    func line(_ s: String) -> [UInt8] { Array(s.utf8) }
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcript","ts":1,"process":3,"text":"hello"}"#)) == "hello")
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcript","ts":1,"text":""}"#)) == "")
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"reply","id":4,"ok":true,"result":"{\"v\":1,\"kind\":\"transcript\",\"text\":\"no\"}"}"#)) == nil)
+    #expect(transcriptText(ofLine: line(#"{"v":1,"id":4,"kind":"transcript","text":"not the writer's order"}"#)) == nil)
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"test.passed","ts":1,"test":"A>>b"}"#)) == nil)
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcriptions","ts":1,"text":"x"}"#)) == nil)
+    #expect(transcriptText(ofLine: []) == nil)
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcript","#)) == nil)
+    #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcript","ts":1,"text":"cut"#)) == nil)
 }

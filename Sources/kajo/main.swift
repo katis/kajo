@@ -183,9 +183,7 @@ case "run":
     }
     // The Transcript on stderr, a line per event.
     options.events = { line in
-        if let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], o["kind"] as? String == "transcript" {
-            FileHandle.standardError.write(((o["text"] as? String ?? "") + "\n").data(using: .utf8)!)
-        }
+        if let t = transcriptText(ofLine: line) { FileHandle.standardError.write((t + "\n").data(using: .utf8)!) }
     }
     let outcome = imageBytes.map { Headless.run(image: $0, options: options) } ?? Headless.run(files, options: options)
     switch outcome.checksum {
@@ -373,9 +371,7 @@ func serveTarget(image: [UInt8], options: Headless.Options, socket: String, name
     do {
         target = try DevTarget(image: image, options: options, listen: listen) { line in
             // The Transcript (a stopped Process prints its line there) on stderr.
-            if let o = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any], o["kind"] as? String == "transcript" {
-                FileHandle.standardError.write(((o["text"] as? String ?? "") + "\n").data(using: .utf8)!)
-            }
+            if let t = transcriptText(ofLine: line) { FileHandle.standardError.write((t + "\n").data(using: .utf8)!) }
         }
     } catch {
         fail("kajo run: \(error)", 1)

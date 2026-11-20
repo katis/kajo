@@ -104,8 +104,7 @@ public func setHostProjects(_ host: ClientHost, target: String, directory: Strin
 /// Transcript lines to the results (the console) as they come.
 nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
     { bytes in
-        guard let o = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any],
-              o["kind"] as? String == "transcript", let t = o["text"] as? String else { return }
+        guard let t = transcriptText(ofLine: bytes) else { return }
         Output.shared.emit("transcript: " + t)
     }
 }
@@ -282,8 +281,7 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
     /// typing, `devsession: done <json>` ends the session.
     nonisolated func sessionSink() -> @Sendable ([UInt8]) -> Void {
         { bytes in
-            guard let o = try? JSONSerialization.jsonObject(with: Data(bytes)) as? [String: Any],
-                  o["kind"] as? String == "transcript", let t = o["text"] as? String else { return }
+            guard let t = transcriptText(ofLine: bytes) else { return }
             Output.shared.emit("transcript: " + t)
             if t == "devsession: drop" {
                 // The dropped link: every client socket ends now, before

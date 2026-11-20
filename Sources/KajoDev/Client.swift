@@ -18,6 +18,12 @@ public final class ProtocolClient: @unchecked Sendable {
     private let lock = NSLock()
     private let changed = NSCondition()
     private var replies: [String: JSONValue] = [:]  // under changed
+    /// The ids `send` waits for (under changed): a reply for any other id
+    /// came after its request gave up, or was never asked for, and is
+    /// dropped and counted (the third review's small fixes, item 7: it was
+    /// kept in `replies` for good).
+    private var waiting: Set<String> = []
+    private var droppedReplies = 0  // under changed
     private var events: [JSONValue] = []  // under changed
     private var eventCount = 0  // under changed: events ever received
     private var closed = false  // under changed
@@ -40,6 +46,12 @@ public final class ProtocolClient: @unchecked Sendable {
         changed.lock()
         defer { changed.unlock() }
         return replies.count
+    }
+    /// Replies dropped because no request waited for their id any more.
+    public var lateReplies: Int {
+        changed.lock()
+        defer { changed.unlock() }
+        return droppedReplies
     }
     /// Lines longer than `lineLimit`, discarded (under changed).
     private var discardedLines = 0
@@ -148,8 +160,12 @@ public final class ProtocolClient: @unchecked Sendable {
         if v["kind"]?.string == "reply" {
             let key = v["id"].map { String(decoding: writeJSON($0), as: UTF8.self) } ?? "null"
             changed.lock()
-            replies[key] = v
-            changed.broadcast()
+            if waiting.contains(key) {
+                replies[key] = v
+                changed.broadcast()
+            } else {
+                droppedReplies += 1
+            }
             changed.unlock()
             return
         }
@@ -169,11 +185,20 @@ public final class ProtocolClient: @unchecked Sendable {
         let id = nextId
         nextId += 1
         lock.unlock()
+        let key = "\(id)"
         changed.lock()
         let discarded = discardedLines
+        waiting.insert(key)
         changed.unlock()
+        // Whatever ends the wait (the reply, an error, the timeout), the id
+        // is no longer waited for and nothing stays under it.
+        defer {
+            changed.lock()
+            waiting.remove(key)
+            replies.removeValue(forKey: key)
+            changed.unlock()
+        }
         try write(DevRequest(id: .int(Int64(id)), kind: kind, arguments: args).line)
-        let key = "\(id)"
         let deadline = Date(timeIntervalSinceNow: timeout)
         changed.lock()
         defer { changed.unlock() }

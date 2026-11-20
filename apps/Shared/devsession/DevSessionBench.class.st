@@ -87,7 +87,9 @@ DevSessionBench class >> finish [
 	o at: 'requests' put: lat.
 	client isNil ifFalse: [
 		o at: 'reconnects' put: client reconnects; at: 'retried' put: client retried.
-		o at: 'outages' put: (client outages collect: [:x | x asArray]) asArray].
+		o at: 'outages' put: (client outages collect: [:x | x asArray]) asArray.
+		"The client keeps the last DevClient class>>logBound records of each log (the third review's small fixes, item 7): what left them is said."
+		o at: 'latenciesDropped' put: client latenciesDropped; at: 'outagesDropped' put: client outagesDropped].
 	Transcript show: 'devsession: done ' , (Json write: o); cr; flush
 ]
 
@@ -205,7 +207,7 @@ DevSessionBench class >> dropLink [
 		self record.
 		self begin: 'drop.reconnect'.
 		r := client reconnects.
-		frames := (client latencies select: [:l | l first = 'process.frames']) size.
+		frames := (client repliesOf: 'process.frames').
 		Transcript show: 'devsession: drop'; cr; flush.
 		client classHierarchy: [:h | hierarchy := h size].
 		client processList: [:l | processes := l].
@@ -213,7 +215,7 @@ DevSessionBench class >> dropLink [
 			(processes anySatisfy: [:p | (p at: 'process') = d process and: [(p at: 'stopped') notNil]])
 				ifFalse: [self fail: 'the stopped Process is gone after the reconnect']
 				ifTrue: [
-					self when: [d state == #stopped and: [(client latencies select: [:l | l first = 'process.frames']) size > frames]] then: [
+					self when: [d state == #stopped and: [(client repliesOf: 'process.frames') > frames]] then: [
 						self record.
 						self begin: 'drop.terminate'.
 						d terminate.
@@ -238,10 +240,10 @@ DevSessionBench class >> populateOnDemand [
 { #category : #session }
 DevSessionBench class >> populate: aName [
 	| before |
-	before := client latencies size.
+	before := client replyCount.
 	self begin: aName.
 	browser refresh.
-	self when: [(client latencies size - before) >= 2] then: [
+	self when: [(client replyCount - before) >= 2] then: [
 		BrowserWindow treeForm: #push.
 		self end]
 ]
@@ -368,10 +370,10 @@ DevSessionBench class >> raiseError [
 DevSessionBench class >> stepOnce [
 	| d n |
 	d := self debugger.
-	n := client latencies size.
+	n := client replyCount.
 	self begin: 'step'.
 	d step: 'over'.
-	self when: [d state == #stopped and: [d reason = 'step' and: [client latencies size > (n + 1)]]] then: [self end]
+	self when: [d state == #stopped and: [d reason = 'step' and: [client replyCount > (n + 1)]]] then: [self end]
 ]
 
 { #category : #session }
