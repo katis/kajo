@@ -8,7 +8,7 @@ import KajoVM
 let usage = """
 usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
                 [--stress every,tiny,oneblock,preempt,stop,tinynursery,promoteall,scavenge]
-                [--slice-ms 5] [--nursery KiB] [--survivor KiB] [--age N] [--verify]
+                [--slice-ms 5] [--nursery KiB] [--survivor KiB] [--age N] [--verify|--no-verify]
                 [--gc cm|stw] [--stress cycle,alwayson,neverapply] [--floor 0.6]
                 [--safety 2] [--escalate-below 0.25] [--sweep-stop-words n|-1] [--entry-rate on|off] [--reloc on|off]
                 [--stalls on|off] [--marker-slowdown N] [--stall-reloc plain|reserve|skip]
@@ -20,7 +20,7 @@ usage: kajo run <file.kasm>... [--workers N] [--heap MiB] [--entries N]
        kajo run <image.img> --protocol <socket>|tcp[:port] [--name <Bonjour name>] [the options above]
        kajo build-image [-o kernel.img] [--no-init] [--release] [--with <dir>]... [<dir or file.st>...]   (default: kernel/)
        kajo seal <in.img> <out.img>
-       kajo test [image.img] [--filter pattern] [--tag tag] [--test Class>>selector]... [--list] [--junit path] [--workers N] [--heap MiB] [--sources dir]
+       kajo test [image.img] [--filter pattern] [--tag tag] [--test Class>>selector]... [--list] [--junit path] [--workers N] [--heap MiB] [--sources dir] [--verify|--no-verify]
        kajo new <Name> --bundle-id <id> --kajo <checkout> [--team <id>] [--directory <dir>] [--platforms macOS,iOS] [--no-native]
        kajo aot <file.kasm>...|<image.img> -o <dir>
        kajo run ... --native <module.dylib>
@@ -133,6 +133,7 @@ case "run":
         case "--age": options.age = Int(value()) ?? 0
         case "--slice-ms": options.sliceMs = Double(value()) ?? 5
         case "--verify": options.verify = true
+        case "--no-verify": options.verify = false
         case "--gc": options.gc = value()
         case "--floor": options.floor = Double(value()) ?? 0.6
         case "--safety": options.safetyFactor = Double(value()) ?? 2

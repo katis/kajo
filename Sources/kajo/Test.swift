@@ -11,6 +11,13 @@ func runTests(_ args: [String]) -> Never {
     var junit: String? = nil
     var listing = false
     var options = Headless.Options()
+    // The third review's small fixes, item 1: a checked build's level (on)
+    // would trap in the kernel's own tests. With the heap verifiers on, the
+    // first scavenge after MakeFuzzTest>>testSeededMutationsAreRefusedOrRun
+    // finds old objects naming young ones unremembered (the make primitive's
+    // methods are made old; docs/modules/review-3-small-fixes.md, Found), so
+    // kajo test verifies only when told to (--verify) until that is fixed.
+    options.verify = false
     var i = 0
     func value() -> String {
         i += 1
@@ -32,6 +39,10 @@ func runTests(_ args: [String]) -> Never {
         case "--young": options.young = value()
         case "--sources": options.sourcesDirectory = value()
         case "--native": options.native = loadNative(value())
+        // The third review's small fixes, item 1: the heap verifiers at
+        // every pause (off by default here, above).
+        case "--verify": options.verify = true
+        case "--no-verify": options.verify = false
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: imagePath = args[i]
         }
@@ -63,6 +74,10 @@ func runTests(_ args: [String]) -> Never {
         }
     }
     FileHandle.standardError.write(report.summary.data(using: .utf8)!)
+    // The third review's small fixes, item 1: what the run checked, from
+    // the gc summary (the verifier runs counted by the object memory).
+    let verifies = report.events.last { $0["kind"] as? String == "gc" && $0["collection"] as? String == "summary" }?["verifies"] as? Int
+    FileHandle.standardError.write("kajo test: verify=\(options.verifies ? "on" : "off") verifies=\(verifies.map(String.init) ?? "-")\n".data(using: .utf8)!)
     // AOT 1: the native engine's counts (bound, interpreted, declined, switches).
     for e in events where e.starts(with: Array("{\"v\":1,\"kind\":\"native\"".utf8)) {
         FileHandle.standardError.write(Data(Array("native: ".utf8) + e + [10]))
