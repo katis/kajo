@@ -362,8 +362,10 @@ Behavior >> organization [
 
 { #category : #organization }
 Behavior >> selectorsInCategory: aCategory [
-	"The selectors filed under aCategory (a String or Symbol), sorted."
-	^ self organization at: aCategory asSymbol ifAbsent: [#()]
+	"The selectors filed under aCategory (a String or Symbol), sorted: only that category's, not the whole organization (the third review's small fixes, item 4)."
+	| cat |
+	cat := aCategory asSymbol.
+	^ (self selectors select: [:sel | ((self categoryOf: sel) ifNil: [Behavior defaultCategory]) == cat]) asArray sort: [:a :b | a <= b]
 ]
 
 { #category : #printing }

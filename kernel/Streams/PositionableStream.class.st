@@ -26,7 +26,6 @@ PositionableStream >> collection ^<C> [
 
 { #category : #accessing }
 PositionableStream >> contents ^<C> [
-	isText ifTrue: [^ collection copyFrom: 1 to: readLimit].
 	^ collection copyFrom: 1 to: readLimit
 ]
 

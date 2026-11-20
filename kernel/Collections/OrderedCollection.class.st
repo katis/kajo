@@ -91,9 +91,26 @@ OrderedCollection >> do: aBlock <[E, ^Dynamic]> ^<Self> [
 
 { #category : #accessing }
 OrderedCollection >> grow ^<Self> [
-	| bigger n start |
-	n := self size.
-	bigger := Array new: (array size * 2 max: 8).
+	"Room at the end that was reached. When the collection fills less than half of its array, its elements move to the middle of the same array and nothing is allocated (the third review's small fixes, item 3: the array grew with what passed through a queue); else they move into an array twice the size. Either way an add's amortized cost is constant. The move is primitive 38, which copies forwards: moving towards the front always may, moving towards the end only when the two ranges do not overlap (else a loop backwards). The slots left behind are cleared by copying nils from the other side of the elements, which the start is rounded to hold."
+	| bigger n start size |
+	n := lastIndex - firstIndex + 1.
+	size := array size.
+	n * 2 < size ifTrue: [
+		lastIndex = size
+			ifTrue: [
+				start := size - n + 1 // 2 + 1.
+				array replaceFrom: start to: start + n - 1 with: array startingAt: firstIndex.
+				array replaceFrom: (start + n max: firstIndex) to: lastIndex with: array startingAt: 1]
+			ifFalse: [
+				start := size - n // 2 + 1.
+				start - firstIndex >= n
+					ifTrue: [array replaceFrom: start to: start + n - 1 with: array startingAt: firstIndex]
+					ifFalse: [n to: 1 by: -1 do: [:k | array at: start + k - 1 put: (array at: firstIndex + k - 1)]].
+				array replaceFrom: firstIndex to: (start - 1 min: lastIndex) with: array startingAt: start + n].
+		firstIndex := start.
+		lastIndex := start + n - 1.
+		^ self].
+	bigger := Array new: (size * 2 max: 8).
 	start := bigger size - n // 2 + 1.
 	bigger replaceFrom: start to: start + n - 1 with: array startingAt: firstIndex.
 	array := bigger.

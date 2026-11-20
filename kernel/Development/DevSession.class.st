@@ -8,7 +8,8 @@ Class {
 		'sessionPackage',
 		'handles',
 		'nextHandle',
-		'handleLock'
+		'handleLock',
+		'objectHandles'
 	]
 }
 
@@ -45,6 +46,7 @@ DevSession >> setConn: anInteger client: aString package: aPackageOrNil [
 	client := aString.
 	sessionPackage := aPackageOrNil.
 	handles := Dictionary new.
+	objectHandles := IdentityDictionary new.
 	nextHandle := 1.
 	handleLock := Mutex new
 ]
@@ -62,12 +64,12 @@ DevSession >> describe: anObject [
 
 { #category : #handles }
 DevSession >> handleOf: anObject [
-	"The handle the session keeps anObject under (one per object). Under the session's lock (the review fixes, item 10): its requests run in Processes of their own, in parallel, and stopped Processes describe their frames through it."
-	^ handleLock critical: [ | found |
-		handles keysAndValuesDo: [:k :v | (found isNil and: [v == anObject]) ifTrue: [found := k]].
-		found ifNil: [
+	"The handle the session keeps anObject under (one per object). Under the session's lock (the review fixes, item 10): its requests run in Processes of their own, in parallel, and stopped Processes describe their frames through it. Found through objectHandles, the same table the other way round, kept with handles under the lock (the third review's small fixes, item 4: a scan of every handle per described slot before)."
+	^ handleLock critical: [
+		objectHandles at: anObject ifAbsent: [
 			nextHandle := nextHandle + 1.
 			handles at: nextHandle put: anObject.
+			objectHandles at: anObject put: nextHandle.
 			nextHandle]]
 ]
 
@@ -160,11 +162,11 @@ DevSession >> classDefinition: className [
 DevSession >> classHierarchy [
 	"Every class with its superclass, package and tag (nil when it has none), sorted by name: the browser's class tree in one request (module 9c; the tag since tags as subdirectories)."
 	<devProtocol>
-	^ (Smalltalk allClasses collect: [:c | | o |
+	^ (Smalltalk allClasses asArray sort: [:a :b | a name <= b name]) collect: [:c | | o |
 		o := JsonObject new.
 		o at: 'name' put: c name asString; at: 'superclass' put: (c superclass ifNotNil: [:s | s name asString]);
 			at: 'package' put: (Smalltalk packageOf: c); at: 'tag' put: ((Smalltalk tagOf: c) ifNotNil: [:t | t asString]).
-		o]) asArray sort: [:a :b | (a at: 'name') <= (b at: 'name')]
+		o]
 ]
 
 { #category : #'requests-browse' }
@@ -173,7 +175,7 @@ DevSession >> classList: package tag: tag [
 	<devProtocol>
 	^ ((Smalltalk allClasses select: [:c |
 		(package isNil or: [(Smalltalk packageOf: c) = package])
-			and: [tag isNil or: [(Smalltalk tagOf: c) notNil and: [(Smalltalk tagOf: c) asString = tag asString]]]])
+			and: [tag isNil or: [((Smalltalk tagOf: c) ifNotNil: [:t | t asString]) = tag asString]]])
 		collect: [:c | c name asString]) asArray sort: [:a :b | a <= b]
 ]
 
@@ -181,11 +183,13 @@ DevSession >> classList: package tag: tag [
 DevSession >> classSelectors: className side: side [
 	"A class's selectors by category (side: instance, the default, or class)."
 	<devProtocol>
-	| b o |
+	| b o org |
 	b := self behaviorNamed: className side: side.
 	o := JsonObject new.
-	(b organization keys asArray sort: [:x :y | x <= y]) do: [:cat |
-		o at: cat put: ((b organization at: cat) collect: [:s | s asString]) asArray].
+	"The organization once (the third review's small fixes, item 4: it was built again per category)."
+	org := b organization.
+	(org keys asArray sort: [:x :y | x <= y]) do: [:cat |
+		o at: cat put: ((org at: cat) collect: [:s | s asString]) asArray].
 	^ o
 ]
 
@@ -400,7 +404,9 @@ DevSession >> inspect: handle [
 DevSession >> inspectRelease: handle [
 	"Let go of the object under a handle."
 	<devProtocol>
-	handleLock critical: [handles removeKey: handle ifAbsent: [nil]].
+	handleLock critical: [ | o |
+		o := handles removeKey: handle ifAbsent: [handles].
+		o == handles ifFalse: [objectHandles removeKey: o ifAbsent: [nil]]].
 	^ true
 ]
 
