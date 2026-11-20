@@ -225,3 +225,91 @@ Build the recommended option; bring the decision back.
 2. Does a release `kajo test` verify? Recommended: no; `--verify` is
    there for the one who wants it.
 3. The bound of `DevClient`'s logs. Recommended: the last 1024 of each.
+
+## Part 1: the positions answered
+
+Built and run by the build agent on 2026-11-20 on the starting commit
+(0b33ed3) with only the new tests, the fixture and one accessor added
+(`ProtocolClient.pendingReplyCount`); for position 1 `kajo test` also took
+`--verify` (three lines in `Sources/kajo/Test.swift`, the flag part 2
+keeps). Toolchain: swift.org 6.4.2 first on PATH (swiftly). Raw files are
+in `~/kajo-scratch/review-3-small-fixes/part1/`.
+
+1. **Wrong.** With the heap verifiers on, the kernel's tests do not pass:
+   `kajo test --verify` in a debug build traps at the first scavenge after
+   `MakeFuzzTest>>testSeededMutationsAreRefusedOrRun`, every time
+   (5 runs of 5 on the unfiltered kernel run, the same scavenge 720 and the same first entry 853907 each time; `found-summary.txt`). The message, from `verify-debug-kernel.err`:
+   `object memory verifier, nursery verifier, before scavenge 720: entry
+   853907 (old) names young @958173 (nursery 1) in slot 1, and is not
+   remembered for it; ...` (nine more of the same shape), in
+   `ReflectionTest>>testAClassWithNoInstancesAnswersAnEmptyArray`, whose
+   `Smalltalk garbageCollect` makes the scavenge. The development image
+   (tools' tests too) and the development image with the type checker
+   trap at the same scavenge 720 in the same test (`verify-debug-dev.err`,
+   `verify-debug-devtypes.err`). Bisected (`found-bisect.txt`): the
+   seeded MakeFuzz test followed by the trapping test is enough
+   (`found-pair-makefuzz-seeded.err`: before scavenge 1); the other
+   candidates are not; and from test 130 of the order the same pair gives
+   the worse form, `after scavenge 1: entry 28490 slot 1 names @88622, a
+   freed entry` (`found-bisect-130.err`): the scavenge freed young objects
+   that old objects still name. The mutated methods are made by primitive
+   143 in old space (`LiveMethodHeap`, `Sources/KajoVM/ObjectModel/
+   LiveMethods.swift`), and a literal that is "any other object" is used
+   as it is (`CodeReader.literal`, `.object(v)`); a young object stored
+   there is not remembered. That is the suspect, not a finding checked
+   line by line; it is a core change and is not fixed here (Found, below).
+   The stop-the-world young mode (`--young stw`) traps too, at scavenge 905 inside the seeded MakeFuzz test itself (`found-kernel-stw.err`), so the fault is not the offloaded young collector's. Every kernel test but the seeded MakeFuzz test passes with the verifiers on (260 of 260, 2121 verifier runs, `work/verify-kernel-but-seeded.err`), and so do the tools' 61 (`work/verify-tools-only.err`).
+3. **Right.** The level is decided in `Headless` alone: `checkedBuild` is
+   internal to `KajoVM` and `Headless.configs` reads it; no file under a
+   core directory is needed.
+4. **Right, with a third fault.** `Monitor` is fixed in Smalltalk only.
+   The four tests (`MonitorTerminationTests` in
+   `Tests/KajoCompilerTests/Review3SmallFixesTests.swift`, driven slice by
+   slice as item 14's were) on the starting commit
+   (`monitor-tests-on-base.txt`): terminated while it waits to enter
+   passes there (the VM unlinks it; nothing to give back, as item 14
+   found for `Semaphore`); released into the Monitor and terminated
+   before it runs fails (excess 0: the Monitor is never free again);
+   terminated while it waits on the condition fails (excess 2, and its
+   Semaphore stays among the waiters); and the third fault, which the
+   brief did not name: a `SharedQueue` consumer terminated in `next`
+   leaves its condition Semaphore queued, the next `nextPut:` signals it,
+   and the live consumer waits for ever (fails: the consumer still
+   waiting, excess 2, one dead waiter). Each fails by a value.
+5. **Right in the array, wrong in the sends.** On the starting commit a
+   queue of ten with a million `addLast:` and `removeFirst` ends with an
+   array of 1 048 576 slots and 16.8 MB allocated (`oc-sends-base.txt`;
+   `addFirst:` with `removeLast` the same), at 4 sends a pair. The
+   common path's sends cannot rise (it is not changed), but every move to
+   the middle is sends of its own, so the sends per operation over a run
+   do rise; the numbers are in As built.
+10. **Right.** `pti_total_user` and `pti_total_system` are Mach time
+   units: a spin of 1.001 s of `getrusage` user time read 24 025 687,
+   which is 1.001 s through the timebase 125/3 and 0.024 s as nanoseconds
+   (`taskinfo-units.txt`, three rounds; the header says only "total
+   time").
+11. **Right.** `scripts/check-tier.sh --dry-run 0b33ed3` says "tier:
+   swift" (with `check-tier-test`, for the comment in
+   `scripts/shell-matrix.sh`).
+
+Position 2 (the cost) is measured with part 2's flags, since the
+unfiltered kernel run cannot finish with the verifiers on; it is in As
+built.
+
+The tests written before the fixes, on the starting commit:
+
+| test | on 0b33ed3 |
+|---|---|
+| `aHeadlessRunReportsItsVerifierLevel` | fails (no `verify` field) |
+| `aProcessTerminatedWhileItWaitsToEnterGivesNothingBack` | passes |
+| `aProcessReleasedIntoTheMonitorAndTerminatedGivesItBack` | fails (excess 0) |
+| `aProcessTerminatedWhileItWaitsOnTheConditionGivesNothingBack` | fails (excess 2, waiters 1) |
+| `aSharedQueueServesItsLiveConsumerAfterOneIsTerminated` | fails (consumer waiting, excess 2, waiters 1) |
+| `aReplyAfterItsRequestTimedOutIsDropped` | fails (`pendingReplyCount` 1) |
+| `OrderedCollectionTest>>testAQueueKeepsABoundedArray` | fails (32 768 slots) |
+| `OrderedCollectionTest>>testADequeAtTheFrontKeepsABoundedArray` | fails (32 768 slots) |
+| `OrderedCollectionTest>>testContentsStayRightAcrossEveryRecentre` | fails (2048 slots for at most 40) |
+| `DevClientTest>>testTheLogsAreBoundedAndTheirTotalsKept` | fails (1100 records) |
+
+(`new-swift-tests-on-base.txt`, `monitor-tests-on-base.txt`,
+`new-st-tests-on-base.err`.)

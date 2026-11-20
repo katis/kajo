@@ -309,6 +309,26 @@ DevClientTest >> testTheDiagnosticsRequestAndItsEvent [
 ]
 
 { #category : #tests }
+DevClientTest >> testTheLogsAreBoundedAndTheirTotalsKept [
+	"The third review's small fixes, item 7: the round trips and the outages are logs of the last 1024 each; the counts of every reply (by kind too) and of every outage, and how many records were dropped, are kept beside them (on 0b33ed3 both logs grew with every reply and every reconnect)."
+	| c got |
+	c := FakeDevClient on: [:k :a | 1].
+	got := 0.
+	1100 timesRepeat: [c evaluate: '1' receiver: nil then: [:r | got := got + r]].
+	self assert: got equals: 1100.
+	self assert: c latencies size equals: 1024.
+	self assert: c replyCount equals: 1100.
+	self assert: (c repliesOf: 'evaluate') equals: 1100.
+	self assert: (c repliesOf: 'class.list') equals: 0.
+	self assert: c latenciesDropped equals: 76.
+	1030 timesRepeat: [c lost: 'dropped'. c fireTimer. c sessionOpened].
+	self assert: c state equals: #open.
+	self assert: c outages size equals: 1024.
+	self assert: c outageCount equals: 1030.
+	self assert: c outagesDropped equals: 6
+]
+
+{ #category : #tests }
 DevClientTest >> testTheSessionReplyOpensTheClient [
 	| c opened |
 	c := DevClient new.

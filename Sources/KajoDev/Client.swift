@@ -34,6 +34,13 @@ public final class ProtocolClient: @unchecked Sendable {
         return closesOfDescriptor
     }
     private var closesOfDescriptor = 0  // under lock
+    /// Replies received and not yet taken by a waiting request (the third
+    /// review's small fixes, item 7: a test reads it).
+    var pendingReplyCount: Int {
+        changed.lock()
+        defer { changed.unlock() }
+        return replies.count
+    }
     /// Lines longer than `lineLimit`, discarded (under changed).
     private var discardedLines = 0
     /// The longest line read (64 MiB, as the image's client and the server
