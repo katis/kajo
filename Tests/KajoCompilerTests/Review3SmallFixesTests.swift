@@ -69,11 +69,13 @@ private final class MonitorStepped {
     let vm: VM
     let cls: Oop
 
-    init() throws {
+    init(preemptEveryPoll: Bool = false) throws {
         var o = Headless.Options()
         o.heapMiB = 256
         o.workers = 2
-        let (vc, c) = try Headless.configs(o).get()
+        let (c0, c) = try Headless.configs(o).get()
+        var vc = c0
+        if preemptEveryPoll { vc.stress = .preemptEveryPoll }
         var oc = c
         oc.onVerifyFailure = .record
         img = try Image.load(image: monitorImage, config: oc)
@@ -208,6 +210,46 @@ private final class MonitorStepped {
     }
 }
 
+/// The failed sanitizer gate's part (the prompt's "also check"): with
+/// every poll but a slice's first preempting, a Process in
+/// `MonitorProbe waitInside` (inside `critical:`, then `wait`) is stopped
+/// at each poll in turn, one run per poll, and terminated there. Wherever
+/// it lands, the Monitor is free exactly once afterwards (the mutex's one
+/// excess signal) and no dead waiter is left. On 0b53285 `wait` gave the
+/// monitor up and queued its condition Semaphore before its
+/// `ifCurtailed:`: a termination at the poll of `mutex signal` left the
+/// Monitor held for ever (excess 0) and one at the poll of the
+/// `ifCurtailed:` send left a dead waiter (waiters 1).
+@Test func aTerminationAtEveryPollOfWaitLeavesTheMonitorWhole() throws {
+    let t = try MonitorStepped(preemptEveryPoll: true)
+    var reachedWait = false
+    var landed = 0
+    var bad: [String] = []
+    for k in 1...600 where !reachedWait {
+        try t.expect("setUpFree", 0)
+        let p = try t.spawn("waitInside")
+        var steps = 0
+        while steps < k, t.vm.state(of: p) == .ready, t.vm.runOneSlice(worker: 1) { steps += 1 }
+        let st = t.vm.state(of: p)
+        if st == .terminated { bad.append("k \(k): ended before its wait"); t.vm.release(p); break }
+        if st == .waiting { reachedWait = true }
+        landed += 1
+        #expect(t.vm.interruptProcess(p, kind: 1))
+        t.settle()
+        let excess = try t.answer("excess")
+        let waiters = try t.answer("waiters")
+        if t.vm.state(of: p) != .terminated || excess != 1 || waiters != 0 {
+            bad.append("k \(k) (\(st)): \(t.vm.state(of: p)) excess \(excess.map(String.init) ?? "nil") waiters \(waiters.map(String.init) ?? "nil")")
+        }
+        t.vm.release(p)
+    }
+    #expect(reachedWait, "the Process never reached its wait in 600 polls")
+    #expect(landed > 10, "terminations landed at \(landed) polls")
+    #expect(bad.isEmpty, "\(bad.count) of \(landed) polls: \(bad.prefix(8))")
+    print("monitor-every-poll polls=\(landed) bad=\(bad.count) \(bad.prefix(8))")
+    t.end()
+}
+
 // MARK: - item 7: a reply after its request timed out
 
 /// A Unix socket that accepts one connection, reads the client's first
@@ -303,4 +345,49 @@ final class LateReplyTarget: @unchecked Sendable {
     #expect(transcriptText(ofLine: []) == nil)
     #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcript","#)) == nil)
     #expect(transcriptText(ofLine: line(#"{"v":1,"kind":"transcript","ts":1,"text":"cut"#)) == nil)
+}
+
+// MARK: - the failed sanitizer gate: the host's timers on a queue of their own
+
+/// The failed sanitizer gate's part (docs/modules/review-3-small-fixes.md):
+/// a `ClientHost` timer fires while the process's default global queue can
+/// start nothing new. Blocks that spin hold every thread that queue may
+/// have (a canary queued after them has not run), then a 50 ms timer is
+/// armed: it fires while the canary still waits. On 0b53285 the timer was a
+/// block of that same queue and waited behind the spinners as the canary
+/// did (in the sanitizer suite the test threads held the queue that way and
+/// a 1 s reconnect timer fired 4 to 27 s late).
+@Test func aHostTimerFiresWhileTheGlobalQueueIsFull() throws {
+    let host = ClientHost()
+    let fired = Atomic<Bool>(false)
+    host.setSink { e in if e.kind == .timer, e.target == 7 { fired.store(true, ordering: .sequentiallyConsistent) } }
+    let release = Atomic<Bool>(false)
+    let spinning = Atomic<Int>(0)
+    let canary = Atomic<Bool>(false)
+    let spinners = ProcessInfo.processInfo.activeProcessorCount * 4
+    for _ in 0..<spinners {
+        DispatchQueue.global().async {
+            spinning.add(1, ordering: .relaxed)
+            while !release.load(ordering: .relaxed) {}
+        }
+    }
+    defer { release.store(true, ordering: .relaxed) }
+    // Every thread the queue may have spins (bounded: something that must
+    // come waits long), then the canary is queued behind them.
+    let start = ShellVM.now()
+    while spinning.load(ordering: .relaxed) == 0, ShellVM.now() - start < 120_000_000_000 { usleep(1000) }
+    usleep(200_000)
+    DispatchQueue.global().async { canary.store(true, ordering: .relaxed) }
+    usleep(200_000)
+    let fullBefore = !canary.load(ordering: .relaxed)
+    #expect(host.callback(ViewCall(op: "timer", handle: 0, arguments: [.int(50), .int(7)])) == .bool(true))
+    let armed = ShellVM.now()
+    while !fired.load(ordering: .sequentiallyConsistent), ShellVM.now() - armed < 20_000_000_000 { usleep(1000) }
+    let firedWhileFull = fired.load(ordering: .sequentiallyConsistent) && !canary.load(ordering: .relaxed)
+    let ms = (ShellVM.now() - armed) / 1_000_000
+    let held = spinning.load(ordering: .relaxed)
+    release.store(true, ordering: .relaxed)
+    print("host-timer full=\(fullBefore) fired=\(fired.load(ordering: .sequentiallyConsistent)) whileFull=\(firedWhileFull) ms=\(ms) spinning=\(held) of \(spinners)")
+    #expect(fullBefore, "the global queue ran the canary: it was not full (\(held) of \(spinners) blocks spinning)")
+    #expect(firedWhileFull, "the timer did not fire while the global queue was full (\(ms) ms, \(held) of \(spinners) spinning)")
 }

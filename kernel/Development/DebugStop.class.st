@@ -13,7 +13,8 @@ Class {
 		'resumeValue',
 		'resuming',
 		'atSend',
-		'noted'
+		'noted',
+		'variables'
 	]
 }
 
@@ -214,7 +215,7 @@ DebugStop >> frameDetail: anIndex session: aSession [
 	o := self frameSummary: anIndex.
 	o at: 'receiver' put: (aSession describe: f receiver).
 	vars := OrderedCollection new.
-	(Compiler frameVariablesOf: f method) do: [:v | | value |
+	(self variablesOf: f method) do: [:v | | value |
 		value := [| x | x := f tempAt: (v at: 2). (v at: 3) isNil ifTrue: [x] ifFalse: [x isNil ifTrue: [nil] ifFalse: [x at: (v at: 3)]]]
 			on: Error do: [:e | nil].
 		vars add: ((aSession describe: value) at: 'name' put: v first; yourself)].
@@ -234,6 +235,13 @@ DebugStop >> frameSummary: anIndex [
 		ifFalse: [f method sourceRangeAt: pc - 1].
 	o at: 'index' put: anIndex; at: 'method' put: f method printString; at: 'pc' put: pc; at: 'range' put: range.
 	^ o
+]
+
+{ #category : #frames }
+DebugStop >> variablesOf: aCompiledMethod [
+	"Compiler frameVariablesOf: aCompiledMethod, found once per method for this stop. Finding them compiles the method's home source again, and that was nearly all of a frames reply (the failed sanitizer gate's part, docs/modules/review-3-small-fixes.md: 9 s alone under the sanitizer, 18 to 29.5 s in the suite, against the tools' 30 s request timeout, and a reconnect asks for the frames again, twice). A frame's method never changes while its Process is stopped (a fix compiles a new method; restart and step end this stop), and only the stopped Process runs the commands that read this table."
+	variables isNil ifTrue: [variables := IdentityDictionary new].
+	^ variables at: aCompiledMethod ifAbsent: [variables at: aCompiledMethod put: (Compiler frameVariablesOf: aCompiledMethod)]
 ]
 
 { #category : #serving }

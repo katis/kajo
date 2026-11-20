@@ -46,14 +46,24 @@ Monitor >> signalAll [
 
 { #category : #accessing }
 Monitor >> wait [
-	"Inside critical: release the monitor, sleep until signalled, take it again. Cut short (the Process terminated while it waits or before it holds the monitor again), abandon: takes the monitor back for critical: to give back and leaves no dead waiter behind."
-	| s me |
+	"Inside critical: release the monitor, sleep until signalled, take it again. Cut short (the Process terminated while it waits or before it holds the monitor again), abandon: takes the monitor back for critical: to give back and leaves no dead waiter behind. Everything from queueing the condition Semaphore on is inside the ifCurtailed: (the failed sanitizer gate's part: a termination at the poll of the mutex's signal left the monitor held for ever, one at the poll of the ifCurtailed: send a dead waiter), and released, stored with no poll after the mutex's signal, says which side of that signal a termination fell on: before it this Process still holds the monitor (critical: gives it back) and only its Semaphore leaves the waiters."
+	| s me released |
 	me := ProcessorScheduler activeProcess.
 	s := Semaphore new.
-	waiting addLast: s.
+	released := false.
+	[waiting addLast: s.
 	owner := nil.
 	mutex signal.
-	[s wait. mutex wait. owner := me] ifCurtailed: [owner == me ifFalse: [self abandon: s]]
+	released := true.
+	s wait.
+	mutex wait.
+	owner := me]
+		ifCurtailed: [
+			released
+				ifTrue: [owner == me ifFalse: [self abandon: s]]
+				ifFalse: [
+					owner := me.
+					(waiting identityIncludes: s) ifTrue: [waiting remove: s]]]
 ]
 
 { #category : #accessing }

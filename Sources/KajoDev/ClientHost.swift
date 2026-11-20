@@ -105,6 +105,16 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
     /// Lines received and malformed lines (for tests).
     private var lines = 0  // under lock
     private var malformed = 0  // under lock
+    /// The image's timers (the `timer` op: a reconnect's backoff, a
+    /// request's timeout) fire on this queue of the host's own. A serial
+    /// queue is given a thread of its own when every thread the process's
+    /// global queues may have is busy; a block of `DispatchQueue.global()`
+    /// is not, and waits (the failed sanitizer gate's part,
+    /// docs/modules/review-3-small-fixes.md: in the sanitizer suite a 1 s
+    /// reconnect timer fired 4 to 28 s late, with every other timer that
+    /// fell due meanwhile, and an outage past the requests' 30 s timeout
+    /// failed the requests it was to send again).
+    private let timers = DispatchQueue(label: "kajo-client-timers", qos: .userInitiated)
     public var linesReceived: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -433,7 +443,7 @@ public final class ClientHost: @unchecked Sendable, CustomReflectable {
         case "timer":
             guard a.count == 2, let ms = a[0].int, ms >= 0, ms <= 3_600_000, let token = a[1].int, token >= 0 else { return nil }
             let target = Int(token)
-            DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(Int(ms))) { [self] in
+            timers.asyncAfter(deadline: .now() + .milliseconds(Int(ms))) { [self] in
                 post(ShellEvent(kind: .timer, target: target, timeNs: ShellVM.now()))
             }
             return .bool(true)

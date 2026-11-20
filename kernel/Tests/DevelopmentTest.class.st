@@ -91,6 +91,18 @@ DevelopmentTest >> testARequestWhoseMethodIsGoneIsAnErrorReply [
 ]
 
 { #category : #tests }
+DevelopmentTest >> testAStopFindsAMethodsVariablesOnce [
+	"The failed sanitizer gate's part (docs/modules/review-3-small-fixes.md): a stop finds a frame method's variables once, by compiling its source, and every later frames request of the same stop reads them again without compiling (the tools ask for the frames again at a reconnect, twice). They are the compiler's: name, frame index, temp vector index."
+	| stop m first |
+	m := thisContext method.
+	stop := DebugStop process: nil exception: nil reason: 'test' frames: (Array with: thisContext).
+	first := stop variablesOf: m.
+	self assert: first equals: (Compiler frameVariablesOf: m).
+	self assert: (first anySatisfy: [:v | v first = 'stop']).
+	self assert: (stop variablesOf: m) == first
+]
+
+{ #category : #tests }
 DevelopmentTest >> testAnAgentsAuthorMarkIsOnePragma [
 	"The rule a session follows (TonelWriter source:author:, the development answers): an agent's compile leaves exactly one author pragma, its own, after the pattern, the comment and the pragmas before the temporaries; a developer's source is compiled as written."
 	| lf tab mark |
