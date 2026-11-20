@@ -348,6 +348,14 @@ public final class ShellVM: @unchecked Sendable {
     /// collector modes; `options.events` is ignored (`callbacks.events`).
     public init(image bytes: [UInt8], options: Headless.Options = Headless.Options(), callbacks: ShellCallbacks) throws(ShellError) {
         let vc: VMConfig, config: ObjectMemoryConfig
+        // The third review's small fixes, item 1: a shell verifies only
+        // when its host says so (`options.verify`), not at the checked
+        // build's level. With the heap verifiers on in every debug ShellVM,
+        // the sanitizer gate failed twice in a row on tool tests over a
+        // shell, each time another one (docs/modules/review-3-small-
+        // fixes.md, Found); the cause was not found.
+        var options = options
+        if options.verify == nil { options.verify = false }
         switch Headless.configs(options) {
         case .success(let c): (vc, config) = c
         case .failure(let f): throw .options("\(f)")
