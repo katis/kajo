@@ -31,13 +31,14 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
     let lines = Lines()
     var o = Headless.Options()
     o.heapMiB = 256
-    // The third review's small fixes, item 1: not the checked build's level
-    // (on): with the heap verifiers on, the kernel's tests trap at the first
-    // scavenge after MakeFuzzTest>>testSeededMutationsAreRefusedOrRun (old
-    // methods made by primitive 143 name young objects unremembered;
-    // docs/modules/review-3-small-fixes.md, Found). On again when that is
-    // fixed.
-    o.verify = false
+    // The verifier's faults (docs/modules/verifier-faults.md, part 4): the
+    // heap verifiers run in the release build's kernel tests (the
+    // test-release gate) and not in a checked build's (swift test, the
+    // sanitizer gates): the owner's answer of 2026-11-20, the verifiers
+    // costing 1.7 times the kernel tests in release and 3 times in debug
+    // (docs/decisions/50-review-3-small-fixes.md). Not the build's level,
+    // which is the opposite.
+    o.verify = !checkedBuild
     let r = Headless.test(image: image, arguments: arguments, options: o) { lines.add($0) }
     return (r, lines.all)
 }

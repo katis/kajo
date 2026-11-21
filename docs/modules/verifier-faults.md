@@ -366,8 +366,25 @@ Starting position 4 is right with the switch: 22 s against twelve
 minutes. Without the switch the plain ring load (`reserveLoadSrc`, whose
 nodes name no young object) moved 2306 bodies across and failed nothing.
 
-The counted runs under the suite's load (the rule, written before them:
-`part1/rule-fault2.txt`) are in "Fault 2 under the suite's load" below.
+**Fault 2 under the suite's load.** Three runs of `swift test --filter
+AllocationStallTests` on the part 1 build with the stall helper verifying
+(`KAJO_STALL_VERIFY=1`), by the rule written before them
+(`part1/rule-fault2.txt`; raw `part1/f2-suite-{1,2,3}.txt`). Each run
+trapped in the full-heap test's offloaded half with the shape of the
+gate's line, and each line names the referent "kept and moved":
+
+| Run | stw half: kept, moved across | offloaded half: the trap |
+|---|---|---|
+| 1 | 311 132, 312 | after scavenge 27: entry 153933 (young in 1) names young @153932 (nursery 0), referent kept and moved from nursery 1 to 0 in scavenge 27; 544 moved across so far |
+| 2 | 282 625, 0 | after scavenge 27: entry 148627 (young in 1) names young @148628 (nursery 0), the same |
+| 3 | 522 407, 0 | after scavenge 21: entry 148628 (young in 1) names young @148629 (nursery 0), the same; the gate's own pair of entries |
+
+So fault 2 is seen 3 of 3 in that set, not 1 of 2 as the gate suggested:
+the run alone (`review-3-small-fixes/part1/found2-fullheap-alone.txt`)
+passed, and the suite's neighbours decide whether a nursery runs out of
+room for its own kept bodies. Deviation from the rule: runs 2 and 3 had
+other work of this module beside them (builds, the five verified kernel
+runs), so their load is the suite's and more.
 
 Part 1's tests, each run on the part 1 commit (07fcad1 with the
 instrumentation, the test switch and the unused barrier site; no fix):
@@ -387,3 +404,61 @@ VM test in `Tests/KajoVMTests/Nursery/VerifierFaultsTests.swift`. The
 stall tests' helper verifies when `KAJO_STALL_VERIFY` is set (part 1
 only, for the counted runs), and its full-heap line prints `keptObjects`,
 `keptAcross`, `verify` and `verifies`.
+
+### Part 2: fault 1 fixed with the barrier (37a55b7)
+
+Option (a). `MethodHeap` gained `storeLiteral(_:_:_:)`, the one store of
+`makeMethodObjects` that part 1's table marks "yes": the make primitive's
+`LiveMethodHeap` stores each literal into the new frame with the barrier
+(`Machine.store`, the new site `BarrierSite.methodLiteral`), the image
+build's `ImageMethodHeap` keeps the raw store (no VM, nothing young). Every
+other store of `makeMethodObjects` stays raw: its values are old or
+immediate. `makeStub` goes through the same function.
+
+Why (a) and not (b), from what the verifiers require: the nursery verifier
+requires of an old holder of a young object exactly its remembered bit for
+that nursery and a list that names it; nothing about read-only or pinned
+holders. The holder's read-only bit is set after the store, and nothing
+that handles a remembered holder writes its header or its slots: the
+barrier's slow path and the scavenge's prep write the remembered word, a
+side table beside the entry table (`remMarker`); `scanRemembered` and the
+young collector read the holder's slots and never store into them (oops
+never change; a copy rewrites the entry). The mark verifier asks nothing
+of the remembered set. (b), making the literal old before the store, has
+no single-object promotion to use: it would be a promote-all scavenge
+inside the make stop at every make that has such a literal. The barrier
+adds nothing to the hot store path: the make primitive runs in a stop and
+the store it changes is not in `interpret`, whose disassembly is
+unchanged (Gates).
+
+No new way to write a verified method: the store happens before the frame
+is made read-only and pinned, as before, through the same slot.
+
+### Part 3: fault 2 fixed in placeKept (70c8d8c)
+
+After the moves across nurseries, with young holders remembered across
+nurseries (module 7's configurations), `placeKept` scans again every young
+object of each nursery that lost a body (its survivor log: the survivors
+copied into it and the kept bodies placed in it) and every moved body,
+sets the remembered bits of the other nurseries each one names, and lists
+a holder whose word it turned from zero with the first participant's
+holders, which go to the carried lists right after. A local correction
+of one stopper step that runs only after a scavenge that kept something
+and moved a body across: no protocol changes, no model step changes (the
+young-collection model has no kept bodies; `docs/models/young-collection.md`
+is unchanged). The counter `keptAcrossHolders` (on the run line beside
+`keptAcross`) counts the holders the scan remembered; the test switch
+`keptAcrossWithoutRescan` is the broken variant.
+
+### Part 4: the verifiers on again
+
+| Where | Before (07fcad1) | After |
+|---|---|---|
+| `kajo test` (`Sources/kajo/Test.swift`) | off unless `--verify` | the build's level: on in a debug build, off in a release build |
+| `KernelTestParts` (`runKernelTests`) | off | on in a release build, off in a checked build (the owner's answer: the release kernel gate only) |
+| the stall tests' helper | off | the build's level (on in `swift test` and the sanitizer gates) |
+| `ShellVM` | off unless the host asks | unchanged |
+| gate `kernel-test` (debug `kajo test`) | off (the default) | `--no-verify` (the owner's answer) |
+| gate `tools-test` (debug `kajo test dev.img`) | off (the default) | `--no-verify` |
+| gate `native-kernel-test` (release `kajo test --native`) | off | off (the release build's level) |
+| gate `test-release` (release `swift test`, its kernel parts) | off | **on** |

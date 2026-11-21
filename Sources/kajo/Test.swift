@@ -11,13 +11,6 @@ func runTests(_ args: [String]) -> Never {
     var junit: String? = nil
     var listing = false
     var options = Headless.Options()
-    // The third review's small fixes, item 1: a checked build's level (on)
-    // would trap in the kernel's own tests. With the heap verifiers on, the
-    // first scavenge after MakeFuzzTest>>testSeededMutationsAreRefusedOrRun
-    // finds old objects naming young ones unremembered (the make primitive's
-    // methods are made old; docs/modules/review-3-small-fixes.md, Found), so
-    // kajo test verifies only when told to (--verify) until that is fixed.
-    options.verify = false
     var i = 0
     func value() -> String {
         i += 1

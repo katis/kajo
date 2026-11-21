@@ -63,11 +63,16 @@ gl_spec() {
     # Gate speed, change 8: the gate scripts' own test.
     check-tier-test) spec_cmd="scripts/check-tier-test.sh"; spec_timeout=900 ;;
     apps)            spec_cmd="just apps" ;;
-    kernel-test)     spec_cmd="just kernel-test" ;;
+    # The verifier's faults (docs/modules/verifier-faults.md, part 4): a
+    # debug kajo test verifies at the build's level, and the owner's answer
+    # of 2026-11-20 puts the heap verifiers in the release build's kernel
+    # gate only (test-release; 3 times the debug run here), so the debug
+    # kernel gates say --no-verify.
+    kernel-test)     spec_cmd="just kernel-test --no-verify" ;;
     new-check)       spec_cmd="just new-check" ;;
     build-image)     spec_cmd="swift run kajo build-image -o $o/kernel.img" ;;
     dev-image)       spec_cmd="swift run kajo build-image -o $o/dev.img --with tools --with types" ;;
-    tools-test)      spec_cmd="swift run kajo test $o/dev.img" ;;
+    tools-test)      spec_cmd="swift run kajo test $o/dev.img --no-verify" ;;
     compiler-tests)  spec_cmd="swift test --filter KajoCompilerTests" ;;
     mac-shell-tests) spec_cmd="rm -f $o/mac-tests-rows.txt; scripts/mac-shell.sh build && scripts/mac-shell.sh run $o/mac-tests-rows.txt mode=tests; cat $o/mac-tests-rows.txt"
                      spec_check=mactests ;;

@@ -63,16 +63,10 @@ private func headless(_ files: [(path: String, text: String)], young: String, wo
     o.markerSlowdown = slowdown
     o.stalls = stalls
     o.relocation = reloc
-    // The third review's small fixes, item 1: not the checked build's
-    // level (on). With the heap verifiers on, aFullHeapFallsBackJustified
-    // ThenRunsOutOfMemory trapped under young=offload in the suite ("nursery
-    // verifier, after scavenge 17: entry ... (young in 1) names young ...
-    // (nursery 0) ..., and is not remembered for it") and passed alone, and
-    // a trap ends the whole test bundle (docs/modules/review-3-small-
-    // fixes.md, Found). These runs verified nothing before; on again when
-    // that is understood. The verifier's faults, part 1: `KAJO_STALL_VERIFY`
-    // turns them on for the counted runs (docs/modules/verifier-faults.md).
-    o.verify = ProcessInfo.processInfo.environment["KAJO_STALL_VERIFY"] != nil
+    // The build's level (on in a checked build): the trap the third
+    // review's small fixes found here under young=offload was fault 2 of
+    // docs/modules/verifier-faults.md (a kept body placed in another
+    // nursery left young holders unremembered), fixed in placeKept.
     if native { o.native = try nativeModule(files) }
     let out = Headless.run(files, options: o)
     var report: [String: String] = [:]
