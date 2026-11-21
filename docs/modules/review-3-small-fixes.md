@@ -669,3 +669,265 @@ Built as recommended where there was a recommendation; decisions only.
    the gate failed, or hold it until the test's condition is found?
    Recommendation: hold it; a test that never failed before failed twice
    in this module's runs.
+
+## The failed sanitizer gate
+
+Built by a second build agent on 2026-11-20 and 21, from 0b53285 (the
+module handed back with its `tsan` gate failing on
+`PhoneTransportTests.theToolsReconnectAfterADroppedLink`), toolchain
+swift.org 6.4.2 first on PATH (swiftly; `part-reconnect/env.txt`). Raw
+files are in `~/kajo-scratch/review-3-small-fixes/part-reconnect/`
+(`runs/` the raw output of every run, `rule.txt` and `rule-after.txt` the
+rules written before the counted runs, each with a copy kept with its
+time, `count-table.md`, `after-table.md`, `diag-table.md` and
+`summary.txt` the tables, `table.py` and `summary.py` what makes them).
+
+Commits: a324f92 (the instrumentation), aca38de (the three fixes with
+their tests), and the commit of this section.
+
+### Instrument first
+
+`ToolsProbe class>>remoteState` printed the remote client but not the
+last clause of `reconnected` (the debugger's frames fetched again), so
+the probe now has `remoteDebuggerState` (the last debugger's state and
+status, `process.frames` replies against `framesBefore`, the last ten
+replies with their round trips) and a trail of the client's events after
+the drop (lost, reconnecting, open, and the reconnect timer as the probe's
+polls first see it); `LocalTools` keeps a `HostLog`, the host side in
+milliseconds from the drop (every timer the image arms with its token and
+when the host fires it, connects, lost connections, the first lines after
+a connect; never a connect's arguments, so never the token). The test
+prints both on every run (`reconnect-state ...`) and in its failure
+message.
+
+A run of the counts is the `tsan` gate's own command filtered to the
+compiler bundle (`swift test --sanitize=thread --scratch-path
+.build/tsan-check --filter KajoCompilerTests`), stopped once the
+reconnect test has its result (`upto2.sh`): the test runs after about 146
+of the bundle's results, 13 minutes in, beside about 30 other tests, so
+everything that loads it is the gate's own and nothing after it is
+needed (about 10 minutes a run against the gate's 57). No busy loops. The
+bundles run in separate processes, so the VM bundle before it in the gate
+does not load it. The first three counted runs (H-1, B-1, H-2) waited for a result line
+that the test process writes to a file in blocks (up to 35 minutes late);
+from then on the bundle runs under `script` and its lines arrive as
+written (`upto2.sh`). The load before the test is the same either way.
+
+### The condition
+
+The three gate runs of the module, each failure's line tabulated first:
+
+| gate run | commit | result | outage (loss to new session) | pending at the reopen | sent again | at the end |
+|---|---|---|--:|--:|--:|---|
+| `check-second-run/tsan.txt` | 577ccd2 (shells verifying) | failed | 48.3 s | 0 | 0 | listed false, hierarchy false, 2 pending |
+| `check-second-run/tsan-rerun/` | 577ccd2 | passed (115 s) | | | | |
+| `check/tsan.txt` | 18ad7a9 (= 0b53285's code) | failed | 5.1 s | 2 | 2 | listed true, hierarchy true, nothing pending, no new frames reply |
+
+Two shapes, and the instrumented runs show both and their mechanism:
+
+1. **The reconnect timer fires late, and an outage past the requests' 30 s
+   timeout fails them.** `ClientHost` fired the image's timers (a
+   reconnect's 1 s backoff, a request's 30 s timeout) as blocks of
+   `DispatchQueue.global()`, and a block of that queue waits while every
+   thread the queue may have is busy (in the sanitizer suite, at the start
+   of the bundle, none of 48 spinning blocks got a thread: `after-F-1`'s
+   `host-timer` line). The host log shows the 1 s reconnect timer fired 4.7, 10.7, 11.1 and 26.8 s after
+   it was armed, each time in the same millisecond as every other timer
+   that fell due meanwhile (`runs/v3-H-1.txt`, `v3-H-2.txt`, `v4-H-1.txt`,
+   `v4-H-2.txt`; in `v2-H-1.txt` the probe first saw it fired at 29.4 s).
+   The two requests the drop left pending wait through the outage with
+   their timeouts running (as designed: an outage counts against the send
+   before it), so an outage over 30 s fails both before the new session
+   can send them again: nothing is retried, neither is answered, and the
+   debugger's two frames requests are still pending at the test's 60 s.
+   That is the 577ccd2 gate failure (48.3 s), `count6-B-11` on the
+   starting commit (31.1 s) and `v2-H-1` on the head (32.5 s).
+2. **The frames reply recompiles every frame's method.** After the reopen
+   the debugger asks for its frames twice (`DevTools class>>reconnected:`
+   and the standing stop of the session's answer), and the stopped Process
+   answers each by compiling every frame's home method again to find its
+   variables (`Compiler frameVariablesOf:`): 9 s alone under the
+   sanitizer (`runs/alone-instr-1.txt`), 18.3 to 29.6 s in the suite
+   against the request's 30 s timeout. When both replies take longer than
+   30 s both requests time out and no frames reply is counted, with the
+   outage short and both dropped requests answered: the 18ad7a9 gate
+   failure (outage 5.1 s; read from its line, since that run had no
+   instrumentation).
+
+Both are CPU-proportional work under a wall-clock bound, as the lesson has
+it, and both are the tools' and the host's, not the test's. How thin it
+ran: in `v4-H-2` the new session opened at 29.95 s and sent the two
+dropped requests again 70 ms before their timeouts fired, and the test's
+60 s `until` held at 55.3 s.
+
+### Whether the module caused it
+
+The rule (`rule.txt`, written before the runs): the head (H, 0b53285) and
+the starting commit (B, 0b33ed3 from `git archive`) with the same
+instrumentation, interleaved, six runs a side first; "the module caused
+it" when H fails at least 2 of 6 and B none; "not the module" when B fails
+at least as often as H minus one, with at least one B failure; anything
+else goes to twelve a side; the starting commit with the module's tests
+(cc00a80) only if H and B differed. At six a side neither had failed, so
+both went to twelve:
+
+| arm | runs | failed | outage, s median (range) | frames after the reopen, s | hierarchy, sent again, s from its first send | held at, s |
+|---|--:|--:|--:|--:|--:|--:|
+| H, 0b53285 | 12 | 0 | 3.1 (2.7-21.3) | 21.2 (18.3-26.2) | 18.9 (16.4-39.5) | 24.3 (21.3-44.2) |
+| B, 0b33ed3 | 12 | 1 (B-11: outage 31.1 s, shape 1) | 6.0 (2.7-31.2) | 22.4 (19.2-29.5) | 25.1 (18.8-44.7) | 29.2 (22.9-49.1) |
+
+(`count-table.md`, `summary.txt`.) By the rule: **not the module.** The
+starting commit fails the same way (B-11 is the 577ccd2 gate failure's
+shape), its margins are no wider than the head's (B-2's frames reply took
+29.5 s of 30), and the cc00a80 arm was not run. Twelve runs a side do not
+prove a rate. Why the module's three gate runs met it twice when 18 gate
+runs since gate speed had not is not established: the test took 115 to 174
+s in this module's gate runs against 68 to 106 s before, and several of the
+tests beside it took longer too (`theTwoReadersReadEveryKernelFileAlike`
+397 s on ec0a6ef, 701 and 437 s here), but the counted runs of the
+truncated bundle showed no difference between the two commits.
+
+### The fixes (aca38de)
+
+- **The host's timers on a queue of its own.** `ClientHost`'s `timer` op
+  arms on `timers`, a serial queue of the host's (user-initiated): a
+  serial queue is given a thread when the global queues have none to give.
+  Test `aHostTimerFiresWhileTheGlobalQueueIsFull`: blocks that spin hold
+  the default global queue (a canary block queued after them has not run),
+  a 50 ms timer is armed, and it must fire while the canary still waits.
+  On 0b53285 it fails (full, not fired in 20 s, 11 of 48 spinners running:
+  `before/new-swift-tests-on-head.txt`); on aca38de it fires in 57 ms
+  (`after/new-swift-tests.txt`), and in the sanitizer suite in 59 ms with
+  none of the 48 spinners started, the suite's tests holding every thread
+  (`runs/after-F-1.txt`).
+- **A stop finds a method's variables once.** `DebugStop>>variablesOf:`
+  keeps `Compiler frameVariablesOf:` per method for the stop; only the
+  stopped Process runs the commands that read it, and a frame's method
+  does not change while it is stopped. Test
+  `DevelopmentTest>>testAStopFindsAMethodsVariablesOnce` (the same Array
+  the second time, and the compiler's): fails on 0b53285 (`DebugStop does
+  not understand #variablesOf:`, `before/debugstop-test-on-head.txt`);
+  broken variant, `variablesOf:` without the table: fails (assertion,
+  `broken/debugstop-nocache.txt`).
+- **`Monitor>>wait`, the prompt's check.** Yes, polls fell between: the
+  `mutex signal` send and the `ifCurtailed:` send each poll before they
+  run. A Process terminated at the first had given up the ownership
+  (`owner := nil`) but not the mutex, so `critical:`'s ensure block gave
+  nothing back and the Monitor stayed held for ever, with its condition
+  Semaphore a dead waiter; terminated at the second it had given the mutex
+  back but left the Semaphore queued, a dead waiter that takes the next
+  signal (the case the prompt named). Now the queueing, the ownership and
+  the signal are inside the `ifCurtailed:`, and `released`, stored with no
+  poll after the signal (a `signal` primitive does not switch Processes),
+  says which side of it a termination fell on: before it the Process still
+  holds the monitor (owner set back, `critical:` gives it back) and only its
+  Semaphore leaves the waiters; after it `abandon:` runs as before. Test
+  `aTerminationAtEveryPollOfWaitLeavesTheMonitorWhole`: under
+  `preemptEveryPoll`, one run per poll of `MonitorProbe waitInside`
+  (`critical:` then `wait`), terminated at that poll; afterwards the
+  Monitor is free exactly once (excess 1) and has no waiter. On 0b53285 it
+  fails at 2 of the 15 polls (after 12 slices, at the signal: excess 0,
+  waiters 1; after 13, at the `ifCurtailed:` send: excess 1, waiters 1); on aca38de 15
+  of 15 hold. The four Monitor tests and the kernel's 262 pass
+  (`after/kernel-test.txt`).
+
+### After
+
+The rule (`rule-after.txt`, written before the runs): twelve runs of
+aca38de as above, nothing skipped; the fixes remove the condition when no
+run fails, every outage is under 5 s and every frames reply after the
+reopen is under 5 s.
+
+| arm | runs | failed | outage, s | first frames, s | frames after the reopen, s | hierarchy, sent again, s from its first send | held at, s | first hierarchy, s |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| aca38de | 12 | 0 | 2.9 (2.5-3.7) | 17.2 (15.2-21.2) | 7.6 (6.0-11.9) | 22.0 (17.4-29.0) | 22.1 (17.5-29.1) | 19.7 (15.3-26.8) |
+
+(`after-table.md`.) No run failed and every outage was under 5 s, but the
+rule's third clause does not hold: the frames replies after the reopen
+took 6.0 to 11.9 s, not under 5 (from 18.3 to 29.6 s). What remains of a
+frames reply is describing the frames' values and writing the reply.
+
+What still sits near the 30 s timeout under the sanitizer and the suite,
+and on the starting commit alike: the class hierarchy (the browser's
+first request 15.3 to 26.8 s here, 20.5 to 27.1 on 0b33ed3; the one the
+probe sends again 15 to 26 s after the reopen) and the first frames reply
+(15.2 to 21.2 s). With the timers on time a reply past 30 s now fails
+where a late timeout timer used to let it through. Not changed here.
+
+### Gates
+
+`KAJO_CHECK_OUT=~/kajo-scratch/review-3-small-fixes/check-final just check
+0b33ed3` on aca38de, the final code commit (tier swift, 8 gates; swift.org
+6.4.2 on every line; the commits after it are this doc). Last line:
+`2026-11-21 03:22:54 aca38de check-tier done swift failed=0 4619s`.
+
+| gate | aca38de | 18ad7a9 (the module's run) |
+|---|--:|--:|
+| check-tier-test | rc=0, 7 s | rc=0, 6 s |
+| clean-build | rc=0, 20 s | rc=0, 20 s |
+| swift-test | rc=0, 711 s (471 and 194 tests) | rc=0, 703 s (471 and 192) |
+| tsan | rc=0, 3230 s (471 and 194 tests, no sanitizer report; the reconnect test 87.6 s) | rc=1, 3416 s |
+| kernel-test | rc=0, 122 s (262 tests, `verify=off`) | rc=0, 130 s (261) |
+| apps | rc=0, 129 s (0 errors, 0 warnings both) | rc=0, 143 s |
+| new-check | rc=0, 269 s | rc=0, 287 s |
+| fuzz (protocol, 120 s) | rc=0, 131 s (build=ok, 379 371 runs) | rc=0, 169 s |
+
+The `tsan` gate alone once more on aca38de, through `gates-lib.sh`'s own
+definition (`check-final/tsan-second/`): `2026-11-21 04:15:22 aca38de end
+tsan rc=0 3125s` (471 and 194 tests, no sanitizer report; the reconnect
+test 74.1 s). Two runs of two do
+not prove a rate; the counted rate on the reduced set is above (the head
+0 of 12 and the starting commit 1 of 12 before, aca38de 0 of 12 after,
+each run the bundle up to the test).
+
+The new tests cost little: the every-poll Monitor test 2.2 s and the timer
+test 0.5 s in a debug build (`after/new-swift-tests.txt`), the kernel test
+milliseconds.
+
+### Deviations
+
+- The counted runs are the compiler bundle up to the reconnect test, not
+  the whole 57-minute gate; the rule says so.
+- The cc00a80 arm of the rule was not run: H and B did not differ.
+- The after rule's third clause (frames after the reopen under 5 s) is not
+  met; the fixes are said to have removed both observed shapes from twelve
+  runs, not the condition's every margin.
+- The instrumentation stays: the probe's `remoteDebuggerState` and trail,
+  `LocalTools`' `HostLog`, and one printed line per run of the test.
+
+### Not done
+
+- The class hierarchy and the first frames reply under the sanitizer
+  (above) were not made cheaper, nor was where their time goes read.
+- `theToolsDevelopTheImageTheyRunIn` (Found 3's other tool test) was not
+  looked at.
+- Nothing ran on a device.
+
+### Found, not this part's
+
+1. **The VM's Delay timers have the same shape.** `startDelay`
+   (`Sources/KajoVM/Processes/External.swift:248`) arms a Delay with
+   `DispatchQueue.global().asyncAfter`, so a Delay in a process whose
+   global queue is held fires late as the host's timers did. A core file;
+   not changed, not measured.
+2. **The test process writes its output to a file in blocks.** A script
+   that waits for a line of `swift test`'s output in a file waits for the
+   buffer (up to 35 minutes here); under `script` the lines arrive as
+   written. Worth knowing for any gate script that watches a test's output.
+3. Under the sanitizer, alone, a `package.list` took 4.4 s, a
+   `class.hierarchy` 10.3 s and a `process.frames` 9.1 s on the target
+   (`runs/alone-instr-1.txt`); outside the sanitizer, in a debug build, 154,
+   355 and 313 ms (`after/new-swift-tests.txt`).
+
+### Open questions
+
+Decisions only.
+
+1. The VM's Delay timers on a queue of their own, as the host's now are
+   (Found 1)? A core change. Recommendation: yes, in part 2, with a counter
+   of how late a Delay fires first.
+2. The class hierarchy's and the first frames reply's margins under the
+   sanitizer (above): leave them, or make the requests cheaper or the
+   tools' timeout a value of its own under the sanitizer? Recommendation:
+   leave them and watch the printed line in the weekly runs; a longer
+   timeout would only move the bound.
