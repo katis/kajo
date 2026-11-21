@@ -187,6 +187,13 @@ let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestList, into: Ke
         #expect(kinds.isSubset(of: ["run.started", "test.started", "test.passed", "test.failed", "test.errored", "transcript",
                                    "gc", "run.finished"]))
         #expect(kinds.isSuperset(of: ["run.started", "test.started", "test.passed", "run.finished", "gc"]))  // gc: the run's summary at least
+        // The verifier's faults, part 4: the release build's parts verify
+        // and say so, a checked build's do not (`runKernelTests`).
+        let summary = report.events.last { $0["kind"] as? String == "gc" && $0["collection"] as? String == "summary" }
+        let verify = summary?["verify"] as? String, verifies = summary?["verifies"] as? Int ?? 0
+        print("kernel part \(part): verify=\(verify ?? "-") verifies=\(verifies)")
+        #expect(verify == (checkedBuild ? "off" : "on"), "part \(part): verify=\(verify ?? "-")")
+        if !checkedBuild { #expect(verifies > 0, "part \(part): verifies=\(verifies)") }
         for e in report.events {
             #expect(e["v"] as? Int == 1)
             #expect((e["ts"] as? Int ?? 0) > 1_700_000_000_000_000)  // microseconds since 1970
