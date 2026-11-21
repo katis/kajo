@@ -714,7 +714,14 @@ func participateInScavenge(_ vm: VMPointer, _ w: WorkerPointer) {
 /// survivor log, the next entry sweep's input. What fits nowhere in its
 /// own nursery goes to another's eden or tail with that nursery's index,
 /// and every holder remembered for the first nursery is remembered for the
-/// second too. The kept bodies sum to no more than the young bytes that
+/// second too. With young collection beside the mutators (module 7, young
+/// holders remembered across nurseries) that is not every holder: a young
+/// object of the first nursery that names the body was remembered by
+/// nobody (same nursery), and the body itself was remembered for every
+/// nursery but its first; so the first nurseries' young objects and the
+/// moved bodies are scanned again and remembered for each other nursery
+/// they name (the verifier's faults, docs/modules/verifier-faults.md,
+/// fault 2). The kept bodies sum to no more than the young bytes that
 /// neither survived nor were promoted, so the nurseries hold them; a body
 /// that still fits nowhere would be a broken invariant, not a provisioning
 /// failure.
@@ -786,6 +793,7 @@ private func placeKept(_ n: NurseryPointer, parts: [Int]) {
     // holders remembered for its first nursery are remembered for the
     // other as well (a superset is sound: a holder is scanned once more).
     var widen = [UInt32](repeating: 0, count: count)
+    var moved: [UInt64] = []
     for x in left {
         var placed = false
         for j in 0..<count where j != x.from {
@@ -794,6 +802,7 @@ private func placeKept(_ n: NurseryPointer, parts: [Int]) {
                 let h = unsafe hp.pointee.load(ordering: .relaxed)
                 unsafe hp.pointee.store(h & ~Header.nurseryMask | UInt64(j) &<< Header.nurseryShift, ordering: .relaxed)
                 widen[x.from] |= remBit(j)
+                moved.append(x.entry)
                 unsafe n.pointee.state.pointee.counters.keptMovedAcross &+= 1
                 if om.config.verify {
                     if unsafe ph.pointee.movedAcross.count >= 8192 { unsafe ph.pointee.movedAcross.removeAll() }
@@ -816,6 +825,36 @@ private func placeKept(_ n: NurseryPointer, parts: [Int]) {
             if add != 0 { unsafe r.pointee.bitwiseOr(add, ordering: .relaxed) }
         }
     }
+    // Module 7: the young holders the widening cannot see. Every young
+    // object of a nursery that lost a body (its survivor log: the
+    // survivors copied into it and the kept bodies placed in it) and every
+    // moved body is scanned again; the bits of the other nurseries it
+    // names are set, and the call that turns its word from 0 lists it with
+    // the first participant's holders, which go to the carried lists next.
+    // Stop-the-world young collection remembers old holders only.
+    guard unsafe ph.pointee.rememberYoung, unsafe !n.pointee.config.testSwitches.keptAcrossWithoutRescan,
+          let first = parts.first else { return }
+    let s0 = unsafe n.scav(first)
+    var rescanned: UInt64 = 0
+    func rescan(_ e: UInt64) {
+        let h = Header(raw: om.headerWord(e))
+        guard h.isYoung, !h.isBytes else { return }
+        var bits: UInt32 = 0
+        for i in 0..<Int(h.count) {
+            let v = om.load(Oop(raw: e), i)
+            if v.isObject && om.headerWord(v.raw) & Header.youngBit != 0 { bits |= remBit(om.header(v).nurseryIndex) }
+        }
+        bits &= ~remBit(h.nurseryIndex)
+        if bits == 0 { return }
+        rescanned &+= 1
+        if unsafe n.remMarker(e).pointee.bitwiseOr(bits, ordering: .relaxed).oldValue == 0 { unsafe s0.pointee.nextRem.append(e) }
+    }
+    for k in 0..<count where widen[k] != 0 {
+        let log = unsafe n.survivors(k).pointee.survLog
+        for i in 0..<log.count { rescan(UInt64(log[i]) &<< 4) }
+    }
+    for e in moved { rescan(e) }
+    unsafe n.pointee.state.pointee.counters.keptAcrossHolders &+= rescanned
 }
 
 /// Stopper, after the phase: every weak slot that named a young object

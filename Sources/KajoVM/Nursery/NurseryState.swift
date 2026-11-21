@@ -224,6 +224,12 @@ struct NurseryCounters: Sendable {
     /// Kept objects that had to move to another nursery's eden (none but
     /// in a nursery whose own eden and survivor space were full).
     var keptMovedAcross: UInt64 = 0
+    /// The verifier's faults (docs/modules/verifier-faults.md, fault 2):
+    /// young holders a scavenge remembered after kept bodies moved across
+    /// nurseries (module 7 only): the first nurseries' young objects that
+    /// name a moved body, and the moved bodies that name objects of
+    /// another nursery than their new one.
+    var keptAcrossHolders: UInt64 = 0
     /// Old-space operations whose promote-all kept objects: old space was
     /// collected around them and promote-all ran again.
     var reclaimsAroundYoung: UInt64 = 0

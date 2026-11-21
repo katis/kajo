@@ -122,6 +122,9 @@ struct NurseryTestSwitches: Sendable {
     /// `placeKept` takes when a nursery has no room for its own; with one
     /// nursery, nothing changes.
     var keptAcrossNurseries = false
+    /// The broken variant of fault 2's fix: `placeKept` does not scan the
+    /// young holders again after kept bodies moved across nurseries.
+    var keptAcrossWithoutRescan = false
 }
 
 /// Every store of an oop into a heap object that may make an old object

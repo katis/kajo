@@ -562,6 +562,7 @@ func nurseryReport(_ vm: VM, stops: [StopRecord], ms: Double) -> [(String, Strin
         ("fullCompactions", "\(c.fullCompactions)"),
         ("reserveExhaustions", "\(vm.image.om.reserveExhaustions)"), ("exhaustedScavenges", "\(c.exhaustedScavenges)"),
         ("keptObjects", "\(c.keptObjects)"), ("keptMB", mb(c.keptBytes)), ("keptAcross", "\(c.keptMovedAcross)"),
+        ("keptAcrossHolders", "\(c.keptAcrossHolders)"),
         ("reclaimsAroundYoung", "\(c.reclaimsAroundYoung)"),
         ("copyMBsPerParticipant", rate), ("sweepP50ms", sweepP50), ("ttspP50ms", ttspP50), ("youngAllocations", "\(c.youngAllocations)"), ("youngAllocMain", "\(c.youngAllocationsMain)"),
         ("promotedMainMB", mb(c.promotedMainBytes)),

@@ -56,12 +56,43 @@ private let twinRingSrc: String = {
 /// moved from nursery A to B".
 @Test(arguments: YoungMode.allCases)
 func keptBodiesPlacedInAnotherNurseryStayRemembered(_ mode: YoungMode) throws {
+    let (rt, nc, runs, failures, seconds) = try keptAcrossRun(mode, rescan: true)
+    print("verifier-faults kept-across \(mode): keptObjects=\(nc.keptObjects) keptMovedAcross=\(nc.keptMovedAcross) "
+          + "keptAcrossHolders=\(nc.keptAcrossHolders) exhausted=\(nc.exhaustedScavenges) verifierRuns=\(runs) failures=\(failures) bodyS=\(seconds)")
+    #expect(nc.keptMovedAcross > 0, "no kept body moved across: \(nc)")
+    // The fix's own path ran: young holders remembered after the moves
+    // (offloaded mode only; the stop-the-world mode remembers old holders).
+    #expect((nc.keptAcrossHolders > 0) == (mode == .offload), "\(nc)")
+    #expect(runs > 0)
+    rt.noFailures()
+    rt.stop()
+}
+
+/// The fix taken out by its test switch (`keptAcrossWithoutRescan`): the
+/// offloaded mode fails the nursery verifier and the line names a body
+/// kept and moved across. Run in the suite because the broken variant
+/// fails a verifier, not a trap.
+@Test func withoutTheRescanTheVerifierNamesAMovedBody() throws {
+    let (rt, nc, _, failures, _) = try keptAcrossRun(.offload, rescan: false)
+    #expect(nc.keptMovedAcross > 0, "no kept body moved across: \(nc)")
+    #expect(failures > 0, "the broken variant passed the verifier: \(nc)")
+    #expect(rt.image.om.verifierReports.contains { $0.contains("kept and moved from nursery") },
+            "\(rt.image.om.verifierReports.prefix(1))")
+    rt.stop(verifyHeap: false)
+}
+
+/// The twin ring on four background workers, no promotion reserve, a
+/// tight heap, kept bodies placed across nurseries, marking off: the
+/// runtime after the Processes ended, its counters, the verifier's runs
+/// and failures and the body's seconds.
+private func keptAcrossRun(_ mode: YoungMode, rescan: Bool) throws -> (Runtime, NurseryCounters, UInt64, UInt64, String) {
     let t0 = nanoseconds()
     let blocks = try tightBlocks(24)
     let rt = try nurseryRuntime(twinRingSrc, background: 4, nurseryKB: 24, start: true, heapBlocks: blocks,
                                 configure: { c in
         c.nursery.testSwitches.promotionReserveBlocks = 0
         c.nursery.testSwitches.keptAcrossNurseries = true
+        c.nursery.testSwitches.keptAcrossWithoutRescan = !rescan
         // As the reserve tests: without the lazy sweep only full
         // collections free old space, so promotion runs out again and again.
         c.marking.enabled = false
@@ -74,12 +105,6 @@ func keptBodiesPlacedInAnotherNurseryStayRemembered(_ mode: YoungMode) throws {
     for _ in 0..<4 { ps.append(rt.spawn("ring:", [int(n)])) }
     rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
     for p in ps { #expect(rt.result(p) == (n - 1023...n).reduce(0, +)) }
-    let nc = rt.vm.nurseryCounters
-    #expect(nc.keptMovedAcross > 0, "no kept body moved across: \(nc)")
     let (runs, failures) = verifierCounts(rt)
-    #expect(runs > 0)
-    print("verifier-faults kept-across \(mode): keptObjects=\(nc.keptObjects) keptMovedAcross=\(nc.keptMovedAcross) "
-          + "exhausted=\(nc.exhaustedScavenges) verifierRuns=\(runs) failures=\(failures) bodyS=\(String(format: "%.1f", Double(nanoseconds() - t0) / 1e9))")
-    rt.noFailures()
-    rt.stop()
+    return (rt, rt.vm.nurseryCounters, runs, failures, String(format: "%.1f", Double(nanoseconds() - t0) / 1e9))
 }
