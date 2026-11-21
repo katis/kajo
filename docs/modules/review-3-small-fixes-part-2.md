@@ -275,3 +275,63 @@ Build the recommended option; bring the decision back.
    bring the count and the time of each from part 1.
 4. `verify=stops` as the release build's default for `kajo run`:
    recommended no change in this module (every default as today).
+
+## As built
+
+Built by one build agent from 2026-11-21 on 8c24c05; toolchain swift.org
+6.4.2 (swiftly), first on PATH (`~/kajo-scratch/review-3-part-2/env.txt`).
+Work files in `~/kajo-scratch/review-3-part-2/`.
+
+### Item 3: the rule, written before its numbers
+
+Committed here before the bound ran (the file
+`part1/rule-item3.txt`, written 2026-11-21 21:43:24, is the same text):
+
+```
+The third review's small fixes, part 2, item 3 (memory.M2): the rule, written
+before any number of the cheating build was run. Copied with its time
+(cp -p) and committed in the module doc before the bound runs.
+
+Builds. ab.sh's aligned builds (-c release -enable-testing
+-align-all-nofallthru-blocks=5 -align-loops=32, product kajo) of
+  base  = 8c24c05 (git archive), and
+  cheat = 8c24c05 with one line at the top of rememberSlow
+          (Nursery/Barrier.swift): an old holder returns at once
+          (`if headerWord(o) & youngBit == 0 { return }`). Unsound; never
+          committed.
+
+Loads. Headless `kajo run ... --slice-ms 0`, the defaults otherwise (gc cm,
+young offload, reloc on, nursery 4096 KiB):
+  share = prelude.kasm lib.kasm sharestorm.kasm (module 7's matrix load)
+  ring  = prelude.kasm lib.kasm fragmentIters.kasm fragment.kasm
+plus ab.sh's kernels (alloc arith fib ivars sends storeheavy st-closures
+st-ivars st-sends), each at 1 and 8 workers.
+
+Runs. Five runs, the sides interleaved within each run (A then B per
+kernel and worker count). First the base against itself (the same base
+binary on both sides): the spread. Then base against cheat.
+
+Measure. Per row (load, workers): the median over the five runs of
+workerCycles and of ms per side; the ratio cheat/base of the medians; the
+per-run ratios. Checksums equal between the sides in every run (a row whose
+checksum differs or whose run fails is void and said).
+
+Spread. For each row, base-vs-base: S = max over runs of |1 - per-run cycles
+ratio|, and the median ratio's distance from 1.
+
+Decision. Build item 3 if and only if, for share or ring at 1 or 8 workers,
+  (a) the cheat's median cycles ratio is at or below 0.99 (a ceiling of at
+      least 1 percent of cycles), and
+  (b) 1 - that ratio is greater than the row's base-vs-base S.
+Cycles decide; time is reported beside them. A gain on one row only (ring
+only, or 8 workers only) satisfies the rule (the brief's open question 2,
+recommended: build).
+
+If the cheat cannot run share or ring (it is unsound: a lost young object
+may crash a run or change its checksum), that row is void for the cheat and
+the bound is taken instead from a sound cheat B on the same base: the
+remembered-bit test moved to the top of rememberSlow (load young state,
+nursery, the remembered word seq_cst, return if set), no counter and no
+skipSite before it: the fix's own order without its counter. Same rule (a)
+and (b) on B. This is said in the doc as a deviation.
+```
