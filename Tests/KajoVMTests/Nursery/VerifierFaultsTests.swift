@@ -79,9 +79,13 @@ func keptBodiesPlacedInAnotherNurseryStayRemembered(_ mode: YoungMode) throws {
 /// The fix taken out by its test switch (`keptAcrossWithoutRescan`): the
 /// offloaded mode fails the nursery verifier and the line names a body
 /// kept and moved across. Rounds repeat (at most four) until a round
-/// split a pair. Run in the suite because the broken variant fails a
-/// verifier, not a trap.
-@Test func withoutTheRescanTheVerifierNamesAMovedBody() throws {
+/// split a pair. Run by hand (`KAJO_BROKEN_KEPT_ACROSS=1`), not in the
+/// suite: in the loaded suite (swift-test-load on 1602cd9) the young
+/// collector freed moved bodies their unremembered holders still named,
+/// the rings answered wrong sums and Processes did not end; a broken
+/// variant that damages the heap may trap, and a trap ends the bundle.
+@Test(.enabled(if: ProcessInfo.processInfo.environment["KAJO_BROKEN_KEPT_ACROSS"] != nil))
+func withoutTheRescanTheVerifierNamesAMovedBody() throws {
     var failed = false
     for round in 1...4 {
         let (rt, nc, _, failures, seconds) = try keptAcrossRun(.offload, rescan: false)

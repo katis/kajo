@@ -63,10 +63,17 @@ private func headless(_ files: [(path: String, text: String)], young: String, wo
     o.markerSlowdown = slowdown
     o.stalls = stalls
     o.relocation = reloc
-    // The build's level (on in a checked build): the trap the third
-    // review's small fixes found here under young=offload was fault 2 of
-    // docs/modules/verifier-faults.md (a kept body placed in another
-    // nursery left young holders unremembered), fixed in placeKept.
+    // The trap the third review's small fixes found here under
+    // young=offload was fault 2 of docs/modules/verifier-faults.md (a kept
+    // body placed in another nursery left young holders unremembered),
+    // fixed in placeKept and tested on its own (VerifierFaultsTests). The
+    // heap verifiers run here in a release build (test-release) and not in
+    // a checked one: at the checked build's level every stall test's body
+    // took 4 to 12 times as long in swift-test-load (the ring 54 to 430 s,
+    // the full heap 307 to 1347 s, the gate 811 to 1861 s;
+    // docs/modules/verifier-faults.md, part 4), the owner's rule for the
+    // kernel's tests (the release gate verifies) applied here.
+    o.verify = !checkedBuild
     if native { o.native = try nativeModule(files) }
     let out = Headless.run(files, options: o)
     var report: [String: String] = [:]
