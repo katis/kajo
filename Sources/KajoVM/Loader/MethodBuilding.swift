@@ -48,6 +48,13 @@ protocol MethodHeap {
     mutating func pointers(_ cls: UInt64, _ slots: Int) throws(LoadError) -> Oop
     mutating func bytes(_ cls: UInt64, _ b: [UInt8]) throws(LoadError) -> Oop
     mutating func keep(_ o: Oop)
+    /// Store literal `v` into slot `i` of the literal frame `frame` (old,
+    /// made by `pointers`). The verifier's faults
+    /// (docs/modules/verifier-faults.md): a literal used as it is may be a
+    /// young object in a running VM, so the make primitive's heap stores it
+    /// with the barrier (`BarrierSite.methodLiteral`); the image build's,
+    /// before any VM, has nothing young.
+    mutating func storeLiteral(_ frame: Oop, _ i: Int, _ v: Oop)
 }
 
 /// Make `top` (a method, `selector` a Symbol) and its block methods
@@ -120,7 +127,7 @@ func makeMethodObjects<H: MethodHeap>(_ top: MethodParts, blocks: [MethodParts],
         heap.keep(bytes)
         let litArray = try heap.pointers(WellKnown.array, lits.count)
         if heap.pinsForGood { om.pinForGood(litArray) }
-        for (i, v) in lits.enumerated() { om.store(litArray, i, v) }
+        for (i, v) in lits.enumerated() { heap.storeLiteral(litArray, i, v) }
         om.setReadOnly(litArray, true)
         heap.keep(litArray)
         let meth = try heap.pointers(WellKnown.method, MethodLayout.size)

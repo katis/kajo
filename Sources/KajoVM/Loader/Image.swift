@@ -867,6 +867,7 @@ private struct ImageMethodHeap: MethodHeap {
     mutating func pointers(_ cls: UInt64, _ slots: Int) throws(LoadError) -> Oop { try image.allocate(cls, slots: slots) }
     mutating func bytes(_ cls: UInt64, _ b: [UInt8]) throws(LoadError) -> Oop { try image.allocateBytes(cls, b, roots: []) }
     mutating func keep(_ o: Oop) { if o.isObject { handles.append(image.om.addRoot(o)) } }
+    mutating func storeLiteral(_ frame: Oop, _ i: Int, _ v: Oop) { om.store(frame, i, v) }
 }
 
 // MARK: - module 8d: the syntax fuzzer's make-and-run mode

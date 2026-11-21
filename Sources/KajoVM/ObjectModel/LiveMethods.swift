@@ -376,6 +376,18 @@ struct LiveMethodHeap: MethodHeap {
     }
 
     mutating func keep(_ o: Oop) { if o.isObject { roots.append(o) } }
+
+    /// The verifier's faults (docs/modules/verifier-faults.md, fault 1): a
+    /// literal `CodeReader.literal` takes as it is ("any other object": an
+    /// instance of a class that is not sealed) may be young, and the frame
+    /// is old. The barrier remembers the frame for the literal's nursery,
+    /// as any old holder (its slow path writes the remembered word, a side
+    /// table, never the header; the scavenge and the young collector only
+    /// read a remembered holder's slots, so the frame's read-only bit, set
+    /// after this store, is never in their way). Every other store of
+    /// `makeMethodObjects` stores an old value or an immediate (part 1's
+    /// table).
+    mutating func storeLiteral(_ frame: Oop, _ i: Int, _ v: Oop) { m.store(frame, i, v, .methodLiteral) }
 }
 
 /// Primitive 166: the receiver's bytecodes as the compilers emitted them,
