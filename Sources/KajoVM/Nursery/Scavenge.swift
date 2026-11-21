@@ -794,9 +794,19 @@ private func placeKept(_ n: NurseryPointer, parts: [Int]) {
     // other as well (a superset is sound: a holder is scanned once more).
     var widen = [UInt32](repeating: 0, count: count)
     var moved: [UInt64] = []
+    // The test switch `keptAcrossNurseries` also deals the bodies out to
+    // the other nurseries in turn, so that a holder and the body it names,
+    // kept together, land in two nurseries (the split the gate's line
+    // showed); otherwise the first nursery with room takes each.
+    let deal = unsafe n.pointee.config.testSwitches.keptAcrossNurseries
+    var turn = 0
     for x in left {
         var placed = false
-        for j in 0..<count where j != x.from {
+        let first = deal ? turn % count : 0
+        turn &+= 1
+        for step in 0..<count {
+            let j = (first + step) % count
+            if j == x.from { continue }
             if place(x.entry, x.off, into: j) {
                 let hp = unsafe om.headerAtomic(x.entry)
                 let h = unsafe hp.pointee.load(ordering: .relaxed)

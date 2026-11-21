@@ -56,29 +56,45 @@ private let twinRingSrc: String = {
 /// moved from nursery A to B".
 @Test(arguments: YoungMode.allCases)
 func keptBodiesPlacedInAnotherNurseryStayRemembered(_ mode: YoungMode) throws {
-    let (rt, nc, runs, failures, seconds) = try keptAcrossRun(mode, rescan: true)
-    print("verifier-faults kept-across \(mode): keptObjects=\(nc.keptObjects) keptMovedAcross=\(nc.keptMovedAcross) "
-          + "keptAcrossHolders=\(nc.keptAcrossHolders) exhausted=\(nc.exhaustedScavenges) verifierRuns=\(runs) failures=\(failures) bodyS=\(seconds)")
-    #expect(nc.keptMovedAcross > 0, "no kept body moved across: \(nc)")
-    // The fix's own path ran: young holders remembered after the moves
-    // (offloaded mode only; the stop-the-world mode remembers old holders).
-    #expect((nc.keptAcrossHolders > 0) == (mode == .offload), "\(nc)")
-    #expect(runs > 0)
-    rt.noFailures()
-    rt.stop()
+    // A round's split pairs depend on how the participants shared the
+    // copying; rounds repeat (at most four) until the fix's own path ran
+    // (offloaded mode: young holders remembered after the moves) or, in the
+    // stop-the-world mode, once (it remembers old holders only).
+    var holders: UInt64 = 0, moved: UInt64 = 0
+    for round in 1...4 {
+        let (rt, nc, runs, failures, seconds) = try keptAcrossRun(mode, rescan: true)
+        print("verifier-faults kept-across \(mode) round \(round): keptObjects=\(nc.keptObjects) keptMovedAcross=\(nc.keptMovedAcross) "
+              + "keptAcrossHolders=\(nc.keptAcrossHolders) exhausted=\(nc.exhaustedScavenges) verifierRuns=\(runs) failures=\(failures) bodyS=\(seconds)")
+        #expect(runs > 0)
+        rt.noFailures()
+        rt.stop()
+        holders += nc.keptAcrossHolders
+        moved += nc.keptMovedAcross
+        if mode != .offload || holders > 0 { break }
+    }
+    #expect(moved > 0, "no kept body moved across")
+    #expect((holders > 0) == (mode == .offload), "keptAcrossHolders \(holders)")
 }
 
 /// The fix taken out by its test switch (`keptAcrossWithoutRescan`): the
 /// offloaded mode fails the nursery verifier and the line names a body
-/// kept and moved across. Run in the suite because the broken variant
-/// fails a verifier, not a trap.
+/// kept and moved across. Rounds repeat (at most four) until a round
+/// split a pair. Run in the suite because the broken variant fails a
+/// verifier, not a trap.
 @Test func withoutTheRescanTheVerifierNamesAMovedBody() throws {
-    let (rt, nc, _, failures, _) = try keptAcrossRun(.offload, rescan: false)
-    #expect(nc.keptMovedAcross > 0, "no kept body moved across: \(nc)")
-    #expect(failures > 0, "the broken variant passed the verifier: \(nc)")
-    #expect(rt.image.om.verifierReports.contains { $0.contains("kept and moved from nursery") },
-            "\(rt.image.om.verifierReports.prefix(1))")
-    rt.stop(verifyHeap: false)
+    var failed = false
+    for round in 1...4 {
+        let (rt, nc, _, failures, seconds) = try keptAcrossRun(.offload, rescan: false)
+        let first = rt.image.om.verifierReports.first ?? "-"
+        print("verifier-faults broken keptAcrossWithoutRescan round \(round): keptMovedAcross=\(nc.keptMovedAcross) failures=\(failures) bodyS=\(seconds) \(first)")
+        if failures > 0 {
+            #expect(rt.image.om.verifierReports.contains { $0.contains("kept and moved from nursery") }, "\(first)")
+            failed = true
+        }
+        rt.stop(verifyHeap: false)
+        if failed { break }
+    }
+    #expect(failed, "the broken variant passed the verifier in four rounds")
 }
 
 /// The twin ring on four background workers, no promotion reserve, a

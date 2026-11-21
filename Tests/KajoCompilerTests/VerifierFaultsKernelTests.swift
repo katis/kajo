@@ -105,6 +105,7 @@ private final class MakeYoungRun {
         defer { t.end() }
         #expect(try t.answer("make:", [1]) == 1)
         t.vm.scavenge()
+        print("verifier-faults broken methodLiteral: failures=\(t.failures) \(t.reports.first ?? "-")")
         #expect(t.failures > 0, "the broken variant passed the verifier")
         #expect(t.reports.first?.contains("is not remembered for it [holder: Array") == true, "\(t.reports.prefix(1))")
     }
