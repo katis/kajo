@@ -383,6 +383,11 @@ struct YoungSampler {
     /// Promotion by young collections (module 5's rate), relaxed atomics.
     let promotedBytes: UnsafeMutablePointer<Atomic<UInt64>>
     let promotedObjects: UnsafeMutablePointer<Atomic<UInt64>>
+    /// The third review's small fixes, part 2, item 4 (memory.A1): objects
+    /// the concurrent collector first copied through a weak object's
+    /// indexed slot, which the stop-the-world scavenge would not have
+    /// traced (`weakOnlyCopies` on the run line). Relaxed.
+    let weakOnlyCopies: UnsafeMutablePointer<Atomic<UInt64>>
     let sampler: UnsafeMutablePointer<YoungSampler>
     let samplerLock: UnsafeMutablePointer<pthread_mutex_t>
     /// Test primitive 39 (`slowPeek:`): while the gate is nonzero the

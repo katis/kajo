@@ -55,6 +55,7 @@ extension YoungShared {
             shutdown: lined(Atomic<Bool>(false)), collectorWaits: lined(Atomic<UInt64>(0)),
             collectorMachThread: lined(Atomic<UInt32>(0)), log: lined(YoungLog(logCapacity: vm.pointee.config.logCapacity)),
             promotedBytes: lined(Atomic<UInt64>(0)), promotedObjects: lined(Atomic<UInt64>(0)),
+            weakOnlyCopies: lined(Atomic<UInt64>(0)),
             sampler: lined(YoungSampler()), samplerLock: makeMutex(), peekGate: lined(Atomic<Int>(0)),
             peekHeld: lined(Atomic<Int>(0)), copyWindow: lined(EnterWindowHook())))
         unsafe vm.pointee.young = y
@@ -105,6 +106,7 @@ extension YoungShared {
         unsafe unlined(s.log)
         unsafe unlined(s.promotedBytes)
         unsafe unlined(s.promotedObjects)
+        unsafe unlined(s.weakOnlyCopies)
         unsafe unlined(s.sampler)
         unsafe freeMutex(s.samplerLock)
         unsafe unlined(s.peekGate)
@@ -167,6 +169,7 @@ struct YoungCounters: Sendable {
     var collectorWakeups: UInt64 = 0
     var promotedBytes: UInt64 = 0
     var promotedObjects: UInt64 = 0
+    var weakOnlyCopies: UInt64 = 0
     /// The main worker always offloads, part 1: collections on the main
     /// thread by whose nursery, and the host's nursery's.
     var onMain = MainThreadCollections()
@@ -188,7 +191,8 @@ extension VM {
             youngRootScanMaxNs: l.youngRootScanMaxNs, youngRootWords: l.youngRootWords, collectorCpuNs: l.collectorCpuNs,
             collectorQoS: l.collectorQoS, collectorWakeups: y.pointee.collectorWaits.pointee.load(ordering: .relaxed),
             promotedBytes: y.pointee.promotedBytes.pointee.load(ordering: .relaxed),
-            promotedObjects: y.pointee.promotedObjects.pointee.load(ordering: .relaxed), onMain: l.onMain)
+            promotedObjects: y.pointee.promotedObjects.pointee.load(ordering: .relaxed),
+            weakOnlyCopies: y.pointee.weakOnlyCopies.pointee.load(ordering: .relaxed), onMain: l.onMain)
     }
 
     /// The last collections and rounds (`VMConfig.logCapacity` of each),

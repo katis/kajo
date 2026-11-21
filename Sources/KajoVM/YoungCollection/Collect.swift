@@ -248,6 +248,9 @@ func collectYoung(_ vm: VMPointer, _ y: YoungPointer, _ c: WorkerPointer, _ k: I
     st.claimFailures = unsafe col.st.claimFailures
     unsafe y.pointee.promotedBytes.pointee.wrappingAdd(st.promotedBytes, ordering: .relaxed)
     unsafe y.pointee.promotedObjects.pointee.wrappingAdd(st.promotedObjects, ordering: .relaxed)
+    if unsafe col.st.weakOnlyCopies != 0 {
+        unsafe y.pointee.weakOnlyCopies.pointee.wrappingAdd(col.st.weakOnlyCopies, ordering: .relaxed)
+    }
     unsafe work.pointee.busy = false
     let onMainThread = pthread_main_np() != 0
 
@@ -309,6 +312,8 @@ struct CollectionTally {
     var hazardRetries: UInt64 = 0
     var newHalfWords: UInt64 = 0
     var claimFailures: UInt64 = 0
+    /// Objects first copied through a weak object's indexed slot (item 4).
+    var weakOnlyCopies: UInt64 = 0
 }
 
 /// The collector of nursery `k`: the constants it reads and its tally,
@@ -328,6 +333,10 @@ struct CollectionTally {
     let survToEnd: UInt64
     let participant: Bool
     let roundEvery: Int
+    /// The class formats (module 4's table): stable for the collection,
+    /// since a class is defined in a stop and stops wait for open
+    /// collections. Read for the weak bit only (item 4's counter).
+    let formats: UnsafeMutablePointer<UInt64>
     var st = CollectionTally()
 
     init(vm: VMPointer, y: YoungPointer, c: WorkerPointer, k: Int, ctx: AllocContext) {
@@ -345,6 +354,26 @@ struct CollectionTally {
         unsafe survToEnd = v.pointee.survToStart &+ n.pointee.survivorBytes
         unsafe participant = isRoundParticipant(vm, c)
         unsafe roundEvery = y.pointee.config.stress.contains(.roundAtEveryPoll) ? 16 : 0
+        unsafe formats = om.gc.pointee.classFormats.baseAddress.unsafelyUnwrapped
+    }
+
+    /// The first indexed slot of a weak object (its named slots), or
+    /// `count` for any other: the slots from there on are weak, which this
+    /// collector traces as strong (v0) and counts (item 4).
+    @inline(__always)
+    func weakFrom(_ h: UInt64, _ count: Int) -> Int {
+        let f = unsafe formats[Int(truncatingIfNeeded: h & Header.classMask)]
+        if _fastPath(f & ClassFormat.weakBit == 0) { return count }
+        return Swift.min(count, Int(truncatingIfNeeded: f & ClassFormat.namedMask))
+    }
+
+    /// `classify` of a weak slot's referent, counting a first copy.
+    @inline(never)
+    mutating func classifyWeak(_ v: UInt64) -> Int {
+        let before = unsafe st.copiedObjects
+        let r = unsafe classify(v)
+        if unsafe st.copiedObjects != before { unsafe st.weakOnlyCopies &+= 1 }
+        return r
     }
 
     /// Between objects the collector holds no body pointer: advance its
@@ -482,9 +511,14 @@ struct CollectionTally {
         let s = unsafe om.stateWord(hld)
         let count = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
         var namesK = false
+        let strong = unsafe weakFrom(h, count)
         var i = 0
-        while i < count {
+        while i < strong {
             if unsafe classify(om.loadAtomic(bodyOffset: s, i)) == 1 { namesK = true }
+            i &+= 1
+        }
+        while _slowPath(i < count) {
+            if unsafe classifyWeak(om.loadAtomic(bodyOffset: s, i)) == 1 { namesK = true }
             i &+= 1
         }
         if namesK { unsafe keepForNext(hld) }
@@ -523,9 +557,15 @@ struct CollectionTally {
             let s = unsafe om.stateWord(o)
             let count = Int(truncatingIfNeeded: (h & Header.countMask) &>> Header.countShift)
             var namesK = false
+            let strong = unsafe weakFrom(h, count)
             var i = 0
-            while i < count {
+            while i < strong {
                 let r = unsafe classify(om.loadAtomic(bodyOffset: s, i))
+                if r == 1 { namesK = true } else if r >= 2 { unsafe rememberFor(o, r &- 2) }
+                i &+= 1
+            }
+            while _slowPath(i < count) {
+                let r = unsafe classifyWeak(om.loadAtomic(bodyOffset: s, i))
                 if r == 1 { namesK = true } else if r >= 2 { unsafe rememberFor(o, r &- 2) }
                 i &+= 1
             }

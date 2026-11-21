@@ -278,7 +278,7 @@ public enum Headless {
         }
         let c = image.om.counters
         let ts = clock_gettime_nsec_np(CLOCK_REALTIME) / 1000
-        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations),\"verify\":\"\(options.verifies ? "on" : "off")\",\"verifies\":\(c.verifierRuns)}".utf8))
+        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations),\"verify\":\"\(options.verifies ? "on" : "off")\",\"verifies\":\(c.verifierRuns),\"weakOnlyCopies\":\(vm.youngCounters.weakOnlyCopies),\"ycPromoted\":\(vm.youngCounters.promotedObjects)}".utf8))
         if let error { return .failure(.vm(error)) }
         guard answer.isSmallInteger else { return .failure(.notAnInteger("\(answer)")) }
         return .success(answer.smallIntegerValue)
@@ -1067,6 +1067,7 @@ func youngReport(_ vm: VM, ms: Double) -> [(String, String)] {
         ("ycCopyMBs", cpu == 0 ? "-" : f(Double(copied) / Double(cpu) * 1e3)),
         ("ycSurvived", "\(totals.survivedObjects)"), ("ycPromoted", "\(c.promotedObjects)"),
         ("ycPromotedMB", f(Double(c.promotedBytes) / 1e6)),
+        ("weakOnlyCopies", "\(c.weakOnlyCopies)"),
         ("ycOverflowMB", f(Double(totals.overflowBytes) / 1e6)),
         ("edenWaits", "\(edenWaits)"), ("edenWaitMs", msS(edenNs)), ("edenWaitMaxMs", msS(edenMax)),
         ("ycCarried", "\(log.last?.carried ?? 0)"), ("ycHolders", "\(totals.holders)"),

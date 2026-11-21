@@ -335,3 +335,211 @@ nursery, the remembered word seq_cst, return if set), no counter and no
 skipSite before it: the fix's own order without its counter. Same rule (a)
 and (b) on B. This is said in the doc as a deviation.
 ```
+
+## Part 1: measured and bounded (no fix)
+
+Every number below names its file under `~/kajo-scratch/review-3-part-2/`.
+Timings are ab.sh's aligned `-enable-testing` release builds, five runs
+interleaved per row, `--slice-ms 0`, `workerCycles` beside wall time
+(`scripts/bench2.sh`, `scripts/table2.py`). The machine was not idle:
+`spotlightknowledged`, a system process of the owner's account, held one
+core near 100 percent through the runs (load average 4 to 7 on 12 cores,
+each `bench.txt` header). One thing of this module measured at a time.
+
+### Item 1: starting position 1, right
+
+On 8c24c05 with `barrierWord` returning `flag + 3`
+(`broken/flag3-src`, `git archive` plus the one line), the native
+engine's three gates pass (`native-check.sh golden`: 24 ok rows;
+`kernel-test`: kernel and dev images, product and full configurations,
+every test passed; `cc`: mac and ios, 0 warnings; `broken/flag3-native-*.txt`),
+the layout hash is equal (`0x9d8b8adaace03dcf 0x14942b18a4940483` both
+sides) and the generated store still tests word 2
+(`AT(s, W_FLAG, u32 *) + 2`) while the VM sets word 3
+(`broken/flag3-summary.txt`). Every native store made while marking or
+while a young collection is open would skip its barrier; no gate sees it.
+
+### Item 2: Float arithmetic
+
+A counting build of 8c24c05 (`part1/count-src`: counters at
+`largeArith`'s entry, at `bigInt`'s SmallInteger branch, which builds the
+`BigInt`'s Swift array, and before `floatArith` in `arith`; not
+committed) over `floats` (30 M iterations, 1 worker), the same in both
+engines (`part1/count-floats.txt`, `count-floats-native.txt`, the native
+run with a module the counting build generated; the base's module was
+refused, "its layout hash is not this VM's build", since the counters
+moved the worker's fields):
+
+| counter | interpreter | native |
+|---|---|---|
+| special sends answered by the tier | 120 000 000 | (same) |
+| `largeArith` entered | 120 000 000 | 120 000 000 |
+| `BigInt` arrays built (a `malloc` and a `free` each) | 30 000 000 | 30 000 000 |
+| `floatArith` reached | 120 000 000 | 120 000 000 |
+| floats boxed | 0 | 0 |
+
+Every float special send (4 an iteration) takes the out-of-line
+LargeInteger tier first; every SmallInteger times SmallFloat (1 an
+iteration) allocates a Swift array there. Starting position 2 right: the
+SmallInteger-op-Float path allocates; and no operation of `floats`
+needs a save (none boxes, none polls), though all of them save.
+
+The base against itself, `floats` (`part1/floats-self-interp/`,
+`floats-self-native/`):
+
+| engine | workers | cycles B/A median | per-run range | ms A / B |
+|---|---|---|---|---|
+| interpreter | 1 | 1.0011 | 0.9945..1.0040 | 3193.6 / 3196.3 |
+| interpreter | 8 | 1.0314 | 0.7194..1.4607 | 458.2 / 548.9 |
+| native | 1 | 0.9920 | 0.9892..1.0057 | 2901.3 / 2877.0 |
+| native | 8 | 0.9768 | 0.8308..1.3826 | 412.5 / 399.4 |
+
+At 8 workers the base is not comparable with itself (a run's ratio from
+0.72 to 1.46): eight threads `malloc` and `free` a `BigInt` array 30 M
+times between them.
+
+### Item 3: the bound, and not built
+
+The rule is above, committed (5e10684) before any of these numbers ran.
+
+The base against itself (`part1/self/table.md`) and the brief's cheating
+build, an old holder returning at the top of `rememberSlow`
+(`part1/cheat/table.md`):
+
+| row | base vs base: median, S | cheat: median cycles ratio |
+|---|---|---|
+| share, 1 | 1.0007, 0.0016 | 0.9917 |
+| share, 8 | 0.9947, 0.0257 | void: 5 of 5 runs failed (one "doesNotUnderstand #check", four with no line) |
+| ring, 1 | 1.0001, 0.0220 | void: 5 of 5 "doesNotUnderstand #at:put: in fragStep:i:" or no line |
+| ring, 8 | 0.9875, 0.0287 | void: 5 of 5 failed |
+
+The cheat is unsound and three of its four rows lost objects, as the rule
+foresaw; share at 1 worker gains 0.83 percent, under (a). By the rule the
+bound is then cheat B, the remembered-bit test moved to the top of
+`rememberSlow` with no counter and no `skipSite` before it, sound
+(`part1/cheatb/table.md`, checksums equal in every run):
+
+| row | cheat B median cycles ratio (exact) | (a) at or below 0.99 | (b) 1 - ratio above S |
+|---|---|---|---|
+| share, 1 | 0.99369 | no | (0.0063 against 0.0016) |
+| share, 8 | 0.98996 | yes | no: 0.0100 against 0.0257 |
+| ring, 1 | 0.99516 | no | no |
+| ring, 8 | 1.00071 | no | no |
+
+No row meets (a) and (b). **Item 3 is not built.** The other kernels under
+cheat B are within their own spread (the 8-worker rows of that run were
+noisier in time than the base's own run; cycles decide). Starting
+position 4 (a gain above 1 percent outside the spread) wrong: the bound is
+under the spread.
+
+Starting position 3, right: cheat B's own counter counts only the calls
+that pass its early exit. Per run of 3 M iterations (run 1 of each row,
+`part1/cheatb/bench.txt`): share at 1 worker 4 369 399 calls, 1 past the
+test; share at 8, 35 998 634 and 4 006 (0.011 percent); ring at 1 and 8,
+2 000 000 and 2 023 and 2 024 (0.10 percent). More than 99.89 percent of
+the calls leave at the remembered-bit test.
+
+### Item 4: `weakOnlyCopies`
+
+The counter is built (this commit): objects the concurrent young
+collector first copied through a weak object's indexed slot, counted in
+`scanHolder` and `drainGrey` by the tally's copy count before and after
+`classify` of each weak slot (`classifyWeak`, out of line; the strong
+slots' loop is unchanged; the weak bit is one load of the class formats
+table per object, read once per collection). On the run line as
+`weakOnlyCopies`, in the shells' rows as `gc_weakOnlyCopies`, in `kajo
+test`'s summary line and the devsession line beside `ycPromoted`. It is an
+upper bound on objects held only weakly: a referent first reached through a
+weak slot and then through a strong one is counted.
+
+| load | weakOnlyCopies | ycPromoted | file (`part1/weak/`) |
+|---|---|---|---|
+| kernel tests (`kajo test`, release, 262 passed) | 0 | 923 895 | `kernel-test.err` |
+| tools' scripted session (`mode=devsession`, Mac shell, Release) | 2 | 1 370 041 | `devsession.txt` |
+| `collections`, 1 worker | 0 | 600 009 | `collections-1.txt` |
+| `collections`, 8 workers | 0 | 4 800 072 | `collections-8.txt` |
+| a million Symbols interned and dropped, 1 worker | 0 | 0 | `symbols-1.txt` |
+| the same split over 8 workers | 0 | 0 | `symbols-split-8.txt` |
+
+Starting position 5 half wrong. Near zero in the kernel tests, right. In
+a load that interns and drops Symbols the counter is 0 and so is
+`ycPromoted`: a Symbol is made old (an old allocation under the intern
+lock, `docs/modules/symbol-interning.md`), so the symbol table's weak
+buckets never name a young object, and memory.A1's example does not
+arise. The weak pass for the concurrent collector would buy, on these
+loads, two objects in 1.37 million promoted.
+
+The test: `weakOnlyCopiesCountsWhatOnlyAWeakSlotHeld`
+(`Tests/KajoVMTests/YoungCollection/WeakOnlyCopiesTests.swift`): a weak
+bag whose slot takes a fresh object every iteration; the counter reads
+above 0 under offload (30 at 2 M iterations, `work/weakonly-test.txt`; the
+committed test runs 500 000 to keep its debug time near 3 s)
+and the young report is absent under `--young stw`.
+
+### Item 5: the switch table
+
+75 fields in the six structs today (`part1/switches-raw.txt`,
+`scripts/switches.py`; the reviewer counted 73, the verifier's faults
+added two). For each, the first test that sets it (a `.field` assignment
+or a key path; `part1/switch-tests.txt`, `scripts/switch-tests.py`).
+Seventy-one are set by a test. Four are set by none:
+
+| field | read by | today |
+|---|---|---|
+| `VMTestSwitches.noPendingRoots` | `startDelay` (`Processes/External.swift`) | named in no test and no doc |
+| `MarkingTestSwitches.youngRootsInStop` | `initialMark` (`Marking/InitialMark.swift`) | module 7's in-pause scan kept as a switch (`final-mark.md`); no test |
+| `MarkingTestSwitches.stallRelocation` | the relocator's pass (`Relocation/Relocator.swift`), set from `--stall-reloc` and the shells' `stallreloc=` | an option, not a broken variant |
+| `YoungTestSwitches.mainWaitsForWantedStops` | `openYoungCollection` | its test's comment says "run by hand" (the reviewer's grep counted the comment) |
+
+Starting position 6 right: all four are read by product code. The broken
+variants whose bad value runs only by hand, each run once on 8c24c05 in
+`broken/byhand-src` (a debug build, 39 s from the cache;
+`broken/byhand-times.txt`):
+
+| variant | command | what it gave | time |
+|---|---|---|---|
+| `flushAfterStop` | `registersAreFlushedBeforeEveryStop` with `arguments: [true]` | trap, "Assertion failed: marking a reference to a free entry: @1536" (`Collector.swift:213`), as `workers.md` says | 2 s |
+| `mainWaitsForWantedStops` | the switch set in `theMainWorkerOpensOneCollectionWhileAStopIsWanted` | "Expectation failed: openedInside" and "opensWhileWanted == 1" after 30 s, as its comment says | 31 s |
+| `lateSignalsIgnoreEnd` | `KAJO_BROKEN_DELAY_END=1 swift test --filter brokenVariantALateTimerTouchesTheFreedVM` | the test process "exited with unexpected signal code 11", as `delay-outlives-vm.md` says | 3 s |
+| `stallRelocation` (an option) | `kajo run fragment --workers 8 --heap 64 --marker-slowdown 32 --stall-reloc plain\|reserve\|skip` | each value reaches its own counter: plain 0 reserve cycles and 0 skipped, reserve 6 and 0, skip 0 and 10 (with 4 fallbacks, the variant part 4 discarded); checksums equal | 5 s each |
+
+Files: `broken/byhand-*.txt`, `part1/stallreloc-*.txt`. Three by-hand
+variants of switch fields, 36 s together after a 39 s build; the other
+by-hand variants (the generator's `AOTOptions.broken*`, the
+environment-switched shell variants, the trapping pins) are outside the
+six structs and are not counted here (open question 3).
+
+### Item 6: what decides "checked", and what every gate verifies
+
+Every place that sets a verifier's default or overrides it, on 8c24c05:
+
+| place | what it decides |
+|---|---|
+| `ObjectMemory/Config.swift:81-82` | `verify = checkedBuild`; `onVerifyFailure = checkedBuild ? .trap : .record` |
+| `Workers/VMConfig.swift:53` | `verifyStops = checkedBuild` (the stop and schedule verifiers) |
+| `Workers/VMConfig.swift:58` | `verifySymbols = false` in every build (tests turn it on) |
+| `YoungCollection/YoungConfig.swift:58` | `verify = false` in every build (a heap walk after every collection) |
+| `Headless.swift:23, 324, 337-338` | `verifies = verify ?? checkedBuild`; young and object-memory verifiers from it; `.trap`; `verifyStops` left at the build's default |
+| `Shell/Shell.swift:358` | a `ShellVM` with no word from its host: `verify = false` |
+| `kajo/main.swift:135`, `kajo/Test.swift:37` | `--verify`, `--no-verify` |
+| `Tests/.../Runtime.swift:25, 34-35` | `verifyStops = true` in every build; `verify` (default true); `.record` |
+| other fixtures | `SavedProcessTests` (as `Runtime`), `makeMemory`, `makeImage`, `largeMemory`, `ImageTests` (object memory only), `FuzzEntry` (on, trap), `KernelTestParts` and the stall tests' helper (`verify = !checkedBuild`), `VerifierFaultsKernelTests` (on), `RedefineOrderTests` (`verifyStops`) |
+
+What each gate verifies, read from the last core run's own outputs
+(`~/kajo-scratch/verifier-faults/check/`, 2c13ed3) and the code each
+runs:
+
+| gate | build | stop verifiers | heap verifiers | printed |
+|---|---|---|---|---|
+| `kernel-test` (`--no-verify`) | debug | on (the checked default) | off | `verify=off verifies=0` |
+| `tools-test` (`--no-verify`, Smalltalk tier) | debug | on | off | `verify=off` |
+| `test-release`, `KernelTestParts` | release | off | on (object memory, young) | `verify=on verifies=734`, `1099` |
+| `swift-test-load`, `tsan`, `tsan-load`, `KernelTestParts` | debug | on | off | `verify=off verifies=0` (2 parts each) |
+| the same gates, `Runtime` tests | both | on | object memory on unless a test says `false`; young as each test sets | (not printed) |
+| `native-kernel-test`, `native-golden`, `golden` | release | off | off | `verify=off verifies=0` (`kajo test`), not printed (`kajo run`) |
+| `soak` (the random programs) | release | on (`Runtime`) | per configuration | (not printed) |
+| the matrices (shells, `ShellVM`) | Release apps | off | off | (not printed) |
+
+Starting position 7 is decided in part 2: three levels cannot express
+"heap verifiers without the stop verifiers", which is what `test-release`
+runs today; see part 2's item 6.

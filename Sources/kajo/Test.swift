@@ -69,8 +69,12 @@ func runTests(_ args: [String]) -> Never {
     FileHandle.standardError.write(report.summary.data(using: .utf8)!)
     // The third review's small fixes, item 1: what the run checked, from
     // the gc summary (the verifier runs counted by the object memory).
-    let verifies = report.events.last { $0["kind"] as? String == "gc" && $0["collection"] as? String == "summary" }?["verifies"] as? Int
-    FileHandle.standardError.write("kajo test: verify=\(options.verifies ? "on" : "off") verifies=\(verifies.map(String.init) ?? "-")\n".data(using: .utf8)!)
+    let summary = report.events.last { $0["kind"] as? String == "gc" && $0["collection"] as? String == "summary" }
+    let verifies = summary?["verifies"] as? Int
+    // The third review's small fixes, part 2, item 4: the weak-only copies
+    // beside the young collections' promotions.
+    let weakOnly = summary?["weakOnlyCopies"] as? Int, promoted = summary?["ycPromoted"] as? Int
+    FileHandle.standardError.write("kajo test: verify=\(options.verifies ? "on" : "off") verifies=\(verifies.map(String.init) ?? "-") weakOnlyCopies=\(weakOnly.map(String.init) ?? "-") ycPromoted=\(promoted.map(String.init) ?? "-")\n".data(using: .utf8)!)
     // AOT 1: the native engine's counts (bound, interpreted, declined, switches).
     for e in events where e.starts(with: Array("{\"v\":1,\"kind\":\"native\"".utf8)) {
         FileHandle.standardError.write(Data(Array("native: ".utf8) + e + [10]))

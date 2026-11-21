@@ -373,6 +373,11 @@ nonisolated func devTranscriptSink() -> @Sendable ([UInt8]) -> Void {
         line += " view_slowest=" + slow.map { "\($0.key):\($0.value.n):\(f1(Double($0.value.total) / 1e6)):\(f1(Double($0.value.max) / 1e6))" }.joined(separator: ",")
         let total = viewNs.values.reduce(UInt64(0)) { $0 &+ $1.total }
         line += " view_total_ms=\(f1(Double(total) / 1e6))"
+        // The third review's small fixes, part 2, item 4: the weak-only
+        // copies of the session beside the young collections' promotions.
+        for (k, v) in runtime.vm.collectorReport(seconds: 1) where k == "weakOnlyCopies" || k == "ycPromoted" {
+            line += " gc_\(k)=\(v)"
+        }
         if let failure { line += " FAILED=1 error=\(failure)" }
         if let json {
             // Each step's frames missed: its start is on the image's clock
