@@ -775,3 +775,27 @@ The test switch `noSmallFloatPath`: `smallFloatAnswers` 27 315 with the
 path and 0 with the switch on the same table (`work/new-tests-debug.txt`).
 The new tests once under ThreadSanitizer with twelve busy loops: 12 of 12
 passed, 0 reports (`work/tsan-new.txt`, `tsan-new-weakonly.txt`).
+
+## Open questions (built as recommended; decisions only)
+
+1. `weakOnlyCopies`, the four loads: the kernel tests 0 of 923 895
+   promoted, the tools' scripted session 2 of 1 370 041, `collections` 0 of
+   600 009 (1 worker) and 0 of 4 800 072 (8), a load that interns and drops
+   a million Symbols 0 of 0 (a Symbol is old at birth). Recommended: the
+   weak pass for the concurrent young collector is not worth its module on
+   these numbers; the counter stays on the run line and in the rows, and
+   the question opens again if a row shows a share.
+2. Item 3 under the rule with a gain on one row only: did not arise; no
+   row met the rule. Not built.
+3. The by-hand variants in the weekly run: three of the six structs'
+   switches have a broken value run only by hand (`flushAfterStop`,
+   `mainWaitsForWantedStops`, `lateSignalsIgnoreEnd`), 36 s together after
+   a 39 s debug build (part 1); the variants outside the structs were not
+   counted. Recommended, as the brief: a later module (`scripts/broken-variants.sh`).
+4. `verify=stops` as the release build's default for `kajo run`:
+   recommended no change; built: every default as before.
+5. New: `test-release` now runs the stop and schedule verifiers beside the
+   heap verifiers, since one level cannot say "heap without stops" (the
+   deviation under item 6). Recommended: keep it (one level; the stop
+   verifiers cost nothing measurable); the alternative is a fourth level
+   for that one combination.
