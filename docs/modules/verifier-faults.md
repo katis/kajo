@@ -624,6 +624,20 @@ this module's tests are a part (the kept-across tests' bodies 167 to 272 s
 under the sanitizer and load; `MakeYoungLiteralTests` a minute), and the
 bundle has grown by other modules since a89dd0e.
 
+**The failed gate.** `tsan` failed `theToolsDevelopTheImageTheyRunIn`:
+"compiledTypedThroughTheBrowser never held ... transcript ... 'Process 538
+stopped (error): MessageNotUnderstood: nil does not understand
+#beginsWith:'", the shape of the third review's small fixes' Found 3 (the
+probe's `Smalltalk sourceOf:` answering nil). `tsan-load` on the same
+commit passed it. Counted under a rule written before the runs
+(`work/rule-tools.txt`): the KajoCompilerTests bundle under the sanitizer,
+the bundle the gate runs it in, interleaved, head 2c13ed3 and starting
+commit 07fcad1 (`work/tools-count/summary.txt`): head 0 of 2, starting
+commit 1 of 2 with the same line ("Process 530 stopped (error):
+MessageNotUnderstood: nil does not understand #beginsWith:"). The fault is
+on the starting commit; this module did not cause it. Two runs a side do
+not give a rate, and why `sourceOf:` answers nil there was not looked at.
+
 The kernel tests' gates after this module, against the baseline:
 
 | Kernel gate | Build | Verifies | Time | Before |
