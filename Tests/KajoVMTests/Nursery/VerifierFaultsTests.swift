@@ -79,13 +79,9 @@ func keptBodiesPlacedInAnotherNurseryStayRemembered(_ mode: YoungMode) throws {
 /// The fix taken out by its test switch (`keptAcrossWithoutRescan`): the
 /// offloaded mode fails the nursery verifier and the line names a body
 /// kept and moved across. Rounds repeat (at most four) until a round
-/// split a pair. Run by hand (`KAJO_BROKEN_KEPT_ACROSS=1`), not in the
-/// suite: in the loaded suite (swift-test-load on 1602cd9) the young
-/// collector freed moved bodies their unremembered holders still named,
-/// the rings answered wrong sums and Processes did not end; a broken
-/// variant that damages the heap may trap, and a trap ends the bundle.
-@Test(.enabled(if: ProcessInfo.processInfo.environment["KAJO_BROKEN_KEPT_ACROSS"] != nil))
-func withoutTheRescanTheVerifierNamesAMovedBody() throws {
+/// split a pair. Run in the suite because the broken variant fails a
+/// verifier, not a trap.
+@Test func withoutTheRescanTheVerifierNamesAMovedBody() throws {
     var failed = false
     for round in 1...4 {
         let (rt, nc, _, failures, seconds) = try keptAcrossRun(.offload, rescan: false)
@@ -120,10 +116,14 @@ private func keptAcrossRun(_ mode: YoungMode, rescan: Bool) throws -> (Runtime, 
         c.young.verify = true
         c.young.verifyEvery = 1
     })
-    let n: Int64 = underThreadSanitizer ? 20_000 : 60_000
+    // 20 000 iterations reach the edge in the first round in every build
+    // (the switch deals the bodies out). The wait is for something that
+    // must come: long everywhere, as under the loaded suite a 120 s bound
+    // ran out with the four rings still going (swift-test-load, d1d7ff7).
+    let n: Int64 = 20_000
     var ps: [Oop] = []
     for _ in 0..<4 { ps.append(rt.spawn("ring:", [int(n)])) }
-    rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
+    rt.waitAllTerminated(600)
     for p in ps { #expect(rt.result(p) == (n - 1023...n).reduce(0, +)) }
     let (runs, failures) = verifierCounts(rt)
     return (rt, rt.vm.nurseryCounters, runs, failures, String(format: "%.1f", Double(nanoseconds() - t0) / 1e9))
