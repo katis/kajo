@@ -543,3 +543,235 @@ runs:
 Starting position 7 is decided in part 2: three levels cannot express
 "heap verifiers without the stop verifiers", which is what `test-release`
 runs today; see part 2's item 6.
+
+## Part 2: the fixes
+
+### Item 1: the layout facts the hash did not cover
+
+- `barrierWordIndex` (`Marking/MarkingState.swift`) is the barrier word's
+  index in the flag line; `barrierWord` adds it, and `NativeLayout.constants`
+  carries it as `FLAG_BARRIER_WORD`. The generated store tests
+  `AT(s, W_FLAG, u32 *) + FLAG_BARRIER_WORD`.
+- Every frame index the generator writes comes from `Frame` (`h[...]`,
+  `hdr[...]`, `hdr + ...`, the overflow bounds); `Frame`'s indices became
+  `package` for it. The emitted text of these is unchanged.
+- The tables file asserts the three structs against their Swift mirrors:
+  `_Static_assert(sizeof(...))` and one `__builtin_offsetof` per field for
+  `KResume`, `KGroup` and `KModule` (27 lines), the right-hand sides from
+  `ResumeOffset` (new: the literal 16 and 8 in `nativeResume` became
+  `ResumeOffset.stride` and `.pc`), `GroupOffset` and `ModuleOffset` (now
+  `package`, with `size = 112`). A mirror that disagrees fails the C compile,
+  so `native-cc` and every native gate that compiles a module.
+- `NativeLayout.hash(of:)` is the hash over any list, the tests' seam.
+
+The generated code of `storeheavy`, base against head
+(`work/gen-diff/diff.txt`): the new constant, the hash
+(`0xeb14e5e6cf9e2e48 0x20e9cddd47cfccb2` against
+`0x9d8b8adaace03dcf 0x14942b18a4940483`), the barrier line and the 27
+asserts; nothing else differs. The worker's offsets did not move (the
+float path's counters, item 2, are after the native state).
+
+What holds an old hash: the native test cache (`.build/native-test-cache`)
+is keyed by the generated source, which now differs, so each module is
+compiled again; a module built by an older VM is refused whole at bind
+("its layout hash is not this VM's build", shown below); a generated app
+generates its module in its build phase with the checkout's `kajo`, so a
+module from an older checkout is likewise refused at bind and the app runs
+interpreted until it is built again (not exercised here beyond `just
+new-check`'s fresh builds). None needs a hand step.
+
+Tests: `theLayoutHashCoversTheBarrierWordsPlace` (the constant is
+`barrierWord`'s own distance; a changed constant changes the hash) and
+`theGeneratedCodeNamesTheBarrierWordAndAssertsTheMirrors`
+(`Tests/KajoVMTests/Native/NativeLayoutTests.swift`). Neither can run on
+8c24c05 (the constant, the seam and the mirrors' enums are new).
+
+### Item 2: Float arithmetic answered before the save
+
+- `smallFloatArith(op, a, b, true, false)` (`ObjectModel/Numbers.swift`):
+  a SmallFloat with a SmallFloat or a SmallInteger; the four operations and
+  six comparisons; a SmallFloat or a Boolean answer, else 0 (another
+  operand, a result that must box, a zero divisor, `//`, `\\`, the bit
+  operations). The same arithmetic as `floatArith`. No allocation, no poll.
+- `specialFastPath` calls it before its `numeric` test and its `save`; an
+  answer is written over the operands and the registers are re-derived with
+  `regsAt` (the bases from the frame's method, no restore). Primitives 60
+  to 69 do the same in `primitiveSend` before its save
+  (`floatPrimitiveQuick`). Every other case takes the old path unchanged.
+- `integerArith` enters `largeArith` only when one side is a
+  LargePositiveInteger or LargeNegativeInteger object (`isLargeInteger`, one
+  class test); before, every pair that was not two SmallIntegers did.
+- The dispatch loop is unchanged (below).
+- Counters: `smallFloatAnswers` (the path's answers) and `largeArithCalls`
+  (entries of the LargeInteger tier) in `Worker.floatPath`, placed after
+  the native state so no offset the interpreter or a native module reads
+  moves (a first version in `InterpreterCounters` moved `W_COUNTDOWN` and
+  every native offset by 16 bytes; seen in the generated-code diff and
+  moved). On the run line with `specialSendTier` and `floatsBoxed`, which
+  were counted and not printed (interpreter.A3, these two only).
+- Test switch `noSmallFloatPath` (`TestSwitches`): the old path, for the
+  oracle.
+
+`floats`, base 8c24c05 against head c46df34, aligned, five interleaved
+runs, each side's own native module (`work/floats-ab/`):
+
+| engine | workers | cycles B/A | per-run range | ms base | ms head | checksums |
+|---|---|---|---|---|---|---|
+| interpreter | 1 | 0.4274 | 0.4238..0.4291 | 3207.6 | 1367.2 | equal |
+| interpreter | 8 | 0.3517 | 0.3376..0.3961 | 589.3 | 182.7 | equal |
+| native | 1 | 0.3854 | 0.3824..0.3864 | 2925.7 | 1127.5 | equal |
+| native | 8 | 0.3605 | 0.3557..0.3807 | 434.8 | 153.8 | equal |
+
+The base's own spread was 0.9945..1.0040 at 1 worker and 0.72..1.46 at 8
+(part 1); the head's 8-worker rows are tight, since no thread allocates.
+`floats` now takes 2.3 times less in the interpreter and 2.6 times less
+natively at 1 worker.
+
+`interpret`, base against head in these aligned builds
+(`work/interpret-diff.txt`): 1816 lines each, 4 differ, each an `adrp`
+page number (the jump table's and a constant pool's page, moved by the
+binary's layout: `adrp x26, 552` against `549` and three like it); no
+instruction differs. `just arc-check` passed (`work/arc-check.txt`):
+`interpret` 1403 instructions, one jump table, ARC 0 on every checked path,
+`specialSend` 789 instructions and `primitiveSend` 491 with ARC 0.
+
+Tests (`Tests/KajoVMTests/ObjectModel/SmallFloatPathTests.swift`):
+`theSmallFloatPathAnswersAsTheOldPath` runs every special arithmetic and
+comparison selector and primitives 60 to 69 over a seeded table (SmallFloats
+with signed zero, large and small magnitudes and random bit patterns that
+encode; SmallIntegers 0, 1, -1, 2^53, 2^53 + 1, the extremes, randoms;
+both orders) on two harnesses, the path on and the switch on: 35 464
+answers over 1 612 pairs, 0 differ, `smallFloatAnswers` 27 315 and 0 with
+the switch (`work/new-tests-debug.txt`). NaN and the infinities do not
+encode as SmallFloats; a result that must box, a zero divisor and `//`
+take the old path on both sides. `theSmallFloatPathAllocatesNothing`:
+`floats`' step 100 000 times allocates 0 objects, enters `largeArith` 0
+times, boxes 0, and all 300 000 float special sends are the path's.
+`ExtremeIntegerTests`, `floatArithmeticOnTheSpecialSends`,
+`FusionTests` and the LargeInteger tests pass. Neither new test can run on
+8c24c05 (the switch and the counters are new); part 1's counting build is
+the evidence of before.
+
+### Item 3: not built
+
+Under part 1's rule (above). The open question 2's case did not arise.
+
+### Item 4: the counter
+
+Nothing beyond part 1's counter. `weakOnlyCopiesCountsWhatOnlyAWeakSlotHeld`
+runs 200 000 iterations with a 1 MiB nursery: 12 collections, 12
+weak-only copies, 1.0 s in debug, 27 s under the sanitizer with twelve busy
+loops (`work/tsan-new-weakonly.txt`; at 500 000 with the default nursery it
+cost 90 s there).
+
+### Item 5: the switch table
+
+`Tests/KajoVMTests/SwitchTableTests.swift`: `switchTable` has one row per
+field of the six structs, each `.test(file, function)` (the file under
+`Tests/` names `.field` and holds the function), `.byHand(doc, what it
+gives)` (the doc names the field) or `.option(flag, doc)` (`kajo` has the
+flag). `everySwitchHasARow` reads the six structs from the source and
+fails for a field with no row or a row with no field; it found this
+module's own new `noSmallFloatPath` before its row existed.
+`aFieldWithoutARowIsNamed` checks the check over a changed list. 76 fields,
+76 rows.
+
+The three unnamed switches: `noPendingRoots` has a test,
+`withoutPendingRootsTheSemaphoresAreLostToACollection` (`ProcessTests`):
+with Delays not registered, the pending table holds none, the collections
+free the Semaphores and all 20 timers find theirs gone (counted stale, the
+external queue's check). `youngRootsInStop` has a test,
+`withYoungRootsInStopTheInitialMarkScansInItsStop` (`FinalMarkTests`):
+nothing owed after the initial mark, the marker scans none, the cycle loses
+nothing. Both pass on 8c24c05 (`broken/start-tests-run.txt`): they test
+switches that existed. `stallRelocation` is an `.option` row
+(`--stall-reloc`, run by hand in part 1). `mainWaitsForWantedStops`, which
+the reviewer missed, is a `.byHand` row (run in part 1).
+
+### Item 6: one verification level
+
+`VerificationLevel` (`Workers/VMConfig.swift`, public): `off`, `stops`,
+`all`; `build` is `all` in a checked build and `off` in a release build;
+`withoutHeap` is `stops` checked and `off` release. `apply(&vc, &om)` sets
+`verifyStops` (at `stops` and `all`), `ObjectMemoryConfig.verify` and
+`YoungConfig.verify` (at `all`). The configurations' own defaults are
+written from `build` (`verifyStops`, `ObjectMemoryConfig.verify`); the
+young verifier's default stays off in every build (its own reason, a heap
+walk after every collection). `verifySymbols` is not a level (off in every
+build, set by the tests that intern); `onVerifyFailure` is the host's
+policy, not a level.
+
+- `Headless.Options.verify` is a `VerificationLevel?` (nil: the build's);
+  `level` replaces `verifies`; `configs` applies it. `kajo run` and `kajo
+  test`: `--verify` is `all`, `--no-verify` is `withoutHeap` (what a
+  `--no-verify` debug run verified before: the stop verifiers, which
+  `Headless` left at the checked default), `--verify-level off|stops|all`
+  is new. The run line, `kajo test`'s line and the `gc` summary print the
+  level's name: `verify=off|stops|all` (was `on|off`).
+- `ShellVM`: a host that says nothing gets `withoutHeap` (was `false`,
+  which left the stop verifiers at the build's default: the same).
+- The test `Runtime` takes `verify: VerificationLevel = .all` and applies
+  it; its one exception, said beside it: the young verifier stays off
+  unless `configure` turns it on, as before. Call sites that passed `false`
+  pass `.stops` (what `false` meant there: the fixture always set
+  `verifyStops`).
+- Readers of `verify=` changed in the same commit: `KernelTestParts`
+  (`checkedBuild ? "stops" : "all"`), `aHeadlessRunReportsItsVerifierLevel`
+  (`all`, `off`, `stops` and `all` by name), the stall tests' helper and
+  `VerifierFaultsKernelTests`. No gate script and no report script reads
+  the field (`scripts/` searched); `check-tier-test` is not owed.
+
+**Deviation (starting position 7, wrong).** Three levels cannot say
+"heap verifiers without the stop verifiers", which `test-release` ran
+(`KernelTestParts` and the stall tests' helper in a release build:
+`verify = true` set the heap verifiers, and `verifyStops` stayed at the
+release default, off). With one level that gate now runs at `all`: the
+stop and schedule verifiers join the heap verifiers there. Every other
+gate verifies exactly what it did. The stop verifiers "cost nothing
+measurable" (AGENTS.md); the gate's time is read below. A fourth level for
+the old combination would keep the letter of the bar and lose the point of
+one level; the owner may say otherwise (open question 5).
+
+Tests: `eachLevelSetsEveryVerifierSwitch` (each level through `apply` and
+through `Headless.configs`) and `theBuildsLevelIsTheConfigurationsDefault`
+(`Tests/KajoVMTests/VerificationLevelTests.swift`);
+`verifiersAreOneFlagAway` and `verifiersRunAtEveryPauseWhenEnabled` as they
+are.
+
+### Broken variants after the fix
+
+Each run by hand from `git archive` of c46df34 plus one line, output in
+`broken/`:
+
+| variant | what it gave | gate it fails |
+|---|---|---|
+| `barrierWord` returns `flag + 3` by hand (the constant left at 2) | `theLayoutHashCoversTheBarrierWordsPlace`: "the constant is not barrierWord's own distance" (`after-a-tests.txt`) | every gate that runs the VM suite (`swift-test-load`, `tsan`, `tsan-load`, `test-release`) |
+| `barrierWordIndex = 3` (moved through the constant) | the head's module refused at bind: `nativeRefused=its_layout_hash_is_not_this_VM's_build`, `nativeBound=0`, the run interpreted with its checksum (`after-b-stale.txt`); the variant's own module names `FLAG_BARRIER_WORD 3` under a new hash (`after-b-gen/`) | none should: the generator follows the constant |
+| `ResumeOffset.pc = 4` (a mirror that disagrees) | `native-check.sh cc`: "static assertion failed due to requirement '__builtin_offsetof(KResume, pc) == 4': KResume.pc: the Swift mirror's offset", rc 1 (`after-c-native-cc.txt`) | `native-cc` (and every native gate that compiles a module) |
+| a field `aSwitchWithNoRow` added to `VMTestSwitches` | `everySwitchHasARow`: "VMTestSwitches.aSwitchWithNoRow: no row" (`after-a-tests.txt`) | the suite's gates |
+
+Starting position 1's variant fails a named gate after the fix (the bar's
+item 1).
+
+### One run of every flag, level and counter this module adds
+
+From `work/quotes.txt` (the head's release build):
+
+```
+kajo run alloc.kasm --workers 2 (default): checksum=41959102 verifies=0 verify=off
+kajo run alloc.kasm --workers 2 --verify: checksum=41959102 verifies=332 verify=all
+kajo run alloc.kasm --workers 2 --no-verify: checksum=41959102 verifies=0 verify=off
+kajo run alloc.kasm --workers 2 --verify-level off: checksum=41959102 verifies=0 verify=off
+kajo run alloc.kasm --workers 2 --verify-level stops: checksum=41959102 verifies=0 verify=stops
+kajo run alloc.kasm --workers 2 --verify-level all: checksum=41959102 verifies=332 verify=all
+kajo run --verify-level on: --verify-level: off, stops or all, not on
+kajo run floats.kasm: checksum=7499750000 ms=1418.2 specialSendTier=120000000 smallFloatAnswers=120000000 largeArithCalls=0 floatsBoxed=0
+kajo test kernel.img (default): kajo test: verify=off verifies=0 weakOnlyCopies=0 ycPromoted=923895
+kajo test kernel.img --verify-level stops: kajo test: verify=stops verifies=0 weakOnlyCopies=0 ycPromoted=923895
+kajo test kernel.img --verify: kajo test: verify=all verifies=2123 weakOnlyCopies=0 ycPromoted=923895
+```
+
+The test switch `noSmallFloatPath`: `smallFloatAnswers` 27 315 with the
+path and 0 with the switch on the same table (`work/new-tests-debug.txt`).
+The new tests once under ThreadSanitizer with twelve busy loops: 12 of 12
+passed, 0 reports (`work/tsan-new.txt`, `tsan-new-weakonly.txt`).

@@ -25,7 +25,7 @@ method UndefinedObject run:of: temps=2
   store_temp 3
 loop:
   push_temp 3
-  push_lit 500000
+  push_lit 200000
   lt
   jump_if_false done
   push_temp 2
@@ -51,6 +51,7 @@ end
 private func weakOnlyRun(young: String) -> Headless.Outcome {
     var o = Headless.Options()
     o.workers = 1
+    o.nurseryKB = 1024  // a collection every 1 MiB: about a dozen in the run
     o.young = young
     o.verify = .withoutHeap
     return Headless.run([("prelude.kasm", kernel("prelude")), ("lib.kasm", kernel("lib")), ("weak.kasm", weakOnlySrc)],
