@@ -174,7 +174,10 @@ let barrierSitesCaught: Set<BarrierSite> = [
     // Module 8. Not caught: contextSlot and closureSlot store into fresh
     // holders (a Context's detachment into an old Context is the one
     // exception, not built as a scenario); installMethod and symbolTable
-    // store old values (methods, dictionaries, symbols) in a stop.
+    // store old values (methods, dictionaries, symbols) in a stop;
+    // methodLiteral (the make primitive's literal frame) needs a kernel
+    // image and is caught by `withoutTheBarrierTheVerifierNamesTheLiteralFrame`
+    // (Tests/KajoCompilerTests/VerifierFaultsKernelTests.swift).
     .storeTempVector, .instVarAtPut,
 ]
 

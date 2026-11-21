@@ -70,8 +70,9 @@ private func headless(_ files: [(path: String, text: String)], young: String, wo
     // (nursery 0) ..., and is not remembered for it") and passed alone, and
     // a trap ends the whole test bundle (docs/modules/review-3-small-
     // fixes.md, Found). These runs verified nothing before; on again when
-    // that is understood.
-    o.verify = false
+    // that is understood. The verifier's faults, part 1: `KAJO_STALL_VERIFY`
+    // turns them on for the counted runs (docs/modules/verifier-faults.md).
+    o.verify = ProcessInfo.processInfo.environment["KAJO_STALL_VERIFY"] != nil
     if native { o.native = try nativeModule(files) }
     let out = Headless.run(files, options: o)
     var report: [String: String] = [:]
@@ -222,7 +223,8 @@ private let fullHeapMiB = underThreadSanitizer ? 3 : 12
     for young in ["stw", "offload"] {
         let t0 = now()
         let r = try headless(files, young: young, heapMiB: fullHeapMiB)
-        print("stall-diag fullheap \(young) s=\(String(format: "%.1f", Double(now() &- t0) / 1e9)) \(r.room) fallbacks=\(r.report["fallbacks"] ?? "-")")
+        print("stall-diag fullheap \(young) s=\(String(format: "%.1f", Double(now() &- t0) / 1e9)) \(r.room) fallbacks=\(r.report["fallbacks"] ?? "-")"
+              + " keptObjects=\(r.report["keptObjects"] ?? "-") keptAcross=\(r.report["keptAcross"] ?? "-") verify=\(r.report["verify"] ?? "-") verifies=\(r.report["verifies"] ?? "-")")
         #expect(r.failure?.contains("outOfMemory") == true || r.failure?.contains("out of memory") == true,
                 "\(young): \(r.failure ?? "answered \(String(describing: r.checksum))")")
         #expect(r.n("unjustifiedFallbacks") == 0, "\(young): \(r.summary)")

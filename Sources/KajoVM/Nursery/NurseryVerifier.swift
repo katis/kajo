@@ -28,6 +28,56 @@ private func strongSlots(_ om: ObjectMemory, _ h: Header) -> Int {
     return f.isWeak ? Swift.min(Int(h.count), f.namedSlots) : Int(h.count)
 }
 
+/// The verifier's faults (docs/modules/verifier-faults.md, part 1): what an
+/// entry the remembered-set check names is, so that its message says which
+/// object holds which and how the referent came to be where it is: the
+/// class (index and name), old or young (nursery, age, claim tag), the
+/// count, the read-only and pinned bits, the remembered word and the lists
+/// that name the entry, and, for a body a scavenge kept and placed in
+/// another nursery, from which nursery in which scavenge.
+private func describeEntry(_ n: NurseryPointer, _ raw: UInt64, listed: UInt32) -> String {
+    let om = unsafe n.pointee.om
+    let h = Header(raw: om.headerWord(raw))
+    var name = "?"
+    let ci = h.classIndex
+    if ci > 0 && ci < UInt64(om.classCount) {
+        var c = om.classOop(ci)
+        var suffix = ""
+        if c.isObject && om.classIndex(of: c) == WellKnown.metaclass {
+            c = om.load(c, MetaclassLayout.thisClass)
+            suffix = " class"
+        }
+        if c.isObject && om.isUsedReference(c) && !om.isBytes(c) && om.count(of: c) > UInt64(ClassLayout.name) {
+            let s = om.load(c, ClassLayout.name)
+            if s.isObject && om.isBytes(s), let b = om.bytesIfShort(of: s), let t = String(validating: b, as: UTF8.self) {
+                name = t + suffix
+            }
+        }
+    }
+    var parts = ["\(name) (class \(ci))"]
+    parts.append(h.isYoung ? "young in \(h.nurseryIndex) age \(h.age) tag \(h.claimTag)" : "old")
+    parts.append(h.isBytes ? "bytes" : "\(h.count) slots")
+    if h.isReadOnly { parts.append("read-only") }
+    if h.isPinned { parts.append("pinned") }
+    let word = unsafe n.remMarker(raw).pointee.load(ordering: .relaxed)
+    parts.append("remembered 0x\(String(word, radix: 16)) listed 0x\(String(listed, radix: 16))")
+    let moves = unsafe n.pointee.phase.pointee.movedAcross
+    for i in 0..<moves.count / 2 where moves[2 * i] == raw {
+        let r = moves[2 * i + 1]
+        parts.append("kept and moved from nursery \(r & 0xFF) to \((r &>> 8) & 0xFF) in scavenge \(r &>> 16)")
+    }
+    return parts.joined(separator: ", ")
+}
+
+/// The scavenge counters a remembered-set message ends with: whether a
+/// promote-all, a full collection or a kept body moved across nurseries
+/// came before the check.
+private func scavengeHistory(_ n: NurseryPointer) -> String {
+    let c = unsafe n.pointee.state.pointee.counters
+    return "(scavenges \(c.scavenges), promote-all \(c.promoteAllScavenges), full collections \(c.fullCollectionsRun), "
+        + "exhausted \(c.exhaustedScavenges), kept \(c.keptObjects), kept moved across \(c.keptMovedAcross))"
+}
+
 /// Remembered set, at a pause: every holder of a young object of nursery
 /// n that is old (or, with young collection without stopping the world,
 /// young in another nursery) has bit n and is in a list of nursery n (an
@@ -98,7 +148,8 @@ private func checkRemembered(_ n: NurseryPointer, _ out: inout Issues) {
                 let m = om.header(v).nurseryIndex
                 if h.isYoung && h.nurseryIndex == m { continue }
                 if word & remBit(m) == 0 {
-                    out.fail("entry \(e) (\(h.isYoung ? "young in \(h.nurseryIndex)" : "old")) names young \(v) (nursery \(m)) in slot \(i), and is not remembered for it")
+                    out.fail(unsafe "entry \(e) (\(h.isYoung ? "young in \(h.nurseryIndex)" : "old")) names young \(v) (nursery \(m)) in slot \(i), and is not remembered for it"
+                             + " [holder: \(describeEntry(n, raw, listed: inList[Int(e)])); referent: \(describeEntry(n, v.raw, listed: inList[Int(v.entryIndex)])); \(scavengeHistory(n))]")
                 }
             }
         }

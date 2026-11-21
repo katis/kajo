@@ -762,6 +762,15 @@ private func placeKept(_ n: NurseryPointer, parts: [Int]) {
         return true
     }
     var left: [(entry: UInt64, off: UInt64, from: Int)] = []
+    // The test switch `keptAcrossNurseries`: the last nursery with kept
+    // bodies places none in its own space. Its bodies lie in its own space
+    // and the others' destinations past their own placed bodies, so the
+    // moves overlap nothing, as when its own nursery has no room.
+    if unsafe n.pointee.config.testSwitches.keptAcrossNurseries && count > 1,
+       let v = (0..<count).last(where: { !byNursery[$0].isEmpty }) {
+        for x in byNursery[v] { left.append((x.entry, x.off, v)) }
+        byNursery[v] = []
+    }
     for k in 0..<count where !byNursery[k].isEmpty {
         let a = unsafe n.alloc(k)
         let lo = unsafe a.pointee.edenStart, hi = unsafe a.pointee.end
@@ -786,6 +795,11 @@ private func placeKept(_ n: NurseryPointer, parts: [Int]) {
                 unsafe hp.pointee.store(h & ~Header.nurseryMask | UInt64(j) &<< Header.nurseryShift, ordering: .relaxed)
                 widen[x.from] |= remBit(j)
                 unsafe n.pointee.state.pointee.counters.keptMovedAcross &+= 1
+                if om.config.verify {
+                    if unsafe ph.pointee.movedAcross.count >= 8192 { unsafe ph.pointee.movedAcross.removeAll() }
+                    unsafe ph.pointee.movedAcross.append(x.entry)
+                    unsafe ph.pointee.movedAcross.append(UInt64(x.from) | UInt64(j) &<< 8 | ph.pointee.number &<< 16)
+                }
                 placed = true
                 break
             }

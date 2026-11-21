@@ -116,6 +116,12 @@ struct NurseryTestSwitches: Sendable {
     /// of blocks as soon as the heap is full): the reserve's fallback under
     /// test (docs/modules/reserve-and-depth.md).
     var promotionReserveBlocks: Int? = nil
+    /// The verifier's faults (docs/modules/verifier-faults.md): the bodies a
+    /// scavenge keeps in place (the reserve's fallback) of the last nursery
+    /// that has any are placed in other nurseries, the rare path
+    /// `placeKept` takes when a nursery has no room for its own; with one
+    /// nursery, nothing changes.
+    var keptAcrossNurseries = false
 }
 
 /// Every store of an oop into a heap object that may make an old object
@@ -171,4 +177,8 @@ enum BarrierSite: UInt8, CaseIterable, Sendable {
     case installMethod
     /// Module 8: a new Symbol and grown buckets in the symbol table (in a stop).
     case symbolTable
+    /// The verifier's faults (docs/modules/verifier-faults.md): a literal the
+    /// make primitive (143) takes as it is, stored into the old literal frame
+    /// it makes (in a stop).
+    case methodLiteral
 }

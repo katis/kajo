@@ -176,6 +176,12 @@ struct ParticipantStats: Sendable {
     /// The objects the last scavenge kept in place (the reserve's
     /// fallback), for its verifier and the promote-all hook.
     var kept = RawArray<UInt64>()
+    /// The verifier's faults (docs/modules/verifier-faults.md, part 1):
+    /// with the verifiers on, each body `placeKept` moved to another
+    /// nursery, as pairs of words (the entry; from | to << 8 | scavenge
+    /// << 16), for the remembered-set message. Bounded: emptied at 8192
+    /// words.
+    var movedAcross = RawArray<UInt64>()
 }
 
 /// Counters of every scavenge so far (the stopper writes them).
@@ -527,6 +533,7 @@ extension NurseryShared {
         unsafe s.phase.pointee.roots.free()
         unsafe s.phase.pointee.holders.free()
         unsafe s.phase.pointee.kept.free()
+        unsafe s.phase.pointee.movedAcross.free()
         unsafe unlined(s.phase)
         unsafe s.packets.pointee.storage.deallocate()
         unsafe s.packets.pointee.length.deallocate()

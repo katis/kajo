@@ -252,3 +252,138 @@ Build the recommended option; bring the decision back.
 3. The verifiers in the debug kernel gate as well as the release one, if
    the cost is under a minute: recommended no, by the owner's answer; give
    the number.
+
+## As built
+
+Built by a build agent from 07fcad1, Saturday 2026-11-21. Toolchain: the
+swift.org 6.4.2 release through swiftly, first on PATH
+(`~/kajo-scratch/verifier-faults/env.txt`). Raw files are under
+`~/kajo-scratch/verifier-faults/` (`part1/`, `work/`, `broken/`,
+`check/`).
+
+### Part 1: the two causes
+
+**Fault 1.** Reproduced on 07fcad1 itself, debug build, `kajo test
+start.img --verify --test 'MakeFuzzTest>>testSeededMutationsAreRefusedOrRun'`:
+rc 133, "nursery verifier, before scavenge 1: entry 33422 (old) names
+young @102276 (nursery 1) in slot 1, and is not remembered for it"
+(`part1/f1-start.err`). The verifier's message now says what each entry
+is (`describeEntry` in `Nursery/NurseryVerifier.swift`: class index and
+name, old or young with nursery, age and claim tag, slots, the read-only
+and pinned bits, the remembered word, the lists naming it, and for a
+body a scavenge kept and placed in another nursery, from where in which
+scavenge; then the scavenge counters). The same run with it
+(`part1/f1-instr.err`):
+
+    entry 33422 (old) names young @102276 (nursery 1) in slot 1 ...
+    [holder: Array (class 7), old, 4 slots, read-only, pinned, remembered 0x0 listed 0x0;
+     referent: OrderedCollection (class 237), young in 1 age 0 tag 0, 3 slots, remembered 0x0 listed 0x0;
+     (scavenges 0, promote-all 0, full collections 0, ...)]
+
+The holder is a read-only, pinned Array, which is what a made method's
+literal frame is (`makeMethodObjects` pins it and sets it read-only), and
+the referent is the fuzz test's stranger `#(1 2) asOrderedCollection`,
+young in the nursery of the worker that ran the test. Starting position 1
+is right: `LiveMethodHeap.pointers` allocates with the worker's old
+context (`om.allocate(m.state.pointee.context, ...)`, `tryAllocateAny`:
+old space), and `makeMethodObjects` stores the literal with `om.store`,
+the raw store, which runs no barrier. The main session's three readings
+were right; `om.store` is the raw store (no post-store check, no
+barrier).
+
+Every store of the make, define, redefine, remove and install
+primitives, with "old holder, value may be young":
+
+| Where | Store | Holder | May the value be young? |
+|---|---|---|---|
+| `makeMethodObjects` (143, `makeStub`) | literal frame slot `om.store(litArray, i, v)` | fresh, old (`LiveMethodHeap`) | **yes** for a top-level literal `CodeReader.literal` answers `.object(v)` as "any other object": an instance of a class that is not sealed (an ordinary object, a Binding, a collection). No for the rest of `.object`: immediates; nil, true, false (image objects, old); a Symbol (made by `internSlow` in the old context or loaded); a Behavior (Class, Metaclass and Behavior are sealed: made only by the image build or primitive 145, old) |
+| `makeMethodObjects` | literal Array element `om.store(a, i, v)` | fresh, old | no: an element is an immediate, nil, true, false, a Symbol, a Behavior, or a fresh byte object or Array (old); any other object in an Array is refused ("an element of class N in a literal Array") |
+| `makeMethodObjects` | Pragma arguments `om.store(args, i, v)`, Pragma selector, arguments, method | fresh, old | no: the arguments are literal-Array elements (as above), the selector a Symbol, the rest made here |
+| `makeMethodObjects` | method slots (bytecodes, literals, selector, class, counts) | fresh, old | no: made here, a Symbol or nil, a Behavior, SmallIntegers |
+| `makeStub` (in 146) | the stub's literal: the stub selector | fresh, old | no: a Symbol, checked |
+| `defineClass` (145) | class and metaclass slots, the pool, each Binding's key | fresh, old | no: the superclass a registered class, the name and keys Symbols (checked), the rest made here; no promote-all needed |
+| `redefine` (146) | dictionary keys and methods, pool elements (the Bindings Smalltalk made), instance sizes | fresh, old | no: `prepareOldSpaceOperation` (module 4's promote-all) runs before any of them, and every allocation after it is old |
+| `redefine` (146) | the dictionaries and pools into the classes | old | stored with the barrier (`m.store`, `.installMethod`) |
+| `removeClass` (147), `freeObsoleteClasses` (163) | method dictionaries, pool, name, superclass, thisClass | old | stored with the barrier; the values are nil, Symbols and classes, after a promote-all |
+| `installInDictionary` (97, 98) | new dictionary's keys and methods | fresh, old | no: Symbols and CompiledMethods (sealed: made only by 143 and the image build, old) |
+| `installInDictionary` | the dictionary into the class | old | stored with the barrier |
+
+So one store has the fault: the literal frame slot of a made method, for
+a literal that is neither an immediate, nil, true, false, a Symbol nor a
+Behavior, and only when nothing promoted it first (the redefine path
+promotes everything before it makes its methods). Starting position 5 is
+right.
+
+Starting position 2 is right: the kernel's compiler puts only classes and
+class variables' Bindings in a literal frame as objects
+(`Compiler>>gen:in:on:value:`, `#global` and `#classVariable`). A class
+is old. A Binding is made old by primitive 145 (a new class's pool), or
+made in Smalltalk (`Smalltalk undeclaredBinding:in:`, `Binding new`, young)
+by a redefinition that adds a class variable, which hands it to primitive
+146; 146 promotes everything before it makes the recompiled methods and
+the pool, so no method made from the compiler's output names a young
+Binding. The test `aClassVariableAddedLiveLeavesNoYoungLiteral` defines
+a class live, adds a class variable, compiles a method against each and
+scavenges with the verifiers on: it passes on the part 1 commit. Only a
+CompiledCode whose literals a program changed after compiling (as
+`MakeFuzzTest` does) reaches the fault. A closure is refused (BlockClosure
+is sealed: `aClosureLiteralIsRefused`).
+
+**Fault 2.** The message names a young holder and a young referent in two
+nurseries, the referent's entry next to the holder's. Read in
+`placeKept` (`Nursery/Scavenge.swift`): when a nursery has no room for a
+body the scavenge kept (the promotion reserve's fallback), the body goes
+to another nursery with that nursery's index, and "every holder
+remembered for the first nursery is remembered for the second too". Two
+kinds of holder are in no list: the young objects of the first nursery
+that name the body (a holder of its own nursery needs no bit until the
+body leaves), and the body itself, which `drain` remembered for every
+nursery but its own first one, so its references to objects of its first
+nursery are unremembered once it lies in another. Under the
+stop-the-world young mode only old holders are remembered (module 4), so
+only the offloaded mode has the fault.
+
+The rare path (a nursery that cannot hold its own kept bodies) is driven
+by the new test switch `keptAcrossNurseries`: the last nursery with kept
+bodies places them all in the others (its bodies lie in its own space,
+the destinations past the others' own placed bodies, so no move
+overlaps). With it, a load whose ring nodes are a young Pair naming
+another young Pair made just before it (`twinRingSrc`), no promotion
+reserve and a tight heap fails the verifier in the offloaded mode in 22 s
+(`part1/f2-forced-instr.txt`, 612 failures):
+
+    nursery verifier, after scavenge 131: entry 11474 (young in 0) names young @11473 (nursery 1) in slot 1,
+    and is not remembered for it [holder: Pair (class 59), young in 0 age 0 tag 2, ...,
+    kept and moved from nursery 3 to 0 in scavenge 131;
+    referent: Pair (class 59), young in 1 age 0 tag 2, ..., kept and moved from nursery 3 to 1 in scavenge 131; ...]
+
+The same shape as the gate's line (adjacent entries, two nurseries, after
+a scavenge). The full-heap test's program is a chain of young Arrays each
+naming the one before, run to out of memory, where promotion finds no
+block. Starting position 3 is right: fault 2 has its own cause, and the
+full-heap test compiles nothing (its kasm is loaded before the VM runs).
+Starting position 4 is right with the switch: 22 s against twelve
+minutes. Without the switch the plain ring load (`reserveLoadSrc`, whose
+nodes name no young object) moved 2306 bodies across and failed nothing.
+
+The counted runs under the suite's load (the rule, written before them:
+`part1/rule-fault2.txt`) are in "Fault 2 under the suite's load" below.
+
+Part 1's tests, each run on the part 1 commit (07fcad1 with the
+instrumentation, the test switch and the unused barrier site; no fix):
+
+| Test | Part 1 commit |
+|---|---|
+| `aMadeMethodsYoungLiteralIsRememberedAndSurvivesAScavenge` (kinds 1 to 4: an ordinary object, a Binding, an OrderedCollection, a Set) | fails, each kind: "before scavenge 1: entry E (old) names young @Y (nursery 1) in slot 0 ... [holder: Array (class 7), old, 1 slots, read-only, pinned ..." |
+| `withoutTheBarrierTheVerifierNamesTheLiteralFrame` (switch `skipBarrierAt = .methodLiteral`) | passes (the fault is there either way) |
+| `aClassVariableAddedLiveLeavesNoYoungLiteral` | passes (starting position 2) |
+| `aClosureLiteralIsRefused` | passes |
+| `keptBodiesPlacedInAnotherNurseryStayRemembered` (stw, offload) | stw passes; offload fails, 142 to 612 verifier failures a run, every one naming a body "kept and moved" |
+
+(`part1/tests-part1.txt`, `part1/f2-forced-instr.txt`.) The kernel tests
+are in `Tests/KajoCompilerTests/VerifierFaultsKernelTests.swift` over the
+probe class `Fixtures/verifier-faults/Tests/MakeYoungProbe.class.st`; the
+VM test in `Tests/KajoVMTests/Nursery/VerifierFaultsTests.swift`. The
+stall tests' helper verifies when `KAJO_STALL_VERIFY` is set (part 1
+only, for the counted runs), and its full-heap line prints `keptObjects`,
+`keptAcross`, `verify` and `verifies`.
