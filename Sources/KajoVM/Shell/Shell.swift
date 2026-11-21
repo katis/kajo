@@ -355,7 +355,7 @@ public final class ShellVM: @unchecked Sendable {
         // shell, each time another one (docs/modules/review-3-small-
         // fixes.md, Found); the cause was not found.
         var options = options
-        if options.verify == nil { options.verify = false }
+        if options.verify == nil { options.verify = .withoutHeap }
         switch Headless.configs(options) {
         case .success(let c): (vc, config) = c
         case .failure(let f): throw .options("\(f)")

@@ -14,7 +14,7 @@ final class Runtime {
 
     init(_ src: String, background: Int, heapBlocks: Int = 2048, reserveBlocks: Int? = nil, entries: Int = 1 << 20,
          sliceMs: Double = 5,
-         pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: Bool = true, pinsForGood: Bool = true,
+         pollEvery: Int = 64, start: Bool = true, stress: StressFlags = [], verify: VerificationLevel = .all, pinsForGood: Bool = true,
          configure: (inout VMConfig) -> Void = { _ in }, switches: TestSwitches = TestSwitches(),
          before: (Image) -> Void = { _ in }, after: (Image) -> Void = { _ in }, native: Bool = nativeRuntimes,
          module: NativeModule? = nil) throws {
@@ -22,16 +22,22 @@ final class Runtime {
         vc.backgroundWorkers = background
         vc.sliceNs = UInt64(sliceMs * 1e6)
         vc.pollEvery = pollEvery
-        vc.verifyStops = true  // the stop and schedule verifiers, in release builds too
-        configure(&vc)
+        // The third review's small fixes, part 2, item 6: the level (`all`
+        // by default: the stop and schedule verifiers and the object
+        // memory's at every pause, in release builds too), through the one
+        // function. The fixture's one exception: the young verifier at a
+        // stop after every collection stays off unless `configure` turns it
+        // on (YoungConfig's reason; the young-collection tests do).
         var c = ObjectMemoryConfig()
+        verify.apply(&vc, &c)
+        vc.young.verify = false
+        configure(&vc)
         c.heapBytes = heapBlocks * BlockHeap.blockBytes
         c.reserveBytes = reserveBlocks.map { $0 * BlockHeap.blockBytes } ?? vc.nursery.reserveBytes(workers: background + 2)
         c.nurseryRegionBytes = vc.nursery.regionBytes(workers: background + 2)
         c.entryCapacity = entries
         c.entryChunk = 256
         c.stress = stress
-        c.verify = verify
         c.onVerifyFailure = .record
         c.testSwitches = switches
         image = try Image(memory: ObjectMemory(c), pinsForGood: pinsForGood)

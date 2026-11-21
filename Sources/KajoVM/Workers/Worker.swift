@@ -70,11 +70,24 @@ enum LeaveReason: UInt8, Sendable {
     /// AOT 1: the native engine's state (Native/NativeState.swift), last so
     /// no offset the interpreter reads moves.
     var native = unsafe NativeWorkerState()
+    /// The third review's small fixes, part 2, item 2: special sends and
+    /// float primitives answered by the SmallFloat path with no save
+    /// (`smallFloatArith`), and entries of the LargeInteger tier
+    /// (`largeArith`, which builds `BigInt`s: Swift arrays). After
+    /// `native`, so no offset the interpreter or a native module reads
+    /// moves.
+    var floatPath = FloatPathCounters()
 
     static let bytes = unsafe (MemoryLayout<Worker>.size + 127) & ~127
 }
 
 typealias WorkerPointer = UnsafeMutablePointer<Worker>
+
+/// The third review's small fixes, part 2, item 2 (`Worker.floatPath`).
+struct FloatPathCounters: Sendable, Equatable {
+    var smallFloatAnswers: UInt64 = 0
+    var largeArithCalls: UInt64 = 0
+}
 
 /// The worker an interpreter state belongs to: the same address.
 @_transparent

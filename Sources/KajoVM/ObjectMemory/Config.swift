@@ -78,7 +78,9 @@ struct ObjectMemoryConfig: Sendable {
     /// Entries per refill of an allocation context.
     var entryChunk = 4096
     var stress: StressFlags = []
-    var verify = checkedBuild
+    /// The heap verifier at every pause (`VerificationLevel.all`; the
+    /// build's level by default).
+    var verify = VerificationLevel.build == .all
     var onVerifyFailure: VerifyFailurePolicy = checkedBuild ? .trap : .record
     var testSwitches = TestSwitches()
     /// Tests: every address-space reservation the object memory makes or
@@ -135,6 +137,11 @@ struct TestSwitches: Sendable {
     /// Interpreter speed: methods are made without the fusion peephole
     /// (`fuseBytecodes`), so a test can run the same program fused and plain.
     var noFusion = false
+    /// The third review's small fixes, part 2, item 2: the special sends
+    /// and primitives 60 to 69 skip the SmallFloat path that answers before
+    /// any save, so a test can compare its answers with the old path's
+    /// (the integer tier first, then `floatArith`, behind a save).
+    var noSmallFloatPath = false
 }
 
 /// Module 10: the readers of a body that know runs, each with a broken

@@ -148,6 +148,29 @@ end
     rt.stop()
 }
 
+/// Module 7's in-pause scan, kept as a switch (`youngRootsInStop`, the
+/// third review's small fixes, part 2, item 5): the initial mark scans
+/// every nursery's young bodies in its stop, so nothing is owed after it and
+/// the marker's step scans none; the cycle still loses nothing.
+@Test func withYoungRootsInStopTheInitialMarkScansInItsStop() throws {
+    let rt = try youngRuntime(.offload, src: markingSrc, marking: true) { $0.marking.testSwitches.youngRootsInStop = true }
+    rt.run("mkEmptyH")
+    rt.run("mkO")
+    rt.vm.collect()
+    rt.run("mkY")
+    rt.vm.startYoungCycle()
+    #expect(rt.phase == .marking)
+    #expect(rt.vm.rootScanState(1) == RootScanState.none)
+    #expect(rt.vm.youngCounters.youngRootScanNs > 0)
+    _ = rt.vm.markStep(10_000_000)
+    #expect(rt.vm.rootScanStats[RootScanStat.byMarker] == 0)
+    rt.vm.finalMark()
+    #expect(rt.phase == .sweeping && rt.marking.missed == 0)
+    rt.vm.sweep()
+    #expect(rt.runInt("sumY") == 100 * 101 / 2)
+    rt.stop()
+}
+
 /// O leaves the young Y for H after H was traced and before Y's nursery
 /// was scanned. With the barrier on young holders of an owed nursery the
 /// store records O; without it (`noOwedScanBarrier`) the scan, done in the

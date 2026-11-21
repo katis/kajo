@@ -109,7 +109,7 @@ private func ms(_ ns: UInt64) -> String { String(format: "%.3f", Double(ns) / 1e
     for (mib, polls) in [(16, true), (64, true), (256, true), (1024, true), (256, false)] {
         let n = mib << 20
         let rt = try Runtime(pairSrc + longSource, background: 1, heapBlocks: 72 * 1024, entries: 1 << 20, start: true,
-                             verify: false, configure: { c in c.testSwitches.noBytePolls = !polls })
+                             verify: .stops, configure: { c in c.testSwitches.noBytePolls = !polls })
         func timed(_ sel: String, _ args: [Oop]) -> (UInt64, Oop) {
             let t0 = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
             let p = rt.spawn(sel, args)

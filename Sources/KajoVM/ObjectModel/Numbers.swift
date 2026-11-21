@@ -367,7 +367,19 @@ extension Machine {
                 return largeArith(.bitShift, a, b)
             }
         }
+        // A LargeInteger object on one side, or nothing for this tier: a
+        // float (or anything else) never builds a `BigInt` (the third
+        // review's small fixes, part 2, item 2; interpreter.M1).
+        guard isLargeInteger(a) || isLargeInteger(b) else { return .none }
         return largeArith(op, a, b)
+    }
+
+    /// A LargePositiveInteger or LargeNegativeInteger object (one class test).
+    @inline(__always)
+    func isLargeInteger(_ v: Oop) -> Bool {
+        guard v.isObject else { return false }
+        let c = om.classIndex(of: v)
+        return c == WellKnown.largePositiveInteger || c == WellKnown.largeNegativeInteger
     }
 
     /// `integerArith` with a LargeInteger on either side, or a SmallInteger
@@ -375,6 +387,7 @@ extension Machine {
     /// and off the checked paths).
     @inline(never)
     func largeArith(_ op: ArithOp, _ a: Oop, _ b: Oop) -> Oop {
+        unsafe workerOf(state).pointee.floatPath.largeArithCalls &+= 1
         guard let x = bigInt(a), let y = bigInt(b) else { return .none }
         let c = BigInt.compare(x, y)
         switch op {
@@ -436,9 +449,57 @@ extension Machine {
     func isBoxedFloat(_ v: Oop) -> Bool { v.isObject && om.classIndex(of: v) == WellKnown.float }
 
     /// The special sends' arithmetic tier: integers, then floats.
+    /// (`smallFloatArith` answers the SmallFloat cases before this.)
     func arith(_ op: ArithOp, _ a: Oop, _ b: Oop) -> Oop {
         let r = integerArith(op, a, b)
         if r != .none || failed { return r }
         return floatArith(op, a, b)
     }
+}
+
+/// The third review's small fixes, part 2, item 2 (interpreter.M1): `a op
+/// b` when one operand is a SmallFloat and the other a SmallFloat or a
+/// SmallInteger, and the answer is a SmallFloat or a Boolean (`t`, `f`).
+/// It neither allocates nor polls, so the special sends and primitives 60
+/// to 69 run it before any register save. 0 (no oop) when it does not
+/// apply: another operand, a result that must be boxed, a zero divisor, an
+/// operation floats do not have; the caller then takes the path that
+/// saves, which answers what it always did. Same arithmetic as
+/// `floatArith` (a SmallInteger converted with `Double(_:)`).
+@inline(__always)
+func smallFloatArith(_ op: ArithOp, _ a: UInt64, _ b: UInt64, _ t: UInt64, _ f: UInt64) -> UInt64 {
+    let oa = Oop(raw: a), ob = Oop(raw: b)
+    let x: Double, y: Double
+    if oa.isSmallFloat {
+        x = oa.smallFloatValue
+        if ob.isSmallFloat {
+            y = ob.smallFloatValue
+        } else if ob.isSmallInteger {
+            y = Double(ob.smallIntegerValue)
+        } else {
+            return 0
+        }
+    } else if ob.isSmallFloat && oa.isSmallInteger {
+        x = Double(oa.smallIntegerValue)
+        y = ob.smallFloatValue
+    } else {
+        return 0
+    }
+    let r: Double
+    switch op {
+    case .add: r = x + y
+    case .sub: r = x - y
+    case .mul: r = x * y
+    case .div:
+        if y == 0 { return 0 }
+        r = x / y
+    case .lt: return x < y ? t : f
+    case .gt: return x > y ? t : f
+    case .le: return x <= y ? t : f
+    case .ge: return x >= y ? t : f
+    case .eq: return x == y ? t : f
+    case .ne: return x != y ? t : f
+    default: return 0
+    }
+    return Oop(smallFloat: r)?.raw ?? 0
 }

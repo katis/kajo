@@ -409,7 +409,7 @@ enum RandomConfig: String, CaseIterable, CustomTestStringConvertible {
         let heapBlocks = exhausted ? exhaustedHeapBlocks + 2 * p.tasks + 2
             : self == .slowedMarker ? slowedHeapBlocks + 2 * p.tasks : longBytes ? 4096 : 256
         return try Runtime(source, background: workers, heapBlocks: heapBlocks,
-                           reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify,
+                           reserveBlocks: exhausted ? 0 : nil, stress: stress, verify: verify ? .all : .stops,
                            configure: { c in
                                // Symbol interning without a stop: the
                                // symbol-table verifier at every stop that
@@ -833,7 +833,7 @@ func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode, saveNative: Boo
                        resumeNative: Bool = false) throws -> (saved: Int64?, resumed: Int64?, didSave: Bool) {
     let n = snapshotPoll(p, mode)
     let rt = try Runtime(p.source + longBytesSource(long: false) + snapshotSrc, background: mode.workers.save, heapBlocks: 256, stress: mode.stress,
-                         verify: mode.verify, configure: { c in
+                         verify: mode.verify ? .all : .stops, configure: { c in
                              mode.configure(&c, p.seed)
                              c.snapshotAtPoll = n
                          }, native: saveNative)

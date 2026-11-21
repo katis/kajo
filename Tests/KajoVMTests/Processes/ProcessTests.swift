@@ -422,6 +422,50 @@ end
     rt.stop()
 }
 
+/// The broken variant of the rule above (`noPendingRoots`, the third
+/// review's small fixes, part 2, item 5): Delays not registered as pending
+/// roots. The table holds none of them, the collections free the
+/// Semaphores, and every timer that fires finds its Semaphore gone: each is
+/// counted stale (the external queue's defensive check) instead of
+/// signalled.
+@Test func withoutPendingRootsTheSemaphoresAreLostToACollection() throws {
+    let src = """
+    ; t0 = n, t1 = i
+    method UndefinedObject armTimers: temps=1
+      push_int 0
+      store_temp 1
+    loop:
+      push_temp 1
+      push_temp 0
+      lt
+      jump_if_false done
+      push_nil
+      push_lit 1500
+      push_nil
+      send newSemaphore 0
+      send delay:signal: 2
+      pop
+      push_temp 1
+      push_int 1
+      add
+      store_temp 1
+      jump loop
+    done:
+      push_temp 1
+      return_top
+    end
+    """
+    let rt = try Runtime(src, background: 2, configure: { $0.testSwitches.noPendingRoots = true })
+    rt.spawn("armTimers:", [int(20)])
+    rt.waitAllTerminated()
+    #expect(rt.vm.pendingRootCount == 0)
+    rt.vm.collect()
+    rt.vm.compact()
+    rt.vm.collect()
+    #expect(eventually(60) { rt.vm.counters.staleExternalSignals == 20 })
+    rt.stop()
+}
+
 @Test func stackOverflowTerminatesTheProcessAndSignalsExit() throws {
     let src = """
     method UndefinedObject down: temps=0

@@ -16,7 +16,7 @@ import Testing
 /// The `gc` summary event of a `Headless.test` run of one kernel test that
 /// collects (`WeakTest>>testWeakArrayLosesItsReferent` calls `Smalltalk
 /// garbageCollect`): its fields as strings.
-private func verifySummary(_ verify: Bool?) throws -> [String: String] {
+private func verifySummary(_ verify: VerificationLevel?) throws -> [String: String] {
     var o = Headless.Options()
     o.heapMiB = 256
     if let verify { o.verify = verify }
@@ -36,17 +36,22 @@ private func verifySummary(_ verify: Bool?) throws -> [String: String] {
 /// A checked build verifies at every pause by default and says so; a run
 /// told not to says off and ran no verifier; a run told to verifies in any
 /// build. On 0b33ed3 the summary had no `verify` field and the default
-/// overwrote the checked build's (no verifier ran).
+/// overwrote the checked build's (no verifier ran). Part 2, item 6: the
+/// level's name (`all` in a checked build by default, `off` in a release
+/// build; `stops` runs no heap verifier).
 @Test func aHeadlessRunReportsItsVerifierLevel() throws {
     let byDefault = try verifySummary(nil)
-    #expect(byDefault["verify"] == (checkedBuild ? "on" : "off"), "default: \(byDefault)")
+    #expect(byDefault["verify"] == (checkedBuild ? "all" : "off"), "default: \(byDefault)")
     if checkedBuild { #expect(Int(byDefault["verifies"] ?? "") ?? 0 > 0, "default: \(byDefault)") }
-    let off = try verifySummary(false)
+    let off = try verifySummary(.off)
     #expect(off["verify"] == "off", "off: \(off)")
     #expect(off["verifies"] == "0", "off: \(off)")
-    let on = try verifySummary(true)
-    #expect(on["verify"] == "on", "on: \(on)")
-    #expect(Int(on["verifies"] ?? "") ?? 0 > 0, "on: \(on)")
+    let stops = try verifySummary(.stops)
+    #expect(stops["verify"] == "stops", "stops: \(stops)")
+    #expect(stops["verifies"] == "0", "stops: \(stops)")
+    let on = try verifySummary(.all)
+    #expect(on["verify"] == "all", "all: \(on)")
+    #expect(Int(on["verifies"] ?? "") ?? 0 > 0, "all: \(on)")
 }
 
 // MARK: - item 2: Monitor and SharedQueue under termination

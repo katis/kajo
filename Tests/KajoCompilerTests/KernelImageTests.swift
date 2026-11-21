@@ -37,8 +37,10 @@ func runKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (Result<Int
     // sanitizer gates): the owner's answer of 2026-11-20, the verifiers
     // costing 1.7 times the kernel tests in release and 3 times in debug
     // (docs/decisions/50-review-3-small-fixes.md). Not the build's level,
-    // which is the opposite.
-    o.verify = !checkedBuild
+    // which is the opposite. Part 2, item 6: the release build's level is
+    // `all` (the heap verifiers and, since then, the stop verifiers too),
+    // the checked build's the build's level without the heap verifiers.
+    o.verify = checkedBuild ? .withoutHeap : .all
     let r = Headless.test(image: image, arguments: arguments, options: o) { lines.add($0) }
     return (r, lines.all)
 }
@@ -192,7 +194,7 @@ let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestList, into: Ke
         let summary = report.events.last { $0["kind"] as? String == "gc" && $0["collection"] as? String == "summary" }
         let verify = summary?["verify"] as? String, verifies = summary?["verifies"] as? Int ?? 0
         print("kernel part \(part): verify=\(verify ?? "-") verifies=\(verifies)")
-        #expect(verify == (checkedBuild ? "off" : "on"), "part \(part): verify=\(verify ?? "-")")
+        #expect(verify == (checkedBuild ? "stops" : "all"), "part \(part): verify=\(verify ?? "-")")
         if !checkedBuild { #expect(verifies > 0, "part \(part): verifies=\(verifies)") }
         for e in report.events {
             #expect(e["v"] as? Int == 1)

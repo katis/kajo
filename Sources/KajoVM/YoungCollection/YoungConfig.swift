@@ -55,6 +55,8 @@ struct YoungConfig: Sendable {
     /// every collection starves long kernels (the lesson module 6 recorded
     /// for its verifier); the young-collection tests, the random programs'
     /// young configurations and the shared-objects test turn it on.
+    /// `VerificationLevel.apply` sets it at `all` (`kajo run --verify`,
+    /// `kajo test` in a checked build).
     var verify = false
     var verifyEvery = 1
     var stress: YoungStress = []

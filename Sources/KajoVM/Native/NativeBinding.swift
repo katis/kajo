@@ -27,15 +27,24 @@ import MachO
 // freed and reused under the binding (`becomeForward` clears a forwarded
 // method's line). No match is not an error: the method runs interpreted.
 
-enum ModuleOffset {
-    static let magic = 0, version = 8, layout0 = 16, layout1 = 24, nilOop = 32, trueOop = 40, falseOop = 48
-    static let groupCount = 56, groups = 64, resumeCount = 72, resume = 80, enter = 88
-    static let generated = 96, declined = 104
+// The generator's tables file asserts each of these against the C structs
+// (`_Static_assert` of `offsetof` and `sizeof`), so `native-cc` fails when a
+// mirror disagrees (the third review's small fixes, part 2, item 1).
+package enum ModuleOffset {
+    package static let magic = 0, version = 8, layout0 = 16, layout1 = 24, nilOop = 32, trueOop = 40, falseOop = 48
+    package static let groupCount = 56, groups = 64, resumeCount = 72, resume = 80, enter = 88
+    package static let generated = 96, declined = 104
+    package static let size = 112
 }
 
-enum GroupOffset {
-    static let h0 = 0, h1 = 8, activate = 16, cold = 24, rx = 32, depth = 40, codeLen = 48
-    static let stride = 56
+package enum GroupOffset {
+    package static let h0 = 0, h1 = 8, activate = 16, cold = 24, rx = 32, depth = 40, codeLen = 48
+    package static let stride = 56
+}
+
+package enum ResumeOffset {
+    package static let fn = 0, pc = 8, depth = 12
+    package static let stride = 16
 }
 
 /// A compiled module: its descriptor, from a `dlopen`ed dylib (tests,

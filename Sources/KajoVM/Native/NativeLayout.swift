@@ -36,6 +36,7 @@ package enum NativeLayout {
             ("FORMAT_VERSION", nativeFormatVersion),
             ("W_COUNTDOWN", off(\Worker.interp.countdown)),
             ("W_FLAG", off(\Worker.interp.safepointFlag)),
+            ("FLAG_BARRIER_WORD", UInt64(barrierWordIndex)),
             ("W_SENDS", off(\Worker.interp.counters.sends)),
             ("W_CACHE", off(\Worker.interp.cache)),
             ("W_STACKBASE", off(\Worker.interp.stackBase)),
@@ -89,14 +90,18 @@ package enum NativeLayout {
     }()
 
     /// The layout hash: SHA-256 of the constants' names and values.
-    package static let hash: (UInt64, UInt64) = {
+    package static let hash: (UInt64, UInt64) = hash(of: constants)
+
+    /// The hash of any list of constants (the tests' seam: a changed
+    /// constant changes the hash).
+    package static func hash(of constants: [(name: String, value: UInt64)]) -> (UInt64, UInt64) {
         var bytes: [UInt8] = []
         for (n, v) in constants {
             bytes += Array(n.utf8) + [0]
             for i in 0..<8 { bytes.append(UInt8(truncatingIfNeeded: v >> (8 * UInt64(i)))) }
         }
         return nativeDigest(bytes)
-    }()
+    }
 }
 
 /// SHA-256 of `bytes`, its first 128 bits as two words.

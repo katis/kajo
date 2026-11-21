@@ -32,7 +32,7 @@ private final class MakeYoungRun {
         var o = Headless.Options()
         o.heapMiB = 256
         o.workers = 2
-        o.verify = true
+        o.verify = .all
         let (c0, c) = try Headless.configs(o).get()
         var vc = c0
         vc.nursery.testSwitches.skipBarrierAt = site

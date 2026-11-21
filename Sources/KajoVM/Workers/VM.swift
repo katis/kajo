@@ -655,6 +655,17 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
         return unsafe state.pointee.intern.pointee
     }
 
+    /// The third review's small fixes, part 2, item 2: every worker's.
+    var floatPathCounters: FloatPathCounters {
+        var c = FloatPathCounters()
+        for i in unsafe 0..<state.pointee.workerCount {
+            let x = unsafe state.worker(i).pointee.floatPath
+            c.smallFloatAnswers &+= x.smallFloatAnswers
+            c.largeArithCalls &+= x.largeArithCalls
+        }
+        return c
+    }
+
     var interpreterCounters: InterpreterCounters {
         var c = InterpreterCounters()
         for i in unsafe 0..<state.pointee.workerCount {
@@ -664,6 +675,7 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
             c.specialSendFallbacks &+= x.specialSendFallbacks; c.errors &+= x.errors
             c.safepointPolls &+= x.safepointPolls; c.collectionsTriggered &+= x.collectionsTriggered
             c.symbolsInterned &+= x.symbolsInterned
+            c.specialSendTier &+= x.specialSendTier; c.floatsBoxed &+= x.floatsBoxed
         }
         return c
     }

@@ -51,6 +51,8 @@ import Synchronization
 
     var machine: Machine { unsafe Machine(state: state) }
     var counters: InterpreterCounters { unsafe state.pointee.counters }
+    /// The third review's small fixes, part 2, item 2.
+    var floatPath: FloatPathCounters { unsafe workerOf(state).pointee.floatPath }
 
     /// The test switch standing in for module 3's safepoint request: while
     /// set, every poll (sends and backward jumps) collects.

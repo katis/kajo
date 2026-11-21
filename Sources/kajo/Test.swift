@@ -34,8 +34,12 @@ func runTests(_ args: [String]) -> Never {
         case "--native": options.native = loadNative(value())
         // The third review's small fixes, item 1: the heap verifiers at
         // every pause (off by default here, above).
-        case "--verify": options.verify = true
-        case "--no-verify": options.verify = false
+        case "--verify": options.verify = .all
+        case "--no-verify": options.verify = .withoutHeap
+        case "--verify-level":
+            let v = value()
+            guard let l = VerificationLevel(name: v) else { fail("--verify-level: off, stops or all, not \(v)") }
+            options.verify = l
         case let a where a.hasPrefix("--"): fail("unknown option \(a)\n\(usage)")
         default: imagePath = args[i]
         }
@@ -74,7 +78,7 @@ func runTests(_ args: [String]) -> Never {
     // The third review's small fixes, part 2, item 4: the weak-only copies
     // beside the young collections' promotions.
     let weakOnly = summary?["weakOnlyCopies"] as? Int, promoted = summary?["ycPromoted"] as? Int
-    FileHandle.standardError.write("kajo test: verify=\(options.verifies ? "on" : "off") verifies=\(verifies.map(String.init) ?? "-") weakOnlyCopies=\(weakOnly.map(String.init) ?? "-") ycPromoted=\(promoted.map(String.init) ?? "-")\n".data(using: .utf8)!)
+    FileHandle.standardError.write("kajo test: verify=\(options.level.name) verifies=\(verifies.map(String.init) ?? "-") weakOnlyCopies=\(weakOnly.map(String.init) ?? "-") ycPromoted=\(promoted.map(String.init) ?? "-")\n".data(using: .utf8)!)
     // AOT 1: the native engine's counts (bound, interpreted, declined, switches).
     for e in events where e.starts(with: Array("{\"v\":1,\"kind\":\"native\"".utf8)) {
         FileHandle.standardError.write(Data(Array("native: ".utf8) + e + [10]))

@@ -125,7 +125,7 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
     """
     // Verifiers once at the end (rt.stop); 30 operations a millisecond
     // apart, so the workers run between them even under ThreadSanitizer.
-    let rt = try Runtime(src, background: 7, heapBlocks: 512, verify: false)
+    let rt = try Runtime(src, background: 7, heapBlocks: 512, verify: .stops)
     let n: Int64 = checkedBuild ? 20_000 : 200_000
     var ps: [Oop] = []
     for _ in 0..<7 { ps.append(rt.spawn("pairs:", [int(n)])) }
@@ -170,7 +170,7 @@ func kernelsOnEightWorkersMatchTheirModels(_ name: String) throws {
     // Verifiers once at the end (rt.stop): at every collection they made
     // the allocating kernels take minutes in a debug build. Eight depth-16
     // trees at once need about a million live entries.
-    let rt = try Runtime(kernel(name), background: 8, heapBlocks: 2048, entries: 1 << 22, verify: false)
+    let rt = try Runtime(kernel(name), background: 8, heapBlocks: 2048, entries: 1 << 22, verify: .stops)
     var ps: [Oop] = []
     for w in 0..<8 { ps.append(rt.spawn("run:of:", [int(Int64(w)), int(n)])) }
     rt.waitAllTerminated(300)

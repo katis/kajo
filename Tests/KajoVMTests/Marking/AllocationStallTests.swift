@@ -73,7 +73,7 @@ private func headless(_ files: [(path: String, text: String)], young: String, wo
     // the full heap 307 to 1347 s, the gate 811 to 1861 s;
     // docs/modules/verifier-faults.md, part 4), the owner's rule for the
     // kernel's tests (the release gate verifies) applied here.
-    o.verify = !checkedBuild
+    o.verify = checkedBuild ? .withoutHeap : .all
     if native { o.native = try nativeModule(files) }
     let out = Headless.run(files, options: o)
     var report: [String: String] = [:]
@@ -133,7 +133,7 @@ func aRingLikeLoadStallsInsteadOfFallingBack(_ young: String) throws {
     // scavenge stop made the stop-the-world case's stops 340 s of 540 under
     // the sanitizer with the twelve loops); the heap is verified once at
     // the end (`rt.stop()`).
-    let rt = try Runtime(src, background: 2, heapBlocks: (16 << 20) / BlockHeap.blockBytes, verify: false, configure: { c in
+    let rt = try Runtime(src, background: 2, heapBlocks: (16 << 20) / BlockHeap.blockBytes, verify: .stops, configure: { c in
         c.nursery.bytes = 512 << 10
         c.young.mode = YoungMode(name: young)!
         c.marking.enabled = true
@@ -726,7 +726,7 @@ end
 private let fullHeapStalls: UInt64 = 4
 
 private func fullHeapUnjustified(broken: Bool) throws -> (MarkingCounters, UInt64, StallTally) {
-    let rt = try Runtime(fullSource, background: 2, heapBlocks: underThreadSanitizer ? 160 : 320, verify: false, configure: { c in
+    let rt = try Runtime(fullSource, background: 2, heapBlocks: underThreadSanitizer ? 160 : 320, verify: .stops, configure: { c in
         c.nursery.bytes = 512 << 10
         c.marking.enabled = true
         c.marking.markerThread = true

@@ -11,16 +11,17 @@ public enum Headless {
         public var entries = 1 << 24
         /// `KAJO_STRESS` syntax: `every`, `oneblock`, `tiny`, `all`.
         public var stress = ""
-        /// The heap verifiers (the object memory's and the young
-        /// collector's) at every pause: nil is the build's level, on in a
-        /// checked (debug) build and off in a release build, as
-        /// docs/VERIFICATION.md layer 1 says; true or false says otherwise
-        /// (`--verify`, `--no-verify`). The third review's small fixes,
-        /// item 1: `configs` wrote false over the checked build's default.
-        public var verify: Bool? = nil
-        /// Whether these options run the heap verifiers (`verify` or the
-        /// build's level): what the run line and `kajo test` print.
-        public var verifies: Bool { verify ?? checkedBuild }
+        /// The verifiers (`VerificationLevel`): nil is the build's level,
+        /// `all` in a checked (debug) build and `off` in a release build, as
+        /// docs/VERIFICATION.md layer 1 says; `--verify` is `all`,
+        /// `--no-verify` the build's level without the heap verifiers
+        /// (`VerificationLevel.withoutHeap`), `--verify-level` names one.
+        /// The third review's small fixes, item 1: `configs` wrote false
+        /// over the checked build's default; part 2, item 6: one level.
+        public var verify: VerificationLevel? = nil
+        /// The level these options run at: what the run line and `kajo
+        /// test` print (`verify=off|stops|all`).
+        public var level: VerificationLevel { verify ?? .build }
         /// Background workers; one Process per worker runs `run: i of: n`.
         public var workers = 1
         public var stackWords = 1 << 16
@@ -278,7 +279,7 @@ public enum Headless {
         }
         let c = image.om.counters
         let ts = clock_gettime_nsec_np(CLOCK_REALTIME) / 1000
-        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations),\"verify\":\"\(options.verifies ? "on" : "off")\",\"verifies\":\(c.verifierRuns),\"weakOnlyCopies\":\(vm.youngCounters.weakOnlyCopies),\"ycPromoted\":\(vm.youngCounters.promotedObjects)}".utf8))
+        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations),\"verify\":\"\(options.level.name)\",\"verifies\":\(c.verifierRuns),\"weakOnlyCopies\":\(vm.youngCounters.weakOnlyCopies),\"ycPromoted\":\(vm.youngCounters.promotedObjects)}".utf8))
         if let error { return .failure(.vm(error)) }
         guard answer.isSmallInteger else { return .failure(.notAnInteger("\(answer)")) }
         return .success(answer.smallIntegerValue)
@@ -321,7 +322,6 @@ public enum Headless {
         guard let mode = YoungMode(name: options.young) else { return .failure(.unsupported(YoungMode.refusal(options.young))) }
         vc.young.mode = mode
         vc.young.stress = YoungStress(parsing: options.youngStress)
-        vc.young.verify = options.verifies
         vc.sourcesDirectory = options.sourcesDirectory
         vc.native = options.native
         guard options.logCapacity >= 1 else { return .failure(.unsupported("log capacity: at least 1")) }
@@ -334,7 +334,7 @@ public enum Headless {
         config.nurseryRegionBytes = vc.nursery.regionBytes(workers: options.workers + 2)
         config.entryCapacity = options.entries
         config.stress = StressFlags(parsing: options.stress)
-        config.verify = options.verifies
+        options.level.apply(&vc, &config)
         config.onVerifyFailure = .trap
         return .success((vc, config))
     }
@@ -417,7 +417,7 @@ public enum Headless {
         let qos = (1...n).map { "\(vm.workerQoS($0).rawValue)" }.joined(separator: ",")
         var report: [(String, String)] = [
             // The third review's small fixes, item 1: what the run checked.
-            ("verify", options.verifies ? "on" : "off"),
+            ("verify", options.level.name),
             ("qos", qos), ("stops", "\(stops.count)"), ("pauseP50ms", pct(0.5)), ("pauseP99ms", pct(0.99)),
             ("pauseMaxMs", pauses.last.map { unsafe String(format: "%.3f", Double($0) / 1e6) } ?? "-"),
             ("slowestParticipant", worst.map { "\($0.slowest)" } ?? "-"),
@@ -455,6 +455,9 @@ public enum Headless {
             ("collections", m.collections), ("compactions", m.compactions), ("allocations", m.allocations),
             ("allocatedBytes", m.allocatedBytes), ("weakSlotsNiled", m.weakSlotsNiled), ("ephemeronsQueued", m.ephemeronsQueued),
             ("verifies", m.verifierRuns),
+            // The third review's small fixes, part 2, item 2.
+            ("specialSendTier", c.specialSendTier), ("smallFloatAnswers", vm.floatPathCounters.smallFloatAnswers),
+            ("largeArithCalls", vm.floatPathCounters.largeArithCalls), ("floatsBoxed", c.floatsBoxed),
         ] + v.named.filter { ["slices", "preemptions", "stops", "schedLocks", "schedContended", "schedWaitNs",
                               "parkNs", "enterWaitNs", "stopNs", "timeToSafepointNs", "processErrors",
                               "stopperQoSRaises", "internStops", "internStopNs", "internTtspNs", "internContended", "internWaitNs",
@@ -524,7 +527,7 @@ extension Headless {
         let v = vm.counters
         return Outcome(checksum: checksum, milliseconds: ms, counters: v.named.filter {
             ["processesResumed", "slices", "preemptions", "stops", "snapshots"].contains($0.name)
-        }, report: [("verify", options.verifies ? "on" : "off"), ("verifies", "\(image.om.counters.verifierRuns)"),
+        }, report: [("verify", options.level.name), ("verifies", "\(image.om.counters.verifierRuns)"),
                     ("resumed", "\(vm.resumedProcesses.count)"), ("answered", "\(ended)"), ("leftWaiting", "\(waiting)")])
     }
 }

@@ -52,7 +52,7 @@ private func weakOnlyRun(young: String) -> Headless.Outcome {
     var o = Headless.Options()
     o.workers = 1
     o.young = young
-    o.verify = false
+    o.verify = .withoutHeap
     return Headless.run([("prelude.kasm", kernel("prelude")), ("lib.kasm", kernel("lib")), ("weak.kasm", weakOnlySrc)],
                         options: o)
 }

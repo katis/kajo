@@ -50,16 +50,16 @@ import Darwin
 /// The three links are SmallIntegers, so the collector scans them as
 /// integers. They are offsets and indices, not addresses: the bytecodes
 /// they point into move under compaction, and the stack may move in module 3.
-enum Frame {
-    static let method = 0
-    static let callerPC = 1
-    static let callerFP = 2
-    static let callerHdr = 3
+package enum Frame {
+    package static let method = 0
+    package static let callerPC = 1
+    package static let callerFP = 2
+    package static let callerHdr = 3
     /// The frame's context word (ADR 0009, module 8): `emptyContext` until
     /// a Context is materialized into it, or a return marker
     /// (ObjectModel/Frames.swift).
-    static let context = 4
-    static let headerWords = 5
+    package static let context = 4
+    package static let headerWords = 5
     /// The context word of a plain frame: SmallInteger 0, so the return's
     /// test is a compare with an immediate and keeps no register for nil.
     static let emptyContext: UInt64 = 1

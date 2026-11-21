@@ -25,6 +25,16 @@ func specialFastPath(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
     let om = unsafe s.pointee.om
     if let op = ArithOp.special(index) {
         let a = Oop(raw: unsafe (sp - 1).pointee), b = Oop(raw: unsafe sp.pointee)
+        // The third review's small fixes, part 2, item 2: a SmallFloat
+        // with a SmallFloat or a SmallInteger whose answer is a SmallFloat
+        // or a Boolean, before any save (nothing here allocates or polls).
+        let quick = unsafe smallFloatArith(op, a.raw, b.raw, s.pointee.trueObject.raw, s.pointee.falseObject.raw)
+        if quick != 0 && !om.config.testSwitches.noSmallFloatPath {
+            unsafe workerOf(s).pointee.floatPath.smallFloatAnswers &+= 1
+            unsafe s.pointee.counters.specialSendTier &+= 1
+            unsafe (sp - 1).pointee = quick
+            return unsafe regsAt(s, pc, sp - 1, fp, hdr)
+        }
         // Numbers only: an immediate (SmallInteger or SmallFloat) or a
         // Float or LargeInteger object on either side.
         func numeric(_ v: Oop) -> Bool {

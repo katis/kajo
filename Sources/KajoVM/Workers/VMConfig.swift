@@ -1,5 +1,56 @@
 import Darwin
 
+/// What "checked" means (the third review's small fixes, part 2, item 6;
+/// verification.A1): one level, one default per build, and one function
+/// (`apply`) that sets every configuration's verifier switch from it.
+///
+/// - `off`: no verifier.
+/// - `stops`: the stop and schedule verifiers at every stop
+///   (`VMConfig.verifyStops`: the parked count, the publish order, the
+///   barrier word, the intern lock).
+/// - `all`: `stops` and the heap verifiers at every pause: the object
+///   memory's (`ObjectMemoryConfig.verify`) and the young collector's
+///   (`YoungConfig.verify`).
+///
+/// The symbol-table verifier (`VMConfig.verifySymbols`) is not a level: it
+/// is off in every build and turned on by the tests that intern. What a
+/// failure does (`ObjectMemoryConfig.onVerifyFailure`) is the host's policy,
+/// not a level: `Headless` traps, the test fixtures record.
+public enum VerificationLevel: Int, Comparable, Sendable, CaseIterable {
+    case off, stops, all
+
+    /// The build's level: `all` in a checked (debug) build, `off` in a
+    /// release build (docs/VERIFICATION.md layer 1).
+    public static let build: VerificationLevel = checkedBuild ? .all : .off
+
+    /// The build's level without the heap verifiers: `stops` in a checked
+    /// build, `off` in a release build. What `--no-verify` and a `ShellVM`
+    /// whose host says nothing run.
+    public static let withoutHeap: VerificationLevel = Swift.min(build, .stops)
+
+    public var name: String {
+        switch self {
+        case .off: "off"
+        case .stops: "stops"
+        case .all: "all"
+        }
+    }
+
+    public init?(name: String) {
+        guard let l = VerificationLevel.allCases.first(where: { $0.name == name }) else { return nil }
+        self = l
+    }
+
+    public static func < (a: VerificationLevel, b: VerificationLevel) -> Bool { a.rawValue < b.rawValue }
+
+    /// Set every verifier switch of the two configurations from the level.
+    func apply(_ vc: inout VMConfig, _ om: inout ObjectMemoryConfig) {
+        vc.verifyStops = self >= .stops
+        vc.young.verify = self == .all
+        om.verify = self == .all
+    }
+}
+
 /// What a VM is built with. Everything here is fixed once the VM exists.
 struct VMConfig: Sendable {
     /// AOT 1: the compiled module to bind at start (docs/modules/aot.md);
@@ -49,8 +100,9 @@ struct VMConfig: Sendable {
     var sourcesDirectory: String? = nil
     /// Injected yields and sleeps, seeded (docs/VERIFICATION.md layer 5).
     var perturb: Perturbation? = nil
-    /// The stop and schedule verifiers at every stop (checked builds).
-    var verifyStops = checkedBuild
+    /// The stop and schedule verifiers at every stop (`VerificationLevel`:
+    /// on at `stops` and `all`, so in checked builds by default).
+    var verifyStops = VerificationLevel.build >= .stops
     /// Symbol interning without a stop, part 3: the symbol-table verifier
     /// (`ObjectMemory.verifySymbolTable`, O(Symbols)) at every stop that
     /// follows inserts. Off by default; the tests and the random programs

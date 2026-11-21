@@ -62,8 +62,9 @@ func nativeResume(_ s: StatePointer, _ r: Regs) -> (fn: UnsafeRawPointer, pc: UI
     let i = unsafe rx[pc]
     if i >= 0 {
         let resume = unsafe w.pointee.native.module.unsafelyUnwrapped.load(fromByteOffset: ModuleOffset.resume, as: UnsafeRawPointer.self)
-        let e = unsafe resume + Int(i) * 16
-        return unsafe (e.load(as: UnsafeRawPointer.self), UInt64(e.load(fromByteOffset: 8, as: UInt32.self)))
+        let e = unsafe resume + Int(i) * ResumeOffset.stride
+        return unsafe (e.load(fromByteOffset: ResumeOffset.fn, as: UnsafeRawPointer.self),
+                       UInt64(e.load(fromByteOffset: ResumeOffset.pc, as: UInt32.self)))
     }
     return unsafe (g.load(fromByteOffset: GroupOffset.cold, as: UnsafeRawPointer.self), UInt64(pc))
 }

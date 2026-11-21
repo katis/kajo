@@ -781,8 +781,15 @@ extension UnsafeMutablePointer where Pointee == MarkingShared {
 /// checks both halves at every stop (`verifyBarrierWordLocked`).
 @_transparent
 func barrierWord(_ flag: UnsafeMutablePointer<Atomic<UInt32>>) -> UnsafeMutablePointer<Atomic<UInt32>> {
-    unsafe flag + 2
+    unsafe flag + barrierWordIndex
 }
+
+/// The barrier word's index in the flag line (32-bit words). The native
+/// layout's `FLAG_BARRIER_WORD` is this constant, so the generated store
+/// tests the word the VM sets and a module built before a move is refused
+/// at bind (the third review's small fixes, part 2, item 1;
+/// interpreter.A2).
+let barrierWordIndex = 2
 
 enum BarrierBits {
     static let marking: UInt32 = 1

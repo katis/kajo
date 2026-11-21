@@ -502,7 +502,7 @@ struct Emitter {
            which stores again. Then the young barrier: a reference whose
            header is young in another nursery than the holder's. */
         static inline void k_store(KS *s, u64 o, u64 i, u64 v, u64 site) {
-          if (__atomic_load_n(AT(s, W_FLAG, u32 *) + 2, __ATOMIC_RELAXED) != 0) { VT(s)->store_barriers(s, o, i, v, site); return; }
+          if (__atomic_load_n(AT(s, W_FLAG, u32 *) + FLAG_BARRIER_WORD, __ATOMIC_RELAXED) != 0) { VT(s)->store_barriers(s, o, i, v, site); return; }
           u64 *sw = (u64 *)(AT(s, W_TABLE, char *) + o);
           u64 e1 = __atomic_load_n(sw, __ATOMIC_RELAXED);
           __atomic_store_n((u64 *)(AT(s, W_HEAP, char *) + e1 + 8 + i * 8), v, __ATOMIC_SEQ_CST);
@@ -550,15 +550,15 @@ struct Emitter {
             // caller's resume index, d the depth before the send << 8 | argc.
             line("KFN k_send(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
             line("  u64 sel_ = a, argc_ = d & 255, dep_ = d >> 8, next_ = b >> 8, len_ = b & 255;")
-            line("  if (UNLIKELY(k_due(s))) { KF *f_ = VT(s)->poll_send(s, next_, hdr + 4 + dep_, fp, hdr, len_); if (f_ != KCONT) { if (!f_) return; KOUT(f_); } }")
+            line("  if (UNLIKELY(k_due(s))) { KF *f_ = VT(s)->poll_send(s, next_, hdr + \(Frame.headerWords - 1) + dep_, fp, hdr, len_); if (f_ != KCONT) { if (!f_) return; KOUT(f_); } }")
             if !options.brokenNoSendCount { line("  AT(s, W_SENDS, u64)++;") }
-            line("  u64 *rp_ = hdr + 4 + dep_ - argc_; u64 cls_ = k_classof(s, *rp_);")
+            line("  u64 *rp_ = hdr + \(Frame.headerWords - 1) + dep_ - argc_; u64 cls_ = k_classof(s, *rp_);")
             line("  const char *e_ = AT(s, W_CACHE, const char *) + ((((sel_ >> 4) ^ cls_) & (CACHE_ENTRIES - 1)) * CACHE_STRIDE);")
             line("  u64 m_;")
             line("  if (LIKELY(*(const u64 *)(e_ + CACHE_CLS) == cls_ && *(const u64 *)(e_ + CACHE_SEL) == sel_)) m_ = *(const u64 *)(e_ + CACHE_METHOD);")
             line("  else m_ = VT(s)->lookup(s, cls_, sel_);")
             line("  KF *act_ = *(KF *const *)(AT(s, W_NTAB, const char *) + m_);")
-            line("  if (UNLIKELY(!act_)) { KF *f_ = VT(s)->send_slow(s, next_, hdr + 4 + dep_, fp, hdr, sel_, argc_ | len_ << 8, m_); if (!f_) return; KOUT(f_); }")
+            line("  if (UNLIKELY(!act_)) { KF *f_ = VT(s)->send_slow(s, next_, hdr + \(Frame.headerWords - 1) + dep_, fp, hdr, sel_, argc_ | len_ << 8, m_); if (!f_) return; KOUT(f_); }")
             line("  AT(s, W_NSENDS, u64)++;")
             line("  __attribute__((musttail)) return act_(s, rp_, hdr, (u64)fp, m_, b, c);")
             line("}")
@@ -599,7 +599,7 @@ struct Emitter {
             return
         }
         line("  u64 *h = fp + \(1 + m.argc + m.temps);")
-        line("  if (UNLIKELY(h + \(Int(5) + m.maxStack) >= AT(s, W_STACKEND, u64 *))) {")
+        line("  if (UNLIKELY(h + \(Frame.headerWords + m.maxStack) >= AT(s, W_STACKEND, u64 *))) {")
         line("    KF *f_ = VT(s)->overflow(s, c >> 8, fp + \(m.argc), (u64 *)a, hdr, b, c & 255);")
         line("    if (!f_ || f_ == KCONT) return;")
         line("    KOUT(f_);")
@@ -607,7 +607,7 @@ struct Emitter {
         for i in 0..<m.temps { line("  fp[\(1 + m.argc + i)] = NILV;") }
         line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
         if options.returnByLookup { line("  (void)d;") }
-        line("  h[0] = b; h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = \(options.returnByLookup ? "EMPTY_CONTEXT" : "TAG(MARKER_BASE + d)");")
+        line("  h[\(Frame.method)] = b; h[\(Frame.callerPC)] = TAG(c >> 8); h[\(Frame.callerFP)] = TAG((u64 *)a - base); h[\(Frame.callerHdr)] = TAG(hdr - base); h[\(Frame.context)] = \(options.returnByLookup ? "EMPTY_CONTEXT" : "TAG(MARKER_BASE + d)");")
         line("  __attribute__((musttail)) return \(p.entryFunction)(s, fp, h, 0, 0, 0, 0);")
         line("}")
     }
@@ -622,7 +622,7 @@ struct Emitter {
     mutating func blockActivation(_ p: MethodPlan) {
         let m = p.info, k = p.index
         line("KFN kn_A\(k)(KS *s, u64 *fp, u64 *hdr, u64 a, u64 b, u64 c, u64 d) {")
-        line("  if (UNLIKELY((c & 255) != \(m.argc) || fp + \(m.argc + m.temps + 5 + m.maxStack + 1) >= AT(s, W_STACKEND, u64 *))) {")
+        line("  if (UNLIKELY((c & 255) != \(m.argc) || fp + \(m.argc + m.temps + Frame.headerWords + m.maxStack + 1) >= AT(s, W_STACKEND, u64 *))) {")
         line("    KF *f_ = VT(s)->special(s, c >> 8, fp + (c & 255), (u64 *)a, hdr, (u64)(\(Opcode.value.rawValue - Opcode.add.rawValue) + (c & 255)) << 8 | (c & 255));")
         line("    if (f_ == KCONT) { const KResume *e_ = &kajo_resume[d]; __attribute__((musttail)) return e_->fn(s, (u64 *)a, hdr, fp[0], e_->pc, 0, 0); }")
         line("    if (!f_) return;")
@@ -635,7 +635,7 @@ struct Emitter {
         line("  fp[\(m.argc + m.temps)] = b;")
         line("  u64 *h = fp + \(1 + m.argc + m.temps);")
         line("  u64 *base = AT(s, W_STACKBASE, u64 *);")
-        line("  h[0] = k_slot(s, b, CLOSURE_METHOD); h[1] = TAG(c >> 8); h[2] = TAG((u64 *)a - base); h[3] = TAG(hdr - base); h[4] = EMPTY_CONTEXT;")
+        line("  h[\(Frame.method)] = k_slot(s, b, CLOSURE_METHOD); h[\(Frame.callerPC)] = TAG(c >> 8); h[\(Frame.callerFP)] = TAG((u64 *)a - base); h[\(Frame.callerHdr)] = TAG(hdr - base); h[\(Frame.context)] = EMPTY_CONTEXT;")
         line("  AT(s, W_CLOSURE_ACTIVATIONS, u64)++;")
         line("  __attribute__((musttail)) return \(p.entryFunction)(s, fp, h, 0, 0, 0, 0);")
         line("}")
@@ -681,7 +681,7 @@ struct Emitter {
         func loads(_ pc: Int, value: Bool) -> String {
             let d = m.instructions[p.at[pc]!].depth
             var s = ""
-            for i in 0..<d { s += "x\(i) = hdr[\(5 + i)]; " }
+            for i in 0..<d { s += "x\(i) = hdr[\(Frame.headerWords + i)]; " }
             if value && d > 0 { s += "x\(d - 1) = a; " }
             return s
         }
@@ -708,6 +708,25 @@ struct Emitter {
     }
 
     mutating func tables(_ plans: [MethodPlan], resumeCount: Int, generated: Int, declined: Int) {
+        // The Swift side's mirrors of the three structs (NativeBinding.swift)
+        // against the C declarations: `native-cc` fails when one disagrees.
+        func check(_ type: String, _ fields: [(String, Int)], size: Int) {
+            line("_Static_assert(sizeof(\(type)) == \(size), \"\(type): the Swift mirror's size\");")
+            for (f, o) in fields {
+                line("_Static_assert(__builtin_offsetof(\(type), \(f)) == \(o), \"\(type).\(f): the Swift mirror's offset\");")
+            }
+        }
+        check("KResume", [("fn", ResumeOffset.fn), ("pc", ResumeOffset.pc), ("depth", ResumeOffset.depth)], size: ResumeOffset.stride)
+        check("KGroup", [("h0", GroupOffset.h0), ("h1", GroupOffset.h1), ("activate", GroupOffset.activate),
+                         ("cold", GroupOffset.cold), ("rx", GroupOffset.rx), ("depth", GroupOffset.depth),
+                         ("codeLen", GroupOffset.codeLen)], size: GroupOffset.stride)
+        check("KModule", [("magic", ModuleOffset.magic), ("version", ModuleOffset.version), ("layout0", ModuleOffset.layout0),
+                          ("layout1", ModuleOffset.layout1), ("nilOop", ModuleOffset.nilOop), ("trueOop", ModuleOffset.trueOop),
+                          ("falseOop", ModuleOffset.falseOop), ("groupCount", ModuleOffset.groupCount),
+                          ("groups", ModuleOffset.groups), ("resumeCount", ModuleOffset.resumeCount),
+                          ("resume", ModuleOffset.resume), ("enter", ModuleOffset.enter),
+                          ("generated", ModuleOffset.generated), ("declined", ModuleOffset.declined)],
+              size: ModuleOffset.size)
         for p in plans {
             let m = p.info
             var rx = [Int](repeating: -1, count: max(m.codeLength, 1))
@@ -783,9 +802,9 @@ struct FunctionBody {
     }
 
     func lit(_ n: Int) -> String { "0x\(hex(info.literals[n]))ULL" }
-    func sp(_ d: Int) -> String { "hdr + \(4 + d)" }
-    func flush(_ d: Int) -> String { (0..<d).map { "hdr[\(5 + $0)] = x\($0);" }.joined(separator: " ") }
-    func reload(_ d: Int) -> String { (0..<max(d, 0)).map { "x\($0) = hdr[\(5 + $0)];" }.joined(separator: " ") }
+    func sp(_ d: Int) -> String { "hdr + \(Frame.headerWords - 1 + d)" }
+    func flush(_ d: Int) -> String { (0..<d).map { "hdr[\(Frame.headerWords + $0)] = x\($0);" }.joined(separator: " ") }
+    func reload(_ d: Int) -> String { (0..<max(d, 0)).map { "x\($0) = hdr[\(Frame.headerWords + $0)];" }.joined(separator: " ") }
 
     /// Depth before the instruction at `pc`, or nil.
     func depth(at pc: Int) -> Int? {
@@ -884,7 +903,7 @@ struct FunctionBody {
             emit("{ u64 c_ = x\(d - 1 - n);")
             emit("  if ((c_ & OOP_TAG_MASK) == 0 && (k_header(s, c_) & HDR_CLASS_MASK) == CLS_BLOCKCLOSURE) {")
             emit("    KF *b_ = *(KF *const *)(AT(s, W_NTAB, const char *) + k_slot(s, c_, CLOSURE_METHOD));")
-            emit("    if (LIKELY(b_ != 0)) { \(flush(d)) __attribute__((musttail)) return b_(s, hdr + \(5 + d - 1 - n), hdr, (u64)fp, c_, \(next << 8 | n), \(ri)); } }")
+            emit("    if (LIKELY(b_ != 0)) { \(flush(d)) __attribute__((musttail)) return b_(s, hdr + \(Frame.headerWords + d - 1 - n), hdr, (u64)fp, c_, \(next << 8 | n), \(ri)); } }")
             emit("  \(special(i.op, d, next: next)) }")
         case .div, .intDiv, .mod, .atPut, .size, .value, .value1, .value2:
             emit(special(i.op, d, next: next))
@@ -918,18 +937,18 @@ struct FunctionBody {
             // The lookup candidate: the caller's method, its group, the
             // resume index at the caller's pc.
             emit("{ u64 v_ = \(value);")
-            emit("  if (LIKELY(hdr[4] == EMPTY_CONTEXT)) {")
-            emit("    u64 *base_ = AT(s, W_STACKBASE, u64 *); u64 *ch_ = base_ + UNTAG(hdr[3]);")
-            emit("    const KGroup *g_ = *(const KGroup *const *)(AT(s, W_NTAB, const char *) + ch_[0] + 8);")
-            emit("    if (LIKELY(g_ != 0)) { i32 i_ = g_->rx[UNTAG(hdr[1])];")
-            emit("      if (LIKELY(i_ >= 0)) { u64 *cf_ = base_ + UNTAG(hdr[2]); fp[0] = v_; AT(s, W_NRETURNS, u64)++;")
+            emit("  if (LIKELY(hdr[\(Frame.context)] == EMPTY_CONTEXT)) {")
+            emit("    u64 *base_ = AT(s, W_STACKBASE, u64 *); u64 *ch_ = base_ + UNTAG(hdr[\(Frame.callerHdr)]);")
+            emit("    const KGroup *g_ = *(const KGroup *const *)(AT(s, W_NTAB, const char *) + ch_[\(Frame.method)] + 8);")
+            emit("    if (LIKELY(g_ != 0)) { i32 i_ = g_->rx[UNTAG(hdr[\(Frame.callerPC)])];")
+            emit("      if (LIKELY(i_ >= 0)) { u64 *cf_ = base_ + UNTAG(hdr[\(Frame.callerFP)]); fp[0] = v_; AT(s, W_NRETURNS, u64)++;")
             emit("        const KResume *e_ = &kajo_resume[i_]; __attribute__((musttail)) return e_->fn(s, cf_, ch_, v_, e_->pc, 0, 0); } } }")
             emit("  \(flush(d)) KF *f_ = VT(s)->ret(s, \(next), \(sp(d)), fp, hdr, v_); if (!f_ || f_ == KCONT) return; KOUT(f_); }")
             return
         }
-        emit("{ u64 v_ = \(value); u64 cw_ = hdr[4];")
+        emit("{ u64 v_ = \(value); u64 cw_ = hdr[\(Frame.context)];")
         emit("  if (LIKELY((cw_ & 1) && cw_ >= TAG(MARKER_BASE))) {")
-        emit("    u64 *base_ = AT(s, W_STACKBASE, u64 *); u64 *cf_ = base_ + UNTAG(hdr[2]); u64 *ch_ = base_ + UNTAG(hdr[3]);")
+        emit("    u64 *base_ = AT(s, W_STACKBASE, u64 *); u64 *cf_ = base_ + UNTAG(hdr[\(Frame.callerFP)]); u64 *ch_ = base_ + UNTAG(hdr[\(Frame.callerHdr)]);")
         emit("    fp[0] = v_; AT(s, W_NRETURNS, u64)++;")
         emit("    const KResume *e_ = &kajo_resume[UNTAG(cw_) - MARKER_BASE];")
         emit("    __attribute__((musttail)) return e_->fn(s, cf_, ch_, v_, e_->pc, 0, 0); }")
