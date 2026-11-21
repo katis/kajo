@@ -456,9 +456,218 @@ is unchanged). The counter `keptAcrossHolders` (on the run line beside
 |---|---|---|
 | `kajo test` (`Sources/kajo/Test.swift`) | off unless `--verify` | the build's level: on in a debug build, off in a release build |
 | `KernelTestParts` (`runKernelTests`) | off | on in a release build, off in a checked build (the owner's answer: the release kernel gate only) |
-| the stall tests' helper | off | the build's level (on in `swift test` and the sanitizer gates) |
+| the stall tests' helper | off | on in a release build (test-release), off in a checked build |
 | `ShellVM` | off unless the host asks | unchanged |
 | gate `kernel-test` (debug `kajo test`) | off (the default) | `--no-verify` (the owner's answer) |
 | gate `tools-test` (debug `kajo test dev.img`) | off (the default) | `--no-verify` |
 | gate `native-kernel-test` (release `kajo test --native`) | off | off (the release build's level) |
-| gate `test-release` (release `swift test`, its kernel parts) | off | **on** |
+| gate `test-release` (release `swift test`: the kernel's parts and the stall tests) | off | **on** |
+
+The stall helper first went to the build's level, as the brief said. The
+first core-tier run (1602cd9, `check-run1/`) showed the cost: every stall
+test's body took 4 to 12 times as long in `swift-test-load` (from the
+`stall-diag body` lines against main-offload's gate: the ring 54 to 430 s,
+the slowed marker at 16 58 to 649 s, fragmentation 154 to 952 s, the full
+heap 307 to 1347 s), and the gate 811 to 1861 s, the full-heap test its
+long pole. The helper now verifies in a release build only, the owner's
+rule for the kernel's tests applied to it; fault 2 keeps its own test in
+every build. In the same run the broken variant
+`withoutTheRescanTheVerifierNamesAMovedBody` failed its expectations:
+"4 Processes still live" after the 120 s wait and no results. Read at
+first as the fault's own damage (and moved out of the suite in d1d7ff7),
+it was a wall-clock bound: the second run (d1d7ff7, `check-run2/`) failed
+the fixed test `keptBodiesPlacedInAnotherNurseryStayRemembered` the same
+way in both modes, with 0 verifier failures and `bodyS=120.3`, the four
+rings still going under the loaded suite. Both tests now run 20 000
+iterations (the dealing switch reaches the edge in the first round: 6 of
+6 repeats in `work/broken-repeat.txt`) and wait 600 s for the Processes,
+and the broken variant is back in the suite. The kept-across tests'
+completed runs never answered a wrong sum.
+
+`kajo test <image> --verify`, the whole kernel run (262 tests), five runs
+in each build on 7769e61's VM (`work/verify-runs/summary.txt`): release
+5 of 5 passed, 12 988 to 13 262 ms, `verify=on verifies=2123` on every
+line; debug 5 of 5 passed, 346 to 592 s (the first three beside other
+work of this module, the last two alone: 346.4 and 346.4 s),
+`verify=on verifies=2123` on every line. Unverified, part 1 of the small
+fixes measured 7.2 s (release) and 117.9 s (debug) for 260 of these tests
+(`review-3-small-fixes/part1/cost-*.txt`).
+
+### Broken variants
+
+Both are test switches in the suite, since each fails a verifier, not a
+trap (their lines, `broken/switches-in-suite.txt`):
+
+- `skipBarrierAt = .methodLiteral` (the fix to fault 1 taken out):
+  `withoutTheBarrierTheVerifierNamesTheLiteralFrame`, 4 failures, "before
+  scavenge 1: entry 112896 (old) names young @117411 (nursery 1) in slot 0,
+  and is not remembered for it [holder: Array (class 7), old, 1 slots,
+  read-only, pinned ...; referent: MakeYoungProbe (class 219), young in 1
+  ...]".
+- `keptAcrossWithoutRescan` (the fix to fault 2 taken out):
+  `withoutTheRescanTheVerifierNamesAMovedBody`, 1156 failures in its first
+  round in a debug build, 14 under ThreadSanitizer with twelve busy loops,
+  each naming a body "kept and moved from nursery".
+
+The first form of the switch `keptAcrossNurseries` (every body to the first
+nursery with room) split pairs too rarely under the sanitizer and load:
+the broken variant needed four rounds once and passed none in another run
+(`work/tsan-new.txt`, `tsan-new-2.txt`). The switch now deals the victim
+nursery's bodies to the others in turn, and both kept-across tests repeat
+up to four rounds until the path they test ran (`work/tsan-new-3.txt`:
+round 1 in each).
+
+New tests under ThreadSanitizer with twelve busy loops
+(`work/tsan-new-3.txt`): all pass, 0 sanitizer reports;
+`keptBodiesPlacedInAnotherNurseryStayRemembered` 130 s,
+`withoutTheRescanTheVerifierNamesAMovedBody` 126 s, the kernel suite
+`MakeYoungLiteralTests` 87 s.
+
+### Starting positions
+
+1. Right: the young "any other object" literal stored into the old frame
+   with the raw store (part 1, the verifier's own message).
+2. Right: the compiler alone cannot; only a program that changes a
+   CompiledCode's literals after compiling (as `MakeFuzzTest`) reaches it
+   (`aClassVariableAddedLiveLeavesNoYoungLiteral`).
+3. Right: a separate fault with its own cause (`placeKept`); the full-heap
+   test compiles nothing.
+4. Right with the test switch: 4 to 30 s a run against twelve minutes; in
+   the full-heap test under the stall tests' own load it showed 3 of 3.
+5. Right: no other store of 143 to 147, 163, 97 or 98 puts a possibly young
+   value into an old object without the barrier (part 1's table).
+
+### Deviations
+
+- The stall tests' helper verifies in a release build, not at the build's
+  level as part 4 said: at the build's level it doubled `swift-test-load`
+  (part 4).
+- `KernelTestParts` verifies in a release build, not at the build's level
+  (nil), and the debug kernel gates (`kernel-test`, `tools-test`) say
+  `--no-verify`: the brief's "the build's own level" and the owner's
+  "release-build kernel gate only" disagree for a debug build; the owner's
+  answer was taken.
+- The counted runs 2 and 3 of fault 2 had other work of this module
+  beside them.
+- Two core-tier runs were stopped and their outputs kept (`check-run1/`
+  on 1602cd9, `check-run2/` on d1d7ff7): each failed `swift-test-load` on
+  this module's own tests (the stall helper's cost, then a 120 s wait under
+  load), and the tier ran again from the start on the fixed commit.
+- Part 1's tests were run on the part 1 commit (07fcad1 with the
+  instrumentation, the test switch and the unused barrier site), not on
+  07fcad1 itself, which has neither the switch nor the site. On 07fcad1
+  itself the fault 1 trap was reproduced through `kajo test --verify`.
+
+### Found, not this module's
+
+1. The verifiers' cost on the stall tests is 4 to 12 times in a debug
+   build (part 4). A checked build that verifies at every pause on a
+   12 MiB heap filled to out of memory is mostly verifier.
+
+### Open questions (built as recommended)
+
+1. Fault 1 is not a release-note item for the compiler: no program that
+   compiles and installs methods the plain way reaches it. A program must
+   change a CompiledCode's literal frame after compiling, putting in an
+   object that is not an immediate, nil, true, false, a Symbol or a class
+   (an instance of an ordinary class, a Binding it made, a collection),
+   then make the method (`makeMethodIn:`) and keep the method while the
+   object dies everywhere else. The kernel's tests do this once
+   (`MakeFuzzTest>>testSeededMutationsAreRefusedOrRun`, two such methods of
+   1500 mutations kept long enough to be seen). The owner decides the
+   wording.
+2. Fault 2 was found; no counter beyond `keptAcrossHolders` was needed.
+3. The verifiers in the debug kernel gate: no, by the owner's answer. The
+   number: the debug kernel run verified takes 346 s against 117.9 s
+   unverified, 228 s more, far above a minute.
+
+### Gates
+
+The core tier on 2c13ed3 (`KAJO_CHECK_OUT=~/kajo-scratch/verifier-faults/check
+just check 1318518`, the dry run "tier: core"),
+`~/kajo-scratch/verifier-faults/check/gates.log`, last line
+`2026-11-21 12:28:17 2c13ed3 check-tier done core failed=1 12235s`. The
+failed gate is `tsan`, on a test this module did not write (below). Times
+against the last core run (main-offload, a89dd0e, 10884 s) and the Swift
+tier this module started from (aca38de):
+
+| Gate | 2c13ed3 | a89dd0e | aca38de |
+|---|--:|--:|--:|
+| check-tier-test | 6 s | - | 7 s |
+| clean-build | 20 s | 19 s | 20 s |
+| swift-test-load | 818 s, 473 + 198 tests | 811 s | (swift-test 711 s) |
+| tsan | **rc=1** 3210 s, 0 sanitizer reports | 2898 s | 3230 s |
+| tsan-load | 4262 s, 473 + 198 tests, 0 reports | 3653 s (rc=1) | - |
+| ios-check | 16 s | 17 s | - |
+| arc-check | 48 s, "no retain or release ... one jump table" | 6 s | - |
+| golden | 78 s | 77 s | - |
+| native-golden | 166 s | 162 s | - |
+| native-kernel-test | 74 s | 70 s | - |
+| native-cc | 39 s | 37 s | - |
+| test-release | 182 s (118 s on b95cf06, below) | 121 s | - |
+| model-check | 35 s | 52 s | - |
+| soak | 64 s | 61 s | - |
+| fuzz | 668 s: kasm 2 092 305, snapshot 2 854 050, syntax 756 114, protocol 1 780 988 runs, build=ok each | 666 s | protocol 120 s |
+| apps | 141 s | 125 s | 129 s |
+| kernel-test | 123 s, `verify=off verifies=0` | 108 s | 122 s |
+| new-check | 270 s | 264 s | 269 s |
+| ab | 332 s | 329 s | - |
+| matrix-mac | 813 s, 153 rows | 670 s, 147 rows | - |
+| matrix-iphone | 870 s, 153 rows | 738 s, 147 rows | - |
+
+The matrices have six rows more than a89dd0e's (main flips' `mainload`
+part, added after it), which is their extra time. `arc-check` built its
+`-enable-testing` tree from scratch in the gate; this module's own run
+before the gate passed too (`work/arc-check.txt`). `tsan-load` is 609 s
+longer than a89dd0e's: the compiler bundle 2913 s against 2330, of which
+this module's tests are a part (the kept-across tests' bodies 167 to 272 s
+under the sanitizer and load; `MakeYoungLiteralTests` a minute), and the
+bundle has grown by other modules since a89dd0e.
+
+The kernel tests' gates after this module, against the baseline:
+
+| Kernel gate | Build | Verifies | Time | Before |
+|---|---|---|--:|--:|
+| `kernel-test` (`just kernel-test --no-verify`) | debug | no (`verify=off verifies=0` on its line) | 123 s | 122 s (aca38de), 108 s (a89dd0e) |
+| `test-release` (the kernel's parts and the stall tests) | release | yes: "kernel part 0: verify=on verifies=984", "kernel part 1: verify=on verifies=1151"; the full-heap lines `verify=on verifies=734` and `1099` | 118 s alone on b95cf06 (`check-rerun/`), 182 s in the tier | 121 s (a89dd0e) |
+| `native-kernel-test` (release `kajo test --native`) | release | no (the build's level) | 74 s | 70 s |
+| `tsan` and `tsan-load`, the kernel's parts | debug, sanitizer | no | in the bundle | - |
+| `swift-test-load`, the kernel's parts | debug | no | in the bundle | - |
+
+After the gate run one test file changed (b95cf06: the kernel's parts
+assert and print their verifier level, so the gate that means to verify
+reads `verify=on` and `verifies` above 0 itself). `test-release` was run
+again alone through `gates-lib.sh`'s own `gl_gate` on b95cf06
+(`check-rerun/gates.log`: `end test-release rc=0 118s`), and the changed
+test in a debug build ("kernel part 0: verify=off verifies=0", passed;
+`work/kernel-parts-debug.txt`). No other gate ran on b95cf06.
+
+The aligned A/B (`check/ab/table.md`, 1318518 against 2c13ed3): at 1
+worker 0.992 to 1.006, at 8 workers 0.946 to 1.044, every checksum the
+same. The base's spread, measured after the gate as the head against
+itself (`work/ab-self/table.md`): 0.996 to 1.005 at 1 worker, 0.975 to
+1.047 at 8. No kernel is slower outside that spread (the slowest, ivars
+at 8 workers, 1.044 against 1.047 for st-sends against itself); the
+kernels outside it are faster (alloc at 1, fib and sends at 8).
+`interpret` is identical instruction for instruction: 1403 instructions
+on both sides, 0 lines differing once addresses are masked
+(`work/interpret-diff.txt`, `otool -tV` of `Dispatch.o` from
+`-enable-testing` release builds of 07fcad1 and the head;
+`scripts/disdiff.py`).
+
+`shell-report.py --bar` over every row (`check/bar-mac.txt`,
+`bar-iphone.txt`): Mac 153 rows, 0 launches failed, 0 checksums not ok,
+0 fallbacks, 0 unjustified, 6 rows missing frames (3 hog rows, 3578
+frames, the hog by design; 3 ring rows under stw, 16 frames), stalls 703
+(longest 26.50 ms), 0 sweep stops, 0 young on the main thread, 0 host's
+nursery, 714 main flips (mainload 696), 0 main waits, longest stop 17.31 ms
+(scavenge, ring, stw), longest wait for a safepoint 0.44 ms (scavenge,
+w1/poll). iPhone 153 rows, 0 failed, 0 not ok, 0 fallbacks, 6 rows
+missing frames (hog 3576, ring 15, mainload 2), 0 stalls, 366 main flips,
+longest stop 19.21 ms, longest wait 8.84 ms (scavenge, marker/poll, ring
+stw). a89dd0e's 147 rows: Mac 3 rows missing 1786 frames, stalls 658
+(28.93 ms), longest stop 11.62 ms, wait 3.87 ms; iPhone 6 rows missing
+3588, longest stop 17.03 ms, wait 6.41 ms (marker/poll). Of what this
+module changed only the placement after a scavenge that kept objects is
+on the rows' paths, and such a scavenge requests a full collection, which
+the rows count as a fallback: 0 in every row.
