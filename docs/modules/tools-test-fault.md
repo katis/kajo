@@ -440,3 +440,58 @@ until then. In a batch host the error is reported and the Process ends
 are queued with no Process to drain them. Not silent in a development
 image; quiet in a batch host. The fix does not need a change there, and
 none is made.
+
+**Measured** (rule first: `~/kajo-scratch/tools-test-fault/work/timing/rule.txt`,
+copied with its time before any run; raw lines `runs.txt`, table
+`summary.txt`). The development image (kernel, tools, types) of 381f57c's
+kernel and of the fix's, each with the scratch-only test `RegistryTiming`,
+the same release `kajo` built from the working tree, `kajo test --test
+RegistryTiming>>testTimes --workers 2`, five runs a side interleaved, the
+machine otherwise idle (20:35, after the natural runs; no thermal state
+is logged by a headless `kajo test`, and none was read). Median (min to
+max) of the five:
+
+| | 381f57c | the fix |
+|---|---|---|
+| `compile:` of a new method, µs (mean of 40) | 137 (135 to 137) | 136 (135 to 141) |
+| a reshape of a 41-method class, µs (mean of 10) | 14283 (14083 to 14683) | 14843 (14242 to 14948) |
+| longest single `Smalltalk sourceOf:` of a second Process during the reshapes, µs | 3516 (3483 to 3682) | 5906 (5629 to 5937) |
+
+The compile path, which took no lock, is within the base's spread. The
+reshape's lock now covers the primitive as well as the records, and the
+longest registry wait a reader sees during a reshape rose from 3.5 to
+5.9 ms (the pragma index's rebuild, image-wide, ran under the same lock
+before the fix too; its share of either was not measured). Under the rule's 8 ms (one frame), so
+the lock across the primitive stays as built; open question 1's choice
+(the type service's `checkLock` or a published copy) does not arise: the
+fix does not touch the type service, so its answering Process's wait
+under a whole-image check is not measured here. The base image lacks the
+two `SourceRecord` classes (the timing ran against the fix's kernel
+otherwise as committed).
+
+**Natural runs** (condition C; `~/kajo-scratch/tools-test-fault/scripts/natural.sh`,
+review-3-part-2's `run.sh` condition: the compiler tests' bundle under
+ThreadSanitizer with twelve `gtimeout 3300 yes` loops; raw
+`part1/natural/run-p1-*.txt`, `part1/natural/summary.txt`). On part 1's
+commit 4f0a550: 0 of 2 (run 1 18:54 to 19:45, run 2 to 20:33). No natural
+failing run's stack was got, so bar 1 rests on the forced runs' stacks
+above, whose error and step are those of every recorded natural failure.
+Run 1 failed on two tests that are not this module's and printed the new
+line in one of them: `theToolsReconnectAfterADroppedLink` ("remoteReady
+never held: … status 'class.hierarchy got no reply within 30000 ms' …
+stops 0 stops", the known class-hierarchy margin of
+`50-review-3-small-fixes.md`) and
+`anErrorWithNoClientStopsAndALaterClientFindsIt` ("no reply to
+session.open within 30.0 s"); during that run I also built the release
+`kajo` and ran the kernel tests, so its load was above the condition's,
+and they are not counted. Run 2 passed whole.
+
+**After the fix, the bundle under the sanitizer with twelve loops**
+(the same script and build; the tree overlaid with 0ef3b1f's kernel/ and
+docs/ at 20:33, `diff -r` against `git archive 0ef3b1f` identical outside
+`.build`, the Swift sources being equal between 4f0a550 and 0ef3b1f): 0
+of 3, and no other issue in any of the three (runs 3 to 5 of
+`part1/natural/summary.txt`: 20:35 to 21:22, to 22:10, to 22:59, each
+`rc=0 issues=0`). With 0 of 2 on part 1's commit, these counts show
+nothing about a rate by themselves; the fault's evidence is the forced
+counts above.
