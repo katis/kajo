@@ -593,11 +593,17 @@ Tests: `theLayoutHashCoversTheBarrierWordsPlace` (the constant is
   six comparisons; a SmallFloat or a Boolean answer, else 0 (another
   operand, a result that must box, a zero divisor, `//`, `\\`, the bit
   operations). The same arithmetic as `floatArith`. No allocation, no poll.
-- `specialFastPath` calls it before its `numeric` test and its `save`; an
-  answer is written over the operands and the registers are re-derived with
-  `regsAt` (the bases from the frame's method, no restore). Primitives 60
-  to 69 do the same in `primitiveSend` before its save
-  (`floatPrimitiveQuick`). Every other case takes the old path unchanged.
+- `specialFastPath`: two SmallIntegers (`\\`, `//`, an overflow) are
+  numbers after one test (`a & b & 1`) and skip the `numeric` test; any
+  other pair takes the `numeric` test and then, when either operand is a
+  SmallFloat and before the `save`, `smallFloatSpecial` (out of line);
+  an answer is written over the operands and the registers are re-derived
+  with `regsAt` (the bases from the frame's method, no restore). Primitives
+  60 to 69 do the same in `primitiveSend` before its save
+  (`floatPrimitiveQuick`, out of line). Every other case takes the old path
+  unchanged. (The first version, c46df34, ran the path inline before the
+  `numeric` test; the first tier run's aligned A/B found st-closures 4.4
+  percent slower, see "The first tier run" below.)
 - `integerArith` enters `largeArith` only when one side is a
   LargePositiveInteger or LargeNegativeInteger object (`isLargeInteger`, one
   class test); before, every pair that was not two SmallIntegers did.
@@ -612,8 +618,8 @@ Tests: `theLayoutHashCoversTheBarrierWordsPlace` (the constant is
 - Test switch `noSmallFloatPath` (`TestSwitches`): the old path, for the
   oracle.
 
-`floats`, base 8c24c05 against head c46df34, aligned, five interleaved
-runs, each side's own native module (`work/floats-ab/`):
+`floats` with the first version (c46df34), base 8c24c05, aligned, five
+interleaved runs, each side's own native module (`work/floats-ab/`):
 
 | engine | workers | cycles B/A | per-run range | ms base | ms head | checksums |
 |---|---|---|---|---|---|---|
@@ -624,16 +630,26 @@ runs, each side's own native module (`work/floats-ab/`):
 
 The base's own spread was 0.9945..1.0040 at 1 worker and 0.72..1.46 at 8
 (part 1); the head's 8-worker rows are tight, since no thread allocates.
-`floats` now takes 2.3 times less in the interpreter and 2.6 times less
-natively at 1 worker.
+The final shape (the first tier run's fix, below) gives up some of it:
+in the full aligned A/B against 8c24c05 (`work/ab-final/table.md`)
+`floats` is 3213.0 against 1859.5 ms at 1 worker (cycles 0.580) and 469.2
+against 239.8 at 8 (0.535), checksums equal; every other kernel of the
+A/B is listed below. The native engine was not measured again on the
+final shape; it calls the same `specialSend`.
 
-`interpret`, base against head in these aligned builds
-(`work/interpret-diff.txt`): 1816 lines each, 4 differ, each an `adrp`
+`interpret`, base against head in the aligned builds
+(`work/interpret-diff.txt` for c46df34, `work/interpret-diff-final.txt`
+for the final shape, the same four lines): 1816 lines each, 4 differ, each an `adrp`
 page number (the jump table's and a constant pool's page, moved by the
 binary's layout: `adrp x26, 552` against `549` and three like it); no
-instruction differs. `just arc-check` passed (`work/arc-check.txt`):
-`interpret` 1403 instructions, one jump table, ARC 0 on every checked path,
-`specialSend` 789 instructions and `primitiveSend` 491 with ARC 0.
+instruction differs. `just arc-check` passed (`work/arc-check.txt`, on
+c46df34): `interpret` 1403 instructions, one jump table, ARC 0 on every
+checked path. In the final shape's aligned builds `specialSend` is 804
+lines against the base's 764 and `primitiveSend` 461 against 429 (the
+first version: 1004 and 637). The new out-of-line functions
+(`smallFloatSpecial`, `floatPrimitiveQuick`) are not on `arc-check`'s list;
+adding them changes a gate script and was left (they build no Swift
+object).
 
 Tests (`Tests/KajoVMTests/ObjectModel/SmallFloatPathTests.swift`):
 `theSmallFloatPathAnswersAsTheOldPath` runs every special arithmetic and
@@ -799,3 +815,77 @@ passed, 0 reports (`work/tsan-new.txt`, `tsan-new-weakonly.txt`).
    deviation under item 6). Recommended: keep it (one level; the stop
    verifiers cost nothing measurable); the alternative is a fourth level
    for that one combination.
+
+## Deviations
+
+- Item 6, starting position 7: `test-release` gains the stop and schedule
+  verifiers (above); every other gate verifies what it did.
+- Item 3's bound came from the rule's fallback (cheat B, sound), not from
+  the brief's cheating build, which lost objects on three of its four
+  rows; the rule said so before the numbers.
+- `kajo test`'s summary line and the devsession line gained
+  `weakOnlyCopies` and `ycPromoted` (the brief named the run line and the
+  shells' rows; the kernel tests and the scripted session had no other way
+  to report the counter).
+- Interpreter.A3 in part: `specialSendTier` and `floatsBoxed` are now on
+  the run line, beside the two new counters.
+
+## Not done
+
+- Item 3 (by the rule). The weak pass (not in this module).
+- No by-hand variant runner and no weekly runs of the variants (open
+  question 3).
+- `floats`' gain was not measured on a device.
+
+## Found, not this module's
+
+- Eight workers interning a million Symbols each and dropping them: every
+  Process's `asSymbol` primitive failed after 390 s ("Unhandled
+  PrimitiveFailed: a primitive failed in String>>asSymbol", 8 times; the
+  same on part 1's build (599ed94, 8c24c05 plus the counter) and on c46df34; `part1/weak/symbols-8.txt`,
+  `symbols-8-again.txt`; the program is `part1/symbols/`, `kajo run
+  symbols.img --workers 8 --slice-ms 0`). A million split over eight
+  workers passes, and so does a million on one (with `cycles=0`: a Symbol
+  is an old allocation and 1 M of them never started a marking cycle). Not
+  investigated; the shape is the lesson "every allocation path decides the
+  collector's trigger".
+- `script -q /dev/null` (the previous module's way to run `swift test`
+  under a pseudo-terminal) fails in this agent's shell ("tcgetattr/ioctl:
+  Operation not supported on socket"); the sanitizer runs here waited for
+  the process instead.
+- `spotlightknowledged` held a core through part 1's measurements (the
+  owner's system process; not touched).
+
+## The first tier run, and what it found
+
+`~/kajo-scratch/review-3-part-2/check-run1/gates.log`: `2026-11-22 02:12:42
+d3ac36c check-tier done core failed=0 12375s`, every gate `rc=0`. Its
+aligned A/B against ac3b752 (`check-run1/ab/table.md`) had st-closures
+1.044 slower at 1 worker (cycles 1.049, instructions 1.041) and 1.038 at
+8, far outside part 1's spread for that row (S 0.0039 at 1 worker). Its
+60 M `\\` sends go through the arithmetic tier, and the first version of
+the SmallFloat path, inline before the `numeric` test, grew `specialSend`
+from 764 to 1004 instructions: the compiler stopped inlining `numeric`
+(two calls per tier send) and spilled the object table's base, which the
+closure activation in the same function then loaded from the stack.
+
+Variants, each measured against 8c24c05 in an aligned build
+(`work/ab-fix*`, `work/qv-*`; cycles ratio of st-closures at 1 worker,
+then floats):
+
+| variant | st-closures | floats | file |
+|---|---|---|---|
+| first version (c46df34) | 1.049 | 0.427 | `check-run1/ab`, `work/floats-ab` |
+| two SmallIntegers skip the path; the rest as before | 1.040 | 0.443 | `work/ab-fix/table.md` |
+| and both quick paths out of line | 1.034 | 0.488 | `work/ab-fix2/table.md` |
+| and `numeric` inside the test | 1.016 | 0.495 | `work/ab-fix3/table.md` |
+| the whole arithmetic tier out of line | 1.029 | 0.483 | `work/ab-fix4/table.md` |
+| base shape, the path after `numeric` when a SmallFloat is present | 1.008 (3 runs: 1.001) | 0.506 | the five-run table was overwritten by the final run's (the numbers are from its output); `work/qv-C/bench.txt` |
+| two SmallIntegers skip `numeric`; others: `numeric`, then the path (final) | 0.994 | 0.580 | `work/ab-final/table.md`, `work/qv-G` |
+
+The final shape's full A/B (`work/ab-final/table.md`, five runs, all
+checksums equal): every kernel at 1 worker within 0.995 to 1.003 in cycles
+but `floats` (0.580); at 8 workers within 0.981 to 1.012 but `fib` 1.021
+(instructions 1.002; `fib` runs no tier send; part 1's base against itself
+gave `fib` at 8 workers 0.9862 to 1.0046 and other 8-worker rows up to
+1.0284) and `floats` (0.535). The tier runs again on the final commit.

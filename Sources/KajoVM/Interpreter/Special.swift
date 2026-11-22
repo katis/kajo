@@ -14,6 +14,21 @@ enum SpecialIndex {
     static let value2 = 20
 }
 
+/// The third review's small fixes, part 2, item 2: a special send's
+/// SmallFloat answer written over its operands, with no save (nothing here
+/// allocates or polls). nil: the tier's ordinary path.
+@inline(never)
+func smallFloatSpecial(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
+                       _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ op: ArithOp) -> Regs? {
+    let quick = unsafe smallFloatArith(op, (sp - 1).pointee, sp.pointee, s.pointee.trueObject.raw, s.pointee.falseObject.raw)
+    let om = unsafe s.pointee.om
+    guard quick != 0, !om.config.testSwitches.noSmallFloatPath else { return nil }
+    unsafe workerOf(s).pointee.floatPath.smallFloatAnswers &+= 1
+    unsafe s.pointee.counters.specialSendTier &+= 1
+    unsafe (sp - 1).pointee = quick
+    return unsafe regsAt(s, pc, sp - 1, fp, hdr)
+}
+
 /// The tier between a special send's inline fast path and a full send.
 /// nil: send. The arithmetic needs no lookup because the kernel's methods
 /// for these selectors on numbers are the same primitives (and a class may
@@ -25,16 +40,6 @@ func specialFastPath(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
     let om = unsafe s.pointee.om
     if let op = ArithOp.special(index) {
         let a = Oop(raw: unsafe (sp - 1).pointee), b = Oop(raw: unsafe sp.pointee)
-        // The third review's small fixes, part 2, item 2: a SmallFloat
-        // with a SmallFloat or a SmallInteger whose answer is a SmallFloat
-        // or a Boolean, before any save (nothing here allocates or polls).
-        let quick = unsafe smallFloatArith(op, a.raw, b.raw, s.pointee.trueObject.raw, s.pointee.falseObject.raw)
-        if quick != 0 && !om.config.testSwitches.noSmallFloatPath {
-            unsafe workerOf(s).pointee.floatPath.smallFloatAnswers &+= 1
-            unsafe s.pointee.counters.specialSendTier &+= 1
-            unsafe (sp - 1).pointee = quick
-            return unsafe regsAt(s, pc, sp - 1, fp, hdr)
-        }
         // Numbers only: an immediate (SmallInteger or SmallFloat) or a
         // Float or LargeInteger object on either side.
         func numeric(_ v: Oop) -> Bool {
@@ -43,7 +48,15 @@ func specialFastPath(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: Unsafe
             let c = om.classIndex(of: v)
             return c == WellKnown.float || c == WellKnown.largePositiveInteger || c == WellKnown.largeNegativeInteger
         }
-        guard numeric(a), numeric(b) else { return nil }
+        // Two SmallIntegers (`\\`, `//`, an overflow) are numbers: one test.
+        // Any other pair: the numbers only, and (the third review's small
+        // fixes, part 2, item 2) a SmallFloat on either side tries the path
+        // that answers before the save, one out-of-line call
+        // (`smallFloatSpecial`).
+        if a.raw & b.raw & 1 == 0 {
+            guard numeric(a), numeric(b) else { return nil }
+            if a.isSmallFloat || b.isSmallFloat, let r = unsafe smallFloatSpecial(s, pc, sp, fp, hdr, op) { return r }
+        }
         unsafe save(s, pc, sp, fp, hdr)
         let m = unsafe Machine(state: s)
         let v = m.arith(op, a, b)

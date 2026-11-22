@@ -333,7 +333,7 @@ func primitiveSend(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMu
         // frame instead of answering a value.
         return unsafe activationPrimitive(s, pc, sp, fp, hdr, method, prim, argc, length)
     }
-    if prim >= 60 && prim <= 69 && argc == 1 {
+    if UInt(bitPattern: prim &- 60) < 10 && argc == 1 {
         // The third review's small fixes, part 2, item 2: the float
         // primitives' SmallFloat answers before the save.
         if let r = unsafe floatPrimitiveQuick(s, pc, sp, fp, hdr, prim) { return r }
@@ -450,8 +450,9 @@ func failedAllocation(_ s: StatePointer, _ sel: UInt64, _ rcv: UInt64, _ length:
 
 /// Primitives 60 to 69 (Float `+` to `~=`) on a SmallFloat receiver whose
 /// answer `smallFloatArith` gives: written over receiver and argument with
-/// no save and no restore. nil: the primitive's ordinary path.
-@inline(__always)
+/// no save and no restore. nil: the primitive's ordinary path. Out of
+/// line: inline it grew `primitiveSend` from 429 to 637 instructions.
+@inline(never)
 func floatPrimitiveQuick(_ s: StatePointer, _ pc: UnsafePointer<UInt8>, _ sp: UnsafeMutablePointer<UInt64>,
                          _ fp: UnsafeMutablePointer<UInt64>, _ hdr: UnsafeMutablePointer<UInt64>, _ prim: Int) -> Regs? {
     let rcv = unsafe (sp - 1).pointee
