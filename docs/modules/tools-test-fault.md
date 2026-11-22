@@ -495,3 +495,21 @@ of 3, and no other issue in any of the three (runs 3 to 5 of
 `rc=0 issues=0`). With 0 of 2 on part 1's commit, these counts show
 nothing about a rate by themselves; the fault's evidence is the forced
 counts above.
+
+**Gates.** `scripts/check-tier.sh --dry-run origin/master` named the
+Swift tier (chosen by the two files under `Tests/`; no fuzzer). `just
+check origin/master` on 6fb8c5d (0ef3b1f's code with this doc's
+measurements; nothing a gate reads changed after it but this paragraph),
+`~/kajo-scratch/tools-test-fault/check/gates.log`: "check-tier done swift
+failed=0 4646s"; clean-build 22 s, swift-test 744 s (484 and 198 tests
+passed), tsan 3352 s (the same counts, 0 sanitizer warnings), kernel-test
+125 s (264 tests, `verify=stops`), apps 131 s, new-check 271 s; against
+the last Swift tier, `review-3-small-fixes/check-final/gates.log`
+(aca38de): 20, 711, 3230, 122, 129, 269 s. `scripts/canonical-tonel.sh
+--check` passes. Toolchain swift.org 6.4.2 first on PATH (`env.txt`).
+
+**Not done.** No natural failing run's own stack (0 of 2 on part 1's
+commit under the condition); the bar's first item rests on the forced
+stacks. No table test of the order rule (said above). The new class's
+definition gap has no forcing test. The forcing and broken-variant runs
+used the debug `kajo` and a plain debug `swift test`, not the sanitizer.
