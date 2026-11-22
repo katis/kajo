@@ -855,6 +855,13 @@ passed, 0 reports (`work/tsan-new.txt`, `tsan-new-weakonly.txt`).
   the process instead.
 - `spotlightknowledged` held a core through part 1's measurements (the
   owner's system process; not touched).
+- `randomProgramsAgreeWithTheirModel`'s "the configuration must
+  scavenge" assertion (10 seeds under the sanitizer) is thin: it failed
+  the second tier run's `tsan` for `exhaustedReserve` and failed 2 of 5
+  counted runs on 8c24c05 for the native `slowedMarker` (Gates, below).
+- `theToolsDevelopTheImageTheyRunIn` under `tsan-load`: 3 of 4 on this
+  module's head, with a reading of a possible race in the type service's
+  key selects (Gates, below).
 
 ## The first tier run, and what it found
 
@@ -889,3 +896,132 @@ but `floats` (0.580); at 8 workers within 0.981 to 1.012 but `fib` 1.021
 (instructions 1.002; `fib` runs no tier send; part 1's base against itself
 gave `fib` at 8 workers 0.9862 to 1.0046 and other 8-worker rows up to
 1.0284) and `floats` (0.535). The tier runs again on the final commit.
+
+## Gates
+
+The core tier on aeecb55 (the final code commit),
+`KAJO_CHECK_OUT=~/kajo-scratch/review-3-part-2/check just check ac3b752`,
+dry run "tier: core" (18 of 39 files chose it), toolchain swift.org 6.4.2
+first on PATH (`check/env.txt`): `2026-11-22 06:36:59 aeecb55 check-tier
+done core failed=2 12266s`. Twenty gates `rc=0`; `tsan` and `tsan-load`
+`rc=1`, each on one test that is not this module's (below). The first run
+(`check-run1/`, d3ac36c: `failed=0 12375s`) is kept; its A/B is what sent
+the fix.
+
+| gate | this run (s) | verifier faults' run, 2c13ed3 (s) |
+|---|--:|--:|
+| clean-build | 20 | 20 |
+| swift-test-load | 847 | 818 |
+| tsan | 3199 (rc 1) | 3210 (rc 1) |
+| tsan-load | 4312 (rc 1) | 4262 |
+| ios-check | 16 | 16 |
+| arc-check | 59 | 48 |
+| golden | 74 | 78 |
+| native-golden | 162 | 166 |
+| native-kernel-test | 74 | 74 |
+| native-cc | 39 | 39 |
+| test-release | 193 | 182 |
+| model-check | 35 | 35 |
+| soak | 62 | 64 |
+| fuzz (4 targets, 600 s each) | 663 | 668 |
+| apps | 140 | 141 |
+| kernel-test | 123 | 123 |
+| new-check | 269 | 270 |
+| ab | 331 | 332 |
+| matrix-mac | 790 | 813 |
+| matrix-iphone | 857 | 870 |
+
+No `check-tier-test` (no gate script changed). Fuzzers: four `build=ok`,
+2 052 606 (kasm), 2 823 697 (snapshot), 783 389 (syntax), 1 839 004
+(protocol) runs. Test counts: `swift-test-load` 484 and 198 passed (the
+baseline 473 and 198: eleven new tests in the VM bundle); `tsan` 483 of 484
+and 198; `tsan-load` 484 and 197 of 198. The new tests cost little: the
+slowest is `theSmallFloatPathAnswersAsTheOldPath` (6.6 s under the
+sanitizer and load), `weakOnlyCopiesCountsWhatOnlyAWeakSlotHeld` 27 s
+there; `swift-test-load` +29 s and `test-release` +11 s against the
+baseline are within those gates' run-to-run variation, not measured apart.
+
+The two failures:
+
+- `tsan-load`: `theToolsDevelopTheImageTheyRunIn`, "Process 508 stopped
+  (error): MessageNotUnderstood: nil does not understand #beginsWith:"
+  (`check/tsan-load.txt`): the thin test the prompt names, failing 1 of 2 on
+  the previous module's starting commit.
+- `tsan`: `randomProgramsAgreeWithTheirModel(exhaustedReserve)`,
+  `RandomPrograms.swift:732`, "Expectation failed:
+  randomScavenges.take(config) > 0" (no exhausted scavenge in the
+  configuration's 10 seeds under the sanitizer; every seed's answer agreed
+  with its model). It passed in both `swift-test-load` runs, in the first
+  run's `tsan` and `tsan-load`, and in `soak`. Counted on both commits by
+  a rule written first (below).
+
+The aligned A/B of the final run (`check/ab/table.md`, against ac3b752):
+every kernel at 1 worker 0.987 to 1.003 in cycles, at 8 workers 0.982 to
+1.018; checksums equal; st-closures 0.998 and 1.001. (`floats` is not in
+the gate's kernel list; its numbers are part 2's above.)
+
+What each gate verifies, read again from the final run's outputs:
+
+| gate | before (2c13ed3) | after (aeecb55) |
+|---|---|---|
+| `kernel-test` | `verify=off verifies=0` (stop verifiers on, heap off) | `verify=stops verifies=0` (the same, named) |
+| `test-release` parts | `verify=on verifies=734`, `1099` (heap on, stops off) | `verify=all verifies=984`, `1151` (heap on, stops on: the deviation) |
+| `test-release` stall tests | `verify=on` | `verify=all verifies=1084`, `1138` |
+| `swift-test-load`, `tsan`, `tsan-load` parts and stall tests | `verify=off verifies=0` | `verify=stops verifies=0` (the same, named) |
+| `native-kernel-test` | `verify=off verifies=0` | `verify=off verifies=0` |
+
+The `--bar` table over every row of both matrices (`check/matrix-mac.txt`,
+`check/matrix-iphone.txt`), against the verifier faults' run:
+
+| matrix | rows | failed launches | checksums not ok | rows missing frames | frames missed | fallbacks | unjustified | stalls (longest ms) | sweep stops | young on main | main flips | main waits | longest stop ms | longest wait for a safepoint ms |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
+| Mac | 153 | 0 | 0 | 6 | 3590 | 0 | 0 | 701 (24.95) | 0 | 0 | 714 | 0 | 13.08 (scavenge, mainload stw) | 0.40 (scavenge, ring stw) |
+| Mac, before | 153 | 0 | 0 | 6 | - | 0 | 0 | 703 (26.50) | - | - | - | - | 17.31 | - |
+| iPhone | 153 | 0 | 0 | 6 | 3586 | 0 | 0 | 0 | 0 | 0 | 366 | 0 | 18.95 (scavenge, ring stw) | 10.17 (scavenge, mainload stw) |
+| iPhone, before | 153 | 0 | 0 | 6 | - | 0 | 0 | 0 | - | - | - | - | 19.21 | 8.84 |
+
+The rows missing frames are the hog rows by design (1193 and 1192 of 1200,
+three each) and the ring under `stw` (2, 3, 6 frames on the Mac; 7, 1, 2 on
+the iPhone), as before. `gc_weakOnlyCopies` is 0 in every `offload` row of
+both matrices (storm, ring, share, idle).
+
+The `tsan` failure counted by the rule written first
+(`work/random-count/rule.txt`, 2026-11-22 04:22, during the tier; the
+whole parametrized test under the sanitizer, five runs a side
+interleaved, `work/random-count/summary.txt`): `exhaustedReserve`'s check
+failed 0 of 5 on aeecb55 and 0 of 5 on 8c24c05. The same check failed 2 of
+5 on 8c24c05 in another configuration (`randomProgramsAgreeWithTheirModelNatively`,
+`slowedMarker`, `RandomPrograms.swift:772`, "randomScavenges.take(config) > 0"),
+listed apart by the rule; 0 of 5 on the head. By the rule the cause is
+not established: the condition chosen (the test alone, about 62 s a run)
+is not the gate's (the whole sanitized suite, where the test ran 332 s
+beside the others) and reproduced the gate's failure on neither side. What
+it does show is that this assertion ("not every seed scavenges, the
+configuration must", 10 seeds under the sanitizer) is thin on the starting
+commit too. `tsan` and `tsan-load` were then run again alone through
+`gl_gate` on aeecb55 (`check-rerun/`, below).
+
+Run again alone through `gl_gate` on aeecb55
+(`~/kajo-scratch/review-3-part-2/check-rerun/gates.log`): `tsan` `rc=0`
+3265 s (484 and 198 passed, 0 sanitizer reports); `tsan-load` `rc=1` 4355 s,
+the same tools test with the same line ("Process 549 stopped (error):
+MessageNotUnderstood: nil does not understand #beginsWith:"), 484 and 197
+of 198. It failed `tsan-load` 2 of 2 on aeecb55 and passed it on d3ac36c
+(the first tier run); counted by a rule written first
+(`work/tools-count/rule.txt`, 08:59): below.
+
+The tools test counted (`work/tools-count/summary.txt`; the compiler
+tests' bundle under the sanitizer with twelve busy loops, the `tsan-load`
+condition, two runs a side interleaved): aeecb55 failed 1 of 2 (the same
+line, "Process 606 stopped (error): MessageNotUnderstood: nil does not
+understand #beginsWith:"), 8c24c05 0 of 2. By the rule the cause is not
+established. Over every run of this module under that condition the head
+failed it 3 of 4 and d3ac36c (the first version, the same semantics)
+passed 1 of 1; the previous module saw 1 of 2 on its own starting commit.
+The test's failing step comes after "compiled ToolsProbe>>probeTyped:"; a
+reading, not checked: `TypeService class>>classKeysOf:` and the checker's
+`indexKeysOfClassNamed:` select over a Dictionary's keys that the
+service's background Process changes, and a key read during a rehash
+could be nil. Nothing of this module touches that code; a change of
+timing (faster float sends) could make such a race more frequent. Handed
+on as found.
