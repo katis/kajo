@@ -215,13 +215,32 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
             if (try? probe(selector, args)) == .bool(true) { return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
         }
-        Issue.record("\(selector) never held: \((try? probe(explain))??.string ?? "?")")
+        Issue.record("\(selector) never held: \((try? probe(explain))??.string ?? "?") stops \(standingStops)")
         return false
     }
 
-    /// `ToolsProbe selector` on main, run to its end with turns here.
+    /// Every standing debugger stop with its frames (`ToolsProbe stops`),
+    /// for a failure message: the tools test's fault (docs/modules/
+    /// tools-test-fault.md) printed only "Process N stopped" and no frame.
+    var standingStops: String {
+        guard !readingStops.exchange(true, ordering: .relaxed) else { return "(a stops probe is running)" }
+        defer { readingStops.store(false, ordering: .relaxed) }
+        return (try? probe("stops"))??.string ?? "?"
+    }
+    private let readingStops = Atomic<Bool>(false)
+
+    /// `ToolsProbe selector` on main, run to its end with turns here (the
+    /// shell tests' `run`); a probe that does not end says why: the
+    /// standing stops with their frames (the tools test's fault was a
+    /// probe stopped at an error, docs/modules/tools-test-fault.md).
     func probe(_ selector: String, _ args: [ShellValue] = []) throws -> ShellValue? {
-        try run(vm, selector, on: "ToolsProbe", args, main: true)
+        let p = try #require(vm.spawn(selector, receiver: "ToolsProbe", arguments: args, main: true))
+        defer { vm.release(p) }
+        if !drive(vm, until: { vm.state(of: p) == .terminated }) {
+            Issue.record("ToolsProbe \(selector) did not end: stops \(standingStops)")
+        }
+        if let f = vm.failure(of: p) { Issue.record("\(selector): \(f)") }
+        return vm.result(of: p)
     }
 
     /// Turns until `ToolsProbe selector` answers true (60 s at most).
@@ -231,7 +250,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
             if (try? probe(selector, args)) == .bool(true) { return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
         }
-        Issue.record("\(selector) never held: \((try? probe("state"))??.string ?? "?")")
+        Issue.record("\(selector) never held: \((try? probe("state"))??.string ?? "?") stops \(standingStops)")
         return false
     }
 }
@@ -350,6 +369,12 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         // Types 1: a method with types in its pattern, accepted in the
         // browser's source pane, is compiled, kept with its types, shown
         // with them, and its file holds the typed pattern.
+        // KAJO_TOOLS_HOLD_INSTALL=<ms>, by hand: the typed method's install
+        // waits that long before its source is recorded (the fault forced,
+        // docs/modules/tools-test-fault.md).
+        if let ms = ProcessInfo.processInfo.environment["KAJO_TOOLS_HOLD_INSTALL"].flatMap({ Int64($0) }) {
+            #expect(try t.probe("holdInstalls:", [.int(ms)]) == .bool(true))
+        }
         #expect(try t.probe("compileTypedThroughTheBrowser") == .bool(true))
         #expect(t.until("compiledTypedThroughTheBrowser"))
         #expect((try? String(contentsOfFile: file, encoding: .utf8))?.contains("ToolsProbe >> probeTyped: x <Integer> ^<Integer> [") == true)

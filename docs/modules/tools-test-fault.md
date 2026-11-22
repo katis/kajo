@@ -229,3 +229,130 @@ Build the recommended option; bring the decision back.
 3. If the fault needs no sanitizer and a plain build can hit it, is it
    said in a release's notes? Recommended: no; the checker is in no
    release image.
+
+## As built
+
+### Part 1: named and forced (2026-11-22)
+
+Toolchain: swiftly's swift.org Swift 6.4.2 first on PATH, its `clang`
+(`~/kajo-scratch/tools-test-fault/env.txt`). Starting commit f2f5612 (the
+brief's own commit over 381f57c; no code between them).
+
+**The message.** `ToolsProbe class>>stops` (the test fixture,
+`Tests/KajoCompilerTests/Fixtures/toolsprobe/ToolsProbe.class.st`) writes
+every standing debugger stop: the Process's id, priority, main affinity,
+reason and error, and its frames (16 at most), each the method, the
+receiver's class and the arguments' printStrings (60 bytes each at most;
+an argument that cannot be read says why). The kernel's Process has no
+name; id, priority and main affinity are what names it. In
+`ToolsTests.swift`, `LocalTools.standingStops` runs it, both `until`s add
+it to their failure line (open question 2, as recommended: every `until`),
+and `LocalTools.probe` no longer goes through the shell tests' `run`: a
+probe Process that does not end within `drive`'s bound records "ToolsProbe
+<selector> did not end: stops …" (before, the same case was the bare
+`ShellTests.swift:150` expectation every recorded failure carried, with no
+frame). `KAJO_TOOLS_HOLD_INSTALL=<ms>` (by hand) makes
+`ToolsProbe class>>addSelector:withMethod:`, a class-side override in the
+fixture, wait that long right after `probeTyped:` is installed: the
+forcing switch, Smalltalk test code only.
+
+**The reading.** The failing step's own probe is a sender:
+`ToolsProbe class>>compiledTypedThroughTheBrowser` (since Types 1,
+d62ec0b, 2026-11-17) reads
+`(Smalltalk sourceOf: (ToolsProbe compiledMethodAt: #probeTyped:)) beginsWith: …`
+right after `includesSelector: #probeTyped:` and the method's run, on the
+probe's Process (main, priority 1, spawned by `LocalTools.probe`). The
+method is compiled by the browser's accept on a request Process of the
+same image (`DevSession`'s compile request, `Behavior>>compile:classified:`),
+which runs on the other worker (`LocalTools` has two). That method
+installs first (`addSelector:withMethod:`, primitive 97 in a stop) and
+records the source after (`Smalltalk noteSource:of:` under the registry
+lock), with nothing between the two that a reader could wait on. A probe
+that runs in that gap sees the method, runs it, and reads a nil source.
+The same gap has a second shape in `ClassBuilder class>>redefine:…`: the
+primitive (`primRedefine:`) makes and installs the class's methods again,
+and `Smalltalk replaceSources:of:` records their sources after; a reader
+between them finds the new method under the old table's identity hash and
+reads nil.
+
+The senders of `beginsWith:` in the image under test outside its tests:
+
+| sender | receiver from | lock | Process |
+|---|---|---|---|
+| `ToolsProbe class>>compiledTypedThroughTheBrowser` (fixture) | `Smalltalk sourceOf:` of a method another Process is installing | registry, inside `sourceOf:` only; the install is not under it | the probe (main) |
+| `TypeService class>>classKeysOf:` (types/Live, l. 110) | `checker resultKeys` | not read here | the service's callers; on no failing stop's stack |
+| `TypeChecker>>forgetClassNamed:`, `indexKeysOfClassNamed:` (l. 281, 299) | the checker's caches' keys | not read here | the recheck; on no failing stop's stack |
+| `BrowserModel` l. 440 (`diagnosedSelectors`) | a reply's keys, `k isString` tested first | none needed | UI loop |
+| `DebuggerModel` l. 120, `TestRunnerModel` l. 91, `ToolWindow` l. 142, `DevTools` l. 213, `DevClient` l. 275 | a reply's or a menu's String, nil tested first where nil can come | none | UI loop |
+| `Behavior>>isObsolete` l. 438, `TonelWriter` l. 180, 215, `TestCase` l. 177, `TestRunner` l. 40 | a class name, a method body, a client name, a selector, a filter | none | caller's |
+
+The type service's tables were not read further: the stop's own frames
+(below) name the probe, not the service (starting position 2 wrong).
+
+**The condition.** Rule written first:
+`~/kajo-scratch/tools-test-fault/part1/rule.txt` (copied with its time as
+`rule.copy.txt`, 18:43, before any run).
+
+- A, the tools test alone in the plain debug build:
+  `KAJO_TOOLS_HOLD_INSTALL=1500 swift test --skip-build --filter 'ToolsTests/theToolsDevelopTheImageTheyRunIn'`
+  (`~/kajo-scratch/tools-test-fault/scripts/forced.sh`), interleaved with
+  the same without the switch: forced 3 of 3 fail, plain 0 of 3
+  (`part1/forced-A/summary.txt`; each forced run 30 s, the length of
+  `drive`'s plain bound). The stop, quoted from `part1/forced-A/run-forced-1.txt`:
+
+      ToolsProbe compiledTypedThroughTheBrowser did not end: stops 1 stops;
+      process 43 priority 1 main true reason 'error' error
+      'MessageNotUnderstood: nil does not understand #beginsWith:' frames
+      [1 Object>>doesNotUnderstand: receiver UndefinedObject arg (unreadable:
+      index 1 out of bounds)] [2 ToolsProbe class>>compiledTypedThroughTheBrowser
+      receiver ToolsProbe class]
+
+  (`part1/forced-A-no-diagnostic/` is the same three before the message
+  existed: each only the `ShellTests.swift:150` line, as in every recorded
+  failure; `part1/forced-A-frames-empty/` the message's first form, which
+  looked the field up by a String among Symbols and printed no frame.)
+- B, a kernel SUnit test, no test hook in a product class:
+  `kernel/Tests/SourceRecordTest.class.st` with
+  `SourceRecordSample.class.st`, whose class side stands still right after
+  an install (`addSelector:withMethod:`) or, in a reshape, at the first
+  `isMeta` the redefinition sends it after `primRedefine:` while the
+  method has no source. A second Process then reads as the probe reads.
+  On 381f57c's kernel (git archive, the two files copied in,
+  `work/start/`): both tests fail, the compile test with 20 of 20 reads
+  answering "nil does not understand #beginsWith:" and the redefinition
+  test with its one read the same. The test files are committed with
+  part 2, beside the fix they test.
+- C, the bundle under ThreadSanitizer with twelve loops, for a natural
+  failing run's own stack: see "Natural runs" below.
+
+**The verdict on the starting positions.**
+
+1. Right, with the new message: a standing stop's frames are read at the
+   failure and name the sender and its receiver (a nil from `Smalltalk
+   sourceOf:`, the registry's sources table, the slot of `probeTyped:`)
+   (`part1/forced-A/run-forced-*.txt`).
+2. Wrong. The sender is the test's own probe,
+   `ToolsProbe class>>compiledTypedThroughTheBrowser`, reading a source in
+   the gap `Behavior>>compile:classified:` leaves between install and
+   record; the type service is not on the stack (same files).
+3. Right: a Smalltalk-level order, not a VM fault. No key read as nil;
+   the nil is `sourceOf:`'s own answer for a method whose source is not
+   recorded yet, and no preemption is needed: the two Processes run on two
+   workers at once (`work/start/` run of B, deterministic on a plain kernel).
+4. Right in substance: no sanitizer needed; a wait at the one place brings
+   it in a plain debug build at every run (A, 3 of 3) and in a plain
+   kernel test (B, 20 of 20 reads). It is a wait at the place, not
+   `preemptEveryPoll`, which would not hold a Process inside the gap.
+5. Right: the stopped Process is the probe Process itself (main,
+   priority 1), the one whose answer the step waits for; no reply was
+   lost. Why the whole step gave up: `drive` waited for the stopped probe
+   for its whole bound, 30 s times `driveScale` 5 under the sanitizer =
+   150 s, past `until`'s 60 s, so `until` recorded "never held" after that
+   one probe (the recorded failures took 191 s). In the plain build the
+   same stop costs 30 s and the step then holds, so a plain-build
+   occurrence shows only as the `drive` line.
+6. Right by mechanism, not by count: the gap (8d's install-then-record
+   order in `compile:`) and the probe's clause (Types 1) both predate
+   part 2, and nothing in part 2's diff is on either path; the rate is a
+   matter of when the probe's 2 ms turns fall against a compile under the
+   sanitizer. No count here separates commits.

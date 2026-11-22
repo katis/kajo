@@ -13,7 +13,8 @@ Class {
 		'typesMark',
 		'dropAt',
 		'trail',
-		'timerSeen'
+		'timerSeen',
+		'holdMs'
 	]
 }
 
@@ -162,6 +163,46 @@ ToolsProbe class >> state [
 			nextPutAll: ' status '; print: (self browsers = 0 ifTrue: [''] ifFalse: [self browser model status]);
 			nextPutAll: ' loop errors '; print: UIEventLoop errorCount;
 			nextPutAll: ' transcript '; print: (DevTools transcript lines last: (DevTools transcript lines size min: 3))]
+]
+
+{ #category : #probing }
+ToolsProbe class >> stops [
+	"Every standing debugger stop, for a test's failure message (the tools test's fault, docs/modules/tools-test-fault.md): each stopped Process's id, priority, main affinity, why and its error, and its frames from where it stopped down (16 at most), each the method, the receiver's class and the arguments' printStrings (60 bytes each at most). The Contexts are read from here: the stopped Process runs nothing while it stands."
+	| all fi |
+	all := Debugger stops.
+	fi := (DebugStop allInstVarNames asArray collect: [:n | n asString]) indexOf: 'frames'.
+	^ String streamContents: [:s |
+		s print: all size; nextPutAll: ' stops'.
+		all do: [:st | | p frames |
+			p := st process.
+			s nextPutAll: '; process '; print: p id; nextPutAll: ' priority '; print: p priority;
+				nextPutAll: ' main '; print: p isMainAffine; nextPutAll: ' reason '; print: st reason;
+				nextPutAll: ' error '; print: st errorText; nextPutAll: ' frames'.
+			frames := fi = 0 ifTrue: [#()] ifFalse: [(st instVarAt: fi) ifNil: [#()]].
+			(frames first: (frames size min: 16)) doWithIndex: [:f :i |
+				s nextPutAll: ' ['; print: i; space.
+				[ | m |
+				 m := f method.
+				 s print: m; nextPutAll: ' receiver '; nextPutAll: f receiver class name.
+				 m isBlockMethod ifFalse: [
+					1 to: m numArgs do: [:k | | a |
+						a := [(f tempAt: k) printString] on: Error do: [:e | '(unreadable: ' , e messageText asString , ')'].
+						s nextPutAll: ' arg '; nextPutAll: (a byteSize > 60 ifTrue: [(a copyFrom: 1 to: 60) , '...'] ifFalse: [a])]]]
+					on: Error do: [:e | s nextPutAll: 'unreadable: '; nextPutAll: e messageText asString].
+				s nextPut: $]]]]
+]
+
+{ #category : #forcing }
+ToolsProbe class >> addSelector: aSymbol withMethod: aCompiledMethod [
+	"The tools test's fault forced (docs/modules/tools-test-fault.md): with holdInstalls: set, a method compiled into this class waits that many milliseconds right after it is installed, where Behavior>>compile:classified: stands between the install and its later records (the source), so a probe that reads the method meanwhile finds what such a reader finds. Off (nil) it only installs."
+	super addSelector: aSymbol withMethod: aCompiledMethod.
+	(holdMs notNil and: [aSymbol == #probeTyped:]) ifTrue: [(Delay forMilliseconds: holdMs) wait]
+]
+
+{ #category : #forcing }
+ToolsProbe class >> holdInstalls: aMilliseconds [
+	holdMs := aMilliseconds.
+	^ true
 ]
 
 { #category : #probing }
