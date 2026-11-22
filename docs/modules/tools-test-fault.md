@@ -356,3 +356,87 @@ The type service's tables were not read further: the stop's own frames
    part 2, and nothing in part 2's diff is on either path; the rate is a
    matter of when the probe's 2 ms turns fall against a compile under the
    sanitizer. No count here separates commits.
+
+### Part 2: the records before the method is seen (2026-11-22)
+
+**The fix, where the cause is.** The rule: a Process that can find a
+method or a class finds its records (source, category, definition) with
+it. Applied to every place the image makes a method or a class visible
+from Smalltalk:
+
+- `Behavior>>compile:classified:` (`kernel/Classes/Behavior.class.st`)
+  records the source and the category first and installs after; an
+  install left by an unwind takes both back (`ifCurtailed:`: the source
+  forgotten, the old category restored or forgotten). No new lock, and
+  no lock held longer: each record takes the registry lock as before.
+- `ClassBuilder class>>redefine:…` (`kernel/Classes/ClassBuilder.class.st`):
+  the new methods are made by the primitive, so their records cannot come
+  first; `primRedefine:` and every record after it (definitions, types,
+  sources, categories, the pragma index) run inside one
+  `Smalltalk registry:` block, so a reader that finds a remade method
+  waits in `sourceOf:` for its record instead of reading the old table.
+  The class variables' bookkeeping stays outside it.
+- `ClassBuilder class>>newClass:…`: the same for a new class and its
+  definition (`primDefineClass:` and `noteDefinition:of:` in one registry
+  block); a reader that finds the class and asks `Smalltalk definitionOf:`
+  waits for it. No forcing test covers this one (a new class has no hook
+  of its own before it exists); it is by reading.
+- Looked at and left: `removeSelector:` removes and then forgets the
+  source (a reader that took the method before the removal can still read
+  nil afterwards; that is reading a method that is gone, not a method
+  without its record); `addSelector:withMethod:` notes the pragma index
+  after the install (a reader of a new method's pragmas by name can miss
+  it for that moment; nothing reads both, and no nil comes of it).
+- Not touched: the type service (its locks, its tables), the probe, the
+  test's waits. No wait lengthened, no retry, no guard: the probe's
+  clause is right as it stands once the kernel keeps the rule.
+
+**Tests.** `kernel/Tests/SourceRecordTest.class.st` with
+`kernel/Tests/SourceRecordSample.class.st` (Kernel package, tag Tests;
+run by every kernel-test gate): `testAReaderAfterTheInstallFindsTheSource`
+(20 compiles, a second Process reads each new method's source as the probe
+does while the compiling Process stands right after the install) and
+`testAReaderDuringARedefinitionFindsTheSource` (a reshape; the reader reads
+the remade method's source while the redefining Process stands after the
+primitive; the redefining Process waits for the reader 2 s at most, since
+with the fix the reader waits for it). Counted with the debug `kajo`
+(`scripts/count-B.sh`), 20 runs each:
+
+| kernel | install test | redefinition test |
+|---|---|---|
+| 381f57c (`work/count-B-start/summary.txt`) | fails 20 of 20 | fails 20 of 20 |
+| the fix (`work/count-B-head/summary.txt`) | passes 20 of 20 | passes 20 of 20 |
+
+Each "fails on 381f57c". The failing line on 381f57c: "answers #('nil does
+not understand #beginsWith:' …)", 20 such answers per run.
+
+The forced tools test (condition A) on the fix: forced 0 of 3, plain 0 of
+3 (`work/forced-A-head/summary.txt`), against forced 3 of 3 on part 1's
+commit (`part1/forced-A/summary.txt`).
+
+The lock rule as a table test (the brief's `ShellVM`-style test): not
+built. The rule here is an order, "records before the method or class is
+seen, or under the registry with the primitive", over three methods; a
+source scan cannot tell a record before an install from one after it
+without parsing statement order, and the two forcing tests fail on each
+of the three places but one (the new class, by reading only).
+
+**Broken variants, by hand** (`~/kajo-scratch/tools-test-fault/broken/`,
+never committed): `order` puts the install back before the records in
+`compile:classified:` (`order.diff`): the install test fails, "answers
+#('nil does not understand #beginsWith:' …)" (`order-run.txt`); `lock`
+runs the redefinition's block without the registry (`lock.diff`): the
+redefinition test fails, "answers #('nil does not understand
+#beginsWith:')" (`lock-run.txt`). Each fails only its own test.
+
+**The background Process's own stops.** Today an error in the type
+service's recheck (`TypeService class>>drain` on its `run` Process) is an
+unhandled error of that Process: in a development image whose host lets a
+debugger come it stops there, standing, with "Process N stopped (error)"
+on the Transcript and a `process.stopped` event; the drain's `ensure:`
+runs only when the stop is ended, so `busy` stays true and waiters wait
+until then. In a batch host the error is reported and the Process ends
+(`UnhandledError>>reportAndEnd`), the `ensure:` runs, and later changes
+are queued with no Process to drain them. Not silent in a development
+image; quiet in a batch host. The fix does not need a change there, and
+none is made.

@@ -103,19 +103,25 @@ Behavior >> compile: aString [
 { #category : #compiling }
 Behavior >> compile: aString classified: aCategoryOrNil [
 	"compile:, the method filed under aCategoryOrNil (a String or Symbol; nil keeps the replaced method's category, or 'as yet unclassified')."
-	| method old category |
+	| method old category oldCategory |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: nil; signal].
 	method := (Compiler compile: aString in: self) makeMethodIn: self.
 	old := self compiledMethodAt: method selector ifAbsent: [nil].
+	oldCategory := self categoryOf: method selector.
 	category := aCategoryOrNil isNil
-		ifTrue: [(self categoryOf: method selector) ifNil: [Behavior defaultCategory]]
+		ifTrue: [oldCategory ifNil: [Behavior defaultCategory]]
 		ifFalse: [aCategoryOrNil asSymbol].
 	"Types 2: a method compiled where a signature without a method stands replaces it (open question 2), filed under the signature's category unless one is given."
 	(old isNil and: [aCategoryOrNil isNil]) ifTrue: [
 		(Smalltalk signatureOf: method selector in: self) ifNotNil: [:e | category := e at: 2]].
-	self addSelector: method selector withMethod: method.
+	"The records first, then the install: another Process that finds the method (it may run on another worker at the same moment) finds its source and its category (the tools test's fault, docs/modules/tools-test-fault.md). An install left by an unwind takes them back."
 	Smalltalk noteSource: aString of: method.
 	Smalltalk noteCategory: category of: method selector in: self.
+	[self addSelector: method selector withMethod: method] ifCurtailed: [
+		Smalltalk forgetSourceOf: method.
+		oldCategory isNil
+			ifTrue: [Smalltalk forgetCategoryOf: method selector in: self]
+			ifFalse: [Smalltalk noteCategory: oldCategory of: method selector in: self]].
 	old ifNotNil: [:m | Smalltalk forgetSourceOf: m].
 	Smalltalk forgetSignatureOf: method selector in: self.
 	DevProtocol noteChangeOf: method selector in: self.

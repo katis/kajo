@@ -36,7 +36,7 @@ ClassBuilder class >> define: aName superclass: aClass instanceVariableNames: iv
 
 { #category : #defining }
 ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: ivars classVariableNames: cvars classInstanceVariableNames: civars package: aPackageOrNil tag: aTagOrNil kind: kind comment: aCommentOrNil [
-	| own ownC cv spec result inherited inheritedC |
+	| own ownC cv spec result inherited inheritedC definition |
 	self checkTag: aTagOrNil.
 	own := (ivars collect: [:n | n asSymbol]) asArray.
 	ownC := (civars collect: [:n | n asSymbol]) asArray.
@@ -46,12 +46,15 @@ ClassBuilder class >> newClass: aName superclass: aClass instanceVariableNames: 
 	spec := Array new: 9.
 	spec at: 1 put: aName asSymbol; at: 2 put: aClass; at: 3 put: inherited , own; at: 4 put: inheritedC , ownC;
 		at: 5 put: cv; at: 6 put: kind; at: 7 put: Binding; at: 8 put: inherited size; at: 9 put: inheritedC size.
-	result := Smalltalk primDefineClass: spec.
-	result isString ifTrue: [^ ClassDefinitionError new signal: result].
-	Smalltalk noteDefinition: (ClassDefinition instVarNames: own classInstVarNames: ownC
+	definition := ClassDefinition instVarNames: own classInstVarNames: ownC
 		package: (aPackageOrNil ifNil: [self newClassPackage ifNil: [self defaultPackage]] ifNotNil: [:p | p asString])
-		tag: (aPackageOrNil ifNil: [nil] ifNotNil: [aTagOrNil]) kind: kind comment: (aCommentOrNil ifNil: ['']))
-		of: result.
+		tag: (aPackageOrNil ifNil: [nil] ifNotNil: [aTagOrNil]) kind: kind comment: (aCommentOrNil ifNil: ['']).
+	"The primitive and the definition's record under the registry's lock: a Process that finds the new class and asks for its definition waits for it (the tools test's fault, docs/modules/tools-test-fault.md)."
+	result := Smalltalk registry: [ | r |
+		r := Smalltalk primDefineClass: spec.
+		r isString ifFalse: [Smalltalk noteDefinition: definition of: r].
+		r].
+	result isString ifTrue: [^ ClassDefinitionError new signal: result].
 	Smalltalk forgetClassNames.
 	Smalltalk noteChange: #class of: nil in: result.
 	^ result
@@ -116,20 +119,23 @@ ClassBuilder class >> redefine: aClass instanceVariableNames: ivars classVariabl
 	failures isEmpty ifFalse: [
 		^ ClassDefinitionError new signal: aClass name , ': ' , failures size printString , ' methods do not compile: ' , (failures inject: '' into: [:a :e | a isEmpty ifTrue: [e] ifFalse: [a , '; ' , e]])].
 	(shapes isEmpty and: [pools isEmpty and: [methods isEmpty]]) ifTrue: [^ aClass].
-	result := Smalltalk primRedefine: {shapes asArray. methods asArray. pools asArray. #methodRemovedByRedefinition. self namesAfter: aClass own: own ownMeta: ownC}.
+	"The primitive and the records that follow the image (definitions, sources: the replaced methods were forwarded to their new selves, categories, the pragma index) under the registry's lock: the primitive installs the methods it made, and a Process that finds one and asks for its source waits for the record instead of reading the old table (the tools test's fault, docs/modules/tools-test-fault.md). The class variables follow outside it."
+	result := Smalltalk registry: [ | r |
+		r := Smalltalk primRedefine: {shapes asArray. methods asArray. pools asArray. #methodRemovedByRedefinition. self namesAfter: aClass own: own ownMeta: ownC}.
+		r isString ifFalse: [
+			shapes do: [:s | | b | b := s first.
+				b isMeta
+					ifTrue: [b == aClass class ifTrue: [d classInstVarNames: ownC]]
+					ifFalse: [b == aClass ifTrue: [d instVarNames: own]]].
+			"Types 1: an instance variable that went takes its type with it."
+			(Smalltalk typesOf: aClass) ifNotNil: [:t | t keepOnly: own. t isEmpty ifTrue: [Smalltalk noteTypes: nil of: aClass]].
+			sources keysAndValuesDo: [:b :srcs | Smalltalk replaceSources: (srcs collect: [:x | x first -> (x at: 2)]) of: b].
+			overrides keysAndValuesDo: [:b :list |
+				Smalltalk forgetCategoriesOf: b.
+				(sources at: b) do: [:x | Smalltalk noteCategory: (x at: 3) of: x first in: b]].
+			methods isEmpty ifFalse: [Pragma rebuildIndex]].
+		r].
 	result isString ifTrue: [^ ClassDefinitionError new signal: aClass name , ': ' , result].
-	"The records follow the image: definitions, sources (the replaced methods were forwarded to their new selves), categories, the pragma index, the class variables."
-	shapes do: [:s | | b | b := s first.
-		b isMeta
-			ifTrue: [b == aClass class ifTrue: [d classInstVarNames: ownC]]
-			ifFalse: [b == aClass ifTrue: [d instVarNames: own]]].
-	"Types 1: an instance variable that went takes its type with it."
-	(Smalltalk typesOf: aClass) ifNotNil: [:t | t keepOnly: own. t isEmpty ifTrue: [Smalltalk noteTypes: nil of: aClass]].
-	sources keysAndValuesDo: [:b :srcs | Smalltalk replaceSources: (srcs collect: [:x | x first -> (x at: 2)]) of: b].
-	overrides keysAndValuesDo: [:b :list |
-		Smalltalk forgetCategoriesOf: b.
-		(sources at: b) do: [:x | Smalltalk noteCategory: (x at: 3) of: x first in: b]].
-	methods isEmpty ifFalse: [Pragma rebuildIndex].
 	newBindings do: [:b | b isUndeclared ifTrue: [b beDeclared]].
 	removed do: [:n | | b | b := kept at: n. b beUndeclared. Smalltalk noteUndeclared: b in: aClass].
 	added do: [:n | Smalltalk forgetUndeclared: n in: aClass].
