@@ -292,11 +292,26 @@ end
         c.marking.testSwitches.markerSlowdown = 16
     })
     let p = rt.spawn("mainChurn", main: true)
+    let d = StallDiag(rt, "main")
+    let t0 = now()
+    var turns = MainTurns()
     let end = now() + UInt64((underThreadSanitizer ? 900.0 : 180.0) * 1e9)
     while rt.vm.liveProcessCount > 0 && now() < end {
-        if rt.vm.runMain(budgetNs: 2_000_000).slices == 0 { usleep(200) }
+        let st = rt.vm.runMain(budgetNs: 2_000_000)
+        turns.add(st)
+        if st.slices == 0 { usleep(200) }
     }
-    #expect(rt.vm.liveProcessCount == 0)
+    // The weekly run of 2026-11-23 (docs/modules/weekly-1123-failures.md):
+    // the deadline passed with the ring unfinished and the line said
+    // nothing of where it stood. The turns, the main worker's share of a
+    // core, the ring's promotion so far and the collector's counters,
+    // whether it ended or not.
+    let wall = now() &- t0
+    let ended = rt.vm.liveProcessCount == 0
+    let stood = "\(d.full(ended ? "ended" : "deadline"))\n  stall-diag main turns \(turns.line(wall: wall)) "
+        + "promotedMB=\(String(format: "%.1f", Double(rt.vm.youngCounters.promotedBytes) / 1e6)) \(fallbackCauses(rt.marking))"
+    print(stood)
+    #expect(ended, "\(stood)")
     _ = rt.vm.result(of: p)
     let c = rt.marking
     let s = rt.vm.stallLog
@@ -358,6 +373,48 @@ private func waitStalled(_ rt: Runtime, _ d: StallDiag? = nil) -> Bool {
 }
 
 // MARK: - diagnostics (the stall tests in a dense suite)
+
+/// The main worker's turns driven by a test thread, summed: how many, the
+/// slices, the wall and CPU time inside them, what was not Smalltalk
+/// (parked in another worker's stop, its own stops, young collection, the
+/// scavenges it copied in), and the longest turn (the weekly run's two
+/// failures, docs/modules/weekly-1123-failures.md).
+struct MainTurns {
+    var turns = 0, slices = 0, preempted = 0
+    var ns: UInt64 = 0, cpuNs: UInt64 = 0, parkNs: UInt64 = 0, stopNs: UInt64 = 0, youngNs: UInt64 = 0
+    var collectorNs: UInt64 = 0, waitNs: UInt64 = 0, maxNs: UInt64 = 0
+
+    mutating func add(_ st: TurnStats) {
+        turns += 1
+        slices += st.slices
+        if st.preempted { preempted += 1 }
+        ns &+= st.ns
+        cpuNs &+= st.cpuNs
+        parkNs &+= st.parkNs
+        stopNs &+= st.stopNs
+        youngNs &+= st.youngNs
+        collectorNs &+= st.collectorNs
+        waitNs &+= st.enterWaitNs &+ st.leaveWaitNs
+        maxNs = max(maxNs, st.ns)
+    }
+
+    /// `share` is the turns' CPU over the wall time since the first turn:
+    /// the main worker's share of a core.
+    func line(wall: UInt64) -> String {
+        func s(_ x: UInt64) -> String { String(format: "%.1f", Double(x) / 1e9) }
+        return "n=\(turns) slices=\(slices) preempted=\(preempted) wallS=\(s(wall)) inTurnsS=\(s(ns)) cpuS=\(s(cpuNs)) "
+            + "share=\(String(format: "%.3f", Double(cpuNs) / Double(max(1, wall)))) parkS=\(s(parkNs)) stopS=\(s(stopNs)) "
+            + "collectorS=\(s(collectorNs)) youngS=\(s(youngNs)) enterLeaveWaitS=\(s(waitNs)) maxTurnMs=\(String(format: "%.1f", Double(maxNs) / 1e6))"
+    }
+}
+
+/// The fallbacks by cause and by requester (MarkingCounters).
+func fallbackCauses(_ c: MarkingCounters) -> String {
+    "fallbacks=\(c.fallbacks) promotion=\(c.fallbacksPromotion) reserve=\(c.fallbacksReserve) softLimit=\(c.fallbacksSoftLimit) "
+        + "entries=\(c.fallbacksEntries) oldAllocation=\(c.fallbacksOldAllocation) byMain=\(c.fallbacksByMain) "
+        + "byStall=\(c.fallbacksByStall) inStop=\(c.fallbacksInStop) noMarker=\(c.fallbacksNoMarker) "
+        + "unjustified=\(c.unjustifiedFallbacks) avoided=\(c.fallbacksAvoided)"
+}
 
 /// A test's body time, printed at its end (`stall-diag body <test> s=`):
 /// Swift Testing's own per-test time in a loaded bundle includes the wait

@@ -14,7 +14,9 @@ Class {
 		'dropAt',
 		'trail',
 		'timerSeen',
-		'holdMs'
+		'holdMs',
+		'defineAt',
+		'holdLoopMs'
 	]
 }
 
@@ -193,6 +195,13 @@ ToolsProbe class >> stops [
 ]
 
 { #category : #forcing }
+ToolsProbe class >> holdLoop: aMilliseconds [
+	"The weekly run's two failures forced (docs/modules/weekly-1123-failures.md): the next defineInTag: first sends a package.list request whose reply holds the tools' event loop aMilliseconds (a Delay in its dispatch), so the define's reply, which comes after it, is dispatched that much later while the target has answered it and the host has written its file, as an event loop busy with earlier replies would leave it. Once: the define clears it."
+	holdLoopMs := aMilliseconds.
+	^ true
+]
+
+{ #category : #forcing }
 ToolsProbe class >> addSelector: aSymbol withMethod: aCompiledMethod [
 	"The tools test's fault forced (docs/modules/tools-test-fault.md): with holdInstalls: set, a method compiled into this class waits that many milliseconds right after it is installed, where Behavior>>compile:classified: stands between the install and its later records (the source), so a probe that reads the method meanwhile finds what such a reader finds. Off (nil) it only installs."
 	super addSelector: aSymbol withMethod: aCompiledMethod.
@@ -365,6 +374,11 @@ ToolsProbe class >> defineInTag: aTag [
 	m := self browser model.
 	m selectPackage: 'Tools'.
 	m newClassTemplate.
+	holdLoopMs isNil ifFalse: [ | ms |
+		ms := holdLoopMs.
+		holdLoopMs := nil.
+		DevTools local request: 'package.list' args: #() then: [:r | (Delay forMilliseconds: ms) wait]].
+	defineAt := Smalltalk microsecondClock.
 	m accept: 'Object subclass: #ToolsTagProbe
 	instanceVariableNames: ''a''
 	classVariableNames: ''''
@@ -380,6 +394,76 @@ ToolsProbe class >> definedInTag: aTag [
 	c := Smalltalk at: #ToolsTagProbe ifAbsent: [^ false].
 	(Smalltalk tagOf: c) = aTag asSymbol ifFalse: [^ false].
 	^ self browser model filesWritten anySatisfy: [:f | (f at: 'path') = (aTag , '/ToolsTagProbe.class.st')]
+]
+
+{ #category : #explaining }
+ToolsProbe class >> definedInTagWhy: aTag [
+	"Each clause of definedInTag: for a failure message (the weekly run's two failures, docs/modules/weekly-1123-failures.md: the line printed none of the three): the class present, its tag against aTag, the paths the browser's filesWritten names, the browser's status, then the client's requests (replies:)."
+	| c |
+	c := Smalltalk at: #ToolsTagProbe ifAbsent: [nil].
+	^ String streamContents: [:s |
+		s nextPutAll: 'class '; print: c notNil;
+			nextPutAll: ' tag '; print: (c ifNotNil: [:x | Smalltalk tagOf: x]);
+			nextPutAll: ' want '; print: aTag asSymbol;
+			nextPutAll: ' files '; print: (self browser model filesWritten asArray collect: [:f | f at: 'path']);
+			nextPutAll: ' status '; print: self browser model status.
+		self replies: s]
+]
+
+{ #category : #explaining }
+ToolsProbe class >> explains: aSelector [
+	"Whether a probe named aSelector (an until's selector with Why before its last colon) explains that until's failure clause by clause."
+	^ self respondsTo: aSelector asSymbol
+]
+
+{ #category : #explaining }
+ToolsProbe class >> readyWhy [
+	"Each clause of ready for a failure message: the local client and its state, the browsers, the first one's hierarchy size, then the client's requests (replies:)."
+	| c |
+	c := DevTools local.
+	^ String streamContents: [:s |
+		s nextPutAll: 'client '; print: c notNil;
+			nextPutAll: ' state '; print: (c ifNotNil: [:x | x state]);
+			nextPutAll: ' browsers '; print: self browsers;
+			nextPutAll: ' hierarchy '; print: (self browsers = 0 ifTrue: [0] ifFalse: [self browser model hierarchy size]).
+		self replies: s]
+]
+
+{ #category : #explaining }
+ToolsProbe class >> replies: aStream [
+	"The local client's requests for a failure message, the last 12 replies (replies:last:)."
+	^ self replies: aStream last: 12
+]
+
+{ #category : #explaining }
+ToolsProbe class >> replies: aStream last: aCount [
+	"The local client's requests: the milliseconds since defineInTag: sent its define (-1: never), each pending request's kind and age (ms), the define's replies so far, and the last aCount replies kept with their round trips (ms, from the send to the dispatch in the tools' event loop), oldest first."
+	| c fi pend now |
+	now := Smalltalk microsecondClock.
+	aStream nextPutAll: ' defineSentMs '; print: (defineAt ifNil: [-1] ifNotNil: [:t | (now - t) // 1000]).
+	c := DevTools local.
+	c isNil ifTrue: [^ aStream nextPutAll: ' no client'].
+	fi := (DevClient allInstVarNames asArray collect: [:n | n asString]) indexOf: 'pending'.
+	pend := fi = 0 ifTrue: [nil] ifFalse: [c instVarAt: fi].
+	aStream nextPutAll: ' pending '; print: (pend isNil ifTrue: [#unreadable] ifFalse: [pend values asArray collect: [:e | {e first. (now - (e at: 2)) // 1000}]]);
+		nextPutAll: ' defineReplies '; print: (c repliesOf: 'class.define');
+		nextPutAll: ' replies '; print: c replyCount;
+		nextPutAll: ' last '; print: ((c latencies last: (c latencies size min: aCount)) asArray collect: [:l | {l first. (l at: 2) // 1000}])
+]
+
+{ #category : #explaining }
+ToolsProbe class >> repliesNow [
+	"Every reply the local client keeps with its round trip (replies:last:), for a test's last line."
+	^ String streamContents: [:s | self replies: s last: 1000]
+]
+
+{ #category : #explaining }
+ToolsProbe class >> tagProbeRemovedWhy [
+	"Each clause of tagProbeRemoved for a failure message: the class present, the browser's status, then the client's requests (replies:)."
+	^ String streamContents: [:s |
+		s nextPutAll: 'class '; print: (Smalltalk includesKey: #ToolsTagProbe);
+			nextPutAll: ' status '; print: self browser model status.
+		self replies: s]
 ]
 
 { #category : #tags }

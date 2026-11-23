@@ -243,15 +243,40 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         return vm.result(of: p)
     }
 
-    /// Turns until `ToolsProbe selector` answers true (60 s at most).
+    /// Turns until `ToolsProbe selector` answers true (60 s at most). A
+    /// failure line says how long the wait was, how many probes ran and
+    /// the longest, and (the weekly run's two failures, docs/modules/
+    /// weekly-1123-failures.md: `definedInTag:` failed and its line printed
+    /// none of its clauses) each clause of the condition when the probe
+    /// has a `...Why` companion (`why`), then the tools' state and stops.
     func until(_ selector: String, _ args: [ShellValue] = []) -> Bool {
-        let end = ShellVM.now() + 60_000_000_000
+        let t0 = ShellVM.now()
+        let end = t0 + 60_000_000_000
+        var probes = 0
+        var longest: UInt64 = 0
         while ShellVM.now() < end {
-            if (try? probe(selector, args)) == .bool(true) { return true }
+            let p0 = ShellVM.now()
+            let held = (try? probe(selector, args)) == .bool(true)
+            probes += 1
+            longest = max(longest, ShellVM.now() &- p0)
+            if held { return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
         }
-        Issue.record("\(selector) never held: \((try? probe("state"))??.string ?? "?") stops \(standingStops)")
+        let waited = String(format: "%.1f", Double(ShellVM.now() &- t0) / 1e9)
+        let clauses: String = why(selector, args)
+        let state: String = (try? probe("state"))??.string ?? "?"
+        let longestS = String(format: "%.1f", Double(longest) / 1e9)
+        Issue.record("\(selector) never held: waited \(waited) s, \(probes) probes, longest \(longestS) s; why \(clauses); \(state) stops \(standingStops)")
         return false
+    }
+
+    /// Each clause of `ToolsProbe selector`, from its companion probe
+    /// (`definedInTag:` has `definedInTagWhy:`, `ready` has `readyWhy`),
+    /// or "none" when it has none.
+    func why(_ selector: String, _ args: [ShellValue]) -> String {
+        let w = selector.hasSuffix(":") ? String(selector.dropLast()) + "Why:" : selector + "Why"
+        guard (try? probe("explains:", [.string(w)])) == .bool(true) else { return "none" }
+        return (try? probe(w, args))??.string ?? "?"
     }
 }
 
@@ -418,9 +443,22 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     /// emptied directory gone); removing the class removes the file. With
     /// the project a copy of tools/, the copy is tools/ again afterwards.
     /// KAJO_TOOLSRUN_OUT names a directory the listings are written to.
+    ///
+    /// Each step prints its own time (`tools-tags <step> s= t=`, the step's
+    /// and the body's so far): the weekly run of 2026-11-23 failed it at
+    /// 378.8 s under the sanitizer with load, against 37 to 68 s in every
+    /// recorded pass, and said nothing of where the time went.
     @Test func aClassDefinedIntoATagFromTheBrowserMovesWithItsTag() throws {
+        let t0 = ShellVM.now()
+        var last = t0
+        func step(_ name: String) {
+            let n = ShellVM.now()
+            print("tools-tags \(name) s=\(String(format: "%.1f", Double(n &- last) / 1e9)) t=\(String(format: "%.1f", Double(n &- t0) / 1e9))")
+            last = n
+        }
         let t = try LocalTools()
         defer { t.close() }
+        step("started")
         let project = try temporaryDirectory("tools-tags")
         defer { try? FileManager.default.removeItem(at: project) }
         try FileManager.default.removeItem(at: project)
@@ -435,27 +473,45 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         // The project directory is the host's (2026-11-11): set before the
         // tools open, never named by the image.
         _ = try t.host.setProject(project.path, for: "local").get()
+        step("copied")
         #expect(try t.probe("open:", [.string(t.path)]) == .bool(true))
+        step("open")
         #expect(t.until("ready"))
+        step("ready")
+        // KAJO_TOOLS_HOLD_LOOP=<ms>, by hand: the first define's reply is
+        // dispatched that much later, the event loop held by the reply
+        // before it (the weekly run's failure forced, docs/modules/
+        // weekly-1123-failures.md).
+        if let ms = ProcessInfo.processInfo.environment["KAJO_TOOLS_HOLD_LOOP"].flatMap({ Int64($0) }) {
+            #expect(try t.probe("holdLoop:", [.int(ms)]) == .bool(true))
+        }
         #expect(try t.probe("defineInTag:", [.string("Probes")]) == .bool(true))
+        step("defineInTag-Probes")
         #expect(t.until("definedInTag:", [.string("Probes")]))
+        step("definedInTag-Probes")
         let defined = try listing("1-defined-in-Probes")
         #expect(defined == (before + ["Probes/ToolsTagProbe.class.st"]).sorted())
         let text = try String(contentsOf: project.appendingPathComponent("Probes/ToolsTagProbe.class.st"), encoding: .utf8)
         #expect(text.hasPrefix("Class {\n\t#name : #ToolsTagProbe,\n\t#superclass : #Object,\n\t#instVars : [\n\t\t'a'\n\t]\n}\n"), "\(text)")
         #expect(try t.probe("defineInTag:", [.string("Moved")]) == .bool(true))
+        step("defineInTag-Moved")
         #expect(t.until("definedInTag:", [.string("Moved")]))
+        step("definedInTag-Moved")
         let moved = try listing("2-moved-to-Moved")
         #expect(moved == (before + ["Moved/ToolsTagProbe.class.st"]).sorted())
         #expect(!FileManager.default.fileExists(atPath: project.appendingPathComponent("Probes").path))
         #expect(try t.probe("removeTagProbe") == .bool(true))
+        step("removeTagProbe")
         #expect(t.until("tagProbeRemoved"))
+        step("tagProbeRemoved")
         let after = try listing("3-removed")
         #expect(after == before)
         #expect(!FileManager.default.fileExists(atPath: project.appendingPathComponent("Moved").path))
         for f in after {
             #expect(FileManager.default.contents(atPath: project.path + "/" + f) == FileManager.default.contents(atPath: toolsDirectory + "/" + f), "\(f)")
         }
+        step("end")
+        print("tools-tags replies \((try? t.probe("repliesNow"))??.string ?? "?")")
     }
 
     @Test func anErrorInAToolStopsOnlyItsProcessAndTheToolsGoOn() throws {
