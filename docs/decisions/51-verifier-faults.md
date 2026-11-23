@@ -150,3 +150,9 @@ counted runs.
    object in any app whose promotion reserve ran out with a full nursery,
    in the offloaded mode; recommended: one line in the next release's
    notes.
+
+## The owner's answers (2026-11-23, "Yes, as recommended")
+
+1. The verifier levels stay as built.
+2. Fault 1 is not said in a release's notes. Fault 2 gets one line in the
+   next release's notes.

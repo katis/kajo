@@ -109,3 +109,20 @@ every summary file. It ran nothing again.
    Recommended: as built.
 2. A release's notes. Recommended: nothing; a release image compiles
    nothing.
+
+## The owner's answers (2026-11-23, "Yes, as recommended")
+
+1. The registry's lock across the reshape primitive stays as built.
+2. Nothing in a release's notes.
+
+## The weekly run of 2026-11-23
+
+`~/kajo-weekly/2026-11-23/` on ba8671c: `theToolsDevelopTheImageTheyRunIn`
+passed `tsan` and `tsan-load`, one more natural run each. The run ended
+`failed=2`, neither on this test: `tsan-load` on
+`aClassDefinedIntoATagFromTheBrowserMovesWithItsTag` ("definedInTag: never
+held ... status 'defined ToolsTagProbe' ... stops 0 stops"; a test recorded
+as thin since tags as subdirectories, and one that defines a class, which
+this module changed; not counted on either commit) and `swift-test-load` on
+`theMainWorkerNeverStallsAndItsFallbacksNameIt` (`liveProcessCount == 0`
+false at `AllocationStallTests.swift:299`).

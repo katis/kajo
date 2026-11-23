@@ -1639,35 +1639,26 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/52-review-3-small-fixes-part-2.md`: The third review's small fixes, part 2
  - `docs/decisions/53-tools-test-fault.md`: The tools test's fault: a method seen before its source
 
-Awaiting the owner: three small questions of the third review's small
-fixes, part 1 (`50-review-3-small-fixes.md`, built 2026-11-21): the VM's
-Delay timers on a queue of their own (a core change; recommended yes, with
-a counter of how late a Delay fires first), the reconnect test's two
-remaining margins under the sanitizer (recommended: leave and watch the
-printed line), and `DevClient`'s log bound of 1024; and two of the
-verifier's two faults (`51-verifier-faults.md`, built 2026-11-21 on the
-owner's "Yes, brief it"): the verifier levels as built (on in a release
-build's kernel tests and stall tests and in every `kajo test` not told
-otherwise, the debug kernel gates saying `--no-verify`; recommended: as
-built), and whether fault 1 is said in a release's notes (recommended: no,
-only a program that edits a CompiledCode's literals before making it
-reached it); and three of part 2 of the small fixes
-(`52-review-3-small-fixes-part-2.md`, built 2026-11-22 on the owner's "Yes,
-brief it"): `test-release` at the level `all`, which adds the stop
-verifiers to that one gate (recommended: keep), no module for the weak pass
-of the concurrent young collector (2 weak-only copies in 1.37 million
-promotions was the most any load showed; recommended: no module, the
-counter stays), and a runner for the by-hand broken variants in the weekly
-run (recommended: a later module); and two of the tools test's fault
-(`53-tools-test-fault.md`, built 2026-11-22 on the owner's "Yes, brief
-it"): the registry's lock held across the reshape primitive, a second
-Process's longest `sourceOf:` wait 5.9 ms from 3.5 (recommended: as
-built), and nothing in a release's notes (recommended: none). Found and
-not briefed: eight workers that each intern a million Symbols fail every
-`asSymbol` after 390 s; `removeSelector:` and a replaced method leave a
-reader that already holds the old method with a nil source; an error in
-the type service's recheck ends its Process in a batch host and later
-changes queue with nothing to drain them.
+Awaiting the owner: nothing. The ten questions of the third review's
+small fixes, parts 1 and 2, the verifier's two faults and the tools test's
+fault were answered as recommended on 2026-11-23 (appended to
+`50-review-3-small-fixes.md`, `51-verifier-faults.md`,
+`52-review-3-small-fixes-part-2.md` and `53-tools-test-fault.md`). Three
+answers leave work and are rows or notes of `docs/PLAN.md`: the VM's Delay
+timers on a queue of their own after a counter of how late a Delay fires
+(core, not briefed), a runner for the by-hand broken variants in the weekly
+run (not briefed), and one line about fault 2 of the verifier's faults in
+the next release's notes. Found and not briefed: eight workers that each
+intern a million Symbols fail every `asSymbol` after 390 s;
+`removeSelector:` and a replaced method leave a reader that already holds
+the old method with a nil source; an error in the type service's recheck
+ends its Process in a batch host and later changes queue with nothing to
+drain them; and the weekly run of 2026-11-23 (ba8671c, `failed=2`) failed
+`tsan-load` on `aClassDefinedIntoATagFromTheBrowserMovesWithItsTag` (thin
+since tags as subdirectories; it defines a class, which the tools test's
+fault changed; not counted) and `swift-test-load` on
+`theMainWorkerNeverStallsAndItsFallbacksNameIt` (`liveProcessCount == 0`
+false).
 Types 3's five questions were answered as recommended on 2026-11-19
 (appended to `49-types-3.md`: the mark stays a pale background; the
 selectors table's mark stays; the checker starts at a session's first

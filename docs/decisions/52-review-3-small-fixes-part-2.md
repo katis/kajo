@@ -161,3 +161,11 @@ variants, the tests on the starting commit.
    structs, 36 s after a 39 s build). Recommended: a later module.
 
 The release default of `kajo run` stays `off` (no question; as before).
+
+## The owner's answers (2026-11-23, "Yes, as recommended")
+
+1. `test-release` stays at `all`.
+2. No module for the weak pass of the concurrent young collector; the
+   counter stays.
+3. A runner for the by-hand broken variants in the weekly run is a later
+   module, a row of `docs/PLAN.md`.

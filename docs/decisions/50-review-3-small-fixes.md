@@ -144,3 +144,12 @@ The device: the main session built the iOS shell from a73a6f1 (Release, 69 s) an
    reply). Recommended: leave them and watch the test's printed line in
    the weekly run; a longer timeout only moves the bound.
 3. `DevClient`'s log bound: 1024 as built.
+
+## The owner's answers (2026-11-23, "Yes, as recommended")
+
+1. The VM's Delay timers go on a queue of their own, after a counter of
+   how late a Delay fires. Approved, not built: a core change, a row of
+   `docs/PLAN.md`.
+2. The reconnect test's two margins are left; its printed line is watched
+   in the weekly run.
+3. `DevClient`'s log bound stays 1024.
