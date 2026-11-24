@@ -250,3 +250,133 @@ Build the recommended option; bring the decisions back.
    wait on progress, unless part 1 shows the claim is decided long
    before the ring ends, in which case end the test when the claim is
    decided.
+
+## As built
+
+Toolchain: swiftly's swift.org Swift 6.4.2 first on PATH, its `clang`
+(`~/kajo-scratch/weekly-1123-failures/env.txt`). Every file named below
+without a path is under `~/kajo-scratch/weekly-1123-failures/`.
+
+### Part 1, A: the tag test (2026-11-23 and 24)
+
+**The failure lines** (eeb07bb). `LocalTools.until` now says how long it
+waited, how many probes ran and the longest, and each clause of its
+condition from the probe's `...Why` companion (`ToolsProbe class>>explains:`
+finds it): `definedInTagWhy:` (the class present, its tag against the one
+wanted, the paths of the browser's `filesWritten`, its status), `readyWhy`
+and `tagProbeRemovedWhy`, each followed by `replies:` (the milliseconds
+since the define was sent, every pending request with its kind and age,
+the define's replies and the last replies with their round trips). Chosen:
+the general mechanism in `until` and companions for the three conditions
+of this test and `ready`, which every tools test waits on; the other
+`until` conditions have none and print "why none". The tag test prints
+each step's time (`tools-tags <step> s= t=`) and, at its end, every reply
+the client keeps with its round trip (`tools-tags replies`).
+
+**What was false.** The weekly run's line printed none of the clauses, so
+which one was false cannot be read from it, and no counted run failed
+(below). What the line does say: after the 60 s the browser's status was
+`'defined ToolsTagProbe'` with nothing pending, no stop stood, and every
+check after the wait passed: the listing that requires
+`Probes/ToolsTagProbe.class.st` on disk, the file's text, the move and the
+removal. The client's request timeout is 30 s on a host timer, and the
+reply is only dispatched by the tools' event loop, behind whatever the loop
+was dispatching before it. The reading that fits every one of these is a
+reply dispatched late: written by the host and answered by the target in
+time, seen by the browser only at the end of the wait.
+
+**The condition** (`KAJO_TOOLS_HOLD_LOOP=<ms>`, by hand): the next
+`defineInTag:` first sends a `package.list` request whose reply holds the
+event loop that long (a Delay in its dispatch), so the define's reply,
+answered and written at once, is dispatched after it. With 70 000 ms, plain
+build, eeb07bb (`part1/forced-A/plain-start-1.txt`):
+
+    definedInTag: never held: waited 60.0 s, 3702 probes, longest 0.0 s; why class true tag #Probes want #Probes files #() status '' defineSentMs 60010 pending #(#('class.define' 60008)) defineReplies 0 ...
+
+and the test went on exactly as the weekly's did: only that `until`
+failed, the listing, the text, the move and the removal passed (the
+define's round trip read 74 682 ms at the end). The false clause in the
+forced run is the files list (`files #()`): the class and its tag are in
+the image, the reply is not yet in the browser. Once in plain, before the
+fix: 1 of 1 fails; the fix's counts are in part 2.
+
+**The count** (rule written first: `part1/rule-A.txt`, copied
+`rule-A.copy.txt` at 17:27:30): the whole package under ThreadSanitizer
+with twelve loops, eeb07bb against eeb07bb with 381f57c's kernel, three
+runs a side interleaved (`work/acount/run-{start,old}-{1,2,3}.txt`,
+`summary.txt`): **start 0 of 3, old 0 of 3** failed the tag test; 0
+sanitizer reports. The count separates nothing, as the rule said it would
+at a rate near 1 in 15. In every run the test took 45.8 to 47.5 s; its
+steps were the same on both sides: started 4.5 to 5.1 s, **ready 25.1 to
+27.0 s** (the browser's first `class.hierarchy`, 23.5 s round trip),
+the first define 4.6 to 5.7 s (its round trip 3.4 to 3.7 s), the move 1.0
+to 2.2 s, the removal 5.0 to 5.5 s.
+
+One run (old 3) failed another tools test with the new line,
+`theToolsChooseThroughTheHostAndTheirChangesLandThere` (ProjectDirectoryTests:357):
+
+    ready never held: waited 60.0 s, 985 probes, longest 17.0 s; why client true state #open browsers 1 hierarchy 0 defineSentMs -1 pending #() defineReplies 0 replies 1 last #(#('package.list' 19445)); client #open ... status 'class.hierarchy got no reply within 30000 ms'
+
+Under the suite's load one probe took 17 s, a `package.list` round trip
+19.4 s and the browser's first `class.hierarchy` ran out the client's own
+30 s timeout. It is the same family as A (a step whose time is the tools'
+share of the CPU) but a different failure: the request failed, so no wait
+could have passed it. Counted: old 1 of 3, start 0 of 3; not this module's.
+
+**Starting positions.** 1: right as far as can be shown: the forced
+condition is a slow step and fails only this step, and the loaded runs show
+steps of 25 s against the 60 s clock; the sanitizer changes no behaviour
+that was found. 2: right for the forced run (`files #()`); not shown for the
+weekly's run. 3: not shown: in the counted runs the long step before
+`definedInTag:` is `ready` (25 to 27 s), and the weekly's 378.8 s has no
+step times. 4: not decided by the count (0 of 3 on each side); nothing in
+the forced reading involves 0ef3b1f's registry block (the define's round
+trip was 3.4 to 3.7 s on both kernels). 7: right: B's cause (below) is the
+main worker's share of a core in a loaded bundle, A's the tools' event
+loop's; a loaded machine is all they share.
+
+### Part 1, B: the main-worker stall test
+
+**What was false**: `rt.vm.liveProcessCount == 0` → 1 at the loop's end,
+body 191.4 s against the 180 s deadline (`swift-test-load.txt:1561`, 1606);
+no other expectation failed. The test now prints where it stood when its
+loop ends, whether it ended or not (`stall-diag main ...`: the turns, the
+main worker's share of a core, its stops, the promotion, the collector's
+counters, the fallbacks by cause and requester). In the loaded VM bundle
+(`work/btimes/S3-*.txt`) the ring ran at a share of 0.34 to 0.51 of a core
+and spent 30.8 to 61.4 s in its own stops, almost all of them the reserve's
+two full collections (13 to 30 s each against 2.4 s alone); two fallbacks,
+both by the main worker, in every run.
+
+**Times** (rule `part1/rule-B.txt`, 17:28:07, amendments 1 and 2 before
+their runs; bodies in seconds, `work/btimes/summary.txt`):
+
+| setting | start against itself (10) | start (5) | 723b3fe (5) |
+|---|---|---|---|
+| S1 alone, unloaded | 16.8 to 17.8, median 17.0 (5.9 %) | 16.8 to 17.2 | 16.8 to 17.1 |
+| S2 alone, twelve loops | 21.3 to 24.2, median 22.6 (12.9 %) | 22.2 to 24.1 | 22.2 to 24.6 |
+| S3 VM bundle, twelve loops | 100.8 to 137.5 (5 runs) | 78.7 to 132.5 | 47.4 to 122.0 |
+
+S3 over its ten start runs: 78.7 to 137.5, median 119.3; 723b3fe's median
+117.3. The same in every setting within the base's own spread. The
+whole package under the sanitizer with twelve loops (A's count): 199.4 to
+275.2 s against its 900 s bound. On file: 78.9 to 141.2 in module runs,
+170.4 and 191.4 in the two weekly runs (the whole package, after
+`swift-test` on a warm machine).
+
+**No deadline** (by hand, `part1/nodl.diff`): the VM bundle with twelve
+loops 96.9 and 113.3 s, the whole package with twelve loops 125.9 and
+79.9 s: the ring ended and every other expectation held in all four, two
+fallbacks by the main worker each; none passed 180 s. Past 180 s the
+evidence is the sanitizer build's six runs (199 to 275 s), which ended
+with every expectation holding.
+
+**Starting positions.** 5: right (the ring ends and nothing else fails;
+past 180 s shown in the sanitizer build only). 6: right: alone and
+unloaded the body is 17.0 s on both commits; it is the bundle beside it
+that takes it to 47 to 138 s, through the main worker's share of a core
+and its full collections' length.
+
+Found, not this module's: `MainThreadTests.aTurnOverrunsItsBudgetByAtMostAFifthOfAMillisecond`
+failed once in the ten start runs of S3 (`work/btimes/S3-base-5.txt`,
+`found-overrun.txt`: `cpuOverruns.last! <= 0.2` false).
