@@ -335,12 +335,14 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     }
 
     /// A margin's name for an until: the test, the probe's selector and its
-    /// arguments (`tools.<test>.definedInTag:Probes`).
+    /// arguments (`tools.<test>.definedInTag:Probes`). An argument that is
+    /// not a plain word or number (an address with its port) is `_`, so the
+    /// name is the same from run to run.
     func marginName(_ selector: String, _ args: [ShellValue]) -> String {
         let a = args.map { v -> String in
-            if let s = v.string { return s }
+            if let s = v.string { return s.allSatisfy { $0.isLetter || $0.isNumber } ? s : "*" }
             if let i = v.int { return String(i) }
-            return "\(v)"
+            return "*"
         }.joined(separator: ",")
         return "tools.\(test).\(selector)\(a)"
     }
