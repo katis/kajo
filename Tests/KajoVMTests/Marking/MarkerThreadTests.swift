@@ -113,7 +113,7 @@ private func sleepMs(_ ms: Int) { usleep(useconds_t(ms * 1000)) }
 /// milliseconds it took, nil on a timeout.
 private func cycleDone(_ rt: Runtime, _ n: UInt64, within s: Double) -> Double? {
     let t0 = now()
-    let ok = eventually(s) { rt.marking.cyclesCompleted >= n && rt.phase == .idle }
+    let ok = eventually(s, margin: "marker.cycleDone") { rt.marking.cyclesCompleted >= n && rt.phase == .idle }
     return ok ? Double(now() &- t0) / 1e6 : nil
 }
 

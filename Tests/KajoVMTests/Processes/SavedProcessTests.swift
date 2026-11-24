@@ -53,9 +53,10 @@ final class Resumed {
         return v.isSmallInteger ? v.smallIntegerValue : nil
     }
 
+    /// `margin`: the weekly margins' name for this wait (`eventually`).
     @discardableResult
-    func waitAllTerminated(_ seconds: Double = 60) -> Bool {
-        let ok = eventually(seconds) { vm.liveProcessCount == 0 }
+    func waitAllTerminated(_ seconds: Double = 60, margin: String? = nil) -> Bool {
+        let ok = eventually(seconds, margin: margin) { vm.liveProcessCount == 0 }
         if !ok { Issue.record("\(vm.liveProcessCount) resumed Processes still live") }
         return ok
     }

@@ -306,7 +306,7 @@ func oldheapUnderConcurrentMarkingMatchesStopTheWorld(_ alwaysOn: Bool) throws {
         rt.start()
         var ps: [Oop] = []
         for i in 0..<4 { ps.append(rt.spawn("run:of:", [int(Int64(i)), int(4)])) }
-        rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
+        rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "marking.oldheapUnderConcurrentMarking.\(alwaysOn).\(concurrent)")
         return (ps.map { rt.result($0) }.reduce(0, &+), rt)
     }
     let (a, stw) = try once(false)

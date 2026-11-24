@@ -402,7 +402,7 @@ func sharedYoungObjectsAreClaimedOnceByParallelScavengers(_ mode: YoungMode) thr
     for _ in 0..<3 {
         var ps: [Oop] = []
         for i in 0..<8 { ps.append(rt.spawn("sharer:", [int(Int64(i))])) }
-        rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
+        rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "generational.sharedYoungObjectsAreClaimedOnceByParallelScavengers.\(mode)")
         for p in ps { #expect(rt.result(p) == 3000 * 32) }
         if mode != .stw || rt.vm.scavengeLog.contains(where: { $0.participants >= 4 }) { break }
     }

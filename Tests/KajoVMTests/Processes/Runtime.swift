@@ -80,9 +80,12 @@ final class Runtime {
 
     /// Wait until every Process has terminated (a test-side poll, so a hang
     /// is a failure, not a stuck suite).
+    /// `margin`: the weekly margins' name for this wait, printed when it
+    /// ends (docs/modules/weekly-margins.md; nil for a wait never near its
+    /// bound).
     @discardableResult
-    func waitAllTerminated(_ seconds: Double = 60) -> Bool {
-        let ok = eventually(seconds) { vm.liveProcessCount == 0 }
+    func waitAllTerminated(_ seconds: Double = 60, margin: String? = nil) -> Bool {
+        let ok = eventually(seconds, margin: margin) { vm.liveProcessCount == 0 }
         if !ok { Issue.record("\(vm.liveProcessCount) Processes still live") }
         return ok
     }
@@ -110,8 +113,14 @@ let underThreadSanitizer = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "__tsa
 
 func now() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
 
-/// Wait (with a timeout) until `cond` holds.
-func eventually(_ seconds: Double = 10, _ cond: () -> Bool) -> Bool {
+/// Wait (with a timeout) until `cond` holds. `margin`: the weekly margins'
+/// name for this wait (docs/modules/weekly-margins.md), printed when it ends,
+/// passing or failing, with the time against `seconds`; nil for a wait never
+/// near its bound. Only a value larger than any before it under the name is
+/// printed (a wait called thousands of times a run prints a few lines).
+func eventually(_ seconds: Double = 10, margin: String? = nil, _ cond: () -> Bool) -> Bool {
+    let t0 = now()
+    defer { if let margin { printLargestMargin(margin, .deadline, value: Double(now() &- t0) / 1e9, bound: seconds) } }
     let end = now() + UInt64(seconds * 1e9)
     while now() < end {
         if cond() { return true }

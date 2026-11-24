@@ -154,7 +154,7 @@ func backToBackStopsDoNotLetReleasedWorkersRun(_ broken: Bool) throws {
         ops += 1
         usleep(1000)
     }
-    rt.waitAllTerminated()
+    rt.waitAllTerminated(margin: "safepoint.operationsWhileOtherWorkersRun")
     #expect(ops >= 3)
     for p in ps { #expect(rt.result(p) == (n - 1) * n / 2) }
     #expect(rt.vm.inspect { om in om.allInstances(of: pair).allSatisfy { om.count(of: $0) == 3 } })
@@ -173,7 +173,7 @@ func kernelsOnEightWorkersMatchTheirModels(_ name: String) throws {
     let rt = try Runtime(kernel(name), background: 8, heapBlocks: 2048, entries: 1 << 22, verify: .stops)
     var ps: [Oop] = []
     for w in 0..<8 { ps.append(rt.spawn("run:of:", [int(Int64(w)), int(n)])) }
-    rt.waitAllTerminated(300)
+    rt.waitAllTerminated(300, margin: "safepoint.kernelsOnEightWorkersMatchTheirModels.\(name)")
     let sum = ps.reduce(Int64(0)) { $0 &+ rt.result($1) }
     let model = (0..<8).reduce(Int64(0)) { $0 &+ KernelModel.checksum(name, w: Int64($1), n: n) }
     #expect(sum == model)

@@ -311,7 +311,7 @@ end
     var turns = MainTurns()
     let quiet: Double = underThreadSanitizer ? 600 : 120
     var last = d.progress(), lastChange = now(), nextRead = now()
-    var quietS = 0.0
+    var quietS = 0.0, longestQuiet = 0.0
     while rt.vm.liveProcessCount > 0 {
         let st = rt.vm.runMain(budgetNs: 2_000_000)
         turns.add(st)
@@ -323,8 +323,10 @@ end
         let p = d.progress()
         if p != last { last = p; lastChange = t }
         quietS = Double(t &- lastChange) / 1e9
+        longestQuiet = max(longestQuiet, quietS)
         if quietS > quiet { break }
     }
+    printMargin("stall.main.ring", .quiet, value: longestQuiet, bound: quiet)
     // Where it stood (the weekly run of 2026-11-23 said nothing of it): the
     // turns, the main worker's share of a core, the ring's promotion so far
     // and the collector's counters, whether it ended or not.
@@ -440,10 +442,16 @@ func fallbackCauses(_ c: MarkingCounters) -> String {
 
 /// A test's body time, printed at its end (`stall-diag body <test> s=`):
 /// Swift Testing's own per-test time in a loaded bundle includes the wait
-/// for a thread of the cooperative pool.
+/// for a thread of the cooperative pool. The weekly margins: also as a
+/// margin of kind time (`stall.body.<test>`, no bound: the stall tests'
+/// waits are on the collector's progress, not on the body's time).
 func bodyTimer(_ name: String) -> () -> Void {
     let t0 = now()
-    return { print("stall-diag body \(name) s=\(String(format: "%.1f", Double(now() &- t0) / 1e9))") }
+    return {
+        let s = Double(now() &- t0) / 1e9
+        print("stall-diag body \(name) s=\(String(format: "%.1f", s))")
+        printMargin("stall.body.\(name)", .time, value: s, bound: nil)
+    }
 }
 
 /// Seconds since this process started (kinfo_proc's start time).
@@ -595,6 +603,7 @@ final class StallDiag {
         let w0 = now()
         var last = progress(), lastChange = w0
         var nextLine = w0 + 10_000_000_000
+        var longestQuiet: UInt64 = 0
         print(line("\(label)-start"))
         var ok = false
         while true {
@@ -602,6 +611,7 @@ final class StallDiag {
             let t = now()
             let p = progress()
             if p != last { last = p; lastChange = t }
+            longestQuiet = max(longestQuiet, t &- lastChange)
             if t &- lastChange > UInt64(quiet * 1e9) { break }
             if t >= nextLine { print(line(label) + " progress=\(p.map(String.init).joined(separator: "/"))"); nextLine = t + 10_000_000_000 }
             usleep(500)
@@ -609,6 +619,7 @@ final class StallDiag {
         if !ok { ok = cond() }
         let quietS = Double(now() &- lastChange) / 1e9
         print(full("\(label)-\(ok ? "ok" : "QUIET") waited=\(String(format: "%.1f", Double(now() &- w0) / 1e9)) quiet=\(String(format: "%.1f", quietS))"))
+        printMargin("stall.\(name).\(label)", .quiet, value: max(Double(longestQuiet) / 1e9, quietS), bound: quiet)
         return ok
     }
 
@@ -639,7 +650,9 @@ final class StallDiag {
             usleep(500)
         }
         if !ok { ok = cond() }
-        print(full("\(label)-\(ok ? "ok" : "TIMEOUT") waited=\(String(format: "%.1f", Double(now() &- w0) / 1e9))"))
+        let waited = Double(now() &- w0) / 1e9
+        print(full("\(label)-\(ok ? "ok" : "TIMEOUT") waited=\(String(format: "%.1f", waited))"))
+        printMargin("stall.\(name).\(label)", .deadline, value: waited, bound: seconds)
         return ok
     }
 }
@@ -873,13 +886,13 @@ private func entriesGate(broken: Bool) throws -> (MarkingCounters, StallLog?, UI
     // What must have happened, not the run's end (the sanitized suite
     // with twelve busy loops ran this past 900 s): an entry stall, or with
     // the broken variant an unjustified fallback; then the rings end.
-    let seen = eventually(underThreadSanitizer ? 1800 : 300) {
+    let seen = eventually(underThreadSanitizer ? 1800 : 300, margin: "stall.theRunningCycleDoesNotJustifyAFallback.seen") {
         rt.vm.liveProcessCount == 0
             || (broken ? rt.vm.counters[.unjustifiedFallbacks] > 0 : (rt.vm.stallLog?.entries.count ?? 0) > 0)
     }
     #expect(seen)
     for p in ps { rt.vm.terminate(p) }
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 1800 : 300))
+    #expect(rt.waitAllTerminated(underThreadSanitizer ? 1800 : 300, margin: "stall.theRunningCycleDoesNotJustifyAFallback.rings"))
     let c = rt.marking, s = rt.vm.stallLog, v = rt.vm.counters[.unjustifiedFallbacks]
     for p in ps { rt.vm.release(p) }
     rt.stop(verifyHeap: false)

@@ -32,6 +32,7 @@ private func rawConnect(_ port: Int) -> Int32 {
 private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
     var p = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
     let end = ShellVM.now() + UInt64(seconds * 1e9)
+    defer { printLargestMargin("transport.closedByServer", .deadline, value: seconds - Double(Int64(end) - Int64(ShellVM.now())) / 1e9, bound: seconds) }
     while ShellVM.now() < end {
         if poll(&p, 1, 100) > 0 {
             var b = [UInt8](repeating: 0, count: 4096)
@@ -84,7 +85,7 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         // A paired client is served.
         let c = try t.client()
         defer { c.close() }
-        try c.open(token: server.token, client: "developer", timeout: 60)
+        try c.open(token: server.token, client: "developer", timeout: 60, margin: #function)
         #expect(try c.eval("3 + 4")["value"] == .string("7"))
         // A session's line is not bound by the unpaired limit.
         let long = String(repeating: "1 + ", count: 4000) + "1"
@@ -92,7 +93,7 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         // busy loops ran past eval's 300 s in the review fixes' part 2 gate
         // run (unloaded the whole test took 247 s): the bound of something
         // that must come is long, the assertion unchanged.
-        let r = try c.send("evaluate", [("source", .string(long))], timeout: compilerTestsUnderThreadSanitizer ? 1800 : 60)
+        let r = try c.send("evaluate", [("source", .string(long))], timeout: compilerTestsUnderThreadSanitizer ? 1800 : 60, margin: #function)
         #expect(r["result"]?["value"] == .string("4001"), "\(r)")
     }
 
@@ -132,7 +133,7 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         let t = try TCPTarget()
         defer { t.close() }
         let c = try t.client()
-        try c.open(token: t.target.server.token, client: "developer", timeout: 60)
+        try c.open(token: t.target.server.token, client: "developer", timeout: 60, margin: #function)
         #expect(try c.eval("DevProtocol sessionCount")["value"] == .string("1"))
         t.target.server.replaceToken()
         c.close()
@@ -196,7 +197,7 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
         defer { t.close() }
         let c = try t.client()
         defer { c.close() }
-        try c.open(token: t.target.server.token, client: "developer", timeout: 60)
+        try c.open(token: t.target.server.token, client: "developer", timeout: 60, margin: #function)
         let id = try c.eval("(ProcessorScheduler primAllProcesses detect: [:p | p notNil and: [DevProtocol isProtocolProcess: p]]) id")["value"]?.string ?? ""
         let pid = JSONValue.int(try #require(Int64(id)))
         for (kind, args) in [("process.suspend", [("process", pid)]), ("process.terminate", [("process", pid)]),
@@ -241,7 +242,7 @@ private func closedByServer(_ fd: Int32, within seconds: Double) -> Bool {
     defer { t.close() }
     let c = try t.client()
     defer { c.close() }
-    try c.open(token: t.target.server.token, client: "developer", timeout: 60)
+    try c.open(token: t.target.server.token, client: "developer", timeout: 60, margin: #function)
     t.target.vm.bridge.failAllocations.store(3, ordering: .relaxed)
     #expect(try c.eval("3 + 4")["value"] == .string("7"))
     #expect(t.target.vm.bridge.failAllocations.load(ordering: .relaxed) == 0)

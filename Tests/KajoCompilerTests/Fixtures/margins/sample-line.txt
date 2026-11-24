@@ -1,0 +1,1 @@
+kajo-margin name=Sample.until.ready kind=quiet value=12.500 bound=60.000 unit=s

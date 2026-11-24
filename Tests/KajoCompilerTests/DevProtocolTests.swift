@@ -54,7 +54,7 @@ final class RunningTarget: @unchecked Sendable {
 
     func session(_ client: String = "agent:test", package: String? = "Sample") throws -> ProtocolClient {
         let c = try ProtocolClient(path: path)
-        try c.open(token: target.server.token, client: client, package: package, timeout: 60)
+        try c.open(token: target.server.token, client: client, package: package, timeout: 60, margin: #function)
         return c
     }
 
@@ -76,8 +76,11 @@ extension ProtocolClient {
     /// evaluate of `aSessionsProjectRebuildsTheImageItEdited` (every
     /// source of five classes, sorted and printed) passed 60 s in module
     /// 10's gate run under the sanitizer and twelve busy loops.
-    func eval(_ source: String) throws -> JSONValue {
-        try request("evaluate", [("source", .string(source))], timeout: compilerTestsUnderThreadSanitizer ? 300 : 60)
+    /// The weekly margins: `protocol.evaluate.<test>`, the longest of the
+    /// test's evaluates against the timeout (`test` is the caller's name).
+    func eval(_ source: String, test: String = #function) throws -> JSONValue {
+        try request("evaluate", [("source", .string(source))], timeout: compilerTestsUnderThreadSanitizer ? 300 : 60,
+                    margin: test)
     }
     /// The next process.stopped event after `mark` (60 s at most).
     func stopped(since mark: Int, process: JSONValue? = nil) throws -> JSONValue {
@@ -214,7 +217,7 @@ extension ProtocolClient {
         let def = try s.request("class.definition", [("className", .string("SampleThing"))])
         #expect(def["package"] == .string("Sample") && def["tag"] == .string("Parts")
                 && def["instanceVariables"] == .array([.string("a"), .string("b")]) && def["category"] == nil)
-        let entry = try s.request("class.hierarchy").array?.first { $0["name"] == .string("SampleThing") }
+        let entry = try s.request("class.hierarchy", margin: #function).array?.first { $0["name"] == .string("SampleThing") }
         #expect(entry?["tag"] == .string("Parts") && entry?["package"] == .string("Sample") && entry?["category"] == nil)
         #expect(try s.request("class.list", [("package", .string("Sample")), ("tag", .string("Parts"))]) == .array([.string("SampleThing")]))
         #expect(try s.request("package.tags", [("name", .string("Sample"))]) == .array([.string("Core"), .string("Parts")]))
@@ -303,7 +306,7 @@ extension ProtocolClient {
         var (p, e) = try s.stopIn("SampleDebug result: (SampleDebug new zork: 3)")
         #expect(e["reason"] == .string("error"))
         #expect(e["error"]?.string?.contains("zork:") == true)
-        let frames = try s.request("process.frames", [("process", p)]).array ?? []
+        let frames = try s.request("process.frames", [("process", p)], margin: #function).array ?? []
         #expect(frames.first?["method"] == .string("Object>>doesNotUnderstand:"))
         #expect(frames.count >= 2 && frames[1]["method"]?.string?.contains("DoIt") == true)
         try s.compile("SampleDebug", "zork: x ^ x * 100")
@@ -335,7 +338,7 @@ extension ProtocolClient {
         defer { t.close() }
         let s = try t.session()
         let (p, _) = try s.stopIn("SampleDebug result: (SampleDebug new failing: 2)")
-        let frames = try s.request("process.frames", [("process", p)]).array ?? []
+        let frames = try s.request("process.frames", [("process", p)], margin: #function).array ?? []
         guard let k = frames.firstIndex(where: { $0["method"] == .string("SampleDebug>>failing:") }) else {
             Issue.record("no failing: frame in \(frames)"); return
         }
@@ -353,7 +356,7 @@ extension ProtocolClient {
         defer { t.close() }
         let s = try t.session()
         let (p, _) = try s.stopIn("SampleDebug result: (SampleDebug new stepped: 5)")
-        let frames = try s.request("process.frames", [("process", p)]).array ?? []
+        let frames = try s.request("process.frames", [("process", p)], margin: #function).array ?? []
         guard let k = frames.firstIndex(where: { $0["method"] == .string("SampleDebug>>stepped:") }) else {
             Issue.record("no stepped: frame"); return
         }
@@ -484,6 +487,7 @@ final class RawConnection {
 
     func reply() throws -> JSONValue {
         let deadline = Date(timeIntervalSinceNow: 60)
+        defer { printLargestMargin("protocol.rawReply", .deadline, value: 60 - deadline.timeIntervalSinceNow, bound: 60) }
         while true {
             if let i = buffer.firstIndex(of: 10) {
                 let line = Array(buffer[..<i])

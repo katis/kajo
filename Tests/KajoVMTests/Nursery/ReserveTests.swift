@@ -103,7 +103,7 @@ func promotionPastTheReserveKeepsObjectsYoungAndTheProgramFinishes(_ mode: Young
     let n: Int64 = underThreadSanitizer ? 20_000 : 60_000
     var ps: [Oop] = []
     for _ in 0..<4 { ps.append(rt.spawn("ring:", [int(n)])) }
-    rt.waitAllTerminated(underThreadSanitizer ? 600 : 120)
+    rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "reserve.promotionPastTheReserve.\(mode).\(reserve)")
     for p in ps { #expect(rt.result(p) == ringSum(n)) }
     let nc = rt.vm.nurseryCounters
     let yc = rt.vm.youngCounters

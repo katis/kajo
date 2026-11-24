@@ -126,7 +126,7 @@ func offMain<T: Sendable>(_ f: @escaping @Sendable () throws -> T) async throws 
         let label: String = try await offMain {
             let c = try ProtocolClient(address: .tcp(host: "127.0.0.1", port: port))
             defer { c.close() }
-            try c.open(token: token, client: "developer", package: "Sample")
+            try c.open(token: token, client: "developer", package: "Sample", margin: #function)
             let r = try c.request("evaluate", [("source", .string("SampleApp pressed. SampleApp labelText"))])
             return r["value"]?.string ?? ""
         }

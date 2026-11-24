@@ -148,10 +148,16 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     let shell = ToolsShell()
     let path = socketNames.next()
     let hostLog = HostLog()
+    /// The weekly margins (docs/modules/weekly-margins.md): the test that
+    /// made these tools, the start of a margin's name (`tools.<test>.`),
+    /// and the longest probe so far against the bound its drive used.
+    let test: String
+    private var longestProbeNs: UInt64 = 0
 
     /// `dropOn`: a Transcript line that makes the client transport drop
     /// every socket as a dead link would (module 9d's tests).
-    init(image: [UInt8] = probedImage, dropOn: String? = nil) throws {
+    init(image: [UInt8] = probedImage, dropOn: String? = nil, test: String = #function) throws {
+        self.test = marginTest(test)
         let box = ServerBox()
         var c = shell.callbacks
         let h = host
@@ -202,19 +208,45 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     }
 
     func close() {
+        printMargins()
         host.closeAll()
         server.stop()
         vm.close()
     }
 
+    /// The weekly margins, at the tools' end: the longest probe against its
+    /// drive's bound, and the longest round trip per request kind of every
+    /// client in the image (`ToolsProbe longestReplies`, read from the
+    /// clients' latencies: from the send to the dispatch in the tools' event
+    /// loop) against that client's request timeout, as `tools.roundtrip.<kind>`
+    /// (one name per kind across the tools tests: the table keeps the largest).
+    /// Nothing here is an issue: a probe that does not end prints nothing.
+    func printMargins() {
+        printMargin("tools.\(test).probe", .deadline, value: Double(longestProbeNs) / 1e9, bound: driveSeconds * driveScale)
+        guard let p = vm.spawn("longestReplies", receiver: "ToolsProbe", arguments: [], main: true) else { return }
+        defer { vm.release(p) }
+        guard drive(vm, until: { vm.state(of: p) == .terminated }), vm.failure(of: p) == nil,
+              let s = vm.result(of: p)?.string else { return }
+        let f = s.split(separator: "\t", omittingEmptySubsequences: false)
+        guard let timeoutMs = f.first.flatMap({ Double($0) }), timeoutMs > 0 else { return }
+        for kv in f.dropFirst() {
+            guard let eq = kv.lastIndex(of: "="), let ms = Double(kv[kv.index(after: eq)...]) else { continue }
+            printMargin("tools.roundtrip.\(kv[..<eq])", .ceiling, value: ms, bound: timeoutMs, unit: "ms")
+        }
+    }
+
     /// Turns until `ToolsProbe selector` answers true, `seconds` at most
     /// (Types 3: a wait for the type checker, long everywhere).
     func until(_ selector: String, _ args: [ShellValue] = [], seconds: Double, explain: String) -> Bool {
+        let t0 = ShellVM.now()
         let end = ShellVM.now() + UInt64(seconds * 1e9)
+        // The weekly margins: the wait against its deadline, when it ends.
+        func report() { printMargin(marginName(selector, args), .deadline, value: Double(ShellVM.now() &- t0) / 1e9, bound: seconds) }
         while ShellVM.now() < end {
-            if (try? probe(selector, args)) == .bool(true) { return true }
+            if (try? probe(selector, args)) == .bool(true) { report(); return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
         }
+        report()
         Issue.record("\(selector) never held: \((try? probe(explain))??.string ?? "?") stops \(standingStops)")
         return false
     }
@@ -236,6 +268,8 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     func probe(_ selector: String, _ args: [ShellValue] = []) throws -> ShellValue? {
         let p = try #require(vm.spawn(selector, receiver: "ToolsProbe", arguments: args, main: true))
         defer { vm.release(p) }
+        let t0 = ShellVM.now()
+        defer { longestProbeNs = max(longestProbeNs, ShellVM.now() &- t0) }
         if !drive(vm, until: { vm.state(of: p) == .terminated }) {
             Issue.record("ToolsProbe \(selector) did not end: stops \(standingStops)")
         }
@@ -263,12 +297,20 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         var longest: UInt64 = 0
         var activity: Int64? = nil, lastChange = t0, nextRead = t0
         var reason = ""
+        var longestQuiet: UInt64 = 0
+        // The weekly margins: the longest quiet stretch against the quiet
+        // bound and the whole wait against the ceiling, when the wait ends.
+        func report() {
+            let name = marginName(selector, args), n = ShellVM.now()
+            printMargin(name + ".quiet", .quiet, value: Double(max(longestQuiet, n &- lastChange)) / 1e9, bound: Double(quietNs) / 1e9)
+            printMargin(name + ".total", .deadline, value: Double(n &- t0) / 1e9, bound: Double(ceilingNs) / 1e9)
+        }
         while true {
             let p0 = ShellVM.now()
             let held = (try? probe(selector, args)) == .bool(true)
             probes += 1
             longest = max(longest, ShellVM.now() &- p0)
-            if held { return true }
+            if held { report(); return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
             let n = ShellVM.now()
             if n >= nextRead {
@@ -279,15 +321,28 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
                 if a != activity || (a > 0 && a % 1000 > 0) { lastChange = n }
                 activity = a
             }
+            longestQuiet = max(longestQuiet, n &- lastChange)
             if n &- lastChange > quietNs { reason = "quiet"; break }
             if n &- t0 > ceilingNs { reason = "ceiling"; break }
         }
+        report()
         let waited = String(format: "%.1f", Double(ShellVM.now() &- t0) / 1e9)
         let clauses: String = why(selector, args)
         let state: String = (try? probe("state"))??.string ?? "?"
         let longestS = String(format: "%.1f", Double(longest) / 1e9)
         Issue.record("\(selector) never held (\(reason), activity \(activity.map { "\($0)" } ?? "-")): waited \(waited) s, \(probes) probes, longest \(longestS) s; why \(clauses); \(state) stops \(standingStops)")
         return false
+    }
+
+    /// A margin's name for an until: the test, the probe's selector and its
+    /// arguments (`tools.<test>.definedInTag:Probes`).
+    func marginName(_ selector: String, _ args: [ShellValue]) -> String {
+        let a = args.map { v -> String in
+            if let s = v.string { return s }
+            if let i = v.int { return String(i) }
+            return "\(v)"
+        }.joined(separator: ",")
+        return "tools.\(test).\(selector)\(a)"
     }
 
     /// Each clause of `ToolsProbe selector`, from its companion probe
@@ -377,18 +432,18 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         let c = try ProtocolClient(path: t.path)
         defer { c.close() }
         let token = t.server.token
-        try c.open(token: token, client: "developer", timeout: 60)
+        try c.open(token: token, client: "developer", timeout: 60, margin: #function)
         // Module 10: 9c refused a request over one heap block; the image
         // now takes it as one String (a large object).
         let long = "^ '" + String(repeating: "x", count: 40_000) + "' byteSize"
-        let r = try c.send("evaluate", [("source", .string(long))], timeout: 60)
+        let r = try c.send("evaluate", [("source", .string(long))], timeout: 60, margin: #function)
         #expect(r["ok"] == .bool(true))
         #expect(r["result"]?["value"] == .string("40000"), "\(r)")
         // Past the line limit a request is still refused with a reply.
         #expect(RequestLimits.imageBytes == (1 << 24) - 1)
         // A reply longer than one heap block comes back whole (written in
         // pieces in the target, joined by its transport).
-        let methods = try c.request("package.selectors", [("name", .string("Kernel"))], timeout: 60)
+        let methods = try c.request("package.selectors", [("name", .string("Kernel"))], timeout: 60, margin: #function)
         #expect((methods.array?.count ?? 0) > 2000)
         #expect(writeJSON(methods).count > 32 * 1024)
     }
@@ -562,6 +617,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         while ShellVM.now() < end, (try? t.probe("results"))?.string?.contains("42") != true {
             for _ in 0..<20 { if t.vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
         }
+        printMargin("tools.\(t.test).results42", .deadline, value: Double(Int64(ShellVM.now()) - Int64(end) + 60_000_000_000) / 1e9, bound: 60)
         #expect(try t.probe("results") == .string("#(42)"))
         // The tools go on: the next action runs in the new loop.
         t.vm.post(ShellEvent(kind: .menu, target: Int(menu), value: .int(2), timeNs: ShellVM.now()))

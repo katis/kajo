@@ -195,7 +195,7 @@ private func waitForTheCycle(stall: Bool) throws -> (MarkingCounters, UInt64, St
         // The allocation is waiting once it asked for the marker.
         #expect(eventually(underThreadSanitizer ? 600 : 60) { rt.vm.markerWantsRaise })
     } else {
-        #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+        #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "fallbackPolicy.waitForTheCycle.\(stall)"))
     }
     if rt.phase == .marking {
         _ = rt.vm.markStep(10_000_000)

@@ -47,7 +47,10 @@ let hostBoundSeconds: Double = compilerTestsUnderThreadSanitizer ? 600 : 120
 
 /// Runs `f` on a thread of its own; nil when it did not return within
 /// `seconds` (the thread is left behind: the host hung).
-func within<T: Sendable>(_ seconds: Double, _ f: @escaping @Sendable () -> T) -> T? {
+/// The weekly margins: `answers.within.<test>`, the wait against `seconds`.
+func within<T: Sendable>(_ seconds: Double, test: String = #function, _ f: @escaping @Sendable () -> T) -> T? {
+    let t0 = ShellVM.now()
+    defer { printLargestMargin("answers.within.\(marginTest(test))", .deadline, value: Double(ShellVM.now() &- t0) / 1e9, bound: seconds) }
     let box = Mutex<T?>(nil)
     let done = DispatchSemaphore(value: 0)
     let t = Thread {
@@ -219,7 +222,7 @@ func probeUntil(_ vm: ShellVM, _ selector: String, _ cond: (ShellValue?) -> Bool
         let (info, frames, result): (JSONValue, JSONValue, String) = try await offMain {
             let c = try ProtocolClient(path: path)
             defer { c.close() }
-            let info = try c.open(token: token, client: "agent:answers", package: "Answers")
+            let info = try c.open(token: token, client: "agent:answers", package: "Answers", margin: #function)
             let frames = try c.request("process.frames", [("process", .int(id))])
             _ = try c.request("method.compile", [("className", .string("AnswersSample")), ("source", .string("missingPart\n\t^ 41")),
                                                  ("category", .string("computing"))])
@@ -262,7 +265,7 @@ func probeUntil(_ vm: ShellVM, _ selector: String, _ cond: (ShellValue?) -> Bool
         let (info, started): (JSONValue, String) = try await offMain {
             let c = try ProtocolClient(address: .tcp(host: "127.0.0.1", port: port))
             defer { c.close() }
-            let info = try c.open(token: token, client: "developer", package: "Answers")
+            let info = try c.open(token: token, client: "developer", package: "Answers", margin: #function)
             guard let id = info["stopped"]?.array?.first?["process"] else { return (info, "no stop") }
             _ = try c.request("method.compile", [("className", .string("AnswersApp")), ("source", .string("startUpValue\n\t^ 7")),
                                                  ("category", .string("opening")), ("side", .string("class"))])
@@ -374,7 +377,7 @@ func probeUntil(_ vm: ShellVM, _ selector: String, _ cond: (ShellValue?) -> Bool
         // A stopped Process whose ensure: block hangs.
         let mark = s.eventMark
         var (p, _) = try s.stopIn("AnswersSample new guarded")
-        let r1 = try s.request("process.terminate", [("process", p)])
+        let r1 = try s.request("process.terminate", [("process", p)], margin: #function)
         #expect(r1["unwound"] == .bool(false))
         #expect(r1["cutOff"]?.string?.contains("cut off after") == true)
         #expect(r1["cutOff"]?.string?.contains("[] in AnswersSample>>guarded") == true)
@@ -392,15 +395,16 @@ func probeUntil(_ vm: ShellVM, _ selector: String, _ cond: (ShellValue?) -> Bool
             usleep(1000)
             n += 1
         }
-        let r3 = try s.request("process.terminate", [("process", .int(Int64(id) ?? -1))])
+        printMargin("answers.aCutOffUnwindingIsReportedThroughTheProtocol.waiting", .deadline, value: Double(n), bound: 3000, unit: "n")
+        let r3 = try s.request("process.terminate", [("process", .int(Int64(id) ?? -1))], margin: #function)
         #expect(r3["unwound"] == .bool(false))
         #expect(Int(try count()) == before + 2)
         // The debugger's restart unwinds through the same kind of block:
         // its answer says the unwinding has not finished and where.
         (p, _) = try s.stopIn("AnswersSample new callGuarded")
-        let frames = try s.request("process.frames", [("process", p)]).array ?? []
+        let frames = try s.request("process.frames", [("process", p)], margin: #function).array ?? []
         let k = try #require(frames.firstIndex { $0["method"] == .string("AnswersSample>>guarded") })
-        let r4 = try s.request("process.restart", [("process", p), ("frame", .int(Int64(k + 1)))])
+        let r4 = try s.request("process.restart", [("process", p), ("frame", .int(Int64(k + 1)))], margin: #function)
         #expect(r4["unwound"] == .bool(false))
         #expect(r4["cutOff"]?.string?.contains("has not finished unwinding") == true)
         #expect(r4["cutOff"]?.string?.contains("[] in AnswersSample>>guarded") == true)

@@ -123,7 +123,7 @@ private func keptAcrossRun(_ mode: YoungMode, rescan: Bool) throws -> (Runtime, 
     let n: Int64 = 20_000
     var ps: [Oop] = []
     for _ in 0..<4 { ps.append(rt.spawn("ring:", [int(n)])) }
-    rt.waitAllTerminated(600)
+    rt.waitAllTerminated(600, margin: "verifierFaults.keptAcrossRun.\(mode).\(rescan)")
     for p in ps { #expect(rt.result(p) == (n - 1023...n).reduce(0, +)) }
     let (runs, failures) = verifierCounts(rt)
     return (rt, rt.vm.nurseryCounters, runs, failures, String(format: "%.1f", Double(nanoseconds() - t0) / 1e9))

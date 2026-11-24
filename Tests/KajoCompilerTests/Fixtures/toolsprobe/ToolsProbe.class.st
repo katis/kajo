@@ -461,6 +461,22 @@ ToolsProbe class >> replies: aStream last: aCount [
 ]
 
 { #category : #explaining }
+ToolsProbe class >> longestReplies [
+	"The weekly margins (docs/modules/weekly-margins.md): the largest request timeout (ms) of the clients in the image, then a tab and kind=ms for each request kind, the longest round trip any of them keeps (latencies: from the send to the dispatch in the tools' event loop)."
+	| longest timeout i |
+	longest := Dictionary new.
+	timeout := 0.
+	i := (DevClient allInstVarNames asArray collect: [:n | n asString]) indexOf: 'timeoutMs'.
+	DevClient allInstances do: [:c |
+		i > 0 ifTrue: [timeout := timeout max: ((c instVarAt: i) ifNil: [0])].
+		c latencies isNil ifFalse: [
+			c latencies do: [:l | longest at: l first put: ((longest at: l first ifAbsent: [0]) max: (l at: 2) // 1000)]]].
+	^ String streamContents: [:s |
+		s print: timeout.
+		longest keysAndValuesDo: [:k :v | s tab; nextPutAll: k; nextPut: $=; print: v]]
+]
+
+{ #category : #explaining }
 ToolsProbe class >> repliesNow [
 	"Every reply the local client keeps with its round trip (replies:last:), for a test's last line."
 	^ String streamContents: [:s | self replies: s last: 1000]

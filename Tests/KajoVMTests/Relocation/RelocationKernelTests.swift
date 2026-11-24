@@ -69,7 +69,7 @@ private func runKernel(_ src: String, heapBlocks: Int, relocate: Bool?, perturb:
     let t0 = now()
     var ps: [Oop] = []
     for i in 0..<4 { ps.append(rt.spawn("run:of:", [int(Int64(i)), int(4)])) }
-    rt.waitAllTerminated(underThreadSanitizer ? 900 : 180)
+    rt.waitAllTerminated(underThreadSanitizer ? 900 : 180, margin: "relocation.runKernel.\(relocate.map { "\($0)" } ?? "stw").\(young)")
     if finishCycle {
         // A cycle the kernel started (planned at its initial mark, with the
         // mutators running) is let finish before the round is counted: the
@@ -85,7 +85,7 @@ private func runKernel(_ src: String, heapBlocks: Int, relocate: Bool?, perturb:
         // says where each round stood when its kernel ended.
         let atEnd = (rt.marking, rt.relocation, rt.phase)
         let t1 = now()
-        if !eventually(underThreadSanitizer ? 600 : 120, { rt.phase == .idle }) {
+        if !eventually(underThreadSanitizer ? 600 : 120, margin: "relocation.runKernel.idle", { rt.phase == .idle }) {
             Issue.record("the cycle the kernel started did not finish: \(rt.phase) \(rt.marking)")
         }
         let m = rt.marking, r = rt.relocation

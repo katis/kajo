@@ -245,7 +245,7 @@ private func relocationScenario(_ blind: RunReader?) throws -> (selectedRun: Boo
             c.young.mode = young
         })
         let p = rt.spawn("churnLarge:", [int(400)])
-        #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+        #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "largeObjects.largeAllocationsStartMarkingCycles"))
         #expect(rt.result(p) == 0)
         rt.vm.release(p)
         let m = rt.vm.markingCounters

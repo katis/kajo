@@ -381,6 +381,7 @@ final class LateReplyTarget: @unchecked Sendable {
     // come waits long), then the canary is queued behind them.
     let start = ShellVM.now()
     while spinning.load(ordering: .relaxed) == 0, ShellVM.now() - start < 120_000_000_000 { usleep(1000) }
+    printMargin("hostTimer.queueSpins", .deadline, value: Double(ShellVM.now() - start) / 1e9, bound: 120)
     usleep(200_000)
     DispatchQueue.global().async { canary.store(true, ordering: .relaxed) }
     usleep(200_000)

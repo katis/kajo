@@ -522,7 +522,7 @@ end
     let other = rt.spawn("sum:", [int(200_000)])
     let p = rt.spawn("watcher")
     let direct = rt.spawn("down:", [int(0)])
-    rt.waitAllTerminated()
+    rt.waitAllTerminated(margin: "process.stackOverflowTerminatesTheProcessAndSignalsExit")
     #expect(rt.result(p) == 1)
     #expect(rt.result(other) == 199_999 * 200_000 / 2)  // only the overflowing Processes ended
     #expect(rt.vm.counters.stackOverflows == 2)
@@ -730,7 +730,7 @@ end
     let collections = pauses()
     rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
     rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
-    #expect(eventually(120) { rt.vm.liveProcessCount == 40 })
+    #expect(eventually(120, margin: "process.gcKeepsParkedProcessStacksAlive") { rt.vm.liveProcessCount == 40 })
     #expect(pauses() - collections >= 3, "pauses \(pauses() - collections), errors \(rt.vm.counters.processErrors)")
     for _ in 0..<40 { rt.vm.signal(sem) }
     rt.waitAllTerminated()

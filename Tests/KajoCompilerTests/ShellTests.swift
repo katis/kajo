@@ -131,9 +131,18 @@ let driveScale: Double = compilerTestsUnderThreadSanitizer ? 5 : 1
 
 /// Turns on this thread until `cond` holds (a bound in seconds, for a hang
 /// only; the assertions are on what happened, not when).
+/// `drive`'s bound when a test gives none, before `driveScale` (the weekly
+/// margins print it beside the longest probe).
+let driveSeconds: Double = 30
+
 @discardableResult
-func drive(_ vm: ShellVM, seconds: Double = 30, until cond: () -> Bool) -> Bool {
+/// `margin`: the weekly margins' name for this wait, printed when it ends
+/// with its time against the scaled bound (docs/modules/weekly-margins.md;
+/// nil for a wait never near its bound).
+func drive(_ vm: ShellVM, seconds: Double = driveSeconds, margin: String? = nil, until cond: () -> Bool) -> Bool {
     let seconds = seconds * driveScale
+    let t0 = ShellVM.now()
+    defer { if let margin { printLargestMargin(margin, .deadline, value: Double(ShellVM.now() &- t0) / 1e9, bound: seconds) } }
     let end = ShellVM.now() + UInt64(seconds * 1e9)
     while !cond() {
         if ShellVM.now() > end { return false }
@@ -251,7 +260,7 @@ func myThread() -> UInt64 {
         defer { vm.close() }
         let p = try #require(vm.spawn("runViewTests", receiver: "ShellFixture", main: false))
         defer { vm.release(p) }
-        #expect(drive(vm, seconds: 120) { vm.state(of: p) == .terminated })
+        #expect(drive(vm, seconds: 120, margin: "shell.\(marginTest(#function)).end") { vm.state(of: p) == .terminated })
         let report = TestReport(shell.events)
         #expect(report.total == 11 && report.passed == 11, "\(report.summary)")
         // The events are the v1 protocol, in time order.

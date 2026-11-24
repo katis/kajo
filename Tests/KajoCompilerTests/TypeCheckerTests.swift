@@ -43,7 +43,7 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
         defer { t.close() }
         let c = try t.session("agent:types", package: nil)
         // the image: the first request starts the checker and waits for it
-        let all = try c.request("diagnostics", [], timeout: typesWait)
+        let all = try c.request("diagnostics", [], timeout: typesWait, margin: #function)
         let diags = all["diagnostics"]?.array ?? []
         #expect(all["count"]?.int == Int64(diags.count) && diags.count > 0 && (all["checked"]?.int ?? 0) > 2000, "\(all["count"] ?? .null)")
         #expect(diags.contains { $0["class"]?.string == "TypeCheckerSample" && $0["selector"]?.string == "badReturn" })
@@ -74,7 +74,7 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
         // a change: the background recheck emits diagnostics.changed
         let mark = c.eventMark
         _ = try c.request("method.compile", [("className", .string("TypeCheckerSample")), ("source", .string("badReturn ^<String>\n\t^ 'fixed'")),
-                                             ("category", .string("samples")), ("side", .null)], timeout: 60)
+                                             ("category", .string("samples")), ("side", .null)], timeout: 60, margin: #function)
         let e = c.waitForEvent(since: mark, timeout: typesWait) { $0["kind"]?.string == "diagnostics.changed" }
         #expect(e != nil)
         if let e {

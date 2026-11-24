@@ -592,10 +592,10 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
             print("stall-diag random slowedMarker seed=\(p.seed) s=\(String(format: "%.1f", Double(now() &- wait0) / 1e9))")
         }
     }
-    guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
+    guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "random.\(config)") else {
         Issue.record("seed \(p.seed) \(config): did not finish (stops \(rt.vm.counters.stops), scavenges \(rt.vm.nurseryCounters.scavenges), collections \(rt.image.om.counters.collections))")
         rt.vm.terminateAll()
-        rt.waitAllTerminated()
+        rt.waitAllTerminated(margin: "random.\(config).afterFailure")
         rt.stop()
         return nil
     }
@@ -838,10 +838,10 @@ func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode, saveNative: Boo
                              c.snapshotAtPoll = n
                          }, native: saveNative)
     let root = rt.spawn("root")
-    guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
+    guard rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "random.snapshot.\(mode)") else {
         Issue.record("seed \(p.seed) \(mode): the saving run did not finish")
         rt.vm.terminateAll()
-        rt.waitAllTerminated()
+        rt.waitAllTerminated(margin: "random.snapshot.\(mode).afterFailure")
         rt.stop()
         return (nil, nil, false)
     }
@@ -854,10 +854,10 @@ func runRandomSnapshot(_ p: RandomProgram, _ mode: SnapshotMode, saveNative: Boo
     guard let bytes = images.first else { return (saved, nil, false) }
     let r = try Resumed(bytes, background: mode.workers.resume, heapBlocks: 256, stress: mode.stress,
                         verify: mode.verify, configure: { c in mode.configure(&c, p.seed &+ 1) }, native: resumeNative)
-    guard r.waitAllTerminated(underThreadSanitizer ? 600 : 120) else {
+    guard r.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "random.snapshot.\(mode).resumed") else {
         Issue.record("seed \(p.seed) \(mode): the resumed run did not finish")
         r.vm.terminateAll()
-        r.waitAllTerminated()
+        r.waitAllTerminated(margin: "random.snapshot.\(mode).resumed.afterFailure")
         r.stop()
         return (saved, nil, true)
     }

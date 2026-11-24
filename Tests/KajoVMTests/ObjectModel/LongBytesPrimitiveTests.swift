@@ -181,7 +181,7 @@ private func runLongWork(polls: Bool) throws -> (Int64, ByteWorkCounters) {
         c.testSwitches.noBytePolls = !polls
     })
     let p = rt.spawn(underThreadSanitizer ? "longWorkFast" : "longWork")
-    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120))
+    #expect(rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "longBytes.runLongWork.\(polls)"))
     let v = rt.result(p)
     rt.vm.release(p)
     let c = rt.vm.byteWorkCounters

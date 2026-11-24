@@ -138,6 +138,8 @@ final class FakeMain: @unchecked Sendable {
         // 28 ms seen; alone the test passes with the 20 ms bound on every
         // run), so the sanitizer gets a bound of its own.
         #expect(st.cpuNs &- st.collectorNs < (underThreadSanitizer ? 100_000_000 : 20_000_000))
+        printLargestMargin("main.hogTurnCpu", .ceiling, value: Double(st.cpuNs &- st.collectorNs) / 1e6,
+                           bound: Double(underThreadSanitizer ? 100_000_000 : 20_000_000) / 1e6, unit: "ms")
         turns += 1
         usleep(2000)
     }
@@ -190,6 +192,8 @@ final class FakeMain: @unchecked Sendable {
     // Under ThreadSanitizer the 1024 polls between clock reads take ten
     // times longer: reported, not asserted.
     #expect(underThreadSanitizer || cpuOverruns.last! <= 0.2)
+    // The weekly margins: a ceiling where it is asserted, a time where not.
+    printMargin("main.turnOverrunCpu", underThreadSanitizer ? .time : .ceiling, value: cpuOverruns.last!, bound: 0.2, unit: "ms")
     #expect(rt.vm.counters.preemptions >= 250)
     rt.vm.terminate(hog)
     rt.vm.terminateAll()

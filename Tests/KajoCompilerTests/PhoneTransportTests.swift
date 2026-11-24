@@ -65,7 +65,7 @@ final class TestClock: Sendable {
         let server = t.target.server
         let c = try t.client()
         defer { c.close() }
-        try c.open(token: server.token, client: "developer", timeout: 60)
+        try c.open(token: server.token, client: "developer", timeout: 60, margin: #function)
         #expect(try c.eval("3 + 4")["value"] == .string("7"))
         #expect(try c.eval("6 * 7")["value"] == .string("42"))
         // The writer notes a reply written after write() returns, which may
@@ -96,7 +96,7 @@ final class TestClock: Sendable {
         server.onRefusing = { r, _ in refusals.withLock { $0.append(r) } }
         // A session over TCP, on IPv4 and IPv6 loopback.
         let c = try t.client()
-        try c.open(token: server.token, client: "developer", timeout: 60)
+        try c.open(token: server.token, client: "developer", timeout: 60, margin: #function)
         #expect(try c.eval("3 + 4")["value"] == .string("7"))
         c.close()
         // localhost: ::1 first (nothing listens there), then 127.0.0.1.
@@ -158,7 +158,7 @@ final class TestClock: Sendable {
         defer { t.close() }
         let old = t.target.server.token
         let c = try t.client()
-        try c.open(token: old, client: "developer", timeout: 60)
+        try c.open(token: old, client: "developer", timeout: 60, margin: #function)
         t.target.server.replaceToken()
         #expect(t.target.server.token != old)
         #expect(throws: ProtocolError.self) { _ = try c.eval("1") }
@@ -197,7 +197,7 @@ final class TestClock: Sendable {
         #expect(lines.contains("\(name)\tbonjour:\(name)\t0"))
         // The Swift client reaches it by its Bonjour name.
         let c = try ProtocolClient(path: "bonjour:\(name)")
-        try c.open(token: t.target.server.token, client: "developer", timeout: 60)
+        try c.open(token: t.target.server.token, client: "developer", timeout: 60, margin: #function)
         #expect(try c.eval("5 + 5")["value"] == .string("10"))
         c.close()
         // The client transport too, by the name, with the token a targets

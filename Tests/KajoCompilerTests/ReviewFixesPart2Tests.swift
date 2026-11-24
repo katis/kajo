@@ -49,7 +49,7 @@ import Testing
         defer { s.close() }
         let source = "foo ^ 1" + String(repeating: " abs", count: 20_000)
         let r = try s.send("method.compile", [("className", .string("SampleCounter")), ("source", .string(source))],
-                           timeout: compilerTestsUnderThreadSanitizer ? 1200 : 300)
+                           timeout: compilerTestsUnderThreadSanitizer ? 1200 : 300, margin: #function)
         #expect(r["ok"] != nil, "\(r)")
         #expect(try s.eval("3 + 4")["value"] == .string("7"))
     }
@@ -436,7 +436,7 @@ final class HoldingTarget: @unchecked Sendable {
     t.target.server.injectAcceptFailures(3)
     let c1 = try t.client()
     defer { c1.close() }
-    try c1.open(token: t.target.server.token, client: "developer", timeout: 60)
+    try c1.open(token: t.target.server.token, client: "developer", timeout: 60, margin: #function)
     let c2 = try t.client()
     defer { c2.close() }
     try c2.open(token: t.target.server.token, client: "developer", timeout: 60)
