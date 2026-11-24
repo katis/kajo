@@ -1659,16 +1659,15 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/53-tools-test-fault.md`: The tools test's fault: a method seen before its source
  - `docs/decisions/54-weekly-1123-failures.md`: The weekly run's two failures (2026-11-23): two test waits on a clock
 
-Awaiting the owner: four questions of the weekly run's two failures
-(`54-weekly-1123-failures.md`, built 2026-11-23 to 24 on the owner's "Yes,
-brief it"): a tools test's wait that goes on while the tools are busy,
-300 s at most (recommended: as built); the stall test's loop on the
-collector's progress (recommended: as built); the client's 30 s request
-timeout against a `class.hierarchy` of 23.5 s under the loaded sanitizer
-(recommended: read the round trips the tag test now prints in the next
-weekly run first); and the weekly summary tabulating each printed body
-time and round trip against its bound (recommended: a small later
-module). Found there and not briefed: the weekly run's failure of the tag
+Awaiting the owner: nothing. The four questions of the weekly run's two
+failures were answered as recommended on 2026-11-24 (appended to
+`54-weekly-1123-failures.md`: the tools tests' wait and the stall test's
+wait stay as built; the client's 30 s request timeout against a
+`class.hierarchy` of 23.5 s under the loaded sanitizer is not changed
+before the round trips the tag test prints are read in the weekly run of
+2026-11-30; the weekly summary tabulating each printed body time and round
+trip against its bound is a later module, a row of `docs/PLAN.md`, not
+briefed). Found there and not briefed: the weekly run's failure of the tag
 test was not reproduced (0 of 6) and its 250 to 300 s are not explained;
 `ProjectDirectoryTests.theToolsChooseThroughTheHostAndTheirChangesLandThere`
 failed once in six loaded sanitizer runs on a `class.hierarchy` that got

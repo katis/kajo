@@ -134,3 +134,14 @@ variants' failing lines. It ran nothing again.
    time and round trip a test prints against its bound, so that a
    shrinking margin or a slow step in a passing run is seen. Recommended:
    a small later module.
+
+## The owner's answers (2026-11-24, "Yes, as recommended")
+
+1. A tools test's wait goes on while a request pends, to 300 s. As built.
+2. The stall test waits on the collector's progress with its ring's length
+   kept. As built.
+3. The client's 30 s request timeout is not changed now. The round trips
+   the tag test prints are read in the next weekly run (2026-11-30) first.
+4. The weekly summary tabulating every body time and round trip a test
+   prints against its bound is a small later module. Approved, not built:
+   a row of `docs/PLAN.md`.
