@@ -116,6 +116,10 @@ shell-matrix TARGET OUT *PARTS:
 check *ARGS:
     scripts/check-tier.sh {{ARGS}}
 
+# The weekly margins: the margins the tests printed in a directory of gate outputs (a weekly run's, a module's check/) and the gates' times against their bounds, as Markdown (`--previous <dir>` adds the previous run's largest fraction)
+margins DIR *ARGS:
+    scripts/margins.py {{DIR}} {{ARGS}}
+
 # Gate tiers: the weekly run by hand (every gate with its load loops, the Mac and device matrices, ~/kajo-weekly/<date>/summary.md; KAJO_WEEKLY_QUICK=1 for the quick mode)
 weekly:
     scripts/weekly.sh

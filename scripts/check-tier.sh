@@ -31,7 +31,8 @@
 # A swift or core diff that touches a gate script (check-tier.sh, its test,
 # gates-lib.sh, weekly.sh, fuzz.sh, fuzz-gate.sh; since main-flips the
 # matrix gates' shell-matrix.sh and shell-report.py, whose --bar the test
-# reads over fixture rows) owes check-tier-test
+# reads over fixture rows; since the weekly margins margins.py, whose
+# fixtures the test compares byte for byte) owes check-tier-test
 # first; one that touches models/ owes model-check (the core tier always
 # runs it). The fuzzers are one gate, `fuzz`, over the targets owed.
 set -uo pipefail
@@ -111,7 +112,7 @@ for f in $files; do [[ $f == models/* ]] && models=1; done
 # test is owed by a diff that touches a gate script.
 tiertest=0
 for f in $files; do
-  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh|shell-matrix.sh|shell-report.py) ]] && tiertest=1
+  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh|shell-matrix.sh|shell-report.py|margins.py) ]] && tiertest=1
 done
 
 print "check-tier: ${#files} files from $source_desc"
@@ -176,5 +177,13 @@ for g in $gates; do
   print "$(date '+%T') $g: $(tail -1 $GL_LOG | sed 's/.* end //')"
 done
 gl_log "check-tier done $tier failed=${#GL_FAILED} $(( $(date +%s) - t0 ))s"
+# The weekly margins (docs/modules/weekly-margins.md): the margins the test
+# gates printed and the gates' times against their bounds, into margins.md
+# and here. It marks thin margins and decides nothing: the exit status below
+# is the gates' alone.
+print
+$root/scripts/margins.py $GL_OUT > $GL_OUT/margins.md 2>&1
+cat $GL_OUT/margins.md
+print "margins: $GL_OUT/margins.md"
 if (( ${#GL_FAILED} )); then print "check-tier: FAILED ${GL_FAILED}"; exit 1; fi
 print "check-tier: every gate of tier $tier passed in $(( $(date +%s) - t0 ))s"

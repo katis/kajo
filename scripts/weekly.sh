@@ -33,6 +33,12 @@
 # A/B is skipped with a line saying so in gates.log and summary.md.
 # `scripts/weekly.sh --gates` prints the steps and exits (the superset check
 # in scripts/check-tier-test.sh).
+#
+# The weekly margins (docs/modules/weekly-margins.md): summary.md has a
+# `## Margins` section after the gates table, scripts/margins.py over this
+# run's directory with the last finished weekly run's directory as
+# --previous (gl_weekly_previous_dir; quick runs not counted). It marks thin
+# margins and fails nothing: failed= does not depend on it.
 set -uo pipefail
 root=${0:A:h:h}
 gates=(check-tier-test clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc
@@ -128,6 +134,15 @@ fi
         res[name] = r; tm[name] = t; nt[name] = note; if (!(name in seen)) { seen[name] = 1; order[++n] = name } }
       END { for (i = 1; i <= n; i++) { k = order[i]; x = nt[k]; if (k in reason) x = reason[k]
               printf "| %s | %s | %s | %s |\n", k, res[k], tm[k], x } }'
+  print "\n## Margins\n"
+  prev=$(gl_weekly_previous_dir $WROOT/weekly.log $out)
+  if [[ -n $prev ]]; then
+    print "Previous: $prev (the last finished weekly run, weekly.log).\n"
+    $root/scripts/margins.py $out --previous $prev
+  else
+    print "Previous: none (no weekly run finished before this one in weekly.log).\n"
+    $root/scripts/margins.py $out
+  fi
   for m in matrix-mac ${devices/#/matrix-}; do
     [[ -d $out/$m ]] || continue
     print "\n## $m (every raw row of $m/*.txt; full tables in $m/report.md)\n"

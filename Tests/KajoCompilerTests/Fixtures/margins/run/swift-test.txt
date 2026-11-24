@@ -1,0 +1,12 @@
+◇ Test aPlainTest() started.
+kajo-margin name=Plain.wait kind=deadline value=1.200 bound=120.000 unit=s
+kajo-margin name=Twice.wait kind=deadline value=2.000 bound=30.000 unit=s
+some other output of a test
+◇ Test anotherTest() started.
+kajo-margin name=Interleaved.a kind=quiet value=3.000 bound=60.000 unit=s
+✔ Test aPlainTest() passed after 0.100 seconds.
+kajo-margin name=Twice.wait kind=deadline value=9.000 bound=30.000 unit=s
+kajo-margin name=OnlyPlain.wait kind=deadline value=0.400 bound=10.000 unit=s
+kajo-margin name=Body.time kind=time value=17.500 bound=- unit=s
+kajo-margin name=Interleaved.b kind=ceiling value=180.000 bound=30000.000 unit=ms
+✔ Test anotherTest() passed after 4.000 seconds.

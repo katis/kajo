@@ -1,0 +1,9 @@
+kajo-margin name=Plain.wait kind=deadline value=4.000 bound=120.000 unit=s
+kajo-margin name=Thin.wait kind=quiet value=50.000 bound=60.000 unit=s
+kajo-margin name=Past.wait kind=deadline value=130.000 bound=120.000 unit=s
+kajo-margin name=Broken.wait kind=deadline value=3.000 unit=s
+✘ Expectation failed: (x → kajo-margin name=Quoted.wait kind=deadline value=1.000 bound=2.000 unit=s)
+kajo-margin name=Twice.wait kind=deadline value=12.000 bound=30.000 unit=s
+kajo-margin name=Interleaved.a kind=quiet value=6.000 bound=60.000 unit=s
+kajo-margin name=Body.time kind=time value=80.000 bound=- unit=s
+kajo-margin name=Interleaved.b kind=ceiling value=23500.000 bound=30000.000 unit=ms

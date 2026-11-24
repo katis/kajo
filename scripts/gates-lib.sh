@@ -3,9 +3,11 @@
 # command line, a bound and a check of its output; the command runs in the
 # repository root under `gtimeout` into <out>/<gate>.txt, and gates.log gets
 # a start line naming the commit and the toolchain and an end line with the
-# exit status and the seconds it took (the final-mark module's pattern):
+# exit status and the seconds it took (the final-mark module's pattern); since
+# the weekly margins (docs/modules/weekly-margins.md) the start line ends with
+# the gate's bound, the gtimeout it runs under, which scripts/margins.py reads:
 #
-#   2026-11-07 08:08:11 bcee36d start clean-build (swift: Apple Swift version 6.4.2 ...)
+#   2026-11-07 08:08:11 bcee36d start clean-build (swift: Apple Swift version 6.4.2 ...) bound=3600s
 #   2026-11-07 08:08:30 bcee36d end clean-build rc=0 19s
 #
 # The caller sets GL_ROOT (the repository) and GL_OUT (the output
@@ -160,6 +162,20 @@ gl_weekly_ab_base() {
   print -r -- $c
 }
 
+# gl_weekly_previous_dir <weekly.log> <this run's dir>: the directory of the
+# last weekly run that finished before this one (quick runs not counted, as
+# for the A/B base), or nothing when there is none or it is gone (the weekly
+# margins: summary.md's --previous).
+gl_weekly_previous_dir() {
+  local log=$1 self=$2 d
+  [[ -r $log ]] || return 0
+  d=$(awk -v self="$self" '$3 == "weekly" && $4 == "start" && $8 == "quick=0" { started[$5] = 1 }
+           $3 == "weekly" && $4 == "done" && ($5 in started) && $5 != self { last = $5 }
+           END { print last }' $log)
+  [[ -n $d && -d $d ]] && print -r -- $d
+  return 0
+}
+
 gl_check_mactests() {
   local line=$(grep -E 'mode=tests ' $1 | grep -v FAILED | tail -1)
   local ok=0
@@ -210,7 +226,7 @@ gl_gate() {
   local id=$1
   gl_spec $id || { gl_log "unknown gate $id"; GL_FAILED+=($id); return 1 }
   local f=$GL_OUT/$id.txt t0=$(date +%s) rc
-  gl_log "start $id (swift: $GL_SWIFT)"
+  gl_log "start $id (swift: $GL_SWIFT) bound=${spec_timeout}s"
   (( spec_load )) && gl_load_on
   (cd $GL_ROOT && exec gtimeout -k 60 $spec_timeout zsh -c "$spec_cmd") > $f 2>&1 &
   GL_CHILD=$!

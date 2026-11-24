@@ -89,7 +89,7 @@ check_gates "clean-build swift-test tsan kernel-test apps new-check model-check"
 core="clean-build swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak fuzz apps kernel-test new-check ab matrix-mac matrix-iphone"
 check_gates "$core" Sources/KajoVM/Marking/Marker.swift
 check_gates "check-tier-test $core" Sources/KajoVM/Marking/Marker.swift scripts/weekly.sh
-for f in check-tier.sh check-tier-test.sh gates-lib.sh weekly.sh fuzz.sh fuzz-gate.sh shell-matrix.sh shell-report.py; do
+for f in check-tier.sh check-tier-test.sh gates-lib.sh weekly.sh fuzz.sh fuzz-gate.sh shell-matrix.sh shell-report.py margins.py; do
   n=$((n + 1)); [[ $(gates scripts/$f) == check-tier-test* ]] || { print "FAIL: scripts/$f does not owe check-tier-test"; fail=1 }
 done
 n=$((n + 1)); [[ $(gates scripts/device.sh) != *check-tier-test* ]] || { print "FAIL: scripts/device.sh owes check-tier-test"; fail=1 }
@@ -196,6 +196,14 @@ killed() {
 fuzzgate > /dev/null 2>&1; rc=$?
 n=$((n + 1)); [[ $rc == 0 && $(grep -c ' end fuzz-[a-z]* rc=0 [0-9]*s runs=12345 build=ok$' $fz/out/gates.log) == 4 ]] \
   || { print "FAIL: the fuzz gate over four good stand-ins: rc=$rc, $(grep -c ' end fuzz-' $fz/out/gates.log) target lines"; fail=1 }
+# The weekly margins: a gate's start line ends with its bound (the fuzz
+# gate's is GL_FUZZ_SECS plus 3600), and margins.py tabulates the gate's
+# time against it (the target lines are not gates).
+n=$((n + 1)); grep -q ' start fuzz (swift: .*) bound=3601s$' $fz/out/gates.log \
+  || { print "FAIL: the fuzz gate's start line does not end with bound=3601s: $(grep ' start fuzz' $fz/out/gates.log)"; fail=1 }
+mt=$($root/scripts/margins.py $fz/out)
+n=$((n + 1)); [[ $(print -r -- $mt | grep -c '^| fuzz' ) == 1 && $(print -r -- $mt | grep '^| fuzz |') == "| fuzz | 0 | "<->" | 3601 | 0.00 |  |" ]] \
+  || { print "FAIL: margins.py's gate table over the fuzz gate: $(print -r -- $mt | grep '^| fuzz')"; fail=1 }
 fuzzgate STANDIN_syntax=fail > /dev/null 2>&1; rc=$?
 n=$((n + 1)); [[ $rc != 0 ]] && grep -q ' end fuzz-syntax rc=1 ' $fz/out/gates.log && grep -q ' end fuzz-kasm rc=0 ' $fz/out/gates.log \
   || { print "FAIL: the fuzz gate with one failing target: rc=$rc"; fail=1 }
@@ -249,6 +257,40 @@ n=$((n + 1)); [[ $bar == *"3 waits of the main worker for its collector, 4.500 m
 rep=$($root/scripts/shell-report.py $bars/ml); rc=$?
 n=$((n + 1)); [[ $rc == 0 && $rep == *"### mainload"* && $(print -r -- $rep | grep -c '^| offload | [12] | 1[12][18] |') == 2 ]] || { print "FAIL: the report's mainload tables: rc=$rc"; fail=1 }
 rm -rf $bars
+# The weekly margins (docs/modules/weekly-margins.md): margins.py over its
+# fixtures (a plain row, a row over THIN, a value past its bound, a line
+# with a field missing and one quoted inside another line, two lines of one
+# name, a name absent from a gate, an empty gate file, a missing one,
+# interleaved lines, gates.log with and without bounds, --previous with a
+# name gone) is the committed expected.md byte for byte; the sample line
+# the Swift helpers' tests read parses to its fields; a usage error is 2.
+mf=$root/Tests/KajoCompilerTests/Fixtures/margins
+ms=$(mktemp -d ${TMPDIR:-/tmp}/kajo-margins-XXXXXX)
+(cd $mf && $root/scripts/margins.py run --previous previous) > $ms/got.md; rc=$?
+n=$((n + 1)); [[ $rc == 0 ]] && cmp -s $ms/got.md $mf/expected.md \
+  || { print "FAIL: margins.py over its fixtures differs from expected.md (rc=$rc):"; diff $ms/got.md $mf/expected.md | head -20; fail=1 }
+rm -f $ms/got.md
+cp $mf/sample-line.txt $ms/tsan-load.txt
+got=$($root/scripts/margins.py $ms); rc=$?
+n=$((n + 1)); [[ $rc == 0 && $(print -r -- $got | grep '^| Sample') == "| Sample.until.ready | quiet | s | 12.5/60.0 (0.21) | 0.21 |  |" && $got != *UNKNOWN* ]] \
+  || { print "FAIL: the sample line does not read as name Sample.until.ready, quiet, 12.5 of 60 s: $(print -r -- $got | grep -E '^\| Sample|UNKNOWN')"; fail=1 }
+$root/scripts/margins.py > /dev/null 2>&1; rc1=$?
+$root/scripts/margins.py $ms/nothing-here > /dev/null 2>&1; rc2=$?
+$root/scripts/margins.py $ms --bogus > /dev/null 2>&1; rc3=$?
+n=$((n + 1)); [[ $rc1 == 2 && $rc2 == 2 && $rc3 == 2 ]] || { print "FAIL: margins.py's usage errors exit $rc1 $rc2 $rc3, want 2"; fail=1 }
+# summary.md's --previous: the last finished non-quick weekly run's
+# directory, never this run's own, nothing when there is none.
+mkdir -p $ms/w/a $ms/w/b $ms/w/c-quick
+prevdir() { zsh -c 'GL_ROOT=$1; source $1/scripts/gates-lib.sh; gl_weekly_previous_dir $2 $3' pd $root $1 $2 }
+print -l "2026-11-01 02:00:00 weekly start $ms/w/a commit x quick=0 devices=1" "2026-11-01 05:00:00 weekly done $ms/w/a failed=0" \
+  "2026-11-02 02:00:00 weekly start $ms/w/c-quick commit x quick=1 devices=0" "2026-11-02 03:00:00 weekly done $ms/w/c-quick failed=0" \
+  "2026-11-03 02:00:00 weekly start $ms/w/b commit x quick=0 devices=1" > $ms/weekly.log
+n=$((n + 1)); [[ $(prevdir $ms/weekly.log $ms/w/b) == $ms/w/a ]] || { print "FAIL: the weekly's previous run is '$(prevdir $ms/weekly.log $ms/w/b)', want $ms/w/a"; fail=1 }
+print "2026-11-03 05:00:00 weekly done $ms/w/b failed=0" >> $ms/weekly.log
+n=$((n + 1)); [[ $(prevdir $ms/weekly.log $ms/w/b) == $ms/w/a ]] || { print "FAIL: a run was its own previous: '$(prevdir $ms/weekly.log $ms/w/b)'"; fail=1 }
+: > $ms/weekly.log
+n=$((n + 1)); [[ -z $(prevdir $ms/weekly.log $ms/w/b) ]] || { print "FAIL: an empty weekly.log gave a previous run"; fail=1 }
+rm -rf $ms
 # docs only: exit 0 at once, saying so.
 out=$(print docs/x.md | $root/scripts/check-tier.sh --paths -); rc=$?
 n=$((n + 1))
