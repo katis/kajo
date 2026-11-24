@@ -380,3 +380,127 @@ and its full collections' length.
 Found, not this module's: `MainThreadTests.aTurnOverrunsItsBudgetByAtMostAFifthOfAMillisecond`
 failed once in the ten start runs of S3 (`work/btimes/S3-base-5.txt`,
 `found-overrun.txt`: `cpuOverruns.last! <= 0.2` false).
+
+### Part 2: each fault in the test that held it (2026-11-24)
+
+What each claim needs was written before any part 2 build or run
+(`part2/claims.txt`, copied 04:37:52; B's test edit was drafted in the
+working tree a few minutes before it, from part 1's numbers, and nothing
+was built or run from it before the file). Both faults are in tests: a
+wall-clock bound on a step whose time is a share of the CPU. Nothing under
+the core directories, `kernel/`, `tools/` or `types/` changed.
+
+**A** (dd7f4e9). `LocalTools.until` no longer puts a 60 s clock on the
+whole step. It fails on a quiet stretch of 60 s, in which the local client
+had no request pending and dispatched no reply (`ToolsProbe class>>activity`:
+replies dispatched times 1000 plus requests pending, read at most once a
+second), or after 300 s in all, and its line says which (`never held
+(quiet, activity N)` or `(ceiling, ...)`). A pending request is ended by
+the client's own 30 s timeout on a host timer, so a request that never
+comes back still ends the wait within 60 s of the timeout; the 300 s bound
+is for an event loop that never dispatches at all, "long everywhere" for
+a thing that must come. A tools test whose until waits on a remote client
+(no local one: activity -1) keeps the 60 s rule as it was. The 60 s quiet
+bound, every assertion and every other wait are unchanged; nothing
+retries.
+
+Forced condition (`KAJO_TOOLS_HOLD_LOOP=70000`, plain, the tag test alone,
+`part2/forced-A/`): before (eeb07bb's tree) **3 of 3 failed**, after
+(the working tree at dd7f4e9's content) **0 of 3**, each about 78 s, the
+first define's step 74.7 s. The broken variant (the pending clause left
+out, `broken/A-nopending/variant.diff`, `run.txt`) fails as before:
+
+    definedInTag: never held (quiet, activity 3001): waited 60.0 s, 3679 probes, longest 0.0 s; why class true tag #Probes want #Probes files #() ... pending #(#('class.define' 60049)) ...
+
+The new test code fails on the starting commit in the sense that the
+starting commit's `until` fails the forced condition 3 of 3; with no
+forcing it passes there (0 of 3 counted runs, part 1). A natural count
+after the fix is no evidence (the count before was 0 of 3).
+
+**B** (eee63db). The loop ends when the ring does and fails only when the
+collector has counted nothing (`StallDiag.progress`: stops, cycles,
+stalls, young collections, read at most every 100 ms) for 120 s, 600 s
+under the sanitizer, printing `stall-diag main QUIET quiet=...` and where
+it stood; the ring's length and every assertion are unchanged. Passes
+(bodies, `work/btimes/summary.txt` `after-*`): alone with twelve loops 5
+of 5 (17.8 to 23.3 s), in the VM bundle with twelve loops 5 of 5 (69.6 to
+127.6 s), and under ThreadSanitizer with twelve loops with the changed
+tools suites (`part2/tsan/changed-load.txt`: 22 tests in 4 suites passed,
+0 reports; B's body 74.6 s, the tag test 33.5 s). Broken variants by hand
+(`broken/`): the ring on a background worker (`B-background`) fails
+`(s?.all.count ?? 1) == 0` with 4 stalls; the main worker never driven
+(`B-quiet`) fails `ended` after `stall-diag main QUIET quiet=120.1`. Both
+are said to pass on the starting commit only in the plain sense: it has
+no progress wait to test.
+
+### Gates
+
+`scripts/check-tier.sh --dry-run origin/master` on eee63db named the
+**Swift tier** (3 of 4 files: the two test files and the probe fixture;
+`check-dry-run.txt`). `just check origin/master` on eee63db
+(`check/gates.log`, last line `2026-11-24 07:47:11 eee63db check-tier done
+swift failed=0 4413s`): clean-build 19 s, swift-test 719 s (744 on 6fb8c5d,
+the last Swift tier), tsan 3146 s (3352), kernel-test 126 s, apps 132 s,
+new-check 271 s; in all 4413 s against 4646 s. Test counts 484 and 198 in
+each test gate, 0 sanitizer reports. The Swift tier has no loaded gate, so
+`swift-test-load` and `tsan-load` ran once each on eee63db through
+`gl_gate` (`check-load/gates.log`): swift-test-load rc=0 829 s (951 s in
+the weekly run), tsan-load rc=0 4156 s (3709 s in the weekly run), 484 and
+198 tests each, 0 reports; B's body 85.0 and 204.6 s, the tag test 1.9 and
+45.7 s. `scripts/canonical-tonel.sh --check` lists nothing.
+
+### Deviations
+
+- The count used the whole package (both bundles, as the gate), not the
+  compiler tests' bundle alone: about 74 minutes a run against 48.
+- S3's base against itself is five runs before the A/B's five of the
+  start (ten in all), as the rule allowed.
+- The no-deadline runs moved from twenty-four loops alone to the bundle
+  and the whole package (amendments 1 and 2, written before their runs):
+  twelve loops alone took the body to 22 s only. None passed 180 s.
+- B's part 2 edit was drafted minutes before `part2/claims.txt` was
+  written; nothing was built from it before.
+
+### Not done
+
+- A was never seen to fail naturally here (0 of 6 counted runs), so the
+  weekly run's false clause is a reading (a reply dispatched late), not a
+  quote; the forced condition and its 3 of 3 against 0 of 3 are the
+  evidence. Which step took the weekly run's other 250 to 300 s is not
+  known; the next natural failure prints each step's time and each clause.
+- B's body was not measured past 180 s in a plain build (the four
+  no-deadline runs ended at 79.9 to 125.9 s); past it, only the sanitizer
+  build's runs (199.4 to 275.2 s) show the ring ending with every
+  expectation holding.
+- Every other `until` condition of the tools tests has no `...Why`
+  companion yet (they print "why none").
+
+### Found, not this module's
+
+- Under the sanitizer with the suite's load the browser's first
+  `class.hierarchy` took 23.5 s of the client's 30 s request timeout in
+  every counted run (the tag test's `ready`, 25 to 27 s), and in one run
+  (old 3, 381f57c's kernel) it ran out:
+  `ProjectDirectoryTests.theToolsChooseThroughTheHostAndTheirChangesLandThere`
+  failed `ready` with "class.hierarchy got no reply within 30000 ms". Counted
+  1 of 3 on old, 0 of 3 on start. No wait can pass a request that failed;
+  the request's 30 s under the sanitizer is a margin to decide.
+- `MainThreadTests.aTurnOverrunsItsBudgetByAtMostAFifthOfAMillisecond`
+  failed once in fifteen VM-bundle runs with twelve loops on the start
+  (`work/btimes/S3-base-5.txt`).
+
+### Open questions (built as recommended)
+
+1. A's count did not separate the two commits, but a condition was found,
+   so question 1's case did not arise as written: part 1's diagnostics are
+   kept and the fix is in the test's wait (a quiet stretch, not a clock).
+   Recommended: keep it.
+2. B's ring is only slow (part 1: the main worker's share of a core and
+   its own full collections; the same on 723b3fe). Built as recommended:
+   the ring's length kept, the loop waits on the collector's progress. The
+   claim is not decided early: its two fallbacks are the reserve's, and no
+   stall must happen anywhere in the ring.
+3. New: should the client's 30 s request timeout get a sanitizer value, or
+   the opening `class.hierarchy` be made cheaper, given the 23.5 s round
+   trips above? Recommended: count the round trip in the next weekly run
+   (the tag test now prints it) before deciding.
