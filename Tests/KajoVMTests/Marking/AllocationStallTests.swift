@@ -282,6 +282,20 @@ end
 /// the background workers idle): it never stalls, and its fallbacks (the
 /// reserve's: a promotion that found no block) name the main worker; no
 /// background stall is charged.
+///
+/// The weekly run's two failures (docs/modules/weekly-1123-failures.md):
+/// the loop had a wall-clock deadline (180 s, 900 s under the sanitizer)
+/// and the weekly run of 2026-11-23 passed it with the ring unfinished
+/// (191.4 s). The body is the main worker's share of a core and its own
+/// stops (the reserve's two full collections: 2.4 s alone, 13 to 30 s in a
+/// loaded bundle), 17 s alone and 47 to 138 s in the loaded VM bundle on
+/// the starting commit and on the stall tests' follow-up alike. The claim
+/// is about the whole ring (no stall anywhere in it, every fallback the
+/// main worker's: two in every run measured), not a time, so the loop now
+/// ends when the ring does and
+/// fails only when the collector has counted nothing for `quiet` seconds
+/// (`StallDiag.progress`, the other stall tests' rule), printing where it
+/// stood either way.
 @Test func theMainWorkerNeverStallsAndItsFallbacksNameIt() throws {
     let endBody = bodyTimer("theMainWorkerNeverStallsAndItsFallbacksNameIt")
     defer { endBody() }
@@ -295,20 +309,28 @@ end
     let d = StallDiag(rt, "main")
     let t0 = now()
     var turns = MainTurns()
-    let end = now() + UInt64((underThreadSanitizer ? 900.0 : 180.0) * 1e9)
-    while rt.vm.liveProcessCount > 0 && now() < end {
+    let quiet: Double = underThreadSanitizer ? 600 : 120
+    var last = d.progress(), lastChange = now(), nextRead = now()
+    var quietS = 0.0
+    while rt.vm.liveProcessCount > 0 {
         let st = rt.vm.runMain(budgetNs: 2_000_000)
         turns.add(st)
         if st.slices == 0 { usleep(200) }
+        // The progress read at most every 100 ms (a turn is 2 ms).
+        let t = now()
+        guard t >= nextRead else { continue }
+        nextRead = t + 100_000_000
+        let p = d.progress()
+        if p != last { last = p; lastChange = t }
+        quietS = Double(t &- lastChange) / 1e9
+        if quietS > quiet { break }
     }
-    // The weekly run of 2026-11-23 (docs/modules/weekly-1123-failures.md):
-    // the deadline passed with the ring unfinished and the line said
-    // nothing of where it stood. The turns, the main worker's share of a
-    // core, the ring's promotion so far and the collector's counters,
-    // whether it ended or not.
+    // Where it stood (the weekly run of 2026-11-23 said nothing of it): the
+    // turns, the main worker's share of a core, the ring's promotion so far
+    // and the collector's counters, whether it ended or not.
     let wall = now() &- t0
     let ended = rt.vm.liveProcessCount == 0
-    let stood = "\(d.full(ended ? "ended" : "deadline"))\n  stall-diag main turns \(turns.line(wall: wall)) "
+    let stood = "\(d.full(ended ? "ended" : "QUIET quiet=\(String(format: "%.1f", quietS))"))\n  stall-diag main turns \(turns.line(wall: wall)) "
         + "promotedMB=\(String(format: "%.1f", Double(rt.vm.youngCounters.promotedBytes) / 1e6)) \(fallbackCauses(rt.marking))"
     print(stood)
     #expect(ended, "\(stood)")
