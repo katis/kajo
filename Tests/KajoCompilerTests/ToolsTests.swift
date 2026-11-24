@@ -243,30 +243,50 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         return vm.result(of: p)
     }
 
-    /// Turns until `ToolsProbe selector` answers true (60 s at most). A
-    /// failure line says how long the wait was, how many probes ran and
-    /// the longest, and (the weekly run's two failures, docs/modules/
-    /// weekly-1123-failures.md: `definedInTag:` failed and its line printed
-    /// none of its clauses) each clause of the condition when the probe
-    /// has a `...Why` companion (`why`), then the tools' state and stops.
+    /// Turns until `ToolsProbe selector` answers true. The wait fails on a
+    /// quiet stretch of 60 s: no request of the local client pending and
+    /// no reply dispatched (`ToolsProbe activity`, read once a second), or
+    /// after 300 s in all with a request pending (a hang). The weekly run's
+    /// two failures (docs/modules/weekly-1123-failures.md): a 60 s clock on
+    /// the whole step failed `definedInTag:` once under the sanitizer with
+    /// the suite's load, where one probe took up to 17 s, a round trip 19 s,
+    /// and the tools' event loop dispatches the replies it waits for as the
+    /// CPU it gets allows; a pending request is ended by the client's own
+    /// 30 s timeout. A failure line says why it ended, how long the wait
+    /// was, how many probes ran and the longest, and each clause of the
+    /// condition when the probe has a `...Why` companion (`why`), then the
+    /// tools' state and stops.
     func until(_ selector: String, _ args: [ShellValue] = []) -> Bool {
         let t0 = ShellVM.now()
-        let end = t0 + 60_000_000_000
+        let quietNs: UInt64 = 60_000_000_000, ceilingNs: UInt64 = 300_000_000_000
         var probes = 0
         var longest: UInt64 = 0
-        while ShellVM.now() < end {
+        var activity: Int64? = nil, lastChange = t0, nextRead = t0
+        var reason = ""
+        while true {
             let p0 = ShellVM.now()
             let held = (try? probe(selector, args)) == .bool(true)
             probes += 1
             longest = max(longest, ShellVM.now() &- p0)
             if held { return true }
             for _ in 0..<20 { if vm.runTurn(budgetNs: 2_000_000).slices == 0 { usleep(500) } }
+            let n = ShellVM.now()
+            if n >= nextRead {
+                nextRead = n + 1_000_000_000
+                let a = (try? probe("activity"))??.int ?? -1
+                // Replies dispatched times 1000 plus requests pending: a
+                // change, or a request pending, is the tools doing something.
+                if a != activity || (a > 0 && a % 1000 > 0) { lastChange = n }
+                activity = a
+            }
+            if n &- lastChange > quietNs { reason = "quiet"; break }
+            if n &- t0 > ceilingNs { reason = "ceiling"; break }
         }
         let waited = String(format: "%.1f", Double(ShellVM.now() &- t0) / 1e9)
         let clauses: String = why(selector, args)
         let state: String = (try? probe("state"))??.string ?? "?"
         let longestS = String(format: "%.1f", Double(longest) / 1e9)
-        Issue.record("\(selector) never held: waited \(waited) s, \(probes) probes, longest \(longestS) s; why \(clauses); \(state) stops \(standingStops)")
+        Issue.record("\(selector) never held (\(reason), activity \(activity.map { "\($0)" } ?? "-")): waited \(waited) s, \(probes) probes, longest \(longestS) s; why \(clauses); \(state) stops \(standingStops)")
         return false
     }
 

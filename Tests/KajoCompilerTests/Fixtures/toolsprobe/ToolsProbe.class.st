@@ -397,6 +397,15 @@ ToolsProbe class >> definedInTag: aTag [
 ]
 
 { #category : #explaining }
+ToolsProbe class >> activity [
+	"What a test's until counts as the tools doing something (the weekly run's two failures, docs/modules/weekly-1123-failures.md): the replies the local client has dispatched times 1000 plus its pending requests (at most 999), or -1 without a local client."
+	| c |
+	c := DevTools local.
+	c isNil ifTrue: [^ -1].
+	^ c replyCount * 1000 + (c pendingCount min: 999)
+]
+
+{ #category : #explaining }
 ToolsProbe class >> definedInTagWhy: aTag [
 	"Each clause of definedInTag: for a failure message (the weekly run's two failures, docs/modules/weekly-1123-failures.md: the line printed none of the three): the class present, its tag against aTag, the paths the browser's filesWritten names, the browser's status, then the client's requests (replies:)."
 	| c |
