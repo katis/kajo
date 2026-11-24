@@ -926,3 +926,256 @@ right.
 | ToolsTests.swift:276 | (found by measurement) |  /  |  | 0.18/30 (0.006) n=17 | 18.4/150 (0.123) n=171 | not a site: the activity probe inside until; counted in tools.<test>.probe |
 
 </details>
+
+### Part 2: the line (2026-11-24)
+
+`printMargin` and `printLargestMargin` in `Tests/KajoVMTests/Margins.swift`
+and `Tests/KajoCompilerTests/Margins.swift` (one helper per test target;
+`marginLine` formats, `parseMarginLine` reads back for the helper's own
+test). Every site of part 1's list that prints does so through them:
+
+- the stall tests: `StallDiag.waitProgress` (`stall.<diag>.<label>`, quiet,
+  the longest quiet stretch against `quiet`), `StallDiag.wait` (deadline),
+  the main-worker ring's own loop (`stall.main.ring`), and each body
+  (`stall.body.<test>`, kind time) beside the old `stall-diag body` line;
+- the tools: `LocalTools.until` prints `.quiet` (the longest stretch with
+  no activity against 60 s) and `.total` (against 300 s) as
+  `tools.<test>.<selector><args>`, the `seconds:` variant a deadline;
+  `close()` prints `tools.<test>.probe` (the longest probe against
+  `driveSeconds * driveScale`) and, from a new fixture probe
+  `ToolsProbe longestReplies` (every `DevClient` in the image, its
+  `latencies` and its `timeoutMs` read by `instVarAt:`, no `tools/`
+  change), `tools.roundtrip.<kind>` against the client's request timeout;
+- the protocol tests: `eval` prints `protocol.evaluate.<test>`; the direct
+  `open`, `request` and `send` calls part 1 kept go through same-named
+  wrappers with a `margin: #function` argument (`protocol.<kind>.<test>`);
+- `eventually`, both `waitAllTerminated` and `drive` take `margin:`, nil
+  by default: only the call sites part 1 kept pass a name;
+- the inline sites kept (`ToolsTests` results loop, the raw reply loop,
+  `closedByServer`, the host timer's queue wait, `within`, the cut-off
+  unwinding's loop, the main-thread ceilings).
+A site called many times prints only a new largest value for its name in
+the process (`printLargestMargin`): the random programs' waits print 2 to
+9 lines a gate, not 4600. Kept, not replaced (open question 4): `stall-diag
+body` and `tools-tags` (named by `docs/modules/weekly-1123-failures.md`,
+`allocation-stalls.md`, `verifier-faults.md` and the third review); the new
+lines are added beside them. Changed: `drive`'s default 30 is now the
+constant `driveSeconds` (30), so the probe line prints the same value the
+wait uses.
+
+**Not changed.** No bound, wait, timeout or assertion: `git diff 51be5b2
+-- Tests` is 36 files, 464 lines added and 68 removed, and each removed
+line comes back with only a `margin:` argument, a defaulted parameter, a
+`t0` read beside it or a print after it (read line by line, not by a
+tool). The protocol wrappers call the client's own method with the same
+arguments. One thing costs more than a line: `LocalTools.close()` runs one
+probe (`longestReplies`, which takes `DevClient allInstances`, one stop)
+after the test's last assertion, and prints nothing if it does not end.
+
+### Part 3: the reader (2026-11-24)
+
+`scripts/margins.py <dir> [--previous <dir>]` (standard library only).
+It reads the gates whose command is `swift test` (`swift-test`,
+`swift-test-load`, `tsan`, `tsan-load`, `test-release`, `soak`,
+`compiler-tests`) and any other `*.txt` with a margin line (named a gate it
+does not know). A line that starts with `kajo-margin` and does not parse,
+or the prefix inside another line, is UNKNOWN: counted and quoted, never a
+row. Under the tables: names printed more than once (largest kept, count
+said), names absent from one of the four whole-suite gates that has
+output, names gone since `--previous`, gates with no output, files it could
+not read. The second table is each gate's time against its bound, which
+`gl_gate` now writes at the end of its start line (`bound=<s>s`; older logs
+read `- (not logged)`). Exit 0 whatever it finds, 2 on a usage error.
+
+- `weekly.sh` writes `## Margins` after the gates table, with
+  `gl_weekly_previous_dir` (new in `gates-lib.sh`: the last finished
+  non-quick weekly run's directory, never this run's) as `--previous`, or
+  says there is none. `failed=` does not depend on it.
+- `check-tier.sh` writes `margins.md` into its output and prints it after
+  `check-tier done`, its exit status unchanged (open question 3, as
+  recommended: one call). A change to `margins.py` owes `check-tier-test`.
+- `just margins <dir> [--previous <dir>]`.
+- `check-tier-test.sh` (116 checks, `work/check-tier-test-1.txt`): the
+  reader over `Tests/KajoCompilerTests/Fixtures/margins/run` with
+  `--previous previous` is `expected.md` byte for byte (a plain row, THIN,
+  PAST, a field missing and a quoted prefix as UNKNOWN, two lines of one
+  name, absent names, an empty `tsan.txt`, a missing `tsan-load.txt`,
+  interleaved test output, a `gates.log` with and without bounds and a fuzz
+  target line, a name gone); the sample line read as its fields; usage
+  errors exit 2; the fuzz gate's start line ends `bound=3601s` and the
+  reader tabulates it; `gl_weekly_previous_dir` over three logs.
+
+**Broken variants** (by hand, `broken/`): the reader reading an UNKNOWN
+line as a passing row (`reader-unknown-as-pass/variant.diff`): the fixture
+check fails, `run-check.txt` ("margins.py over its fixtures differs from
+expected.md": a `Broken.wait` row at 0.00 and one UNKNOWN line fewer); the
+same checks pass on the head (`head-run.txt`). The helper printing a bound
+the wait does not use (`helper-wrong-bound/variant.diff`: `until`'s quiet
+line printing 30 for 60): **no check fails** (`run.txt`: the tag test
+passes, its line says `bound=30.000`). None can as built: no test sees the
+bound a wait used except through the line itself. The protection is that
+each print reads the same constant or variable as the wait, which a reader
+of the diff checks.
+
+### The real run (2026-11-24, c514abf)
+
+The tier's `swift-test` and `tsan` run again on the final commit
+(`check-rerun/gates.log`, after the name fix below) and one
+`swift-test-load` and `tsan-load` through `gl_gate` (`check-load/gates.log`),
+copied together into `work/real/`; `scripts/margins.py work/real` is
+`work/real-margins.md`. 225 margins; **no UNKNOWN line, no name absent from
+a gate**. The ten largest fractions:
+
+| margin | kind | unit | swift-test | swift-test-load | tsan | tsan-load | largest | mark |
+|---|---|---|--:|--:|--:|--:|--:|---|
+| tools.roundtrip.class.hierarchy | ceiling | ms | 658/30000 (0.02) x7 | 1011/30000 (0.03) x7 | 28886/30000 (0.96) x7 | 36891/30000 (1.23) x7 | 1.23 | PAST |
+| hostTimer.queueSpins | deadline | s | 45.3/120 (0.38) | 51.6/120 (0.43) | 120/120 (1.00) | 120/120 (1.00) | 1.00 | PAST |
+| tools.roundtrip.class.hierarchy__retried_ | ceiling | ms | 1477/30000 (0.05) | 1619/30000 (0.05) | 21692/30000 (0.72) | 28968/30000 (0.97) | 0.97 | THIN |
+| tools.roundtrip.process.frames | ceiling | ms | 364/30000 (0.01) x2 | 625/30000 (0.02) x2 | 15713/30000 (0.52) x2 | 24695/30000 (0.82) x2 | 0.82 | THIN |
+| reserve.promotionPastTheReserve.offload.0 | deadline | s | 82.5/120 (0.69) | 85.1/120 (0.71) | 89.7/600 (0.15) | 169/600 (0.28) | 0.71 |  |
+| reserve.promotionPastTheReserve.stw.0 | deadline | s | 80.9/120 (0.67) | 74.7/120 (0.62) | 86.3/600 (0.14) | 170/600 (0.28) | 0.67 |  |
+| main.turnOverrunCpu | ceiling/time | ms | 0.043/0.200 (0.21) | 0.124/0.200 (0.62) | 2.0 | 3.2 | 0.62 |  |
+| reserve.promotionPastTheReserve.stw.4 | deadline | s | 71.2/120 (0.59) | 69.6/120 (0.58) | 79.5/600 (0.13) | 158/600 (0.26) | 0.59 |  |
+| tools.theToolsReconnectAfterADroppedLink.remoteReady.quiet | quiet | s | 0.438/60.0 (0.01) | 0.472/60.0 (0.01) | 18.7/60.0 (0.31) | 34.6/60.0 (0.58) | 0.58 |  |
+| process.gcKeepsParkedProcessStacksAlive | deadline | s | 9.1/120 (0.08) | 14.6/120 (0.12) | 47.3/120 (0.39) | 66.2/120 (0.55) | 0.55 |  |
+
+The bar's rows, under `tsan-load`: the tag test's `ready` 9.0 s quiet of
+60 (0.15) and 25.7 s total of 300 (0.09), `definedInTag:Probes` 1.2 of 60
+and 5.7 of 300; `tools.roundtrip.class.hierarchy` **36 891 ms of the 30 000
+ms request timeout (1.23, PAST)** in a passing run (28 886 under `tsan`, 0.96);
+`stall.main.ring` 10.6 s quiet of 600 (0.02) with its body 207 s (a time);
+the full-heap test has no bounded wait (`headless` runs to its end) and
+prints its body only, 349, 373, 381 and 791 s. The gates' own times: 741,
+3234, 825 and 4355 s against 3600, 10 800, 3600 and 10 800 (0.21 to 0.40).
+
+The tier's first table (`check/margins.md`) named `holdsTokenFor:` with the
+target's port, a new name each run; c514abf makes any argument that is not
+a plain word or number `_`. That is why `swift-test` and `tsan` ran again.
+
+### The scratch weekly run
+
+`KAJO_WEEKLY_ROOT=~/kajo-scratch/weekly-margins/work/weekly
+KAJO_WEEKLY_DEVICES=0 KAJO_WEEKLY_ONLY="check-tier-test swift-test"
+scripts/weekly.sh` on c514abf (`work/weekly-run.txt`; nothing under
+`~/kajo-weekly/` changed, no device touched). Its `weekly.log` was seeded
+with one synthetic finished run whose directory holds the real run's four
+outputs, so that `--previous` has something to read. `summary.md`
+(`work/weekly/2026-11-24/summary.md`, 12 min, `failed: none`) has the
+section after the gates table; its head:
+
+    ## Margins
+
+    Previous: .../work/weekly/2026-11-23-prev (the last finished weekly run, weekly.log).
+
+    ### Margins the tests printed (2026-11-24)
+
+    | margin | kind | unit | swift-test | largest | previous | mark |
+    |---|---|---|--:|--:|--:|---|
+    | reserve.promotionPastTheReserve.offload.0 | deadline | s | 86.5/120 (0.72) | 0.72 | 0.71 |  |
+    | reserve.promotionPastTheReserve.stw.0 | deadline | s | 82.1/120 (0.68) | 0.68 | 0.67 |  |
+    | reserve.promotionPastTheReserve.stw.4 | deadline | s | 73.6/120 (0.61) | 0.61 | 0.59 |  |
+    | reserve.promotionPastTheReserve.offload.4 | deadline | s | 55.0/120 (0.46) | 0.46 | 0.50 |  |
+    | hostTimer.queueSpins | deadline | s | 50.5/120 (0.42) | 0.42 | 1.00 |  |
+    ...
+    ### The gates' own times against their bounds (gates.log)
+
+    | gate | rc | seconds | bound | fraction | mark |
+    |---|---|--:|--:|--:|---|
+    | check-tier-test | 0 | 7 | 900 | 0.01 |  |
+    | swift-test | 0 | 740 | 3600 | 0.21 |  |
+
+    - Printed more than once in a gate (the largest fraction kept): ...
+    - No output here for: swift-test-load, tsan, tsan-load, test-release, soak, compiler-tests
+
+The first real run is the weekly of 2026-11-30. Its `--previous` is
+2026-11-23, whose outputs hold no margin line: every row's previous column
+will read `new` that once.
+
+### Gates
+
+`scripts/check-tier.sh --dry-run origin/master` on 3f86421 named the
+**Swift tier with `check-tier-test`** (42 of 43 files; `check-dry-run.txt`).
+`just check origin/master` on 3f86421 (`check/gates.log`, last line
+`2026-11-24 20:50:56 3f86421 check-tier done swift failed=0 4449s`):
+check-tier-test 7 s, clean-build 20 (19 in the last module's
+`~/kajo-scratch/weekly-1123-failures/check/gates.log`), swift-test 747
+(719), tsan 3146 (3146), kernel-test 126 (126), apps 131 (132), new-check
+272 (271); 4449 s against 4413. 485 and 199 tests (484 and 198: the two
+helper tests), 0 sanitizer reports. The tier printed its table
+(`check/margins.md`). c514abf then changed one test file (the name fix), so
+`swift-test` and `tsan` ran again alone through `gl_gate`
+(`check-rerun/gates.log`: rc=0 741 s, rc=0 3234 s), then `swift-test-load`
+and `tsan-load` once each (`check-load/gates.log`: rc=0 825 s, 829 in the
+last module; rc=0 4355 s, 4156). 485 and 199 tests in each, 0 reports.
+Before the tier the changed suites ran once under ThreadSanitizer with
+twelve loops (`work/tsan-changed/tsan-changed.txt`: 84 and 199 tests
+passed, 0 reports), and `check-tier-test.sh` ran alone (116 checks, ok).
+Against the last module's tier: `swift-test` 747 and 741 s against 719
+(3 to 4 percent, the two new tests, the printing and one probe at each
+tools test's end; not split further), `tsan` 3146 and 3234 against 3146.
+
+### Deviations
+
+- Part 1 measured with an instrumented copy and two loaded runs (about 90
+  minutes), not from the eee63db outputs alone: most sites printed nothing
+  there. A first attempt was stopped (`part1/measure-aborted`) when two
+  site-naming schemes were seen to collide.
+- The rule's "not reached prints" did not foresee tests no gate runs (17
+  rows by hand: `KAJO_MEASURE` and the like): they print nothing and are
+  listed as by hand. `AnswersProbe`'s Smalltalk loop is not measured and
+  prints nothing. `Review3SmallFixesTests.swift:328` is not a margin (its
+  0.2 s timeout is meant to run out).
+- The reader's fixture test was run against the broken variant by
+  extracting the margins checks from `check-tier-test.sh`
+  (`broken/reader-unknown-as-pass/margins-checks.sh`), not by running the
+  whole script in a copy (it needs a git checkout); the extraction ran on
+  the head too.
+- One test file changed after the tier (c514abf), so its two test gates ran
+  again alone, as PROCESS.md allows.
+- Two temporary directories the extracted checks left in `$TMPDIR` were
+  removed by hand.
+
+### Not done, not verified
+
+- The table has not met a failing run: every gate run here passed. That a
+  line is printed when a wait fails is read from the code (each print sits
+  where the wait ends, before the failure is recorded), not seen.
+- A printed bound that differs from the bound the wait used is caught by
+  nothing (the second broken variant); a reader of the diff is the check.
+- The weekly summary has run once, in a scratch root with a seeded
+  previous run, two gates; the full weekly with every gate has not.
+- `test-release`, `soak` and `compiler-tests` were never read with margin
+  lines in them.
+
+### Found, not this module's
+
+- **`class.hierarchy` round trips past the client's 30 s request timeout in
+  passing runs**: 41 500 ms in part 1's instrumented `tsan-load`, 36 891 ms
+  in the real `tsan-load`, 28 886 under plain `tsan`. A latency longer
+  than the timeout means the reply was dispatched after the timer was due;
+  how a request survives that (the retried label, 29 s, suggests a send
+  again) is not read here. Question 3 of the last record asked for exactly
+  this number.
+- `Review3SmallFixesTests`' host-timer test waits up to 120 s for every
+  thread of the global queue to spin, and under the sanitizer that wait
+  runs out every time (120.0 of 120 in both `tsan` runs, part 1 too) while
+  the test passes on what it saw then.
+- `ReserveTests`' `promotionPastTheReserve` waits use 0.6 to 0.72 of 120 s
+  in plain builds, the largest plain fractions in the suite.
+- `process.frames` round trips reach 24.7 s of 30 under `tsan-load`.
+
+### Open questions (built as recommended)
+
+1. THIN's number: 0.8. The spread gives no reason for another (part 1).
+2. A thin margin does not fail the weekly run: as built, a mark in
+   `summary.md`.
+3. `just check` prints the table at its end: as built, one call that
+   cannot change the exit status.
+4. The old lines (`stall-diag body`, `tools-tags`) are kept beside the new
+   ones: docs and records name them.
+5. New: the `class.hierarchy` round trip past its timeout under the
+   sanitizer (above). Recommended: read the weekly of 2026-11-30's row
+   first, then decide question 3 of the last record with it.
+6. New: the host-timer test's 120 s wait that always runs out under the
+   sanitizer. Recommended: a small follow-up that says what the test needs
+   of that wait.
