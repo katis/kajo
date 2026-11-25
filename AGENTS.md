@@ -1677,18 +1677,19 @@ rules). Read the record of an area before changing the area. Until
  - `docs/decisions/54-weekly-1123-failures.md`: The weekly run's two failures (2026-11-23): two test waits on a clock
  - `docs/decisions/55-weekly-margins.md`: The weekly margins: a test's wait prints its value and bound, and a table reads them
 
-Awaiting the owner: six questions of the weekly margins
+Awaiting the owner: nothing. The six questions of the weekly margins
 (`55-weekly-margins.md`, built 2026-11-24 on the owner's "Weekly margins
-table"): THIN at 0.8 of a bound, a mark only (recommended: as built); a
-thin margin fails no gate and no weekly run (recommended: as built);
-`just check` prints the table at a tier's end (recommended: as built); the
-old `stall-diag body` and `tools-tags` lines kept beside the new one
-(recommended: as built); a `class.hierarchy` round trip of 36.9 and 41.5 s
-against the client's 30 s request timeout in passing loaded sanitizer runs
-(recommended: a small module that first says what the number measures and
-how the request passed); and the host-timer test's 120 s wait that runs
-out in every sanitizer run while the test passes (recommended: a small
-follow-up). Found there and not briefed: `ReserveTests` uses 0.59 to 0.72
+table") were answered as recommended on 2026-11-25 (appended there): THIN
+at 0.8 of a bound stays a mark only, a thin margin fails no gate and no
+weekly run, `just check` prints the table at a tier's end, and the old
+`stall-diag body` and `tools-tags` lines stay beside the new one. Two
+answers leave work and are rows of `docs/PLAN.md`, approved and not
+briefed: a small module on the `class.hierarchy` round trip of 36.9 and
+41.5 s against the client's 30 s request timeout in passing loaded
+sanitizer runs, which first says what the number measures and how the
+request passed, and a small follow-up on the host-timer test's 120 s wait
+that runs out in every sanitizer run while the test passes. Found there
+and not briefed: `ReserveTests` uses 0.59 to 0.72
 of its 120 s bound in plain builds. Earlier: the four questions of the weekly run's two
 failures were answered as recommended on 2026-11-24 (appended to
 `54-weekly-1123-failures.md`: the tools tests' wait and the stall test's

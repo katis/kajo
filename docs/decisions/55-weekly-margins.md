@@ -131,3 +131,20 @@ absent from the sanitizer gates by design (none in the real run).
 6. The host-timer test's wait that always runs out under the sanitizer.
    Recommended: a small follow-up that says what the wait is for and
    bounds it by what it waits for.
+
+## The owner's answers (2026-11-25, "Yes, as recommended")
+
+1. THIN is 0.8 of a bound, a mark only. As built.
+2. A thin margin fails no gate and no weekly run. As built.
+3. `just check` prints the table at a tier's end. As built.
+4. The old `stall-diag body` and `tools-tags` lines stay beside the new
+   line. As built.
+5. The `class.hierarchy` round trip past the request timeout gets a small
+   module that first says what the number measures (a late reply kept, or
+   a request sent again) and how the request passed, before any change to
+   the timeout. Approved, not briefed: a row of `docs/PLAN.md`. It takes
+   the place of the reading that question 3 of
+   `54-weekly-1123-failures.md` left for the weekly run of 2026-11-30.
+6. The host-timer test's wait that always runs out under the sanitizer
+   gets a small follow-up that says what the wait is for and bounds it by
+   what it waits for. Approved, not briefed: a row of `docs/PLAN.md`.
