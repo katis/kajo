@@ -79,52 +79,59 @@ func listKernelTests(_ image: [UInt8], _ arguments: [String] = []) -> (tests: [L
 let kernelTestList: [ListedKernelTest] = listKernelTests(kernelImage).tests
 
 enum KernelTestParts {
-    /// How many VMs run at once. Measured on 3cf22fe under the sanitizer
-    /// (one VM, the mini idle): 2921 s of tests, of which the two
-    /// every-method tests are 698 and 691 s and the long chain 585 s, each
-    /// one test; the other 246 tests are 948 s. Five parts would make the
-    /// longest part the longest test, but five VMs beside the rest of the
-    /// bundle starve its timers: `theToolsReconnectAfterADroppedLink` failed
-    /// in 6 of 8 sanitizer runs at five parts, 1 of 2 at three, 0 of 1 at two
-    /// and at one (docs/modules/gate-speed.md, "The reconnect test"). Two
-    /// parts of about 1460 sanitizer seconds each. `KAJO_KERNEL_TEST_PARTS`
-    /// overrides the count (the measurement).
-    static let count = Int(ProcessInfo.processInfo.environment["KAJO_KERNEL_TEST_PARTS"] ?? "").flatMap { $0 > 0 ? $0 : nil } ?? 2
+    /// How many VMs run at once. Gate speed set two on 3cf22fe, when five
+    /// parts beside the bundle starved the host's timers on the global queue
+    /// (`theToolsReconnectAfterADroppedLink` failed 6 of 8 at five parts, 1
+    /// of 2 at three; docs/modules/gate-speed.md). Check time's part 1
+    /// (docs/modules/check-time.md) counted the compiler bundle under the
+    /// sanitizer and twelve loops on 4f9c364, with the host's timers on a
+    /// queue of their own: 0 failures of 5 at two parts, of 3 each at three,
+    /// four and six; the bundle 2836 to 2926 s at two, 2551 to 2577 at three,
+    /// 2589 to 2663 at four and 2698 to 2710 at six (the CPU, not a failure:
+    /// under load each part slows as parts are added). Three, the shortest.
+    /// `KAJO_KERNEL_TEST_PARTS` overrides the count (the measurement).
+    static let count = Int(ProcessInfo.processInfo.environment["KAJO_KERNEL_TEST_PARTS"] ?? "").flatMap { $0 > 0 ? $0 : nil } ?? 3
 
-    /// Seconds under the sanitizer measured on 3cf22fe for every test of 5 s
-    /// or more there (the doc's table; a plain build is 26 to 32 times
-    /// shorter, test for test). Only the balance of the parts reads this:
+    /// Seconds under the sanitizer, quiet, for every test of 5 s or more
+    /// there: measured on 4f9c364 by check time's part 1 (the gate's own
+    /// `kernel test part` lines, `~/kajo-scratch/check-time/part1/runs/q-tsan.txt`;
+    /// on 3cf22fe before, which lacked TypeSyntaxTest's 247 s). Only the balance of the parts reads this:
     /// a test missing from it (a new one, a renamed one) is still in a part,
     /// weighed as the measured mean of the rest (0.32 s), or as a
     /// ClassFuzzTest (150 s) when it is tagged `<slow>`.
     static let measuredSeconds: [String: Double] = [
-        "LiveCompileTest>>testEveryMethodMakesAsInstalled": 697.9,
-        "CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid": 691.4,
-        "CompilerTest>>testALongChainIsWalkedByALoop": 584.5,
-        "ClassFuzzTest>>testSeededSpecificationsAreRefusedOrAccepted": 152.8,
-        "TonelTest>>testTheReaderReadsWhatTheWriterWrote": 138.0,
-        "LargeObjectTest>>testStringsPastTheCountField": 123.7,
-        "DevelopmentTest>>testARemovedClassStillNamedIsKept": 95.8,
-        "LargeObjectTest>>testALargeArrayIsAnArray": 61.2,
-        "LargeObjectTest>>testJsonInPieces": 51.1,
-        "LargeObjectTest>>testLargeStringsAndByteArrays": 45.0,
-        "LargeObjectTest>>testGrowableCollectionsPassOneBlock": 36.7,
-        "ClassFuzzTest>>testSeededReshapesAreRefusedOrAccepted": 29.9,
-        "MakeFuzzTest>>testSeededMutationsAreRefusedOrRun": 17.7,
-        "RegistryTest>>testHandlesFromManyProcessesAreDistinct": 14.0,
-        "RegistryTest>>testThePragmaIndexIsWholeWhileItIsRebuilt": 13.9,
-        "DevelopmentTest>>testACollectionThatHoldsItselfPrintsCut": 13.5,
-        "TonelTest>>testAClassDefinedAndRedefinedFromTonel": 10.4,
-        "TonelTest>>testATagIsTheFilesDirectory": 10.3,
-        "LiveClassTest>>testReshapeKeepsValuesByNameAndRecompiles": 10.0,
-        "LiveClassTest>>testOldClosuresFollowTheirMethod": 7.8,
-        "LiveClassTest>>testARedefinitionThatTheSubclassesNamesClashWithIsRefused": 7.3,
-        "LiveClassTest>>testClassSideInstanceVariables": 6.7,
-        "DevelopmentTest>>testClassDefineIntoATagAndMoving": 6.7,
-        "LiveClassTest>>testDefinitionsTheVMRefuses": 6.4,
-        "LiveClassTest>>testARemovalThatBreaksAMethodChangesNothing": 6.4,
-        "LiveClassTest>>testARunningMethodRefusesTheReshape": 5.6,
-        "LiveClassTest>>testDefineInstantiateRemove": 5.3,
+        "CompilerTest>>testALongChainIsWalkedByALoop": 879.1,
+        "LiveCompileTest>>testEveryMethodMakesAsInstalled": 873.3,
+        "CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid": 847.0,
+        "ClassFuzzTest>>testSeededSpecificationsAreRefusedOrAccepted": 280.4,
+        "TypeSyntaxTest>>testTypesCompileToNothing": 247.3,
+        "TonelTest>>testTheReaderReadsWhatTheWriterWrote": 182.3,
+        "LargeObjectTest>>testStringsPastTheCountField": 127.4,
+        "LargeObjectTest>>testALargeArrayIsAnArray": 108.2,
+        "LargeObjectTest>>testLargeStringsAndByteArrays": 61.4,
+        "LargeObjectTest>>testJsonInPieces": 53.6,
+        "ClassFuzzTest>>testSeededReshapesAreRefusedOrAccepted": 51.3,
+        "LargeObjectTest>>testGrowableCollectionsPassOneBlock": 38.8,
+        "DevelopmentTest>>testARemovedClassStillNamedIsKept": 31.4,
+        "DevelopmentTest>>testACollectionThatHoldsItselfPrintsCut": 25.0,
+        "MakeFuzzTest>>testSeededMutationsAreRefusedOrRun": 19.9,
+        "RegistryTest>>testThePragmaIndexIsWholeWhileItIsRebuilt": 14.6,
+        "LiveClassTest>>testClassSideInstanceVariables": 12.9,
+        "TonelTest>>testATagIsTheFilesDirectory": 11.4,
+        "TonelTest>>testAClassDefinedAndRedefinedFromTonel": 11.0,
+        "LiveClassTest>>testReshapeKeepsValuesByNameAndRecompiles": 10.4,
+        "LiveClassTest>>testARedefinitionThatTheSubclassesNamesClashWithIsRefused": 9.1,
+        "DevelopmentTest>>testClassDefineIntoATagAndMoving": 8.6,
+        "LiveClassTest>>testOldClosuresFollowTheirMethod": 8.2,
+        "SourceRecordTest>>testAReaderDuringARedefinitionFindsTheSource": 7.0,
+        "TypeSyntaxTest>>testARedefinitionTakesARemovedVariablesTypeWithIt": 6.4,
+        "DevelopmentTest>>testExtensionFilesAndAuthorMarks": 6.3,
+        "LiveClassTest>>testARemovalThatBreaksAMethodChangesNothing": 6.1,
+        "LiveClassTest>>testDefinitionsTheVMRefuses": 6.1,
+        "LiveClassTest>>testARunningMethodRefusesTheReshape": 5.7,
+        "DevelopmentTest>>testEvaluateInAContextReadsAndWritesItsVariables": 5.7,
+        "LiveClassTest>>testDefineInstantiateRemove": 5.6,
+        "DevelopmentTest>>testTerminateEndsAProcessWhoseUnwindBlockHangs": 5.3,
     ]
 
     static func weight(_ t: ListedKernelTest) -> Double {
@@ -145,8 +152,29 @@ enum KernelTestParts {
     }
 }
 
+extension KernelTestParts {
+    /// Check time (docs/modules/check-time.md): the kernel tests that a
+    /// tier's sanitizer gate leaves to the weekly run. Each is a claim the
+    /// tier's plain gates (swift-test, kernel-test) check whole; under the
+    /// sanitizer they were 2600 of the kernel tests' 4058 s (part 1, quiet,
+    /// 4f9c364) and each alone longer than any other part could be.
+    static let weeklyUnderSanitizer: Set<String> = [
+        "CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid",
+        "LiveCompileTest>>testEveryMethodMakesAsInstalled",
+        "CompilerTest>>testALongChainIsWalkedByALoop",
+    ]
+
+    /// The tests this process leaves out: the set above in a tier's
+    /// sanitizer gate, none anywhere else.
+    static let leftOut: Set<String> = compilerTestsUnderThreadSanitizer
+        ? sized("KernelTestParts.sanitizerTier", tier: weeklyUnderSanitizer, full: []) : []
+}
+
+/// The tests this process runs: every listed test but the ones left out.
+let kernelTestsRun: [ListedKernelTest] = kernelTestList.filter { !KernelTestParts.leftOut.contains($0.name) }
+
 /// The parts of this test process's run.
-let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestList, into: KernelTestParts.count)
+let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestsRun, into: KernelTestParts.count)
 
 @Suite struct KernelTestPartsTests {
     /// The standing assertion, cheap in every build mode: what the runner
@@ -166,9 +194,17 @@ let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestList, into: Ke
             union += listed.tests.map(\.name)
         }
         #expect(union.count == Set(union).count, "a test is in two parts")
-        #expect(union.sorted() == all.tests.map(\.name).sorted())
+        // Check time: what this process leaves out (nothing at full size and
+        // outside the sanitizer) is a set of listed tests, and the parts with
+        // it are the unfiltered run.
+        let names = Set(all.tests.map(\.name))
+        #expect(KernelTestParts.leftOut.isSubset(of: names), "left out and not listed: \(KernelTestParts.leftOut.subtracting(names))")
+        #expect(KernelTestParts.weeklyUnderSanitizer.isSubset(of: names))
+        #expect(Set(union).isDisjoint(with: KernelTestParts.leftOut))
+        #expect((union + KernelTestParts.leftOut).sorted() == all.tests.map(\.name).sorted())
+        print("kernel parts: \(kernelTestParts.count) parts, \(union.count) tests run, \(KernelTestParts.leftOut.count) left out (size \(testSize.rawValue)): \(KernelTestParts.leftOut.sorted())")
         // the split is deterministic: a second split of the list is the same
-        #expect(KernelTestParts.split(kernelTestList, into: KernelTestParts.count) == kernelTestParts)
+        #expect(KernelTestParts.split(kernelTestsRun, into: KernelTestParts.count) == kernelTestParts)
         // a filter and a name compose (the --test path selects, never adds)
         #expect(listKernelTests(kernelImage, ["--filter", "StringTest>>*", "--test", "ArrayTest>>testIsArray"]).tests.isEmpty)
     }

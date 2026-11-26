@@ -22,7 +22,12 @@ let typesProjectImage: [UInt8] = {
 let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
 
 @Suite(.serialized) struct TypeCheckerTests {
-    @Test func theTypesPackageBuildsAndItsTestsPass() throws {
+    /// Check time: under the sanitizer in the weekly run only (its 33
+    /// SUnit tests on the development image took 1132 to 1532 s there with
+    /// twelve loops and ended the compiler tests' shard); every tier's plain
+    /// gate runs it, and the Smalltalk tier's tools-test runs the same tests.
+    @Test(.weeklyUnderSanitizer("TypeCheckerTests.theTypesPackage"))
+    func theTypesPackageBuildsAndItsTestsPass() throws {
         let r = try KernelBuild.build(KernelBuild.sources(in: [kernelDirectory, toolsDirectory, typesDirectory]))
         #expect(r.warnings.isEmpty, "\(r.warnings)")
         var total = 0
@@ -38,7 +43,10 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
         #expect(total == 33)
     }
 
-    @Test func theDiagnosticsRequestAnswersItsScopesAndTheEventFollowsAChange() throws {
+    /// Check time: under the sanitizer in the weekly run only (its
+    /// whole-image check was 1047 s there); every tier's plain gate runs it.
+    @Test(.weeklyUnderSanitizer("TypeCheckerTests.theDiagnosticsRequest"))
+    func theDiagnosticsRequestAnswersItsScopesAndTheEventFollowsAChange() throws {
         let t = try RunningTarget(typesProjectImage)
         defer { t.close() }
         let c = try t.session("agent:types", package: nil)

@@ -459,3 +459,167 @@ a thin race test). Three of those were seen under `tsan` and never under
 thin on its starting commit too, decision 52) and the interning race test
 (30e14bd, which plain `swift-test` failed too, decision 39). **No fault of
 the product was found by `tsan` alone.** The decision is built.
+
+### Part 3: the thin waits (2026-11-26)
+
+**A product path, said first.** `session.open`'s answer counted the
+protocol's requests with `DevProtocol describe size`: it made the whole
+description (every request's arguments and comment) to answer one number.
+Timed in the image (`$CT/work/rt/serves-*.txt`, the instrumented copy's
+`ToolsProbe class>>timeOpen`): a fresh image's first `info` 4117 ms under
+the sanitizer and 142 ms plain, later ones 534 and 18; with the count taken
+from the kinds table, 87 ms (sanitizer). `DevProtocol class>>requestCount`
+(`kernel/Development/DevProtocol.class.st`) answers it; `DevSession>>info`
+uses it. This is the one change under `kernel/`; the files are canonical
+(`scripts/canonical-tonel.sh --check`, `$CT/work/canonical-1.txt`).
+
+**1. `class.hierarchy`.** What `tools.roundtrip.<kind>` measures (read in
+`DevClient>>receive:`): from the request's send to the reply's dispatch in
+the tools' event loop, which runs on the main worker the test's thread
+turns. How a 36.9 s round trip passed a 30 s timeout: the timeout is a timer
+event of the same loop, and the reply's line event reached the image's
+queue first; the loop dispatched the line, cancelled the timer, and the
+dispatch came late. Measured with a copy whose `LocalTools` prints when
+each request reaches the server, when the image delivers its reply and
+when the client host hands the reply's line to the image
+(`$CT/scripts/rt.py`, `$CT/work/rt/run1.txt`: the compiler bundle under the
+sanitizer and twelve loops, 2-part kernel tests, starting commit). In
+`theToolsDevelopTheImageTheyRunIn`: the browser sends `session.open`, then
+`package.list` and `class.hierarchy` at once; the session's reply came after
+8.95 s, the package list's 1.6 s later, the hierarchy's 6.0 s after that
+(16.0 s from its send), its line reached the image 15 ms later, and the
+client dispatched it 8.2 s after that (24.2 s). Over the five tools tests
+the hierarchy's reply reached the image after 15.5 to 25.2 s and was
+dispatched after 23.8 to 39.3 s. Alone and quiet under the sanitizer
+(`ToolsProbe class>>timeServes`): the hierarchy's work 1.15 s and its JSON
+2.3 s more, the package list 0.31 s; the session's answer 4.1 s, nearly all
+the description it did not need. So the reply was slow first because the
+session's answer before it was, and the round trip ran past the timeout
+because the dispatch waited for the tools' main worker, not because a reply
+came late.
+- The fix: the session's answer above, the reply's own work unchanged
+  (3.5 s quiet under the sanitizer, under 0.12 s plain; building the
+  hierarchy once per change would save its 1.15 s and not its JSON).
+- The margin: `LocalTools` now prints `tools.reply.<kind>`, when the reply
+  reached the image against the client's timeout (`ReplyArrivals` in
+  `Tests/KajoCompilerTests/ToolsTests.swift`), beside the round trips. No
+  timeout changed.
+- `process.frames` (21 to 25 s round trips, 0.70 to 0.84): the same
+  measurement, read in the final runs below.
+- The `ProjectDirectoryTests` failure of decision 54 (a `class.hierarchy`
+  with no reply in 30 s): the same request in the same position (the first
+  hierarchy after `session.open`); its test was the slowest of the five here
+  (25.2 s to the image, 39.3 s to the dispatch).
+
+**2. The host-timer test.** The wait was for one of the test's own spinner
+blocks to start on the global queue, before queuing the canary behind them.
+GCD made the condition true; in the suite it started no thread for the
+default global queue for 45 s in a plain bundle and past 120 s under the
+sanitizer in 13 of 14 runs (`spinning=0 of 48` at the end in the five
+two-part runs). A sample of the process 9.3 s into the wait (plain,
+`$CT/work/gcd/sample-44146.txt`) shows 71 threads and none of that queue:
+the cooperative pool's 12, the VM workers, overcommit queues. A small
+program (`$CT/work/gcd/gcd.swift`) with 12 cooperative tasks or 12 threads
+spinning started a global-queue block in 2 to 6 ms, so the pool alone does
+not explain it; why GCD starts none in the suite is not established. The
+test's claim does not need it: the canary queued behind 48 spinners and not
+run is the evidence that the queue is full, and the test passed on that
+alone in every one of those runs. The wait is removed (and its margin line,
+`hostTimer.queueSpins`, with it). Its broken variant at the new shape (the
+host's timers back on the global queue, `$CT/broken/hosttimer/variant.diff`)
+fails: "the timer did not fire while the global queue was full", fired at
+20 001 ms (`broken/hosttimer/run.txt`). Plain alone the test now takes
+0.47 s.
+
+**3. `ReserveTests`.** The wait was for four rings of a fixed length to
+end, under a 120 s clock on the whole wait: a clock on CPU-proportional
+work. The four background workers make it true. The wait now ends when the
+rings end and fails only when the collector counts nothing (no stop, no
+young collection) for 120 s, 600 under the sanitizer: `StallDiag.waitProgress`,
+the stall tests' rule; the rings, the heap and every assertion are as they
+were. Its margin is now `stall.reserve.<mode>.<reserve>.terminated` (quiet).
+Forced (`$CT/scripts/ecore-load.sh`: the test held on the efficiency cores
+with eight busy loops there too, `$CT/work/reserve/`): before, all four
+cases ran out at 120.0 s and failed ("Processes still live", wrong sums);
+after, all four passed in 139 to 193 s with the longest quiet stretch 4.2 s.
+Plain and alone the new wait's quiet stretches are 0.26 to 0.62 s.
+
+**4. The turn-overrun test.** It asserts that the largest CPU overrun of 300
+turns is at most 0.2 ms. The starting position was that the bound needs a
+load value; it was not changed (decided: no bound grows). What was seen:
+on the efficiency cores (`taskpolicy -b`, three runs) the overrun is smaller
+(0.033 to 0.053 ms), so the core type is not it. Alone under twelve loops,
+100 runs (`$CT/work/turn/loop.txt`): 99 passed (median of the maxima 0.072
+ms), one failed at 0.219 ms. Its largest turn: one slice, preempted at the
+deadline, no stop, no park, CPU equal to wall (1.237 ms), and one young
+round acknowledged in the turn (17 µs of young time, subtracted). Over the
+300 largest turns of those runs, turns with an acknowledgement passed 0.1
+ms in 8 of 66, turns without in 7 of 234 (largest 0.151). A reading: a turn
+in which the main worker acknowledges a young round can run past its
+deadline check by more than its reported young time. That is the VM's (a
+core module's): found, not fixed. The test now prints every field of its
+three largest turns, in its failure message too, so the next failure names
+its case.
+
+**5. The tag test's weekly failure.** Counted in the five loaded sanitizer
+runs of the final commit (rule written first: `$CT/work/rule-tag.txt`),
+below.
+
+### Part 4: the weekly run (2026-11-26)
+
+- `scripts/weekly.sh` exports `KAJO_TEST_SIZE=full` for every gate and
+  keeps all four test gates (`swift-test`, `swift-test-load`, `tsan`,
+  `tsan-load`). Its `summary.md` has a `## Test sizes` section: the
+  variable, and per gate the `kajo-test-size size=... sized=...` line its
+  suite printed (`TestSizeTests` prints it in every run). A tier leaves the
+  variable unset; `check-tier-test.sh` checks that only the weekly sets it.
+- `scripts/broken-variants.sh <out> [name...]`, the gate `broken-variants`
+  (weekly only, after `ab`): the by-hand variants that need no source change,
+  each once as its doc says to run it, each judged against its recorded end:
+
+  | name | how it runs | expected |
+  |---|---|---|
+  | delay-end | `KAJO_BROKEN_DELAY_END=1`, `brokenVariantALateTimerTouchesTheFreedVM` | fails: "exited with unexpected signal code 11" |
+  | shell-close | `KAJO_BROKEN_SHELL_CLOSE=1`, `aShellClosedWithADelayPendingFreesItsVM` | fails: "close left the VM undestroyed" |
+  | closed-shell-runTurn, -spawn, -liveProcessCount | `KAJO_CLOSED_SHELL_CALL=<call>`, `aCallAfterCloseByHand` | fails: "Fatal error: ShellVM.<call> after close" (the fix's trap) |
+  | tools-hold-install | `KAJO_TOOLS_HOLD_INSTALL=1500`, `theToolsDevelopTheImageTheyRunIn` | passes (the forcing condition the fix bears) |
+  | tools-hold-loop | `KAJO_TOOLS_HOLD_LOOP=70000`, `aClassDefinedIntoATagFromTheBrowserMovesWithItsTag` | passes (likewise) |
+
+  A variant expected to fail that passes, or fails without its message, is
+  the runner's failure; so is a forcing condition that fails. `--list`
+  names them, `--judge` judges one output (what `check-tier-test.sh`
+  tests with six cases). `summary.md` has a `## By-hand broken variants`
+  section with the runner's lines.
+- **Not automated, and why.** Every other variant in the "Broken variants
+  run by hand" sections of `allocation-stalls.md`, `aot.md`,
+  `app-project.md`, `collectors-review.md`, `developer-ui.md`,
+  `development-answers.md`, `development-protocol.md`, `final-mark.md`
+  (`mainWaitsForWantedStops`, whose wait is shortened in the source for
+  the run), `image-processes.md`, `kernel-image.md`, `kernel-live.md`,
+  `large-bytes.md`, `large-objects.md`, `live-classes.md`,
+  `object-model.md`, `phone-transport.md`, `reserve-and-depth.md`,
+  `review-3-small-fixes-part-2.md`, `types-1.md`, `types-2.md`,
+  `types-3.md`, `verifier-faults.md` and `vm-teardown.md` is a change to the
+  source: a line removed, two calls reordered, a check skipped, a wait
+  shortened. Broken variants are never committed, so a runner has nothing to
+  apply; they stay by hand, as recorded. The broken variants that are test
+  switches already run in every suite (`SwitchTableTests` lists them).
+
+### Part 2: the gates' time (2026-11-26)
+
+Each lever priced from part 1 before it was taken, then measured together
+(`$CT/work/cand1/gates.log`, the working tree on 3429c70 with the levers
+built and the types package not yet moved: `tsan-load` 2022 s against
+4355, `swift-test` 287 s against 747, 0 sanitizer reports, every test
+passed):
+
+| lever | price (part 1) | taken |
+|---|---|---|
+| the suite as shards side by side (`scripts/test-bundles.sh`: one build; the VM tests but the random programs, the random programs but the resumed ones, the resumed ones, the compiler tests, each a `swift test --skip-build --ignore-lock` of its own) | the plain VM bundle waits on its pool (655 s quiet, 705 to 725 s loaded); under the sanitizer the bundles ran one after the other (1186 + 2174 s quiet) with the second at 49 percent idle | yes, in all four test gates: `swift-test` 287 s (747), the shards 241, 283, 267 and 243 s |
+| a tier's sanitizer gate leaves three kernel tests to the weekly run (`KernelTestParts.weeklyUnderSanitizer`; `swift-test` and `kernel-test` run them whole) | 2600 of the kernel tests' 4058 s (quiet); each longer alone (879 s quiet, 1809 s loaded) than any part could be | yes (rule 1d) |
+| the diagnostics test weekly under the sanitizer (`.weeklyUnderSanitizer`) | 1047 s quiet, 1355 to 1536 s loaded, the end of the serialized `TypeCheckerTests` chain | yes (rule 2a) |
+| the types package's tests weekly under the sanitizer | 494 s quiet; 1132 s of SUnit body and 1532 s in all in the candidate run, the end of the compiler shard | yes, after the candidate run (rule 2a; the Smalltalk tier's `tools-test` runs the same tests) |
+| three kernel-test parts | 2551 to 2577 s against 2836 to 2926 at two (rule 4c: the shortest) | yes; the weights refreshed from part 1 (`TypeSyntaxTest`'s 247 s had weighed 0.32) |
+| a kept or second scratch path for the build | the builds are 26.6 and 33.0 s of the gates from an empty scratch path | no: under 4 percent, and a kept build is a gate that may have changed |
+| the host-timer test's sleep | 120 s of one test thread in every sanitizer run | yes (part 3) |
+| the VM tests under the sanitizer at a tier size | the stall tests are 3990 of the VM bundle's 13 305 body seconds (30 percent), and the VM shard ends the candidate gate (1766 s) | no: their sanitizer runs guard the collectors' protocols, which a core-tier diff changes; a size the core tier runs too would weaken exactly those runs. The next lever, an open question |

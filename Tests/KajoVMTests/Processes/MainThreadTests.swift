@@ -165,6 +165,7 @@ final class FakeMain: @unchecked Sendable {
     let hog = rt.spawn("hog", priority: Priority.normal, main: true)
     for _ in 0..<2 { rt.spawn("churn:", [int(1 << 40)]) }
     var overruns: [Double] = [], cpuOverruns: [Double] = []
+    var turnFields: [(Double, String)] = []
     var stopped = 0
     let budget: UInt64 = 1_000_000
     for _ in 0..<300 {
@@ -177,6 +178,13 @@ final class FakeMain: @unchecked Sendable {
         // Module 7: likewise the young collection work the turn did (round
         // acknowledgements, its own collections), reported apart.
         cpuOverruns.append(Double(Int64(bitPattern: st.cpuNs &- st.collectorNs &- st.youngNs &- budget)) / 1e6)
+        // Check time (docs/modules/check-time.md, part 3): every field of
+        // the turn, for the three largest CPU overruns. Decision 54's one
+        // failure (0.38 ms) printed only the maxima; five loaded runs and
+        // three on the efficiency cores did not reach it again.
+        turnFields.append((cpuOverruns.last!, "cpuOver=\(cpuOverruns.last!) ns=\(st.ns) cpuNs=\(st.cpuNs) enterWait=\(st.enterWaitNs) "
+            + "leaveWait=\(st.leaveWaitNs) park=\(st.parkNs) stop=\(st.stopNs) collector=\(st.collectorNs) young=\(st.youngNs) "
+            + "acks=\(st.acks) slices=\(st.slices) preempted=\(st.preempted)"))
         usleep(500)
     }
     overruns.sort()
@@ -191,7 +199,9 @@ final class FakeMain: @unchecked Sendable {
     // machine their max was 0.064 ms).
     // Under ThreadSanitizer the 1024 polls between clock reads take ten
     // times longer: reported, not asserted.
-    #expect(underThreadSanitizer || cpuOverruns.last! <= 0.2)
+    let largest = turnFields.sorted { $0.0 > $1.0 }.prefix(3).map(\.1)
+    for t in largest { print("turn overrun largest \(t)") }
+    #expect(underThreadSanitizer || cpuOverruns.last! <= 0.2, "the largest turns: \(largest)")
     // The weekly margins: a ceiling where it is asserted, a time where not.
     printMargin("main.turnOverrunCpu", underThreadSanitizer ? .time : .ceiling, value: cpuOverruns.last!, bound: 0.2, unit: "ms")
     #expect(rt.vm.counters.preemptions >= 250)

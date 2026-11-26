@@ -44,10 +44,14 @@ gl_spec() {
   spec_timeout=3600 spec_load=0 spec_check=- spec_cmd=
   case $id in
     clean-build)     spec_cmd="rm -rf .build/clean-check && swift build --scratch-path .build/clean-check"; spec_check=clean ;;
-    swift-test)      spec_cmd="swift test" ;;
-    swift-test-load) spec_cmd="swift test"; spec_load=1 ;;
-    tsan)            spec_cmd="swift test --sanitize=thread --scratch-path .build/tsan-check"; spec_timeout=10800 ;;
-    tsan-load)       spec_cmd="swift test --sanitize=thread --scratch-path .build/tsan-check"; spec_timeout=10800; spec_load=1 ;;
+    # Check time (docs/modules/check-time.md, part 2): the suite as three
+    # shards side by side (scripts/test-bundles.sh: one build, the VM tests,
+    # the random programs and the compiler tests each a process of its own;
+    # their outputs into <out>/bundles/ and then, in order, the gate's).
+    swift-test)      spec_cmd="scripts/test-bundles.sh $o/bundles/swift-test" ;;
+    swift-test-load) spec_cmd="scripts/test-bundles.sh $o/bundles/swift-test-load"; spec_load=1 ;;
+    tsan)            spec_cmd="scripts/test-bundles.sh $o/bundles/tsan --sanitize=thread --scratch-path .build/tsan-check"; spec_timeout=10800 ;;
+    tsan-load)       spec_cmd="scripts/test-bundles.sh $o/bundles/tsan-load --sanitize=thread --scratch-path .build/tsan-check"; spec_timeout=10800; spec_load=1 ;;
     ios-check)       spec_cmd="just ios-check"; spec_check=clean ;;
     arc-check)       spec_cmd="just arc-check" ;;
     golden)          spec_cmd="just golden" ;;
@@ -65,6 +69,9 @@ gl_spec() {
     # Gate speed, change 8: the gate scripts' own test.
     check-tier-test) spec_cmd="scripts/check-tier-test.sh"; spec_timeout=900 ;;
     apps)            spec_cmd="just apps" ;;
+    # Check time (docs/modules/check-time.md, part 4): the by-hand broken
+    # variants that need no source change, each once, each as recorded.
+    broken-variants) spec_cmd="scripts/broken-variants.sh $o/broken-variants"; spec_timeout=10800 ;;
     # The verifier's faults (docs/modules/verifier-faults.md, part 4): a
     # debug kajo test verifies at the build's level, and the owner's answer
     # of 2026-11-20 puts the heap verifiers in the release build's kernel

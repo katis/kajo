@@ -137,6 +137,46 @@ final class HostLog: @unchecked Sendable {
     }
 }
 
+/// Check time (docs/modules/check-time.md, part 3): when each request's
+/// reply reached the image, against when the request reached the server.
+/// That is what a request's timeout races: the timeout is an event of the
+/// tools' loop like the reply's line, and the earlier of the two in the
+/// image's queue wins. The clients' own round trips (`tools.roundtrip.<kind>`)
+/// run to the reply's dispatch, after whatever the tools' main worker did
+/// first. Keyed by the request's id, its latest send (a request sent again
+/// after a dropped link re-arms its timeout from that send).
+final class ReplyArrivals: @unchecked Sendable {
+    private let lock = NSLock()
+    private var sent: [String: (kind: String, at: UInt64)] = [:]
+    private var longest: [String: UInt64] = [:]
+
+    private static func field(_ text: Substring, _ name: String) -> String? {
+        guard let r = text.range(of: "\"\(name)\":") else { return nil }
+        let rest = text[r.upperBound...]
+        if rest.first == "\"" { return String(rest.dropFirst().prefix { $0 != "\"" }) }
+        return String(rest.prefix { $0.isLetter || $0.isNumber })
+    }
+
+    func request(_ json: [UInt8]) {
+        let t = String(decoding: json.prefix(400), as: UTF8.self)[...]
+        guard let id = Self.field(t, "id"), let kind = Self.field(t, "kind") else { return }
+        let now = ShellVM.now()
+        lock.lock(); sent[id] = (kind, now); lock.unlock()
+    }
+
+    func line(_ text: String) {
+        let t = text.prefix(400)
+        guard Self.field(t, "kind") == "reply", let id = Self.field(t, "id") else { return }
+        let now = ShellVM.now()
+        lock.lock()
+        defer { lock.unlock() }
+        guard let s = sent.removeValue(forKey: id) else { return }
+        longest[s.kind] = max(longest[s.kind] ?? 0, now &- s.at)
+    }
+
+    var longestByKind: [(String, UInt64)] { lock.lock(); defer { lock.unlock() }; return longest.sorted { $0.key < $1.key } }
+}
+
 final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConvertible {
     // A failed expectation prints its operands: never the token.
     var customMirror: Mirror { Mirror(self, children: [:]) }
@@ -148,6 +188,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     let shell = ToolsShell()
     let path = socketNames.next()
     let hostLog = HostLog()
+    let arrivals = ReplyArrivals()
     /// The weekly margins (docs/modules/weekly-margins.md): the test that
     /// made these tools, the start of a margin's name (`tools.<test>.`),
     /// and the longest probe so far against the bound its drive used.
@@ -162,6 +203,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         var c = shell.callbacks
         let h = host
         let log = hostLog
+        let arrived = arrivals
         c.events = { line in
             if let marker = dropOn, line.count < 200, String(decoding: line, as: UTF8.self).contains("\"text\":\"\(marker)\"") {
                 log.drop()
@@ -188,12 +230,14 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
             switch e.kind {
             case .timer: log.note("fired token \(e.target)")
             case .lost: log.note("lost \(e.target)")
-            case .line: log.note("line \(e.target)", line: true)
+            case .line:
+                log.note("line \(e.target)", line: true)
+                if case .string(let text) = e.value { arrived.line(text) }
             default: break
             }
             v.post(e)
         }
-        server = try ProtocolServer(path: path) { conn, json in v.postRequest(connection: conn, json: json) }
+        server = try ProtocolServer(path: path) { conn, json in arrived.request(json); v.postRequest(connection: conn, json: json) }
         box.server = server
         host.addTarget(ClientHost.Target(name: "local", path: path, token: server.token))
         vm.openProtocol()
@@ -229,6 +273,10 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
               let s = vm.result(of: p)?.string else { return }
         let f = s.split(separator: "\t", omittingEmptySubsequences: false)
         guard let timeoutMs = f.first.flatMap({ Double($0) }), timeoutMs > 0 else { return }
+        // Check time: the reply's arrival, what the timeout races.
+        for (kind, ns) in arrivals.longestByKind {
+            printMargin("tools.reply.\(kind)", .ceiling, value: Double(ns) / 1e6, bound: timeoutMs, unit: "ms")
+        }
         for kv in f.dropFirst() {
             guard let eq = kv.lastIndex(of: "="), let ms = Double(kv[kv.index(after: eq)...]) else { continue }
             printMargin("tools.roundtrip.\(kv[..<eq])", .ceiling, value: ms, bound: timeoutMs, unit: "ms")

@@ -81,15 +81,22 @@ check_gates "build-image dev-image kernel-test tools-test compiler-tests golden 
 # Gate speed (docs/modules/gate-speed.md): a gate script owes
 # check-tier-test first (change 8), the fuzzers are one gate (change 2),
 # plain swift-test is out of the core tier (change 7).
-check_gates "check-tier-test clean-build swift-test tsan kernel-test apps new-check" scripts/gates-lib.sh
-check_gates "clean-build swift-test tsan kernel-test apps new-check" Package.swift
-check_gates "clean-build swift-test tsan kernel-test apps new-check fuzz" Sources/KajoDev/Client.swift
-check_gates "check-tier-test clean-build swift-test tsan kernel-test apps new-check fuzz" scripts/fuzz.sh
-check_gates "clean-build swift-test tsan kernel-test apps new-check model-check" models/Package.swift
-core="clean-build swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak fuzz apps kernel-test new-check ab matrix-mac matrix-iphone"
+# Check time (docs/modules/check-time.md): one sanitizer gate a tier, the
+# loaded one. Before: the Swift tier's was tsan, the core tier ran both.
+check_gates "check-tier-test clean-build swift-test tsan-load kernel-test apps new-check" scripts/gates-lib.sh
+check_gates "clean-build swift-test tsan-load kernel-test apps new-check" Package.swift
+check_gates "clean-build swift-test tsan-load kernel-test apps new-check fuzz" Sources/KajoDev/Client.swift
+check_gates "check-tier-test clean-build swift-test tsan-load kernel-test apps new-check fuzz" scripts/fuzz.sh
+check_gates "clean-build swift-test tsan-load kernel-test apps new-check model-check" models/Package.swift
+check_gates "clean-build swift-test tsan-load kernel-test apps new-check" Tests/KajoCompilerTests/TestSize.swift
+core="clean-build swift-test-load tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak fuzz apps kernel-test new-check ab matrix-mac matrix-iphone"
+for l in "$(gates Package.swift)" "$(gates Sources/KajoVM/Marking/X.swift)"; do
+  n=$((n + 1)); [[ " $l " != *" tsan "* && $(print -r -- " $l " | grep -o ' tsan-load ' | wc -l | tr -d ' ') == 1 ]] \
+    || { print "FAIL: a tier does not run exactly one sanitizer gate, the loaded one: $l"; fail=1 }
+done
 check_gates "$core" Sources/KajoVM/Marking/Marker.swift
 check_gates "check-tier-test $core" Sources/KajoVM/Marking/Marker.swift scripts/weekly.sh
-for f in check-tier.sh check-tier-test.sh gates-lib.sh weekly.sh fuzz.sh fuzz-gate.sh shell-matrix.sh shell-report.py margins.py; do
+for f in check-tier.sh check-tier-test.sh gates-lib.sh weekly.sh fuzz.sh fuzz-gate.sh shell-matrix.sh shell-report.py margins.py broken-variants.sh test-bundles.sh; do
   n=$((n + 1)); [[ $(gates scripts/$f) == check-tier-test* ]] || { print "FAIL: scripts/$f does not owe check-tier-test"; fail=1 }
 done
 n=$((n + 1)); [[ $(gates scripts/device.sh) != *check-tier-test* ]] || { print "FAIL: scripts/device.sh owes check-tier-test"; fail=1 }
@@ -118,7 +125,9 @@ n=$((n + 1)); grep -q -- '--skip randomPrograms' $root/justfile && grep -q -- '-
 # Change 6: the weekly is the full set: every core gate (with every
 # conditional one), the device rows as `devices`, and plain swift-test.
 coreall=$(gates Sources/KajoVM/Marking/X.swift scripts/gates-lib.sh models/x)
-for g in ${=coreall} swift-test; do
+# Check time: the weekly keeps both sanitizer gates (the tiers run the
+# loaded one only) and runs the by-hand broken variants.
+for g in ${=coreall} swift-test tsan broken-variants; do
   [[ $g == matrix-iphone ]] && g=devices
   n=$((n + 1))
   [[ " $weekly " == *" $g "* ]] || { print "FAIL: the weekly run lacks $g"; fail=1 }
@@ -291,6 +300,54 @@ n=$((n + 1)); [[ $(prevdir $ms/weekly.log $ms/w/b) == $ms/w/a ]] || { print "FAI
 : > $ms/weekly.log
 n=$((n + 1)); [[ -z $(prevdir $ms/weekly.log $ms/w/b) ]] || { print "FAIL: an empty weekly.log gave a previous run"; fail=1 }
 rm -rf $ms
+# Check time (docs/modules/check-time.md, part 4): the by-hand variants'
+# runner judges an output as recorded: a variant expected to fail fails
+# with its message (a pass, or a failure without the message, is the
+# runner's failure), a forcing condition passes with its line; the list
+# has every variant; a usage error is 2.
+bv=$(mktemp -d ${TMPDIR:-/tmp}/kajo-broken-XXXXXX)
+print 'error: Process ... exited with unexpected signal code 11' > $bv/crash.txt
+print '✔ Test theToolsDevelopTheImageTheyRunIn() passed after 9.1 seconds.' > $bv/pass.txt
+judged() { $root/scripts/broken-variants.sh --judge "$@" }
+for c in "fail|exited with unexpected signal code 11|1|crash.txt|ok" "fail|exited with unexpected signal code 11|0|crash.txt|FAILED" \
+         "fail|exited with unexpected signal code 11|1|pass.txt|FAILED" "pass|theToolsDevelopTheImageTheyRunIn() passed|0|pass.txt|ok" \
+         "pass|theToolsDevelopTheImageTheyRunIn() passed|1|pass.txt|FAILED" "pass|theToolsDevelopTheImageTheyRunIn() passed|0|crash.txt|FAILED"; do
+  local -a w=("${(@s:|:)c}")
+  got=$(judged ${w[1]} "${w[2]}" ${w[3]} $bv/${w[4]})
+  n=$((n + 1)); [[ $got == ${w[5]} ]] || { print "FAIL: broken-variants judged '$c' as $got"; fail=1 }
+done
+n=$((n + 1)); [[ $($root/scripts/broken-variants.sh --list | tr '\n' ' ') == "delay-end shell-close closed-shell-runTurn closed-shell-spawn closed-shell-liveProcessCount tools-hold-install tools-hold-loop " ]] \
+  || { print "FAIL: broken-variants --list: $($root/scripts/broken-variants.sh --list | tr '\n' ' ')"; fail=1 }
+$root/scripts/broken-variants.sh > /dev/null 2>&1; rc1=$?
+$root/scripts/broken-variants.sh --judge fail x > /dev/null 2>&1; rc2=$?
+n=$((n + 1)); [[ $rc1 == 2 && $rc2 == 2 ]] || { print "FAIL: broken-variants' usage errors exit $rc1 $rc2, want 2"; fail=1 }
+# The shards side by side (part 2): with a stand-in swift, the build runs
+# once, each shard runs with --skip-build --ignore-lock and its own
+# selection (together every test once: the VM tests but the random
+# programs, the random programs but the resumed ones, the resumed ones,
+# the compiler tests), the output is the
+# shards' in order, and a failing shard fails the run.
+cat > $bv/swift <<'STANDIN'
+#!/bin/zsh
+print -r -- "$*" >> ${0:h}/calls.txt
+[[ $1 == build ]] && exit 0
+print "shard ran: $*"
+[[ "$*" == *${STANDIN_FAIL:-none}* ]] && exit 1
+exit 0
+STANDIN
+chmod +x $bv/swift
+KAJO_SWIFT=$bv/swift $root/scripts/test-bundles.sh $bv/out/x --sanitize=thread > $bv/run.txt 2>&1; rc=$?
+want="test --skip-build --ignore-lock --sanitize=thread --filter KajoCompilerTests/test --skip-build --ignore-lock --sanitize=thread --filter KajoVMTests --skip randomPrograms/test --skip-build --ignore-lock --sanitize=thread --filter randomPrograms --skip randomProgramsResume/test --skip-build --ignore-lock --sanitize=thread --filter randomProgramsResume/"
+n=$((n + 1)); [[ $rc == 0 && $(grep -c '^build --build-tests --sanitize=thread$' $bv/calls.txt) == 1 \
+  && $(grep '^test ' $bv/calls.txt | sort | tr '\n' '/') == $want \
+  && $(grep '^shard ran' $bv/run.txt | sed 's/.*--filter //' | tr '\n' '/') == "KajoVMTests --skip randomPrograms/randomPrograms --skip randomProgramsResume/randomProgramsResume/KajoCompilerTests/" ]] \
+  || { print "FAIL: test-bundles over a stand-in (rc=$rc): $(cat $bv/calls.txt $bv/run.txt | tr '\n' '/')"; fail=1 }
+STANDIN_FAIL=KajoCompilerTests KAJO_SWIFT=$bv/swift $root/scripts/test-bundles.sh $bv/out/x > $bv/run2.txt 2>&1; rc=$?
+n=$((n + 1)); [[ $rc != 0 && $(grep -c '^shard ran' $bv/run2.txt) == 4 && $(grep -c 'shard compiler rc=1' $bv/run2.txt) == 1 ]] || { print "FAIL: test-bundles with a failing shard: rc=$rc"; fail=1 }
+rm -rf $bv
+# The weekly run sets the full size for every gate; a tier sets nothing.
+n=$((n + 1)); grep -q '^export KAJO_TEST_SIZE=full$' $root/scripts/weekly.sh && ! grep -q 'KAJO_TEST_SIZE' $root/scripts/check-tier.sh $root/scripts/gates-lib.sh \
+  || { print "FAIL: KAJO_TEST_SIZE=full is not the weekly's alone"; fail=1 }
 # docs only: exit 0 at once, saying so.
 out=$(print docs/x.md | $root/scripts/check-tier.sh --paths -); rc=$?
 n=$((n + 1))

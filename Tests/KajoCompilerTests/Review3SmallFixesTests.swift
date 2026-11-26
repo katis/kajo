@@ -377,11 +377,13 @@ final class LateReplyTarget: @unchecked Sendable {
         }
     }
     defer { release.store(true, ordering: .relaxed) }
-    // Every thread the queue may have spins (bounded: something that must
-    // come waits long), then the canary is queued behind them.
-    let start = ShellVM.now()
-    while spinning.load(ordering: .relaxed) == 0, ShellVM.now() - start < 120_000_000_000 { usleep(1000) }
-    printMargin("hostTimer.queueSpins", .deadline, value: Double(ShellVM.now() - start) / 1e9, bound: 120)
+    // The canary is queued behind the spinners, and that it has not run is
+    // the test's whole evidence that the queue is full. Check time
+    // (docs/modules/check-time.md, part 3): this used to wait, up to 120 s,
+    // for one spinner to start first. In the suite GCD started no thread for
+    // the queue for 45 s (plain) and past 120 s (under the sanitizer, every
+    // run), and the test passed on the canary alone; the wait asked nothing
+    // the canary does not.
     usleep(200_000)
     DispatchQueue.global().async { canary.store(true, ordering: .relaxed) }
     usleep(200_000)

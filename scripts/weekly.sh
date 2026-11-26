@@ -39,10 +39,17 @@
 # run's directory with the last finished weekly run's directory as
 # --previous (gl_weekly_previous_dir; quick runs not counted). It marks thin
 # margins and fails nothing: failed= does not depend on it.
+#
+# Check time (docs/modules/check-time.md): the weekly run is where every
+# test runs at its full size. It exports KAJO_TEST_SIZE=full for every gate
+# (the tiers leave it unset: their sizes), and summary.md says the size each
+# test gate's suite printed (`kajo-test-size` lines). It runs the by-hand
+# broken variants that need no source change (`broken-variants`,
+# scripts/broken-variants.sh) and lists them in a section of their own.
 set -uo pipefail
 root=${0:A:h:h}
 gates=(check-tier-test clean-build swift-test swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc
-       test-release model-check soak fuzz apps kernel-test new-check ab)
+       test-release model-check soak fuzz apps kernel-test new-check ab broken-variants)
 if [[ ${1:-} == --gates ]]; then print -r -- "$gates matrix-mac devices"; exit 0; fi
 WROOT=${KAJO_WEEKLY_ROOT:-$HOME/kajo-weekly}
 QUICK=${KAJO_WEEKLY_QUICK:-0}
@@ -75,6 +82,7 @@ note=
 [[ $dirty == 0 ]] || note="$note the tree is dirty ($dirty paths, run as it is);"
 wlog "weekly start $out commit $(git rev-parse --short HEAD) quick=$QUICK devices=$DEVICES${note:+ NOTE:$note}"
 
+export KAJO_TEST_SIZE=full
 GL_ROOT=$root
 GL_OUT=$out
 source $root/scripts/gates-lib.sh
@@ -134,6 +142,16 @@ fi
         res[name] = r; tm[name] = t; nt[name] = note; if (!(name in seen)) { seen[name] = 1; order[++n] = name } }
       END { for (i = 1; i <= n; i++) { k = order[i]; x = nt[k]; if (k in reason) x = reason[k]
               printf "| %s | %s | %s | %s |\n", k, res[k], tm[k], x } }'
+  print "\n## Test sizes\n"
+  print "KAJO_TEST_SIZE=$KAJO_TEST_SIZE for every gate. The size each suite printed:\n"
+  for f in $out/*.txt(N); do
+    sz=$(grep -ho 'kajo-test-size size=[a-z]* sized=[0-9]*' $f 2>/dev/null | sort | uniq -c | sed 's/^ *//' | tr '\n' ';')
+    [[ -n $sz ]] && print -r -- "- ${f:t:r}: ${sz%;}"
+  done
+  if [[ -f $out/broken-variants.txt ]]; then
+    print "\n## By-hand broken variants (scripts/broken-variants.sh)\n"
+    grep -E '^broken-variants?: ' $out/broken-variants.txt | sed 's/^/    /'
+  fi
   print "\n## Margins\n"
   prev=$(gl_weekly_previous_dir $WROOT/weekly.log $out)
   if [[ -n $prev ]]; then

@@ -103,7 +103,15 @@ func promotionPastTheReserveKeepsObjectsYoungAndTheProgramFinishes(_ mode: Young
     let n: Int64 = underThreadSanitizer ? 20_000 : 60_000
     var ps: [Oop] = []
     for _ in 0..<4 { ps.append(rt.spawn("ring:", [int(n)])) }
-    rt.waitAllTerminated(underThreadSanitizer ? 600 : 120, margin: "reserve.promotionPastTheReserve.\(mode).\(reserve)")
+    // Check time (docs/modules/check-time.md, part 3): the four rings are a
+    // fixed amount of work, so a clock on the whole wait measured the CPU
+    // the test was given (91 to 107 s of 120 in the loaded plain bundle, 0.6
+    // to 0.7 idle). The wait ends when the rings end and fails only when the
+    // collector counts nothing (no stop, no young collection: these rings
+    // collect at every eden) for the old bound, the stall tests' rule.
+    let d = StallDiag(rt, "reserve.\(mode).\(reserve)")
+    let ended = d.waitProgress("terminated", quiet: underThreadSanitizer ? 600 : 120) { rt.vm.liveProcessCount == 0 }
+    #expect(ended, "\(rt.vm.liveProcessCount) Processes still live: \(d.full("fail"))")
     for p in ps { #expect(rt.result(p) == ringSum(n)) }
     let nc = rt.vm.nurseryCounters
     let yc = rt.vm.youngCounters

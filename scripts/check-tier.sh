@@ -22,6 +22,8 @@
 #              Sources/KajoAOT/ (AOT 1: the native engine and its generator);
 #              every gate but plain swift-test (gate speed: the owner's
 #              decision of 2026-11-13, the Swift tier and the weekly keep it)
+#              and plain tsan (check time, 2026-11-25: one sanitizer gate a
+#              tier, the loaded one; the weekly keeps both)
 #   swift      anything that is in no other tier (Swift outside the core,
 #              Package.swift, Tests/, scripts/, justfile, apps/ but its
 #              Smalltalk, models/, experiments/ code ...)
@@ -32,7 +34,8 @@
 # gates-lib.sh, weekly.sh, fuzz.sh, fuzz-gate.sh; since main-flips the
 # matrix gates' shell-matrix.sh and shell-report.py, whose --bar the test
 # reads over fixture rows; since the weekly margins margins.py, whose
-# fixtures the test compares byte for byte) owes check-tier-test
+# fixtures the test compares byte for byte; since check time the by-hand
+# variants' runner and the bundles' script) owes check-tier-test
 # first; one that touches models/ owes model-check (the core tier always
 # runs it). The fuzzers are one gate, `fuzz`, over the targets owed.
 set -uo pipefail
@@ -112,7 +115,7 @@ for f in $files; do [[ $f == models/* ]] && models=1; done
 # test is owed by a diff that touches a gate script.
 tiertest=0
 for f in $files; do
-  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh|shell-matrix.sh|shell-report.py|margins.py) ]] && tiertest=1
+  [[ $f == scripts/(check-tier.sh|check-tier-test.sh|gates-lib.sh|weekly.sh|fuzz.sh|fuzz-gate.sh|shell-matrix.sh|shell-report.py|margins.py|broken-variants.sh|test-bundles.sh) ]] && tiertest=1
 done
 
 print "check-tier: ${#files} files from $source_desc"
@@ -139,7 +142,10 @@ case $tier in
   smalltalk)
     gates=(build-image dev-image kernel-test tools-test compiler-tests golden mac-shell-tests) ;;
   swift)
-    gates=(clean-build swift-test tsan kernel-test apps new-check)
+    # Check time (docs/modules/check-time.md, decided under the owner's
+    # delegation): a tier runs one sanitizer gate, the loaded one, at the
+    # tiers' sizes; the weekly run keeps tsan and every full size.
+    gates=(clean-build swift-test tsan-load kernel-test apps new-check)
     (( ${#fuzzers} )) && gates+=(fuzz)
     (( models )) && gates+=(model-check) ;;
   core)
@@ -147,7 +153,7 @@ case $tier in
     # 2026-11-13; the Swift tier and the weekly run keep it), the four
     # fuzzers are one gate, and test-release leaves the random programs to
     # soak, which must follow it (scripts/check-tier-test.sh checks that).
-    gates=(clean-build swift-test-load tsan tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak
+    gates=(clean-build swift-test-load tsan-load ios-check arc-check golden native-golden native-kernel-test native-cc test-release model-check soak
            fuzz apps kernel-test new-check ab matrix-mac matrix-iphone) ;;
 esac
 [[ $tier == (swift|core) ]] && (( tiertest )) && gates=(check-tier-test $gates)
