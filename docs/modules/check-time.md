@@ -299,3 +299,163 @@ Build the recommended option; decisions only.
 2. Whether a THIN margin in a tier's own table should fail `just check`
    once this module leaves none. Recommended: not yet; read two weekly
    runs first.
+
+## As built
+
+Built from 2026-11-25 by one build agent from this brief. Work
+files in `~/kajo-scratch/check-time/` (written `$CT/` below). The
+toolchain first on PATH: swiftly's swift.org 6.4.2 (`swift`, `clang` from
+`~/.swiftly/bin`), Homebrew's `python3`; `$CT/work/env.txt`.
+
+### Part 1: where the time is (2026-11-25 to 26)
+
+**The rules** (`$CT/part1/rules.txt`, written 15:51 on 2026-11-25 and
+copied with its time to `rules.copy.txt` before any run of this module;
+one amendment at 15:56, before the run it touches, copied as
+`rules.copy2.txt`). In short: (1) a test made smaller keeps its
+assertions, still reaches the edge it asserts and still fails its broken
+variant; a claim over every X is made smaller in a tier only where another
+gate of the tier runs all of X, and under that rule a sanitizer gate may
+leave a test to the weekly run when the tier's plain gate runs it whole;
+(2) a test leaves a tier's gate only into the tests-per-gate table and the
+weekly run, never out of the weekly run; (3) the targets of the bar, from
+an empty scratch path; (4) the part count by decision 34's method, five
+runs at two parts and three at three, four and six, every planned run run;
+(5) the thin waits from those five runs and five runs of the plain VM
+bundle under twelve loops; (6) body times from an instrumented copy.
+
+**How it was measured.** `$CT/part1/instrument.py` makes a copy of 4f9c364
+(`git archive`) whose every `@Test` body prints one `kajo-body` line when it
+ends (684 bodies; no other change but the amendment's diagnostic print in
+the turn-overrun test). `measure.sh` ran, one after another on the quiet
+machine: one plain `swift test` and one `swift test --sanitize=thread`, each
+from an empty scratch path; five runs of the VM bundle in a plain build
+under twelve loops; and the compiler bundle under the sanitizer and twelve
+loops five times at two parts and three times each at three, four and six
+(`runs/`, `measure.log`; 23 runs, 15:53 on 2026-11-25 to 04:42 on 2026-11-26). `bodies.py`,
+`groups.py` and `kclasses.py` make the tables; `runs/cpu.log` samples the
+machine's CPU every 30 s.
+
+**Where the time is: the plain gate** (`q-plain-bodies.md`): 781 s, of
+which the build from an empty scratch path 26.6 s (3 percent). The VM
+bundle 654.8 s (485 tests, 829 bodies summing to 7811 s), the compiler
+bundle 98.1 s. The random programs are 5242 of the 7811 body seconds
+(natively 1937, resumed across engines 1315, against the model 1155, from a
+snapshot 835), every native seed compiled cold (an empty scratch path has
+no native cache). The stall tests are 772. Under twelve busy loops the same
+bundle took 705 to 725 s (five runs, `vm-load-*`): **the plain VM bundle
+waits on its pool of test threads (one per core), not on the cores**, and
+the random programs, started last, end it (the snapshot test under
+`stopEveryPoll`, 404 s, started at 251 s). `aFailureStopsTheVMUnderTrap`
+reads 545 s; it is an exit test whose `await` resumes only when a pool
+thread is free, not work.
+
+| rank | body s | test (plain, quiet) |
+|--:|--:|---|
+| 1 | 545.1 | VerifierTests.aFailureStopsTheVMUnderTrap (exit test: pool wait) |
+| 2 | 403.6 | randomProgramsResumeFromASnapshot(stopEveryPoll) |
+| 3 | 328.7 | randomProgramsResumeAcrossEngines(stopEveryPoll,true) |
+| 4 | 326.3 | randomProgramsResumeAcrossEngines(stopEveryPoll,false) |
+| 5 | 290.6 | randomProgramsResumeFromASnapshot(collectEveryAllocation) |
+| 6 | 271.4 | randomProgramsAgreeWithTheirModel(stopEveryPoll) |
+| 7 | 245.2 | randomProgramsAgreeWithTheirModel(collectEveryAllocation) |
+| 8 | 234.5 | aFullHeapFallsBackJustifiedThenRunsOutOfMemory |
+| 9 | 221.5 | randomProgramsAgreeWithTheirModelNatively(collectEveryAllocation) |
+| 10 | 174.4 | randomProgramsResumeAcrossEngines(collectEveryAllocation,false) |
+
+The top fifty per bundle and their sums are in `q-plain-bodies.md`.
+
+**Where the time is: the sanitizer gate** (`q-tsan-bodies.md`): 3404 s,
+of which the build 33.0 s (1 percent). The VM bundle 1185.9 s (sum of
+bodies 13 305 s; the machine at 85 percent user, 10 system, 5 idle over it:
+**CPU-bound**), then the compiler bundle 2173.5 s (sum 11 998 s; 44 percent
+user and 49 idle over it, 17 idle in its first 860 s and 70 idle after).
+The compiler bundle is the kernel's two parts (1949 and 2111 s, their test
+bodies 1960 and 2117 s, ending the bundle) with the rest of the bundle done
+by 1706 s, where the serialized `TypeCheckerTests` suite ends
+(`theTypesPackageBuildsAndItsTestsPass` 494 s, then
+`theDiagnosticsRequestAnswersItsScopesAndTheEventFollowsAChange` 1047 s).
+In the VM bundle: the stall tests 3990 body seconds (30 percent; the full
+heap 784, the entry-stall gate 572, the slowed marker four times about 320),
+then concurrent marking 953, the relocation kernels 861, the kernel tests
+under a collection at every allocation 828, the verifier faults 600, the
+extreme integers 554, the native random programs 539.
+
+The kernel's SUnit tests under the sanitizer, quiet (`q-tsan-kernel.md`;
+264 tests, 4058 s):
+
+| class | s | | test | s |
+|---|--:|---|---|--:|
+| CompilerTest | 1733.3 | | CompilerTest>>testALongChainIsWalkedByALoop | 879.1 |
+| LiveCompileTest | 876.1 | | LiveCompileTest>>testEveryMethodMakesAsInstalled | 873.3 |
+| LargeObjectTest | 389.5 | | CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid | 847.0 |
+| ClassFuzzTest | 331.7 | | ClassFuzzTest>>testSeededSpecificationsAreRefusedOrAccepted | 280.4 |
+| TypeSyntaxTest | 254.0 | | TypeSyntaxTest>>testTypesCompileToNothing | 247.3 |
+| TonelTest | 210.1 | | TonelTest>>testTheReaderReadsWhatTheWriterWrote | 182.3 |
+| DevelopmentTest | 102.3 | | LargeObjectTest>>testStringsPastTheCountField | 127.4 |
+
+Three tests are 2600 of the 4058 s, each one Smalltalk test that no split
+divides; `TypeSyntaxTest>>testTypesCompileToNothing` (247 s) is missing
+from `KernelTestParts.measuredSeconds` and was weighed as 0.32 s.
+
+**The part count** (rule 4; `count-parts.md`): the compiler bundle under
+the sanitizer and twelve loops.
+
+| parts | runs | failed | bundle s | longest kernel part s | `TypeCheckerTests` chain s |
+|--:|--:|--:|--:|--:|--:|
+| 2 | 5 | 0 | 2836 to 2926 | 2713 to 2739 | 2300 |
+| 3 | 3 | 0 | 2551 to 2577 | 2317 | 2393 |
+| 4 | 3 | 0 | 2589 to 2663 | 1912 | 2561 |
+| 6 | 3 | 0 | 2698 to 2710 | 1809 (one test) | 2632 |
+
+No count failed: the reconnect test passed in all 14 runs, its quiet stretch
+28.4 to 35.1 s of 60. Decision 34's limit (five kernel VMs starving the
+host's timers on the global queue) is gone with the host's timers since the
+third review's small fixes, part 1. **What limits the count now is the CPU
+and one serial chain, not a failure**: under load each kernel test alone
+takes twice its quiet time (the long chain 1809 s at six parts against 879
+quiet), so more parts make each part slower, and from four parts on the
+bundle ends with the serialized `TypeCheckerTests` suite (the types
+package's tests 780 to 907 s, then the diagnostics test 1355 to 1536 s).
+Three runs with 0 failures are a reading, not a rate (rule 4c). The Delay
+timers on the global queue (the next module's) were not seen to limit
+anything here.
+
+**The build's share**: 26.6 s of the plain gate, 33.0 s of the sanitizer
+gate, from empty scratch paths; under 4 percent of either.
+
+**The six thin waits** (rule 5: the five two-part runs above for the
+compiler bundle's, the five plain VM-bundle runs under twelve loops for
+the VM bundle's; each value from its `kajo-margin` line, `thin.py`):
+
+| wait | what it waits for | who makes it true | five loaded values | bound |
+|---|---|---|---|--:|
+| `tools.roundtrip.class.hierarchy` | the browser's first request's reply, from the send to its dispatch in the tools' event loop | the image's protocol Process computes it on a background worker; the test's thread turns the main worker that dispatches it | 35.4, 37.2, 37.0, 36.8, 41.7 s (sanitizer); 35 to 42 in all 14 runs | 30 s |
+| the same, `(retried)` | the same request sent again after the reconnect test's dropped link, counted from its first send | as above, after the outage | 25.9, 29.5, 28.2, 29.7, 32.3 s | 30 s |
+| `tools.roundtrip.process.frames` | the debugger's frames reply | the protocol Process | 21.0, 23.7, 23.6, 21.4, 23.0 s | 30 s |
+| `hostTimer.queueSpins` | one of the test's own spinner blocks to start on the global queue | GCD, when it starts a thread for the queue | 120.0 s in every run but one (0.017 s at four parts) | 120 s |
+| `reserve.promotionPastTheReserve.*` | the four rings to end | the four background workers, a fixed amount of work | 101.8, 98.7, 106.5, 96.3, 93.7 s (largest of the four cases, plain, twelve loops; 76.5 to 78.5 quiet) | 120 s |
+| `main.turnOverrunCpu` | (a ceiling) the largest CPU overrun of 300 turns | the main worker's deadline check, every 1024 polls | 0.075, 0.073, 0.082, 0.049, 0.078 ms | 0.2 ms |
+
+The tag test's `ready` in the same runs: 8.7 to 10.5 s quiet of 60, 25.1
+to 26.1 s in all of 300. The turn-overrun diagnostic (rule 6d): in every
+run the three largest overruns were turns with one slice, preempted at the
+deadline, no stop, no park, CPU time equal to wall (1.03 to 1.08 ms of a
+1 ms budget): the overrun is the time from the deadline to the next deadline
+check. The failing run of decision 54 (0.38 ms) was not seen again.
+
+**Which sanitizer gate found each failure** (the brief's condition for
+"one sanitizer gate a tier"): every `end tsan` or `end tsan-load` line with
+a non-zero status in `~/kajo-weekly/*/gates.log` and every module's
+`gates.log` under `~/kajo-scratch/`, each failing test read from the gate's
+own output (`$CT/part1/notes.md`): 19 failing gate runs, 0 sanitizer
+reports in every one. One was a product fault, decision 53's (a method seen
+before its source), and both gates found it (`tsan` on 2c13ed3, where
+`tsan-load` passed; `tsan-load` 2 of 2 on aeecb55). Every other failure
+was a test's own fault (a timer or a wait on a clock, an edge not reached,
+a thin race test). Three of those were seen under `tsan` and never under
+`tsan-load`: the ring stall's edge not reached (b478aaf, fixed in decision
+36), the random programs' scavenge check under `exhaustedReserve` (aeecb55,
+thin on its starting commit too, decision 52) and the interning race test
+(30e14bd, which plain `swift-test` failed too, decision 39). **No fault of
+the product was found by `tsan` alone.** The decision is built.
