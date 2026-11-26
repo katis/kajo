@@ -11,8 +11,9 @@
 #
 # The shards cover every test once: the VM tests but the random programs;
 # the random programs but the resumed ones; the resumed random programs
-# (randomProgramsResume...); the compiler tests but the tools'; then, alone,
-# the tools' tests (ToolsTests, PhoneTransportTests, ProjectDirectoryTests). A process's tests share one pool
+# (randomProgramsResume...); the compiler tests but the tools' and the
+# protocol's; then, alone, those (ToolsTests, PhoneTransportTests,
+# ProjectDirectoryTests, DebuggerProtocolTests, DevelopmentAnswersTests). A process's tests share one pool
 # of as many threads as cores (Swift Testing), and in a plain build the VM
 # bundle waited on that pool, not on the cores (part 1: 655 s quiet, 705 to 725 s
 # under twelve busy loops); each shard has a pool of its own.
@@ -27,11 +28,13 @@ prefix=${1:a}; shift
 mkdir -p ${prefix:h}
 cd $root
 # name and the selection, as swift test arguments. The first four run side
-# by side; the tools' tests then run alone (the second phase): with the VM
-# tests beside them, the remote target's frames reply in the reconnect test
-# ran past the tools' 30 s request timeout under the loaded sanitizer, 2 runs
-# of 2 (docs/modules/check-time.md, part 3, item 6).
-tools='ToolsTests|PhoneTransportTests|ProjectDirectoryTests'
+# by side; the tests that ask a target for a stopped Process's frames then
+# run alone (the second phase): with the VM tests beside them, the remote
+# target's frames reply in the reconnect test ran past the tools' 30 s request
+# timeout under the loaded sanitizer, 2 runs of 2, and the protocol tests'
+# frames waits read up to 49 s of 60 (docs/modules/check-time.md, part 3,
+# item 6).
+tools='ToolsTests|PhoneTransportTests|ProjectDirectoryTests|DebuggerProtocolTests|DevelopmentAnswersTests'
 shards=("vm:--filter KajoVMTests --skip randomPrograms" "random:--filter randomPrograms --skip randomProgramsResume"
         "resume:--filter randomProgramsResume" "compiler:--filter KajoCompilerTests --skip $tools")
 later=("tools:--filter $tools")

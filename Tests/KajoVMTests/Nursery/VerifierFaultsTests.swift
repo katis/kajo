@@ -123,7 +123,13 @@ private func keptAcrossRun(_ mode: YoungMode, rescan: Bool) throws -> (Runtime, 
     let n: Int64 = 20_000
     var ps: [Oop] = []
     for _ in 0..<4 { ps.append(rt.spawn("ring:", [int(n)])) }
-    rt.waitAllTerminated(600, margin: "verifierFaults.keptAcrossRun.\(mode).\(rescan)")
+    // Check time (docs/modules/check-time.md, part 3): a clock on the whole
+    // wait measured the CPU the rings were given, 0.80 to 0.85 of 600 s in
+    // the tier's loaded sanitizer gate once the suite ran as shards. The
+    // wait ends when the rings end and fails only when the collector counts
+    // nothing for 600 s (`StallDiag.waitProgress`, the stall tests' rule).
+    let d = StallDiag(rt, "verifierFaults.keptAcrossRun.\(mode).\(rescan)")
+    #expect(d.waitProgress("terminated", quiet: 600) { rt.vm.liveProcessCount == 0 }, "\(rt.vm.liveProcessCount) Processes still live: \(d.full("fail"))")
     for p in ps { #expect(rt.result(p) == (n - 1023...n).reduce(0, +)) }
     let (runs, failures) = verifierCounts(rt)
     return (rt, rt.vm.nurseryCounters, runs, failures, String(format: "%.1f", Double(nanoseconds() - t0) / 1e9))
