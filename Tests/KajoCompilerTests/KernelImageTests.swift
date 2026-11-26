@@ -229,7 +229,10 @@ let kernelTestParts: [[String]] = KernelTestParts.split(kernelTestsRun, into: Ke
         // and say so, a checked build's do not (`runKernelTests`).
         let summary = report.events.last { $0["kind"] as? String == "gc" && $0["collection"] as? String == "summary" }
         let verify = summary?["verify"] as? String, verifies = summary?["verifies"] as? Int ?? 0
-        print("kernel part \(part): verify=\(verify ?? "-") verifies=\(verifies)")
+        // The known faults, part 1: how late the part's Delays fired.
+        let delays = ["delaysFired", "delayLateSumUs", "delayLateMaxUs", "delaysLate10ms", "delaysLate100ms"]
+            .map { "\($0)=\((summary?[$0] as? Int).map(String.init) ?? "-")" }.joined(separator: " ")
+        print("kernel part \(part): verify=\(verify ?? "-") verifies=\(verifies) \(delays)")
         #expect(verify == (checkedBuild ? "stops" : "all"), "part \(part): verify=\(verify ?? "-")")
         if !checkedBuild { #expect(verifies > 0, "part \(part): verifies=\(verifies)") }
         for e in report.events {

@@ -279,7 +279,7 @@ public enum Headless {
         }
         let c = image.om.counters
         let ts = clock_gettime_nsec_np(CLOCK_REALTIME) / 1000
-        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations),\"verify\":\"\(options.level.name)\",\"verifies\":\(c.verifierRuns),\"weakOnlyCopies\":\(vm.youngCounters.weakOnlyCopies),\"ycPromoted\":\(vm.youngCounters.promotedObjects)}".utf8))
+        events(Array("{\"v\":1,\"kind\":\"gc\",\"ts\":\(ts),\"collection\":\"summary\",\"pauses\":\(scavenges + full + other),\"scavenges\":\(scavenges),\"full\":\(full),\"collections\":\(c.collections),\"allocations\":\(c.allocations),\"verify\":\"\(options.level.name)\",\"verifies\":\(c.verifierRuns),\"weakOnlyCopies\":\(vm.youngCounters.weakOnlyCopies),\"ycPromoted\":\(vm.youngCounters.promotedObjects),\(delayLatenessJSON(vm.delayLateness))}".utf8))
         if let error { return .failure(.vm(error)) }
         guard answer.isSmallInteger else { return .failure(.notAnInteger("\(answer)")) }
         return .success(answer.smallIntegerValue)
@@ -438,6 +438,8 @@ public enum Headless {
             ("internHoldMaxUs", unsafe String(format: "%.3f", Double(ic.longestHoldNs) / 1e3)),
             ("symbolVerifies", "\(ic.verifies)"), ("symbolVerifyMs", unsafe String(format: "%.3f", Double(ic.verifyNs) / 1e6)),
         ]
+        // The known faults, part 1: how late the Delays' timers fired.
+        report += delayLatenessFields(vm.delayLateness)
         report += nurseryReport(vm, stops: stops, ms: ms)
         report += markingReport(vm, stops: stops)
         report += relocationReport(vm)
@@ -463,6 +465,24 @@ public enum Headless {
                               "stopperQoSRaises", "internStops", "internStopNs", "internTtspNs", "internContended", "internWaitNs",
                               "symbolVerifierFailures", "youngOnMainFailures"].contains($0.name) },
         report: report)
+    }
+}
+
+extension Headless {
+    /// The known faults, part 1 (docs/modules/known-faults.md): the Delay
+    /// lateness counter's run-line fields.
+    static func delayLatenessFields(_ d: DelayLateness) -> [(String, String)] {
+        [("delaysFired", "\(d.fired)"),
+         ("delayLateMeanMs", d.fired == 0 ? "-" : unsafe String(format: "%.3f", d.meanMs)),
+         ("delayLateMaxMs", unsafe String(format: "%.3f", d.maxMs)),
+         ("delaysLate10ms", "\(d.late10ms)"), ("delaysLate100ms", "\(d.late100ms)")]
+    }
+
+    /// The same in the gc summary event (`kajo test`'s line, the kernel
+    /// test parts' line): the maximum in microseconds.
+    static func delayLatenessJSON(_ d: DelayLateness) -> String {
+        "\"delaysFired\":\(d.fired),\"delayLateSumUs\":\(d.sumNs / 1000),\"delayLateMaxUs\":\(d.maxNs / 1000),"
+            + "\"delaysLate10ms\":\(d.late10ms),\"delaysLate100ms\":\(d.late100ms)"
     }
 }
 

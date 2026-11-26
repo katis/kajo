@@ -199,3 +199,26 @@ The commits, this doc's "As built", the tests, and the hand-back map of
 2. The Symbols fault at a size no app reaches: fix, or record as a known
    limit? Recommended: fix when the cause is a missing trigger; record
    when it needs a new protocol.
+
+## As built
+
+Built from 7ba9643 by one build agent, 2026-11-27 onwards. Toolchain:
+swift.org 6.4.2 through swiftly, first on PATH, its `clang` too
+(`~/kajo-scratch/known-faults/env.txt`). Work files in
+`~/kajo-scratch/known-faults/`. The rules of part 1 were written at 00:48:51
+on 2026-11-27, before any number (`part1/rules.txt`, copied with its time as
+`part1/rules-copy-20261127-004854.txt`, `part1/rules-stamp.txt`).
+
+### Part 1a: the lateness counter (its own commit)
+
+Each Delay's timer notes fired minus due, both on the uptime clock, the
+fired time taken where the timer's block begins: `DelayLateness` in
+`Sources/KajoVM/Processes/External.swift`, kept in `VMLife`'s state under
+the lock the timer takes anyway (not a relaxed atomic as the brief's
+candidate had it: the lock is already there, and the cell outlives the VM, so
+the counter is readable after `destroy`). `VM.delayLateness` reads it. The
+run line carries `delaysFired`, `delayLateMeanMs`, `delayLateMaxMs`,
+`delaysLate10ms` and `delaysLate100ms`; the gc summary event `delaysFired`,
+`delayLateSumUs`, `delayLateMaxUs`, `delaysLate10ms`, `delaysLate100ms`;
+`kajo test` prints them on a line of its own and each kernel test part on its
+`kernel part N:` line.

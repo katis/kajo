@@ -29,6 +29,12 @@ import Synchronization
         /// Signals and roots refused because the VM had ended (a timer's
         /// included).
         var lateSignals: UInt64 = 0
+        /// The known faults, part 1 (docs/modules/known-faults.md): how late
+        /// each Delay's timer fired, fired minus due, both on the uptime
+        /// clock, taken where the timer's block began (not where the lock
+        /// was got). Kept under the cell's lock, which the timer takes
+        /// anyway; read after `destroy` too.
+        var lateness = DelayLateness()
     }
     private let state = Mutex(State())
     /// The broken variant (`TestSwitches.lateSignalsIgnoreEnd`), copied at
@@ -55,10 +61,12 @@ import Synchronization
     /// A Delay's timer was armed (on a VM thread: the VM lives).
     func armTimer() { state.withLock { $0.timersPending += 1 } }
 
-    /// A Delay's timer fired: `body` signals, if the VM still lives.
-    func timerFired(_ body: () -> Void) {
+    /// A Delay's timer fired at `firedNs` and was due at `dueNs` (uptime
+    /// nanoseconds): `body` signals, if the VM still lives.
+    func timerFired(firedNs: UInt64, dueNs: UInt64, _ body: () -> Void) {
         state.withLock { s in
             s.timersPending -= 1
+            s.lateness.note(firedNs > dueNs ? firedNs - dueNs : 0)
             if s.ended && !ignoresEnd {
                 s.lateSignals &+= 1
                 return
@@ -104,10 +112,32 @@ import Synchronization
         life.whileLive { unsafe pushExternal(vm, sem, handle: handle) }
     }
 
-    /// A Delay's timer fired (`startDelay`).
-    func timerFired(_ sem: Oop, handle: Int?) {
-        life.timerFired { unsafe pushExternal(vm, sem, handle: handle) }
+    /// A Delay's timer fired (`startDelay`) at `firedNs`, due at `dueNs`.
+    func timerFired(_ sem: Oop, handle: Int?, firedNs: UInt64, dueNs: UInt64) {
+        life.timerFired(firedNs: firedNs, dueNs: dueNs) { unsafe pushExternal(vm, sem, handle: handle) }
     }
+}
+
+/// How late the Delays' timers fired (the known faults, part 1: the
+/// owner's counter before the Delay queue): a sum and a maximum of fired
+/// minus due, and how many were at least 10 ms and 100 ms late.
+struct DelayLateness: Sendable, Equatable {
+    var fired: UInt64 = 0
+    var sumNs: UInt64 = 0
+    var maxNs: UInt64 = 0
+    var late10ms: UInt64 = 0
+    var late100ms: UInt64 = 0
+
+    mutating func note(_ ns: UInt64) {
+        fired &+= 1
+        sumNs &+= ns
+        if ns > maxNs { maxNs = ns }
+        if ns >= 10_000_000 { late10ms &+= 1 }
+        if ns >= 100_000_000 { late100ms &+= 1 }
+    }
+
+    var meanMs: Double { fired == 0 ? 0 : Double(sumNs) / Double(fired) / 1e6 }
+    var maxMs: Double { Double(maxNs) / 1e6 }
 }
 
 /// Push a signal of `sem` onto the external queue and wake a worker to
@@ -245,8 +275,11 @@ func startDelay(_ vm: VMPointer, ms: Int, sem: Oop) -> Bool {
     if h < 0 && !unrooted { return false }
     let ref = unsafe VMRef(vm: vm, life: vm.pointee.life)
     ref.life.armTimer()
-    DispatchQueue.global().asyncAfter(deadline: .now() + .milliseconds(ms)) {
-        ref.timerFired(sem, handle: h < 0 ? nil : h)
+    let armed = DispatchTime.now()
+    let due = armed.uptimeNanoseconds &+ UInt64(max(ms, 0)) &* 1_000_000
+    DispatchQueue.global().asyncAfter(deadline: armed + .milliseconds(ms)) {
+        let fired = DispatchTime.now().uptimeNanoseconds
+        ref.timerFired(sem, handle: h < 0 ? nil : h, firedNs: fired, dueNs: due)
     }
     return true
 }

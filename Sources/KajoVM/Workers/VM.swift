@@ -130,6 +130,10 @@ private func flags(_ n: Int) -> UnsafeMutablePointer<Bool> {
     /// docs/modules/delay-outlives-vm.md; no host surface reads it).
     var timersPending: Int { life.snapshot.timersPending }
 
+    /// How late this VM's Delays fired (the known faults, part 1; readable
+    /// after `destroy`).
+    var delayLateness: DelayLateness { life.snapshot.lateness }
+
     /// Set before `start` (no closure built in `@MainActor` context may run
     /// on a VM thread; these are C function pointers).
     var hooks: VMHooks {

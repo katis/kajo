@@ -79,6 +79,10 @@ func runTests(_ args: [String]) -> Never {
     // beside the young collections' promotions.
     let weakOnly = summary?["weakOnlyCopies"] as? Int, promoted = summary?["ycPromoted"] as? Int
     FileHandle.standardError.write("kajo test: verify=\(options.level.name) verifies=\(verifies.map(String.init) ?? "-") weakOnlyCopies=\(weakOnly.map(String.init) ?? "-") ycPromoted=\(promoted.map(String.init) ?? "-")\n".data(using: .utf8)!)
+    // The known faults, part 1: how late the VM's Delays fired.
+    let delays = ["delaysFired", "delayLateMaxUs", "delaysLate10ms", "delaysLate100ms"]
+        .map { "\($0)=\((summary?[$0] as? Int).map(String.init) ?? "-")" }.joined(separator: " ")
+    FileHandle.standardError.write("kajo test: \(delays)\n".data(using: .utf8)!)
     // AOT 1: the native engine's counts (bound, interpreted, declined, switches).
     for e in events where e.starts(with: Array("{\"v\":1,\"kind\":\"native\"".utf8)) {
         FileHandle.standardError.write(Data(Array("native: ".utf8) + e + [10]))
