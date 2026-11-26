@@ -302,7 +302,7 @@ Build the recommended option; decisions only.
 
 ## As built
 
-Built from 2026-11-25 by one build agent from this brief. Work
+Built 2026-11-25 to 27 by one build agent from this brief. Work
 files in `~/kajo-scratch/check-time/` (written `$CT/` below). The
 toolchain first on PATH: swiftly's swift.org 6.4.2 (`swift`, `clang` from
 `~/.swiftly/bin`), Homebrew's `python3`; `$CT/work/env.txt`.
@@ -561,9 +561,92 @@ core module's): found, not fixed. The test now prints every field of its
 three largest turns, in its failure message too, so the next failure names
 its case.
 
-**5. The tag test's weekly failure.** Counted in the five loaded sanitizer
-runs of the final commit (rule written first: `$CT/work/rule-tag.txt`),
-below.
+**6. Waits the new layout made thin.** The tier's first run on 292b202
+(`$CT/292b202-check/gates.log`, `check-tier done swift failed=1 3087s`)
+failed `tsan-load` on `theToolsReconnectAfterADroppedLink`:
+"remoteDebuggerReady never held (quiet, activity -1): waited 60.0 s", and
+its table had two marks that part 1's had not: that wait at 60.0 of 60
+(PAST; 22 to 31 s in part 1's 14 runs, 40.7 in the candidate run) and
+`process.gcKeepsParkedProcessStacksAlive` at 105 of 120 s (THIN; 66 before).
+Both are the suite's shards running side by side: the compiler tests no
+longer have the machine to themselves after the VM tests. Not run again
+until it passed; investigated:
+- `remoteDebuggerReady`: the test drives only a remote client, and
+  `ToolsProbe class>>activity` counted the local one, so the wait's quiet
+  clause saw -1 throughout: a 60 s clock on the remote target's work. Now
+  `activity` counts every client in the image. Forced (the test alone under
+  the sanitizer, held on the efficiency cores with eight loops there,
+  `$CT/work/reconnect/`): before, the tier's line exactly ("quiet, activity
+  -1", 60.9 s); after, the wait sees the remote client (activity 3000) and
+  still fails, and its new companion probe (`remoteDebuggerReadyWhy`) says
+  why: "debuggers 1 lastIsRemote true state #stopped frames 0 remote true open
+  true pending 0 replies 3", the remote's `class.hierarchy` reply after 70 s.
+  The debugger opened and its frames request is gone without a reply: under
+  that forcing the remote's `process.frames` ran past the client's 30 s
+  timeout. A by-hand try that counted the remote VM's counters as activity
+  was backed out: they change for as long as a request pends there (the
+  request reaper's Delay), so the quiet clause became the 300 s ceiling. So
+  this wait's thinness is the remote's replies under load, the same shape
+  as item 1. The second tier run on 749fc70 (`$CT/749fc70-check/`, 3119 s)
+  failed the same way naturally, with the clauses: "debuggers 1 lastIsRemote
+  true state #stopped frames 0 ... pending 0 replies 3". The protocol tests'
+  own `process.frames` waits say what a frames reply costs: 12 s quiet under
+  the sanitizer and 0.4 s plain, 15 to 22 s in part 1's loaded runs and 28
+  to 36 s in these two (`protocol.process.frames.*`): the first frames reply
+  of a stop compiles every frame's method again to find its variables
+  (`DebugStop>>variablesOf:`, `Compiler class>>frameVariablesOf:`), and with
+  the VM tests beside it that passes the tools' 30 s request timeout. The
+  timeout does not grow, and making the frames reply cheaper is a change to
+  how a frame's variables are found (the next lever, an open question). Built
+  instead: the tools' three suites (`ToolsTests`, `PhoneTransportTests`,
+  `ProjectDirectoryTests`) run after the other shards, alone, as a second
+  phase of `scripts/test-bundles.sh` (0ae993f), the load they passed under
+  in part 1. The tier on 0ae993f passed (`$CT/0ae993f-check/gates.log`,
+  `check-tier done swift failed=0 3634s`, no THIN or PAST), and the five
+  loaded runs on it (`$CT/0ae993f-check-load-{1..5}/`) passed 5 of 5 (2478 to
+  2565 s, 0 reports) with two marks new: the protocol tests' frames waits
+  (`DebuggerProtocolTests`, `DevelopmentAnswersTests`) at 33 to 49 s of 60
+  (0.82 once; 21 to 22 s in part 1), the same frames reply; and
+  `verifierFaults.keptAcrossRun.*` at 0.80 to 0.85 of a 600 s clock on four
+  rings of fixed length. So the frames tests joined the second phase, and
+  `keptAcrossRun` waits on the collector's progress (quiet 600 s, as item 3;
+  its broken variant's test, `withoutTheRescanTheVerifierNamesAMovedBody`,
+  still passes by seeing the failures).
+
+**5. The tag test.** The tier on a880ce0 (`$CT/a880ce0-check/`, stopped
+after it: `tsan-load` `rc=1` at 2755 s, the other gates `rc=0`) failed
+`aClassDefinedIntoATagFromTheBrowserMovesWithItsTag` at its last step:
+"tagProbeRemoved never held (quiet, activity 15000): waited 141.9 s ... status
+'ClassDefinitionError: another Process holds ToolsTagProbe on its stack: try
+again when it has let go'", its round trips holding two `class.hierarchy`
+of 35.9 and 49.9 s. The VM refused the removal because a Process had the
+class on its stack (`Sources/KajoVM/ObjectModel/LiveClasses.swift`), and
+the line names no Process. Two Processes in that image hold classes on
+their stacks for long: a `class.hierarchy` request while it lists the
+classes, and the type service's checks, which the browser's first class
+selection starts (the whole image, then each change). A fix that waited for
+the browser's pending requests was built and measured, then backed out: it
+waited 39 s in a plain run behind the type checker's first whole-image
+diagnostics request (`$CT/work/tag/after-forced-*.txt`), and its forcing
+condition (a refresh asked just before the removal) did not fail without it
+in three plain runs (`$CT/broken/tag-unsettled/`), so neither its cause nor
+its evidence was seen. Built (1a68580): the failure line now says what may
+hold the class (`tagProbeRemovedWhy`: the requests the image is running,
+the type service's state and passes). The count under the rule written
+first (`$CT/work/rule-tag.txt`): the five loaded runs below. A reading: the
+weekly run's failure of 2026-11-23 was at another step (`definedInTag:`).
+This is a different failure of the same test, and with the type service
+holding a changed class while it rechecks it, the tools' own removal can be
+refused in a real session too; found, not fixed.
+
+1a68580 is the final code commit and every run below is on it.
+- `gcKeepsParkedProcessStacksAlive` waited for two churners of fixed length
+  under a 120 s clock on the whole wait; it now waits on the collector's
+  progress (`StallDiag.waitProgress`, quiet 120 s), as item 3.
+- `tools.roundtrip.<kind>` is printed as a time (no bound): it runs to the
+  dispatch, which the timeout does not race (item 1). `tools.reply.<kind>`
+  is the ceiling against the timeout.
+
 
 ### Part 4: the weekly run (2026-11-26)
 
@@ -615,7 +698,7 @@ passed):
 
 | lever | price (part 1) | taken |
 |---|---|---|
-| the suite as shards side by side (`scripts/test-bundles.sh`: one build; the VM tests but the random programs, the random programs but the resumed ones, the resumed ones, the compiler tests, each a `swift test --skip-build --ignore-lock` of its own) | the plain VM bundle waits on its pool (655 s quiet, 705 to 725 s loaded); under the sanitizer the bundles ran one after the other (1186 + 2174 s quiet) with the second at 49 percent idle | yes, in all four test gates: `swift-test` 287 s (747), the shards 241, 283, 267 and 243 s |
+| the suite as shards side by side (`scripts/test-bundles.sh`: one build; the VM tests but the random programs, the random programs but the resumed ones, the resumed ones, the compiler tests, each a `swift test --skip-build --ignore-lock` of its own) | the plain VM bundle waits on its pool (655 s quiet, 705 to 725 s loaded); under the sanitizer the bundles ran one after the other (1186 + 2174 s quiet) with the second at 49 percent idle | yes, in all four test gates: `swift-test` 287 s (747), the shards 241, 283, 267 and 243 s; later (part 3, item 6) the tools' suites and the frames tests became a second phase, alone: `tsan-load` 2529 to 2614 s on the final commit |
 | a tier's sanitizer gate leaves three kernel tests to the weekly run (`KernelTestParts.weeklyUnderSanitizer`; `swift-test` and `kernel-test` run them whole) | 2600 of the kernel tests' 4058 s (quiet); each longer alone (879 s quiet, 1809 s loaded) than any part could be | yes (rule 1d) |
 | the diagnostics test weekly under the sanitizer (`.weeklyUnderSanitizer`) | 1047 s quiet, 1355 to 1536 s loaded, the end of the serialized `TypeCheckerTests` chain | yes (rule 2a) |
 | the types package's tests weekly under the sanitizer | 494 s quiet; 1132 s of SUnit body and 1532 s in all in the candidate run, the end of the compiler shard | yes, after the candidate run (rule 2a; the Smalltalk tier's `tools-test` runs the same tests) |
@@ -623,3 +706,269 @@ passed):
 | a kept or second scratch path for the build | the builds are 26.6 and 33.0 s of the gates from an empty scratch path | no: under 4 percent, and a kept build is a gate that may have changed |
 | the host-timer test's sleep | 120 s of one test thread in every sanitizer run | yes (part 3) |
 | the VM tests under the sanitizer at a tier size | the stall tests are 3990 of the VM bundle's 13 305 body seconds (30 percent), and the VM shard ends the candidate gate (1766 s) | no: their sanitizer runs guard the collectors' protocols, which a core-tier diff changes; a size the core tier runs too would weaken exactly those runs. The next lever, an open question |
+
+### The tests per gate (the bar, item 3)
+
+`$CT/scripts/tests-per-gate.py` reads a gate's output for every Swift
+test that passed, failed or was skipped (by function name; 676 names before)
+and every kernel test the parts ran (264). `$CT/work/tests-per-gate-tier.md`:
+
+| gate | before (c514abf) | after, tier (0ae993f) | after, full size (`check-full/`) |
+|---|---|---|---|
+| `swift-test` | 676 + 264 kernel | 678 + 264 | 678 + 264 |
+| `tsan` (the Swift tier's before) / `tsan-load` (after) | 676 + 264 | 676 run, 7 skipped (5 before) + 261 kernel | 678 + 264 (`tsan`, `tsan-load`) |
+| `swift-test-load` | 676 + 264 | (core tier) | 678 + 264 |
+
+New in every gate: `TestSizeTests.everySizedTestHasARow` and
+`theSwitchReadsItsVariable`. Gone from a tier's sanitizer gate, each in the
+size switch's table (`sizedTests`, `Tests/KajoCompilerTests/TestSize.swift`)
+and run in the tier's plain gate and the weekly run's four:
+
+| test | claim | where it runs |
+|---|---|---|
+| `TypeCheckerTests.theDiagnosticsRequestAnswersItsScopesAndTheEventFollowsAChange` | the diagnostics request answers its scopes after a whole-image check; the event follows a change | tiers: plain only (47 s); weekly: all four |
+| `TypeCheckerTests.theTypesPackageBuildsAndItsTestsPass` | the types package builds; its 33 SUnit tests pass | tiers: plain only (29 s); weekly: all four; the Smalltalk tier's `tools-test` runs the same tests |
+| `CompilerTest>>testEveryMethodCompilesAsTheBootstrapDid` (kernel) | every method compiles as the bootstrap did | tiers: `swift-test` and `kernel-test` whole; weekly: all four |
+| `LiveCompileTest>>testEveryMethodMakesAsInstalled` (kernel) | every method made by the make primitive is as installed | the same |
+| `CompilerTest>>testALongChainIsWalkedByALoop` (kernel) | a chain of 120 000 sends compiles by loops | the same |
+
+Nothing left the weekly run: its four test gates at full size hold every
+name of before (`check-full/`, 0 gone in each).
+
+### The starting positions
+
+1. Half right. The sanitizer gate's end was the kernel's two parts, but
+   behind them the two bundles ran one after the other (1186 + 2174 s quiet)
+   with the second half idle; more parts did not cut it (2551 to 2710 s at
+   three to six parts against 2836 to 2926 at two: under load the parts
+   share the CPU, and from four parts the serialized type-checker suite
+   ends the bundle). What cut it: the shards side by side and five tests
+   left to the weekly run under the sanitizer.
+2. Wrong. The 36.9 s row was not a request sent again: `(retried)` is a
+   label of its own. It was a first send whose reply reached the image in
+   16 to 25 s and was dispatched later; the slow thing before the reply was
+   `session.open`'s answer (4.1 s of a fresh image's first open quiet under
+   the sanitizer, 9 s loaded), and the hierarchy's own work is 3.5 s quiet
+   under the sanitizer. The timeout races the arrival, not the dispatch.
+3. Right that the claim does not need the wait; "never makes true" is
+   nearly so: past 120 s in 13 of 14 sanitizer runs (0.017 s once), 45 to 59
+   s plain. Why GCD starts no thread for the queue in the suite is not
+   established.
+4. Wrong. The reserve test's claim needed no smaller size: its wait was a
+   clock on a fixed amount of work. It waits on the collector's progress;
+   the rings are the same length.
+5. Partly. The test has a sanitizer exemption already; a load value would
+   have widened the bound (decided against). Reproduced alone under twelve
+   loops, 1 failure in 100: the failing turn acknowledged a young round.
+   The VM's, handed on.
+6. Wrong for the plain gate: the random programs' seeds are a claim over
+   every seed (rule 1d keeps them whole where no other tier gate runs them),
+   and the plain VM bundle was waiting on its pool of test threads, not on
+   its seeds (shards cut it from 655 to 241 to 283 s a shard). Under the
+   sanitizer the long VM tests were kept (part 2's table).
+
+### Decided under the owner's delegation, as built
+
+1. A tier runs one sanitizer gate, the loaded one; the weekly run keeps
+   `tsan` and `tsan-load` (`check-tier.sh`, `weekly.sh`). The condition was
+   checked first (part 1): no fault of the product was found by `tsan`
+   alone.
+2. A test may run at a claim size in the tiers and its full size weekly:
+   `KAJO_TEST_SIZE=full`, exported by `weekly.sh` only; `sized(_:tier:full:)`
+   and `.weeklyUnderSanitizer(_:)` in `Tests/KajoCompilerTests/TestSize.swift`,
+   with the table test `TestSizeTests`. Three rows, all of them "under the
+   sanitizer in the weekly run only" (the VM tests read no size).
+3. The targets: not met (below), the claims kept.
+4. No request timeout and no test's bound grew. Waits that changed are
+   quiet-bounded on the collector's progress (reserve, the parked stacks,
+   the verifier faults' rings) or removed (the host timer's); the tools'
+   activity counts every client.
+
+### Not done, not verified
+
+- The targets of the bar, item 2, are not met (the gates, below). The next
+  lever is named in part 2's table: a tier size for the VM tests under the
+  sanitizer (the stall tests are 30 percent of the VM bundle's sanitizer
+  time), or a Swift-tier-only selection of them, both a coverage decision.
+- The core tier was not run; its Mac gates' time is an estimate from the
+  weekly run of 2026-11-23 for the gates this module did not touch and from
+  this module's runs for `swift-test-load` and `tsan-load` (below). The
+  device rows were not touched.
+- "From an empty scratch path": the tiers ran with `.build` removed
+  (`$CT/dotbuild-kept/` holds the one found there at the start, moved
+  aside, not deleted); the toolchain's compilation cache outside the
+  repository was left as it was.
+- Why GCD starts no thread for the default global queue in the suite is
+  not established (part 3, item 2).
+- The turn-overrun test's 1 failure in 100 under load is the VM's (a young
+  round acknowledged in the turn); not fixed here.
+- The tag test's refused removal (part 3, item 5): which Process held the
+  class is not known; the line says more from now on.
+- `scripts/broken-variants.sh` ran once on its own and once in the scratch
+  weekly run; never in a real weekly run.
+
+### Found, not this module's
+
+- A frames reply compiles every frame's method again to find its
+  variables: 12 s quiet under the sanitizer and 0.4 s plain for a doIt's
+  stop, 28 to 49 s with the VM tests beside it, against the tools' 30 s
+  request timeout (part 3, item 6). The tools' suites and the frames tests
+  run in a phase of their own because of it.
+- `session.open`'s answer made the whole protocol description to count it
+  (fixed here, part 3, item 1); the first `protocol.describe` of an image
+  still pays 3.6 s under the sanitizer once.
+- A turn that acknowledges a young round can run past its deadline check
+  by more than its reported young time (part 3, item 4): 1 in 100 runs of
+  the turn-overrun test alone under twelve loops, 0.219 ms against 0.2.
+- The VM refuses a class removal while any Process holds the class on its
+  stack; a listing request or the type service's recheck does for seconds
+  (minutes under the sanitizer), so the browser's own removal can be
+  refused "try again" in a real session.
+- `ProjectDirectoryTests.eachTargetWritesOnlyIntoItsOwnDirectory` failed
+  once, in the full-size `swift-test-load` on 0ae993f (`$CT/0ae993f-check-full/`):
+  the C target's reply line was not among the host's events after its
+  connection's end. Not reproduced, not looked into further; it passed in
+  every other run here.
+
+### Gates
+
+`scripts/check-tier.sh --dry-run origin/master` on 1a68580: **the Swift
+tier with `check-tier-test`**, no fuzzer, no model check
+(`$CT/check-dry-run.txt`; 19 files, 16 chose it, `kernel/` the other
+tier's). `KAJO_CHECK_OUT=$CT/check just check origin/master` from an empty
+scratch path (`$CT/check/gates.log`, last line `2026-11-26 18:48:55 1a68580
+check-tier done swift failed=0 3656s`):
+
+| gate | s (1a68580) | before (3f86421, weekly margins) |
+|---|--:|--:|
+| check-tier-test | 7 | 7 |
+| clean-build | 18 | 20 |
+| swift-test | 453 (from empty: the native cache cold; 303 to 307 warm) | 747 |
+| tsan (before) / tsan-load (after) | 2643 | 3146 (`tsan`); `tsan-load` 4355 on c514abf |
+| kernel-test | 125 | 126 |
+| apps | 141 | 131 |
+| new-check | 269 | 272 |
+| **the tier** | **3656** | **4449** |
+
+`check-tier-test.sh`: 133 checks (116 before). 676 Swift tests run, 7
+skipped, 261 kernel tests in `tsan-load`; 678 and 264 in `swift-test`; 0
+sanitizer reports; the tier's margins table (`$CT/check/margins.md`): no
+THIN, no PAST, the largest 0.60 (`relocation.runKernel.true.stw`, 538 of
+900 s).
+
+**The five loaded sanitizer runs** (`$CT/check-load-{1..5}/gates.log`,
+through `gl_gate`): `rc=0` 2529, 2595, 2592, 2604 and 2614 s; 0 sanitizer
+reports in each; no THIN and no PAST in any run's table. The first phase
+ended at 1880 to 1961 s, the tools' phase took 645 to 659 s. The tag test
+0 of 5 (rule `$CT/work/rule-tag.txt`): `tagProbeRemoved` 4.1 to 4.6 s, the
+whole test 29.6 to 31.4 s. The thin waits in them: `tools.reply.class.hierarchy`
+7.5 to 8.0 s of 30 (0.25 to 0.27; its round trip, now a time, beside it);
+`tools.reply.session.open` 0.40 to 0.48 s; `tools.reply.process.frames`
+6.4 to 6.6 s; the protocol tests' frames waits 11.5 to 12.2 s of 60 (0.20);
+the reconnect test's `remoteDebuggerReady` quiet 1.4 to 3.8 s of 60; the
+reserve's quiet stretches 7.8 to 14.8 s of 600; `keptAcrossRun`'s 13 to 18
+s of 600; the parked stacks' 14 to 21 s of 120; `main.turnOverrunCpu` (a
+time under the sanitizer) 0.93 to 2.49 ms.
+
+**Everything that moved to the weekly run still passes** (`$CT/check-full/`,
+`KAJO_TEST_SIZE=full`, through `gl_gate`): `swift-test` `rc=0` 307 s,
+`swift-test-load` 357, `tsan` 3003, `tsan-load` 3796; 678 Swift and 264
+kernel tests in each, every name of before (`$CT/work/tests-per-gate-final.md`),
+`kajo-test-size size=full sized=3` in each, 0 reports, no THIN and no PAST
+(`$CT/check-full/margins.md`, the weekly-shaped table of the bar's item 4;
+the largest 0.58, the long chain over the protocol under `tsan-load`).
+
+**The targets** (the bar, item 2): the Swift tier from an empty scratch
+path in 3656 s against 1800: not met. The core tier's Mac gates, estimated:
+this module's `swift-test-load` (357 s) and `tsan-load` (2587 s, the five
+runs' mean) and the other Mac gates' times of the weekly run of 2026-11-23
+(2863 s: clean-build 20 to matrix-mac 745) come to about 5807 s against
+4500: not met; the same gates came to 10 841 s in that weekly run with
+`tsan` and the old `tsan-load`. Not run as a tier here. The next lever is
+part 2's last row.
+
+**The weekly run.** `scripts/weekly.sh --gates`:
+`check-tier-test clean-build swift-test swift-test-load tsan tsan-load
+ios-check arc-check golden native-golden native-kernel-test native-cc
+test-release model-check soak fuzz apps kernel-test new-check ab
+broken-variants matrix-mac devices`. A quick scratch run on 1a68580
+(`KAJO_WEEKLY_ROOT=$CT/work/weekly KAJO_WEEKLY_DEVICES=0 KAJO_WEEKLY_QUICK=1
+KAJO_WEEKLY_ONLY="check-tier-test swift-test broken-variants"`,
+`$CT/work/weekly/2026-11-27-quick/summary.md`, 7 min, `failed: none`;
+nothing under `~/kajo-weekly/` changed, no device touched):
+
+    | check-tier-test | pass | 7s |  |
+    | swift-test | pass | 304s |  |
+    | broken-variants | pass | 107s |  |
+
+    ## Test sizes
+
+    KAJO_TEST_SIZE=full for every gate. The size each suite printed:
+
+    - swift-test: 1 kajo-test-size size=full sized=3
+
+    ## By-hand broken variants (scripts/broken-variants.sh)
+
+        broken-variant: delay-end expect=fail rc=1 5s ok
+        ...
+        broken-variant: tools-hold-loop expect=pass rc=0 79s ok
+        broken-variants: 7 run, 0 not as recorded
+
+Before the tier the changed suites ran once under the sanitizer with twelve
+loops (`$CT/work/tsan-changed/`: 31 tests passed, 0 reports) and the
+changed scripts each once on their own (`check-tier-test.sh`,
+`$CT/work/check-tier-test-1.txt`; `broken-variants.sh`,
+`$CT/work/broken-variants-1.txt`).
+
+**Runs that failed on the way**, each investigated, none run again until it
+passed: the tier on 292b202 (`$CT/292b202-check/`, `failed=1`, the
+reconnect test, `remoteDebuggerReady` with activity -1), on 749fc70
+(`$CT/749fc70-check/`, `failed=1`, the same with the clauses), on a880ce0
+(`$CT/a880ce0-check/`, `tsan-load` `rc=1`, the tag test's refused removal;
+the run stopped there); the full-size `swift-test-load` on 0ae993f
+(`ProjectDirectoryTests`, found above). The tier on 0ae993f passed in 3634
+s and its five loaded runs 5 of 5.
+
+**The module's own gate time**: about 35 hours of the machine from
+2026-11-25 15:53 to 2026-11-27 00:36 (part 1's 23 runs 12.8 h, the
+experiments of part 3 about 5 h, five tier runs 4.8 h, two sets of five
+loaded runs 7.3 h, two full-size sets 4.0 h, the rest under an hour;
+`measure.log` and every `gates.log` under `$CT`).
+
+### Deviations
+
+- `kernel/` changed (`DevProtocol class>>requestCount`, `DevSession>>info`),
+  a product path part 3's measurement named, said first in part 3.
+- The tools' suites and the frames tests run in a second phase of the
+  suite, not side by side with the rest: the side-by-side layout made the
+  frames reply pass the tools' timeout (part 3, item 6).
+- Five extra waits were changed beyond the six thin ones (the parked
+  stacks, the verifier faults' rings, the reconnect test's activity, the
+  turn test's printing, the tag test's clauses), each made thin by the new
+  layout or by a failure here.
+- The core tier was estimated, not run.
+- The by-hand variants' runner covers the seven variants that need no
+  source change; the rest are named, not automated.
+- The first tier runs found what the layout broke; the module's final
+  code commit is 1a68580, the third commit after the first tier.
+
+### Open questions (built as recommended)
+
+1. The Swift tier's plain gate stays unloaded. Recommended: as built, one
+   loaded gate a tier.
+2. A THIN margin in a tier's table does not fail `just check`.
+   Recommended: not yet; read two weekly runs first.
+3. New: the owner's decision of 2026-11-13 kept "sampling the every-method
+   kernel tests under the sanitizer" out of gate speed; here, under the
+   delegation, a tier's sanitizer gate leaves those three tests to the
+   weekly run (the plain gates of every tier run them whole). Recommended:
+   keep, as built.
+4. New: the targets are not met (61 and about 97 minutes against 30 and 75).
+   The next lever is a tier size for the VM tests under the sanitizer,
+   either everywhere (weakens the core tier's sanitizer runs of the
+   collectors) or in the Swift tier only (a third size). Recommended: neither
+   now; read the next weekly runs at these prices first.
+5. New: the frames reply's cost (every frame's method compiled again, 12 s
+   quiet under the sanitizer) as a small module: cheaper, the second phase
+   could go (about 650 s of every sanitizer gate). Recommended: yes, after
+   the core module.
