@@ -266,6 +266,26 @@ ToolsProbe class >> remoteDebuggerReady [
 ]
 
 { #category : #remote }
+ToolsProbe class >> remoteDebuggerReadyWhy [
+	"Each clause of remoteDebuggerReady for a failure message (check time, docs/modules/check-time.md: the reconnect test failed it in the tier with no clause printed): the debuggers, the last one's client, state and frames, then the remote client's state, pending requests and last replies."
+	| c d |
+	c := self remote.
+	^ String streamContents: [:s |
+		s nextPutAll: 'debuggers '; print: DevTools debuggers size.
+		DevTools debuggers isEmpty ifFalse: [
+			d := DevTools debuggers last model.
+			s nextPutAll: ' lastIsRemote '; print: d client == c;
+				nextPutAll: ' state '; print: d state;
+				nextPutAll: ' frames '; print: (d frames ifNil: [-1] ifNotNil: [:f | f size])].
+		s nextPutAll: ' remote '; print: c notNil.
+		c isNil ifFalse: [
+			s nextPutAll: ' open '; print: c isOpen;
+				nextPutAll: ' pending '; print: c pendingCount;
+				nextPutAll: ' replies '; print: c replyCount;
+				nextPutAll: ' last '; print: ((c latencies last: (c latencies size min: 6)) asArray collect: [:l | {l first. (l at: 2) // 1000}])]]
+]
+
+{ #category : #remote }
 ToolsProbe class >> dropWithRequests [
 	"The link drops (the test's host closes the sockets on this line), then two requests go out on the dead link: both are pending at the loss."
 	| c |
@@ -398,11 +418,12 @@ ToolsProbe class >> definedInTag: aTag [
 
 { #category : #explaining }
 ToolsProbe class >> activity [
-	"What a test's until counts as the tools doing something (the weekly run's two failures, docs/modules/weekly-1123-failures.md): the replies the local client has dispatched times 1000 plus its pending requests (at most 999), or -1 without a local client."
-	| c |
-	c := DevTools local.
-	c isNil ifTrue: [^ -1].
-	^ c replyCount * 1000 + (c pendingCount min: 999)
+	"What a test's until counts as the tools doing something (the weekly run's two failures, docs/modules/weekly-1123-failures.md): the replies the image's clients have dispatched times 1000 plus their pending requests (at most 999), or -1 without a client. Every client, not only the local one (check time, docs/modules/check-time.md: the reconnect test drives a remote client only, its waits saw -1 and were a 60 s clock on the remote target's replies)."
+	| clients |
+	clients := DevClient allInstances reject: [:c | c isOpen not and: [c pendingCount = 0]].
+	clients isEmpty ifTrue: [^ -1].
+	^ (clients inject: 0 into: [:a :c | a + c replyCount]) * 1000
+		+ ((clients inject: 0 into: [:a :c | a + c pendingCount]) min: 999)
 ]
 
 { #category : #explaining }

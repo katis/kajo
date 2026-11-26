@@ -730,7 +730,13 @@ end
     let collections = pauses()
     rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
     rt.spawn("churn:", [int(checkedBuild ? 150_000 : 300_000)])
-    #expect(eventually(120, margin: "process.gcKeepsParkedProcessStacksAlive") { rt.vm.liveProcessCount == 40 })
+    // Check time (docs/modules/check-time.md, part 3): the churners are a
+    // fixed amount of work; a 120 s clock on it read 105 s in the tier's
+    // loaded sanitizer gate once the suite ran as shards side by side (66 s
+    // before). The wait ends when they end and fails only when the
+    // collector counts nothing for 120 s (`StallDiag.waitProgress`).
+    let d = StallDiag(rt, "process.gcKeepsParkedProcessStacksAlive")
+    #expect(d.waitProgress("churned", quiet: 120) { rt.vm.liveProcessCount == 40 }, "\(d.full("fail"))")
     #expect(pauses() - collections >= 3, "pauses \(pauses() - collections), errors \(rt.vm.counters.processErrors)")
     for _ in 0..<40 { rt.vm.signal(sem) }
     rt.waitAllTerminated()

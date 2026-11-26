@@ -259,11 +259,13 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
     }
 
     /// The weekly margins, at the tools' end: the longest probe against its
-    /// drive's bound, and the longest round trip per request kind of every
-    /// client in the image (`ToolsProbe longestReplies`, read from the
-    /// clients' latencies: from the send to the dispatch in the tools' event
-    /// loop) against that client's request timeout, as `tools.roundtrip.<kind>`
-    /// (one name per kind across the tools tests: the table keeps the largest).
+    /// drive's bound, the longest arrival of a reply per request kind against
+    /// the client's request timeout (`tools.reply.<kind>`, check time), and the
+    /// longest round trip per request kind of every client in the image
+    /// (`ToolsProbe longestReplies`, read from the clients' latencies: from
+    /// the send to the dispatch in the tools' event loop) as a time,
+    /// `tools.roundtrip.<kind>` (one name per kind across the tools tests:
+    /// the table keeps the largest).
     /// Nothing here is an issue: a probe that does not end prints nothing.
     func printMargins() {
         printMargin("tools.\(test).probe", .deadline, value: Double(longestProbeNs) / 1e9, bound: driveSeconds * driveScale)
@@ -279,7 +281,13 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         }
         for kv in f.dropFirst() {
             guard let eq = kv.lastIndex(of: "="), let ms = Double(kv[kv.index(after: eq)...]) else { continue }
-            printMargin("tools.roundtrip.\(kv[..<eq])", .ceiling, value: ms, bound: timeoutMs, unit: "ms")
+            // Check time: a time, not a ceiling. The round trip runs to the
+            // reply's dispatch, which waits for the tools' main worker (the
+            // test's own thread turns it between probes); the timeout races
+            // the reply's arrival, `tools.reply.<kind>` above. Under the
+            // loaded sanitizer the hierarchy's round trip read 35 to 42 s
+            // against its 30 s timeout in passing runs, its arrival 16 to 25.
+            printMargin("tools.roundtrip.\(kv[..<eq])", .time, value: ms, bound: nil, unit: "ms")
         }
     }
 
