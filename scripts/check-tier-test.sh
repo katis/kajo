@@ -325,7 +325,7 @@ n=$((n + 1)); [[ $rc1 == 2 && $rc2 == 2 ]] || { print "FAIL: broken-variants' us
 # once, each shard runs with --skip-build --ignore-lock and its own
 # selection (together every test once: the VM tests but the random
 # programs, the random programs but the resumed ones, the resumed ones,
-# the compiler tests), the output is the
+# the compiler tests but the tools', then alone the tools'), the output is the
 # shards' in order, and a failing shard fails the run.
 cat > $bv/swift <<'STANDIN'
 #!/bin/zsh
@@ -337,13 +337,14 @@ exit 0
 STANDIN
 chmod +x $bv/swift
 KAJO_SWIFT=$bv/swift $root/scripts/test-bundles.sh $bv/out/x --sanitize=thread > $bv/run.txt 2>&1; rc=$?
-want="test --skip-build --ignore-lock --sanitize=thread --filter KajoCompilerTests/test --skip-build --ignore-lock --sanitize=thread --filter KajoVMTests --skip randomPrograms/test --skip-build --ignore-lock --sanitize=thread --filter randomPrograms --skip randomProgramsResume/test --skip-build --ignore-lock --sanitize=thread --filter randomProgramsResume/"
+want="test --skip-build --ignore-lock --sanitize=thread --filter KajoCompilerTests --skip ToolsTests|PhoneTransportTests|ProjectDirectoryTests/test --skip-build --ignore-lock --sanitize=thread --filter KajoVMTests --skip randomPrograms/test --skip-build --ignore-lock --sanitize=thread --filter ToolsTests|PhoneTransportTests|ProjectDirectoryTests/test --skip-build --ignore-lock --sanitize=thread --filter randomPrograms --skip randomProgramsResume/test --skip-build --ignore-lock --sanitize=thread --filter randomProgramsResume/"
 n=$((n + 1)); [[ $rc == 0 && $(grep -c '^build --build-tests --sanitize=thread$' $bv/calls.txt) == 1 \
   && $(grep '^test ' $bv/calls.txt | sort | tr '\n' '/') == $want \
-  && $(grep '^shard ran' $bv/run.txt | sed 's/.*--filter //' | tr '\n' '/') == "KajoVMTests --skip randomPrograms/randomPrograms --skip randomProgramsResume/randomProgramsResume/KajoCompilerTests/" ]] \
+  && $(grep '^shard ran' $bv/run.txt | sed 's/.*--filter //' | tr '\n' '/') == "KajoVMTests --skip randomPrograms/randomPrograms --skip randomProgramsResume/randomProgramsResume/KajoCompilerTests --skip ToolsTests|PhoneTransportTests|ProjectDirectoryTests/ToolsTests|PhoneTransportTests|ProjectDirectoryTests/" \
+  && $(grep -c '^test-bundles: phase of ' $bv/run.txt) == 2 ]] \
   || { print "FAIL: test-bundles over a stand-in (rc=$rc): $(cat $bv/calls.txt $bv/run.txt | tr '\n' '/')"; fail=1 }
 STANDIN_FAIL=KajoCompilerTests KAJO_SWIFT=$bv/swift $root/scripts/test-bundles.sh $bv/out/x > $bv/run2.txt 2>&1; rc=$?
-n=$((n + 1)); [[ $rc != 0 && $(grep -c '^shard ran' $bv/run2.txt) == 4 && $(grep -c 'shard compiler rc=1' $bv/run2.txt) == 1 ]] || { print "FAIL: test-bundles with a failing shard: rc=$rc"; fail=1 }
+n=$((n + 1)); [[ $rc != 0 && $(grep -c '^shard ran' $bv/run2.txt) == 5 && $(grep -c 'shard compiler rc=1' $bv/run2.txt) == 1 ]] || { print "FAIL: test-bundles with a failing shard: rc=$rc"; fail=1 }
 rm -rf $bv
 # The weekly run sets the full size for every gate; a tier sets nothing.
 n=$((n + 1)); grep -q '^export KAJO_TEST_SIZE=full$' $root/scripts/weekly.sh && ! grep -q 'KAJO_TEST_SIZE' $root/scripts/check-tier.sh $root/scripts/gates-lib.sh \
