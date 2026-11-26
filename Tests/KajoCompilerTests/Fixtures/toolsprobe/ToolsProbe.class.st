@@ -505,10 +505,18 @@ ToolsProbe class >> repliesNow [
 
 { #category : #explaining }
 ToolsProbe class >> tagProbeRemovedWhy [
-	"Each clause of tagProbeRemoved for a failure message: the class present, the browser's status, then the client's requests (replies:)."
+	"Each clause of tagProbeRemoved for a failure message: the class present, the browser's status, then what in the image could hold the class on a Process's stack (check time, docs/modules/check-time.md: a880ce0's tier refused the removal, 'another Process holds ToolsTagProbe on its stack', and named no Process): the requests the image is running and the type service's state, then the client's requests (replies:)."
+	| ts i pend |
+	ts := Smalltalk at: #TypeService ifAbsent: [nil].
+	i := (DevProtocol class allInstVarNames asArray collect: [:n | n asString]) indexOf: 'pending'.
+	pend := i = 0 ifTrue: [nil] ifFalse: [[DevProtocol instVarAt: i] on: Error do: [:e | nil]].
 	^ String streamContents: [:s |
 		s nextPutAll: 'class '; print: (Smalltalk includesKey: #ToolsTagProbe);
-			nextPutAll: ' status '; print: self browser model status.
+			nextPutAll: ' status '; print: self browser model status;
+			nextPutAll: ' requestsRunning '; print: (pend isNil ifTrue: [-1] ifFalse: [pend size]);
+			nextPutAll: ' typeService '; print: (ts isNil ifTrue: [#absent] ifFalse: [ts isRunning]);
+			nextPutAll: ' passes '; print: (ts isNil ifTrue: [0] ifFalse: [ts passes]);
+			nextPutAll: ' lastRechecked '; print: (ts isNil ifTrue: [0] ifFalse: [ts lastRechecked]).
 		self replies: s]
 ]
 
