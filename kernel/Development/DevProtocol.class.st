@@ -85,6 +85,13 @@ DevProtocol class >> rebuildKinds [
 ]
 
 { #category : #describing }
+DevProtocol class >> requestCount [
+	"How many requests there are, protocol.describe's size without its entries: session.open's answer counted them by making the whole description, 4.1 s of a fresh image's first open under the sanitizer (check time, docs/modules/check-time.md, part 3)."
+	self rebuildKinds.
+	^ kinds size
+]
+
+{ #category : #describing }
 DevProtocol class >> selectorOf: aKind [
 	"The selector of the request aKind, or nil; the table is made again when it misses (a request just added)."
 	kinds isNil ifTrue: [self rebuildKinds].

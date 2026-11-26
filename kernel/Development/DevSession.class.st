@@ -30,7 +30,7 @@ DevSession >> info [
 	o := JsonObject new.
 	o at: 'protocol' put: 1; at: 'client' put: client; at: 'package' put: sessionPackage;
 		at: 'image' put: (Smalltalk isReleaseImage ifTrue: ['release'] ifFalse: ['development']);
-		at: 'requests' put: DevProtocol describe size;
+		at: 'requests' put: DevProtocol requestCount;
 		at: 'stopped' put: ((Debugger stops sort: [:a :b | a process id <= b process id]) collect: [:s | s notedSummary]).
 	^ o
 ]
