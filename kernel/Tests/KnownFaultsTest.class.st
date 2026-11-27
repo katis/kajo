@@ -65,6 +65,22 @@ KnownFaultsTest >> testAPragmaReaderAtTheInstallFindsTheMethod [
 ]
 
 { #category : #tests }
+KnownFaultsTest >> testARefusedInstallSignalsOutsideTheRegistry [
+	"Item 3's lock: the VM refuses a method made for another selector; its error is signalled after the registry is let go, so a handler (or a debugger stop) of it holds no lock that another Process's sourceOf: waits for."
+	| m read |
+	Smalltalk isReleaseImage ifTrue: [^ self].
+	m := KnownFaultsSample compiledMethodAt: #hold:until:.
+	read := nil.
+	[KnownFaultsSample addSelector: #kfElsewhere withMethod: m] on: Error do: [:e | | t |
+		[Smalltalk sourceOf: m. read := true] fork.
+		t := Smalltalk microsecondClock.
+		[read isNil and: [Smalltalk microsecondClock - t < 2000000]] whileTrue: [(Delay forMilliseconds: 5) wait].
+		e return: nil].
+	self assert: read == true.
+	self deny: (KnownFaultsSample includesSelector: #kfElsewhere)
+]
+
+{ #category : #tests }
 KnownFaultsTest >> testARefusedRemovalNamesTheProcessAndTheFrame [
 	"Item 5: another Process holds the class in a temporary while it waits; the removal is refused with a reason that names that Process and the method of its frame (the reason named neither on 7ba9643, 5 of 5), and the class is removed once it has let go."
 	| c sem p text |

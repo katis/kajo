@@ -253,13 +253,14 @@ Behavior >> >> aSymbol [
 
 { #category : #methods }
 Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
-	"Install a method (verified by the VM against this class) and note its pragmas, both under Smalltalk registry:, the lock the pragma index's readers take: a reader never finds the method installed and its pragmas not yet noted (the known faults, item 3)."
-	| old result |
+	"Install a method (verified by the VM against this class) and note its pragmas, both under Smalltalk registry:, the lock the pragma index's readers take: a reader never finds the method installed and its pragmas not yet noted (the known faults, item 3). A refusal's error is caught inside the block and signalled after it, so no Process stops for the debugger holding the registry."
+	| old result failure |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	Smalltalk registry: [
 		old := self compiledMethodAt: aSymbol ifAbsent: [nil].
-		result := self primAddSelector: aSymbol withMethod: aCompiledMethod.
-		result isString ifFalse: [Pragma noteRemoved: old; noteInstalled: aCompiledMethod]].
+		result := [self primAddSelector: aSymbol withMethod: aCompiledMethod] on: Error do: [:e | failure := e. e return: nil].
+		(failure isNil and: [result isString not]) ifTrue: [Pragma noteRemoved: old; noteInstalled: aCompiledMethod]].
+	failure ifNotNil: [:e | ^ e signal].
 	result isString ifTrue: [^ self error: result]
 ]
 
@@ -322,15 +323,16 @@ Behavior >> primRemoveSelector: aSymbol [
 
 { #category : #methods }
 Behavior >> removeSelector: aSymbol [
-	| old result |
+	| old result failure |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
 	"The removal and the pragma index under the registry as the install's are; the source is retired, not forgotten: a reader that holds the method still reads it (the known faults, item 3)."
 	Smalltalk registry: [
 		old := self compiledMethodAt: aSymbol ifAbsent: [nil].
 		old isNil ifFalse: [
-			result := self primRemoveSelector: aSymbol.
-			result isString ifFalse: [Pragma noteRemoved: old]]].
+			result := [self primRemoveSelector: aSymbol] on: Error do: [:e | failure := e. e return: nil].
+			(failure isNil and: [result isString not]) ifTrue: [Pragma noteRemoved: old]]].
 	old isNil ifTrue: [^ nil].
+	failure ifNotNil: [:e | ^ e signal].
 	result isString ifTrue: [^ self error: result].
 	Smalltalk retireSourceOf: old.
 	Smalltalk forgetCategoryOf: aSymbol in: self.

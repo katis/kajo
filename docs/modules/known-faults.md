@@ -321,6 +321,39 @@ place; nothing is changed here.
 
 ### Part 2: the Delay timers (nothing built but tests)
 
+A correction to part 1, found after the tier: D was measured again in the
+core tier's `tsan-load` and in the three loaded sanitizer runs that
+followed, on 8efdf05, whose Delay path is the starting code's. Four of the first
+seven runs of D with that path had a Delay 100 ms or more late (five of
+seven, with check-load-4 run later):
+
+| run of D | max ms | 100 ms late | file |
+|---|--:|--:|---|
+| part 1 (183b5db) | 22.7 | 0 | `part1/item1/tsan-load/` |
+| the changed tests under load | 96.5 | 0 | `work/tsan-changed/` |
+| the tier | 145.1 | 2 | `check/bundles/` |
+| check-load-1 | 114.2 | 1 | `check-load-1/` |
+| check-load-2 | 149.0 | 3 | `check-load-2/` |
+| check-load-3 | 259.4 | 2 | `check-load-3/` |
+| check-load-4 | 151.3 | 3 | `check-load-4/` |
+
+So the rule's "fix" condition holds (a Delay 100 ms late in D), and part
+1's "the rule did not decide" was read from one run. The rule's next step
+was taken: the queue (`work/queue-not-built.patch`, a serial queue per VM
+at user-initiated) was built and measured, A and B five runs each
+(`part2/ab-queue-ui.txt`: max 10.1 to 10.3 ms alone, 10.7 to 17.1 under
+the loops, against 10.1 and 11.5 to 18.3 without) and D once
+(`part2/tsan-load-ui/`, rc=0: max 116.6 ms, 2 Delays 100 ms late, against
+0 to 3 without). The queue changes nothing measurable: the late Delays of
+the sanitizer suite under twelve loops are not a timer block waiting for
+a global queue's thread (the forcing test shows the global queue gives the
+block a thread while it is full) but the CPU the whole suite is given.
+Decided here, against the rule's letter: the queue is not committed. A
+change with no measured effect in any of A, B or D is not the fix the rule
+meant, and it is a core change. This is the module's first open question
+for the owner (below). The QoS comparison of the rule was not run (there
+is no queue to give a QoS).
+
 The queue is not built (part 1). `Tests/KajoVMTests/Processes/DelayQueueTests.swift`:
 `aDelayFiresWhileTheGlobalQueueIsFull` (the guard; its lateness through
 `printMargin` as `delay.globalQueueFull`, ceiling 1000 ms; it passed 3 of 3
@@ -425,3 +458,116 @@ method's selector (a test bug, fixed in the committed test) and read
   ms late (part 2), none 100 ms late.
 - `TypeCheckerTests.theTypesPackageBuildsAndItsTestsPass` counts 34 SUnit
   tests now (33 before; the new TypeService test).
+
+### The gates (part 5)
+
+`scripts/check-tier.sh --dry-run origin/master` on 8efdf05: "tier: core",
+chosen by nine files under `Sources/KajoVM/` (`check-dry-run.txt`).
+`KAJO_CHECK_OUT=~/kajo-scratch/known-faults/check just check origin/master`
+on 8efdf05 (`check/gates.log`): "check-tier done core failed=0 6841s", every
+gate rc=0, swift.org 6.4.2:
+
+| gate | s | weekly 2026-11-23 (ba8671c) |
+|---|--:|--:|
+| clean-build | 20 | 20 |
+| swift-test-load | 381 | 951 (rc=1) |
+| tsan-load | 2564 | 3709 (rc=1) |
+| ios-check | 17 | 16 |
+| arc-check | 7 | 6 |
+| golden | 73 | 73 |
+| native-golden | 161 | 162 |
+| native-kernel-test | 91 | 84 |
+| native-cc | 40 | 43 |
+| test-release | 195 | 130 |
+| model-check | 36 | 34 |
+| soak | 65 | 81 |
+| fuzz (four at 600 s) | 671 | 607 |
+| apps | 137 | 128 |
+| kernel-test | 129 | 126 |
+| new-check | 274 | 269 |
+| ab | 332 | 330 |
+| matrix-mac | 795 | 745 |
+| matrix-iphone | 853 | 801 |
+
+The test gates are check time's layout (its Swift tier on 1a68580:
+swift-test 453, tsan-load 2643, kernel-test 125, apps 141, new-check 269),
+so the weekly's are not their baseline. `test-release` 195 s against the
+weekly's 130 is not explained here: the weekly ran it before check time's
+kernel parts and before this module's tests, and no earlier core-tier run
+has check time's layout. The new VM tests in the tier's `tsan-load`: the
+stalled Symbols test's body 6.1 s, the live one 4.3 s plain.
+
+Read beside the exit status: 0 "WARNING: ThreadSanitizer" in every bundle;
+486 + 162 + 2 + 3 + 39 tests in each test gate's bundles; 270 kernel tests
+in `kernel-test`; the four fuzzers "build=ok" with 2 035 194, 3 158 939,
+760 479 and 1 688 007 runs; `arc-check` OK; the aligned A/B against
+7ba9643 (`check/ab/table.md`) 0.969 to 1.043 in time, instructions 0.999 to
+1.001, checksums the same (fib at 8 workers 1.043 with cycles 1.010: its
+own spread, base 177 to 200 ms); the margins table (`check/margins.md`) no
+THIN or PAST row, `delay.globalQueueFull` at 0.3 to 4.4 of 1000 ms.
+
+The matrices' `--bar` columns over every row (`shell-report.py --bar`):
+
+| | rows | failed | checksums | rows missing frames | frames missed | fallbacks | unjustified | stalls (longest ms) | sweep stops | main flips | longest stop ms | longest wait for a safepoint |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|
+| Mac | 153 | 0 | 0 | 6 | 3595 (3579 in the 3 hog rows, budget off) | 0 | 0 | 637 (24.89) | 0 | 714 | 11.46 (ring stw scavenge) | 0.62 ms (finalMark, w4 at a poll) |
+| iPhone 13 Pro | 153 | 0 | 0 | 5 | 3582 (3577 in the hog rows) | 0 | 0 | 0 | 0 | 366 | 18.07 (storm mainload stw scavenge) | 4.31 ms (scavenge, marker at a poll) |
+
+The ring `young=stw` rows missed 4, 4 and 8 frames on the Mac and 2 and 3
+on the iPhone behind 11 to 17 ms scavenges, as in earlier modules.
+
+### The loaded sanitizer gate on 8efdf05 (the bar's item 4)
+
+| run | rc | s | reports | margins |
+|---|--:|--:|--:|---|
+| the tier's `tsan-load` | 0 | 2564 | 0 | no THIN or PAST |
+| check-load-1 | 0 | 2527 | 0 | no THIN or PAST |
+| check-load-2 | 0 | 2600 | 0 | no THIN or PAST |
+| check-load-3 | 124 | 10804 | 0 in what was written | the gate's own row PAST (10804 of 10800) |
+| check-load-4 (one more, run after the investigation) | 0 | 2583 | 0 | no THIN or PAST |
+
+**The bar's item 4 is not met**: check-load-3 timed out in the tools shard
+(the second phase, alone), whose output ends at
+`anErrorInAToolStopsOnlyItsProcessAndTheToolsGoOn() started` and its
+`debuggerReady` margin (8.7 s quiet of 60): `swift test` writes a file in
+blocks and the rest was lost with the kill, so where it hung is not known.
+Every wait that test makes is bounded (60 s quiet, 300 s, 150 s a probe, 60
+and 30 s loops), so a hang of two hours is in something unbounded: a VM
+that does not reach a stop, or a Smalltalk wait with no bound.
+
+Counted under a rule written first (`hang/rule.txt`, 09:57:43, copied with
+its time): the tools shard alone under ThreadSanitizer and twelve loops,
+four runs on 8efdf05 and four on the scratch copy of the starting code
+(`hang/head.out`, `hang/start.out`): 8 of 8 passed in 643 to 654 s. Not
+reproduced; the module did not cause it is not established either. What
+this module changed on that test's path, as a reading: the method install
+(`addSelector:withMethod:` now holds `Smalltalk registry:` across primitive
+97 and the pragma notes; before, primitive 97 ran outside it), the frames
+reply (`Compiler frameVariablesOf:` takes the registry twice, briefly; its
+old body took it through `sourceOf:` already), and the type service's
+handler. A Process stopped for the debugger while it holds the registry
+would hold every other reader of it; primitive 97's own refusal (the
+fallback code after the primitive, which signals an error) now runs inside
+the registry block. That is the one new way this module gives a stop
+inside the registry, and nothing in that test makes primitive 97 refuse;
+it is named as the candidate, not as the cause. The fourth run carried a
+watcher that samples any test process past 1500 s
+(`scripts/watch-sample.sh`); it sampled only the VM and compiler shards'
+legitimate long runs.
+
+### A fault of this module's, found reading for the hang (fixed)
+
+8efdf05's `addSelector:withMethod:` and `removeSelector:` ran primitives 97
+and 98 inside `Smalltalk registry:`, and a primitive's refusal signals its
+error from the fallback code after the primitive, inside the block: a
+handler of it, or a debugger stop in a development image, held the
+registry, and every Process that reads a source waited. Now the refusal is
+caught inside the block and signalled after it. The test
+`KnownFaultsTest>>testARefusedInstallSignalsOutsideTheRegistry` (the VM
+refuses a method made for another selector; in the handler another
+Process's `sourceOf:` must answer within 2 s) fails 3 of 3 on 8efdf05's
+kernel (`broken/registry-error/`) and passes after; it passes on the
+starting code too (no registry block there). 271 of 271 kernel tests pass
+in release. Whether this is what hung check-load-3 is not known (nothing
+in that test is known to make primitive 97 refuse). The tier and the
+loaded sanitizer runs are run again on this commit (below).
