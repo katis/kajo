@@ -571,3 +571,129 @@ starting code too (no registry block there). 271 of 271 kernel tests pass
 in release. Whether this is what hung check-load-3 is not known (nothing
 in that test is known to make primitive 97 refuse). The tier and the
 loaded sanitizer runs are run again on this commit (below).
+
+### The gates on 46f7510, the final code commit
+
+The tier again (`check/gates.log`, the first run moved to
+`check-8efdf05/`): "tier: core" (`check-dry-run-46f7510.txt`), "check-tier
+done core failed=0 6628s", every gate rc=0: clean-build 20, swift-test-load
+361, tsan-load 2462, ios-check 17, arc-check 45, golden 73, native-golden
+163, native-kernel-test 91, native-cc 40, test-release 142, model-check 35,
+soak 62, fuzz 645 (2 048 535, 2 935 785, 755 628 and 1 724 887 runs, each
+"build=ok"), apps 130, kernel-test 129 (271 tests), new-check 271, ab 331,
+matrix-mac 771, matrix-iphone 840. 0 sanitizer reports; 486 + 162 + 2 + 3
++ 39 tests in each test gate; no THIN or PAST margin.
+
+The aligned A/B against 7ba9643 (`check/ab/table.md`): 1 worker 0.995 to
+1.004; 8 workers 0.954 to 1.055 (fib and sends at 1.055, cycles 1.014 and
+1.020, instructions 1.002); checksums the same everywhere. The VM code of
+46f7510 is 8efdf05's, whose A/B had fib at 8 workers 1.043 and sends
+1.006: the 8-worker rows move by the spread the lessons record for them
+(0.939 to 1.082 base against base), and no file on the interpreter's path
+changed.
+
+The matrices' `--bar` columns over every row:
+
+| | rows | failed | checksums | rows missing frames | frames missed | fallbacks | unjustified | stalls (longest ms) | main flips | longest stop ms | longest wait for a safepoint |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|--:|---|---|
+| Mac | 153 | 0 | 0 | 5 | 3594 (3579 in the hog rows) | 0 | 0 | 696 (19.68) | 714 | 12.66 (ring stw scavenge) | 0.46 (scavenge, w6 at a poll) |
+| iPhone 13 Pro | 153 | 0 | 0 | 8 | 3586 (3577 in the hog rows) | 0 | 0 | 0 | 366 | 19.39 (storm mainload stw scavenge) | 9.52 (scavenge, the marker at a poll; storm stw) |
+
+The three loaded sanitizer runs (`check-load-1..3/`, each with the sampling
+watcher):
+
+| run | rc | s | reports | margins | Delays 100 ms late (max ms) |
+|---|--:|--:|--:|---|---|
+| the tier's | 0 | 2462 | 0 | no THIN or PAST | 1 (140.3) |
+| check-load-1 | 1 | 2569 | 0 | no THIN or PAST | 1 (139.8) |
+| check-load-2 | 0 | 2635 | 0 | no THIN or PAST | 2 (232.5) |
+| check-load-3 | 0 | 2652 | 0 | no THIN or PAST | 3 (160.5) |
+
+check-load-1 failed one assertion that is not this module's:
+`randomProgramsAgreeWithTheirModelNatively(_:)`, config `slowedMarker`,
+"Expectation failed: randomScavenges.take(config) > 0"
+(`RandomPrograms.swift:772`), recorded as thin since the third review's
+small fixes, part 2. Counted under a rule written first (`thin/rule.txt`):
+see "The thin test's count" below. No run hung; the watcher sampled only
+the VM and compiler shards' long runs.
+
+### The thin test's count
+
+Under `thin/rule.txt` (16:17:35, copied with its time): the test alone
+under the sanitizer and twelve loops, five runs on 46f7510 and five on a
+scratch tree of 7ba9643 (`thin/head.out`, `thin/start.out`): 0 of 5 and 0
+of 5 failed, each run 60 to 74 s (220 s in the gate, beside the other
+shards). Not the module's under the rule; the condition is not the gate's,
+and the count says nothing about the gate's rate. One failure in five
+loaded runs of 46f7510 is all that is known.
+
+### Where check-load-3 on 8efdf05 hung (found after the count)
+
+The hung test process outlived the gate's kill (its parent became launchd)
+and was found alive nine hours later in the check for leftover processes;
+it was sampled (`hang/orphan/sample-70841.txt`) and then killed. Every VM
+thread waits on its condition (the workers idle, the marker and the young
+collector idle), and the test thread is in
+`ProjectDirectoryToolsTests.theToolsChooseThroughTheHostAndTheirChangesLandThere`
+(`ProjectDirectoryTests.swift:361`), in its deferred `LocalTools.close()`,
+in `ShellVM.closeOnce` (`Shell.swift:464`), in `VM.waitUntilAllTerminated()`:
+after `terminateAll` a Process never ended and nothing runs. That wait has
+no bound. Not this module's code; which Process and why is not known (a
+main-affine Process whose unwinding needs a turn the closing thread does
+not give, or an unwind that waits on a lock, are readings). The test is the
+one recorded in decision 55 as having failed once on a `class.hierarchy`
+with no reply. Whether 8efdf05's registry fault took part is not known.
+
+## Decided under the owner's delegation (by the build agent; reversible)
+
+1. Item 1: the queue is not committed. The rule's "fix" condition held (a
+   Delay 100 ms late under the loaded sanitizer, 5 of 7 runs), but the
+   queue, built and measured, changed nothing in A, B or D, and the global
+   queue gives a Delay's block a thread while it is full. The counter and
+   the guard test stay.
+2. Item 2: fixed with the allocation stalls' own rule (a new resource and a
+   new fallback cause), no protocol change, no model change.
+3. Item 3: a retired method's source is kept weakly, and the install and
+   the removal hold the registry across the primitive; a refusal signals
+   after it.
+4. Item 4: a recheck's error is counted and the service goes on; the failed
+   recheck's changes are not checked again until they change.
+5. Item 6: the frame variables are kept per method in a table of at most
+   1024 methods.
+6. Item 7: measured; the rule's next step is a turn profile by phase.
+
+## Not done
+
+- No queue for the Delays (above); no QoS comparison; no idle-wakeup
+  measurement (nothing that runs changed).
+- No trigger that starts a cycle before a bucket is at its largest: the
+  stall waits at the full bucket, and the main worker falls back there.
+- The bucket scan at four million Symbols (not in this module): the fixed
+  full program takes 236 s.
+- The bar's item 4: of five loaded sanitizer runs of 8efdf05 one hung, and
+  of four of 46f7510 (the tier's and three) one failed the thin test above.
+- Device rows ran in the tier only (the iPhone; the iPad is the weekly's).
+
+## Found, not this module's
+
+- `ShellVM.closeOnce` waits for every Process to terminate with no bound;
+  one loaded sanitizer run hung there for two hours (above), and the
+  test process then outlived the gate's `gtimeout -k 60` kill.
+- Under the loaded sanitizer Delays run up to 260 ms late with or without a
+  queue of their own: the suite's CPU, not the queue.
+- `randomProgramsAgreeWithTheirModelNatively` (`slowedMarker`, "must
+  scavenge") failed once in the loaded sanitizer gate; 0 of 10 alone.
+
+## Open questions (built as recommended where there was a build)
+
+1. The Delay queue: the owner approved it before the counter; the counter
+   and the queue's own measurement say it changes nothing. Recommended:
+   leave it out and keep the counter; reopen if a Delay is seen 1 s late.
+2. The Symbols fault: fixed (a missing trigger); a cycle started before a
+   bucket fills is a later idea. Recommended: as built.
+3. `ShellVM.closeOnce`'s unbounded wait: recommended, a small follow-up
+   that finds which Process does not end (print the live Processes and
+   their frames when the wait has made no progress for a long quiet
+   stretch) before any bound is set.
+4. The turn overrun: recommended, a turn profile by phase (part 1's rule),
+   briefed when the owner wants it.
