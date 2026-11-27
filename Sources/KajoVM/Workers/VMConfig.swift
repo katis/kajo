@@ -206,6 +206,14 @@ struct VMTestSwitches: Sendable {
     /// (`allocateOld`) and takes the lock again, the path a full context
     /// takes; the tests run it too.
     var internSlowAllocation = false
+    /// The known faults, item 2 (docs/modules/known-faults.md): not a
+    /// broken variant: a symbol-table bucket grows to at most this many
+    /// slots (nil: `SymbolTable.maxBucket`), so a test fills the table with
+    /// a few thousand Symbols where the real limit takes four million.
+    var symbolBucketMax: Int? = nil
+    /// Its broken variant: a full bucket fails the primitive at once, as
+    /// before the fix (no stall, no fallback).
+    var symbolFullFailsAtOnce = false
     /// A Delay does not outlive its VM (docs/modules/delay-outlives-vm.md):
     /// the broken variant in which a signal or a timer that comes after the
     /// VM's end is not refused and touches the freed VM. It crashes (signal

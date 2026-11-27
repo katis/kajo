@@ -298,6 +298,9 @@ struct MarkingCounters: Sendable {
     /// run of its length).
     var fallbacksEntries: UInt64 = 0
     var fallbacksOldAllocation: UInt64 = 0
+    /// The known faults, item 2: a symbol-table bucket at its largest with
+    /// no hole (the main worker's, or a justified stall's).
+    var fallbacksSymbols: UInt64 = 0
     /// Allocation stalls (docs/modules/allocation-stalls.md): fallbacks
     /// for a background worker's promotion after a justified stall, for
     /// promotion that found no block (the reserve's fallback: objects kept
@@ -481,6 +484,10 @@ enum StallResource: UInt8, Sendable {
     /// Room under the soft limit, or a run of blocks, for an old (large)
     /// allocation.
     case old
+    /// The known faults, item 2: a hole in a symbol-table bucket that is
+    /// at its largest (a dead Symbol's weak slot is nil only after a cycle
+    /// has marked).
+    case symbols
 }
 
 /// Allocation stalls: what justified a stall's fallback.
@@ -536,6 +543,7 @@ struct StallLog {
     var promotion = StallTally()
     var entries = StallTally()
     var old = StallTally()
+    var symbols = StallTally()
     var records: RecordRing<StallRecord>
     var byWorkerCount: [UInt64]
     var byWorkerNs: [UInt64]
@@ -567,7 +575,7 @@ struct StallLog {
 
     var all: StallTally {
         var t = StallTally()
-        for x in [promotion, entries, old] {
+        for x in [promotion, entries, old, symbols] {
             t.count &+= x.count
             t.ns &+= x.ns
             t.maxNs = Swift.max(t.maxNs, x.maxNs)
@@ -587,6 +595,7 @@ struct StallLog {
         case .promotion: add(&promotion)
         case .entries: add(&entries)
         case .old: add(&old)
+        case .symbols: add(&symbols)
         }
         if r.worker >= 0 && r.worker < byWorkerCount.count {
             byWorkerCount[r.worker] &+= 1

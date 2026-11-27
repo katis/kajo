@@ -52,6 +52,8 @@ let switchTable: [String: SwitchRow] = [
     "VMTestSwitches.internPublishBeforeFill": .test("SymbolInterningTests.swift", "lookupsDuringAnInsert"),
     "VMTestSwitches.internPauseUs": .test("SymbolInterningTests.swift", "lookupsDuringAnInsert"),
     "VMTestSwitches.internSlowAllocation": .test("SymbolInterningTests.swift", "internSymbolsRuntime"),
+    "VMTestSwitches.symbolBucketMax": .test("SymbolTableFullTests.swift", "fullTableRuntime"),
+    "VMTestSwitches.symbolFullFailsAtOnce": .test("SymbolTableFullTests.swift", "fullTableRuntime"),
     "VMTestSwitches.lateSignalsIgnoreEnd": .test("DelayEndTests.swift", "brokenVariantALateTimerTouchesTheFreedVM"),
     "NurseryTestSwitches.skipBarrierAt": .test("BarrierSiteTests.swift", "siteScenario"),
     "NurseryTestSwitches.dropCarriedHolders": .test("AgeTests.swift", "anOldHolderOfASurvivorStaysRemembered"),

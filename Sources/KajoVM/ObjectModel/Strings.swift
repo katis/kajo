@@ -148,8 +148,9 @@ extension Machine {
     /// 4: making the Symbol before the lock (the brief's candidate) made
     /// 137 000 Symbols for nothing a run when eight workers intern the same
     /// bytes at once. Answers `.none` (the primitive fails and the kernel
-    /// reports it, as before) when the heap has no room or the bucket is
-    /// full at `SymbolTable.maxBucket`.
+    /// reports it, as before) when the heap has no room, or the bucket is
+    /// at `SymbolTable.maxBucket` with no hole after a collection (the
+    /// known faults, item 2: `bucketAtLargest`).
     @inline(never)
     func internSlow(_ o: Oop, _ h: Int64) -> Oop {
         let vm = unsafe workerOf(state).pointee.vm
@@ -162,7 +163,13 @@ extension Machine {
             if om.symbolSlot(table, hash: h) == nil {
                 // A hint read without the lock; the growth checks under it.
                 if sym != .none { discardSymbol(sym); sym = .none }
-                if unsafe !growBucket(vm, table, h, keeping: o) { return .none }
+                switch unsafe growBucket(vm, table, h, keeping: o, max: sw.symbolBucketMax ?? SymbolTable.maxBucket) {
+                case .grown: break
+                case .noRoom: return .none
+                case .atLargest:
+                    if sw.symbolFullFailsAtOnce { return .none }
+                    guard let vm = unsafe vm, unsafe bucketAtLargest(vm, table, h, keeping: o) else { return .none }
+                }
                 continue
             }
             let t0 = unsafe internLock(vm)
@@ -219,24 +226,27 @@ extension Machine {
         om.setReadOnly(sym, true)
     }
 
+    enum BucketGrowth { case grown, noRoom, atLargest }
+
     /// Replace the full bucket of hash `h` by one twice its size: allocated
     /// (old, nil) before the lock, filled and published under it if the
     /// table still names the bucket measured, thrown away otherwise. The
     /// copy reads weak slots and hands their Symbols on to a bucket born
     /// after any snapshot (the final mark never nils its slots): every read
     /// goes through the keep-alive barrier. False: no room, or the bucket
-    /// is at its largest.
-    private func growBucket(_ vm: UnsafeMutablePointer<VMState>?, _ table: Oop, _ h: Int64, keeping o: Oop) -> Bool {
+    /// is at its largest (`max`, `SymbolTable.maxBucket` but in a test).
+    private func growBucket(_ vm: UnsafeMutablePointer<VMState>?, _ table: Oop, _ h: Int64, keeping o: Oop,
+                            max: Int) -> BucketGrowth {
         let j = Int(truncatingIfNeeded: h) & (SymbolTable.buckets &- 1)
         let old = om.load(table, j)
         let k = old == nilObject ? 0 : Int(om.count(of: old))
-        guard let size = SymbolTable.grownBucketSize(k) else { return false }
+        guard let size = SymbolTable.grownBucketSize(k, max: max) else { return .atLargest }
         let nb = allocateOld(WellKnown.weakArray, count: size, bytes: false, keeping: o, softFailure: true)
-        if nb == .none { return false }
+        if nb == .none { return .noRoom }
         let t0 = unsafe internLock(vm)
         if om.load(table, j) != old {
             unsafe internUnlock(vm, t0) { unsafe $0.pointee.growthRetries &+= 1 }
-            return true
+            return .grown
         }
         for x in 0..<k {
             let v = om.load(old, x)
@@ -246,7 +256,43 @@ extension Machine {
         atomicMemoryFence(ordering: .releasing)
         store(table, j, nb, .symbolTable)
         unsafe internUnlock(vm, t0) { unsafe $0.pointee.growths &+= 1 }
-        return true
+        return .grown
+    }
+
+    /// The known faults, item 2: the bucket of hash `h` is at its largest
+    /// and has no hole. Its dead Symbols' weak slots become holes only when
+    /// a collection has marked, and a Symbol is old at birth, so a program
+    /// that interns and drops millions of them starts no cycle by itself
+    /// (eight workers each interning a million failed every `asSymbol`
+    /// after 4.0 million with `cycles=0` on 7ba9643). Outside the intern
+    /// lock, nothing of the insert held but `o` (no Symbol made yet): a
+    /// background worker stalls for the collector until the bucket has a
+    /// hole (the allocation stalls' rule, resource `symbols`: it starts a
+    /// cycle when none runs); a stall that a cycle justified, the main and
+    /// the host worker, and a VM with no marker thread take one full
+    /// collection, a counted fallback of cause `symbols`. True: look again
+    /// (other workers may take the holes first: then the bucket is full
+    /// again and this runs again, each time with progress made). False: the
+    /// bucket had no hole in the stop right after a full collection, a
+    /// table full of live Symbols, and the primitive fails as before.
+    @inline(never)
+    private func bucketAtLargest(_ vm: VMPointer, _ table: Oop, _ h: Int64, keeping o: Oop) -> Bool {
+        let w = unsafe workerOf(state)
+        let hole = { om.symbolSlot(table, hash: h) != nil }
+        let outcome = unsafe stallForCollector(vm, w, .symbols, held: o, available: hole)
+        if outcome == .available { return true }
+        defer { if outcome == .justified { unsafe stallFallbackDone(vm, w) } }
+        var stillFull = false
+        unsafe stopWorld(vm, w, retry: true, keeping: [o]) { stop in
+            if hole() {
+                if let mk = unsafe vm.pointee.marking { unsafe mk.pointee.log.pointee.counters.fallbacksAvoided &+= 1 }
+                return
+            }
+            unsafe noteFullCollection(vm, .symbols, requester: fallbackRequester(vm, w), worker: w.pointee.index)
+            unsafe fullCollection(vm, stop)
+            stillFull = !hole()
+        }
+        return !stillFull
     }
 
     /// Take the intern lock (none without a VM: one thread). Answers the

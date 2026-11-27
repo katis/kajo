@@ -156,7 +156,10 @@ func stallForCollector(_ vm: VMPointer, _ w: WorkerPointer, _ resource: StallRes
         // a fallback; docs/modules/sweep-stop.md), once per cycle; blocks
         // come only with the whole apply, which the marker asks for.
         let phase = unsafe mk.phaseNow
-        if resource != .promotion && (phase == .sweeping || phase == .swept), unsafe sweepStopCycle != mk.cycleNow {
+        // A Symbol's hole comes with the final mark (weak slots), not the
+        // sweep: no sweep stop for it.
+        if resource != .promotion && resource != .symbols && (phase == .sweeping || phase == .swept),
+           unsafe sweepStopCycle != mk.cycleNow {
             sweepStopCycle = unsafe mk.cycleNow
             unsafe stopWorld(vm, w, retry: true, keeping: held == .none ? [] : [held]) { _ in
                 _ = unsafe finishSweepInStop(vm, for: resource == .entries ? .entries : .oldAllocation)

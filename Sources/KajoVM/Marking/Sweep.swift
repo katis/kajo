@@ -391,6 +391,9 @@ enum FullCause: UInt8, Sendable {
     /// to wait for (no marker thread, the switch `noStalls`): module 4's
     /// rule before the allocation stalls, kept there.
     case softLimit
+    /// The known faults, item 2: a symbol-table bucket was at its largest
+    /// with no hole (its dead Symbols' slots are niled by a collection).
+    case symbols
 }
 
 /// A full collection is about to run in this stop (or, for an old
@@ -442,6 +445,7 @@ func noteFullCollection(_ vm: VMPointer, _ cause: FullCause, requester: Fallback
     case .oldAllocation: unsafe log.pointee.counters.fallbacksOldAllocation &+= 1
     case .promotion: unsafe log.pointee.counters.fallbacksPromotion &+= 1
     case .softLimit: unsafe log.pointee.counters.fallbacksSoftLimit &+= 1
+    case .symbols: unsafe log.pointee.counters.fallbacksSymbols &+= 1
     case .verifier, .other: break
     }
     switch requester {

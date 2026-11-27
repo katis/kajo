@@ -163,9 +163,9 @@ enum SymbolTable {
     static let firstBucket = 4
     static let maxBucket = 4095
 
-    static func grownBucketSize(_ old: Int) -> Int? {
-        if old >= maxBucket { return nil }
-        return old == 0 ? firstBucket : min(2 * old, maxBucket)
+    static func grownBucketSize(_ old: Int, max: Int = maxBucket) -> Int? {
+        if old >= max { return nil }
+        return old == 0 ? Swift.min(firstBucket, max) : Swift.min(2 * old, max)
     }
 }
 
