@@ -231,6 +231,45 @@ rm -rf $fz/pids/*(N) $fz/out; mkdir -p $fz/out
 killed "the fuzz gate's script killed alone" $fz/script.pid
 wait
 rm -rf $fz
+# Gate reliability (docs/modules/gate-reliability.md): a process a gate
+# started that outlives it is found by its tag, logged, sampled, killed by
+# pid and counted (leftover=<n> on the end line), and it fails the gate. The
+# stand-in's child leaves the gate's process group for a session of its own
+# (as `swift test`'s helper leaves for a group of its own) and sleeps; once
+# with the gate killed at its bound, once with a gate that exits 0 and leaves
+# its child behind. A gate that leaves nothing says leftover=0.
+lo=$(mktemp -d ${TMPDIR:-/tmp}/kajo-leftover-XXXXXX)
+print -l 'import os, sys, time' 'os.setsid()' 'open(sys.argv[1], "w").write(str(os.getpid()))' 'time.sleep(300)' > $lo/child.py
+leftgate() {
+  rm -rf $lo/out; mkdir -p $lo/out
+  zsh -c 'GL_ROOT=$1 GL_OUT=$2/out LO=$2; source $1/scripts/gates-lib.sh
+    functions[gl_spec_real]=$functions[gl_spec]
+    gl_spec() {
+      case $1 in
+        leftover-killed) spec_cmd="python3 -I $LO/child.py $LO/child.pid & sleep 300"
+                         spec_timeout=3 spec_load=0 spec_check=- ;;
+        leftover-exit)   spec_cmd="python3 -I $LO/child.py $LO/child.pid & sleep 2; exit 0"
+                         spec_timeout=60 spec_load=0 spec_check=- ;;
+        leftover-none)   spec_cmd="sleep 1"; spec_timeout=60 spec_load=0 spec_check=- ;;
+        *) gl_spec_real "$@" ;;
+      esac
+    }
+    gl_init; trap "gl_cleanup; exit 130" INT TERM; trap gl_cleanup EXIT; gl_gate $3' lg $root $lo $1
+}
+for g in leftover-killed leftover-exit; do
+  rm -f $lo/child.pid
+  leftgate $g > /dev/null 2>&1; rc=$?
+  cp=$(cat $lo/child.pid 2>/dev/null)
+  n=$((n + 1))
+  [[ $rc != 0 && -n $cp && -s $lo/out/leftover-$g-$cp.txt ]] && ! kill -0 $cp 2>/dev/null \
+    && grep -q " end $g rc=[1-9][0-9]* [0-9]*s leftover=1$" $lo/out/gates.log && grep -q " leftover $g pid=$cp ppid=" $lo/out/gates.log \
+    || { print "FAIL: the gate $g's leftover (rc=$rc, child ${cp:-none}): $(grep -E " (end|leftover) " $lo/out/gates.log 2>/dev/null | tr '\n' '/')"; fail=1 }
+  [[ -n $cp ]] && kill -KILL $cp 2>/dev/null
+done
+leftgate leftover-none > /dev/null 2>&1; rc=$?
+n=$((n + 1)); [[ $rc == 0 ]] && grep -q " end leftover-none rc=0 [0-9]*s leftover=0$" $lo/out/gates.log \
+  || { print "FAIL: a gate that leaves nothing: rc=$rc $(grep ' end ' $lo/out/gates.log 2>/dev/null)"; fail=1 }
+rm -rf $lo
 # The review fixes, part 2, item 11 (tools.F5): shell-report.py --bar over a
 # directory with rows passes and over one with none fails, and the Mac
 # matrix gate's command fails when its matrix step fails (the scripts stood

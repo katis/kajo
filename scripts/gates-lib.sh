@@ -25,6 +25,7 @@ GL_AB_BASE=${GL_AB_BASE:-}
 GL_FAILED=()
 GL_CHILD=
 GL_LOAD=
+GL_TAG=
 
 gl_init() {
   mkdir -p $GL_OUT
@@ -222,28 +223,72 @@ gl_load_off() {
   sleep 1
 }
 
+# Gate reliability (docs/modules/gate-reliability.md): every process a gate
+# starts carries KAJO_GATE_TAG=<the gate's tag> in its environment, so it is
+# found by pid after the gate whatever its parent or process group became
+# (`swift test` starts its test helper in a group of its own, which
+# gtimeout's kill of its own group misses; the helper was then orphaned to
+# launchd). gl_tagged <tag>: the pids of the live processes that carry it.
+gl_tagged() {
+  ps -wwE -A -o pid= -o command= 2>/dev/null | awk -v k="KAJO_GATE_TAG=" -v v="$1" 'index($0, k v " ") || substr($0, length($0) - length(k v) + 1) == k v { print $1 }'
+}
+
+# gl_leftovers <tag> <gate>: every process of the gate still alive after it
+# (seen twice, 2 s apart, so one that is exiting is not counted) is logged
+# with its parent, process group and command, sampled into
+# <out>/leftover-<gate>-<pid>.txt, then killed by pid (TERM, KILL after
+# 10 s). Prints the count.
+gl_leftovers() {
+  local tag=$1 id=$2 p n=0 i
+  local -a first=($(gl_tagged $tag)) alive=()
+  if (( ${#first} )); then
+    sleep 2
+    local -a again=($(gl_tagged $tag))
+    for p in $first; do (( ${again[(Ie)$p]} )) && alive+=($p); done
+  fi
+  for p in $alive; do
+    gl_log "leftover $id pid=$p $(ps -o ppid=,pgid=,command= -p $p 2>/dev/null | cut -c1-200 | awk '{ printf "ppid=%s pgid=%s command=", $1, $2; for (i = 3; i <= NF; i++) printf "%s%s", $i, (i < NF ? " " : "") }')"
+    gtimeout 60 sample $p 5 -file $GL_OUT/leftover-$id-$p.txt > /dev/null 2>&1
+    kill -TERM $p 2>/dev/null
+  done
+  for p in $alive; do
+    for i in {1..100}; do kill -0 $p 2>/dev/null || break; sleep 0.1; done
+    kill -0 $p 2>/dev/null && kill -KILL $p 2>/dev/null
+    n=$((n + 1))
+  done
+  print $n
+}
+
 gl_cleanup() {
   [[ -n $GL_CHILD ]] && { gl_kill_tree $GL_CHILD; GL_CHILD= }
+  [[ -n $GL_TAG ]] && { gl_leftovers $GL_TAG interrupted > /dev/null; GL_TAG= }
   gl_load_off
 }
 
 # gl_gate <gate>: runs it, logs it, appends a failure to GL_FAILED.
 # Answers the gate's status (the command's, or 1 when its check failed).
+# Since gate reliability the end line ends with leftover=<n>: the processes
+# the gate started that outlived it (gl_leftovers), and a leftover fails a
+# gate that passed (rc=1).
 gl_gate() {
   local id=$1
   gl_spec $id || { gl_log "unknown gate $id"; GL_FAILED+=($id); return 1 }
-  local f=$GL_OUT/$id.txt t0=$(date +%s) rc
+  local f=$GL_OUT/$id.txt t0=$(date +%s) rc left
+  GL_TAG="kajo-gate-$id-$$-$t0-$RANDOM"
   gl_log "start $id (swift: $GL_SWIFT) bound=${spec_timeout}s"
   (( spec_load )) && gl_load_on
-  (cd $GL_ROOT && exec gtimeout -k 60 $spec_timeout zsh -c "$spec_cmd") > $f 2>&1 &
+  (cd $GL_ROOT && KAJO_GATE_TAG=$GL_TAG exec gtimeout -k 60 $spec_timeout zsh -c "$spec_cmd") > $f 2>&1 &
   GL_CHILD=$!
   wait $GL_CHILD
   rc=$?
   GL_CHILD=
+  left=$(gl_leftovers $GL_TAG $id)
+  GL_TAG=
   (( spec_load )) && gl_load_off
   if [[ $rc == 0 && $spec_check != - ]]; then gl_check_$spec_check $f || rc=1; fi
+  (( rc == 0 && left > 0 )) && rc=1
   [[ $id == fuzz ]] && gl_fuzz_lines $f
-  gl_log "end $id rc=$rc $(( $(date +%s) - t0 ))s"
+  gl_log "end $id rc=$rc $(( $(date +%s) - t0 ))s leftover=$left"
   (( rc )) && GL_FAILED+=($id)
   return $rc
 }

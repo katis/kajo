@@ -377,3 +377,28 @@ terminateRequested frames=[]". The broken variant (`KAJO_BROKEN_CLOSE_WAIT=1`,
 s; 32 live: process 164 waiting priority=1 runningOn=-1 waitingOn=Semaphore
 frames=[UndefinedObject>>[] < BlockClosure>>forkedValue]; ...". Starting
 position 3 is built with the cause removed (rounds) and the bound as the net.
+
+### Part 3: B, the kill (its own commit)
+
+`gl_gate` (`scripts/gates-lib.sh`) runs each gate with
+`KAJO_GATE_TAG=kajo-gate-<gate>-<pid>-<time>-<random>` in its environment,
+which every process it starts inherits whatever its parent or process group
+becomes. After the gate `gl_leftovers` finds the live processes that carry
+the tag (`ps -wwE`, seen twice 2 s apart so an exiting one is not counted),
+writes a `leftover <gate> pid= ppid= pgid= command=` line to `gates.log`,
+samples each into `<out>/leftover-<gate>-<pid>.txt`, kills it by pid (TERM,
+KILL after 10 s), and the end line ends `leftover=<n>`. A leftover fails a
+gate that passed (open question 4, as recommended). `gl_cleanup` (a tier or
+weekly run interrupted) does the same for the gate running. The block-
+buffered output is left as it is (question 5): the sample is the evidence.
+
+The reproduction again with the fix (`work/after/B.out`): "leftover
+hang-standin pid=83882 ppid=1 pgid=83882 command=.../swiftpm-testing-helper
+...", "end hang-standin rc=124 67s leftover=1", the sample file written, and
+nothing of the stand-in alive afterwards. `scripts/check-tier-test.sh` has
+the stand-in (a child that leaves for a session of its own and sleeps):
+killed at the bound, a gate that exits 0 and leaves it, and a gate that
+leaves nothing; 136 checks ok (`work/after/check-tier-test.txt`). The same
+three checks against the starting `gates-lib.sh`
+(`broken/B-start-gates-lib.txt`): all three fail ("end leftover-killed
+rc=124 3s" with no count; the child was killed by the test's own cleanup).
