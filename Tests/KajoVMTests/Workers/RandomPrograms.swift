@@ -572,12 +572,19 @@ final class ScavengeTally: @unchecked Sendable {
     func take(_ c: RandomConfig) -> UInt64 { lock.lock(); defer { n[c.rawValue] = 0; lock.unlock() }; return n[c.rawValue] ?? 0 }
 }
 let randomScavenges = ScavengeTally()
+/// Gate reliability (docs/modules/gate-reliability.md, fault C): the native
+/// engine's tally, apart from the interpreter's. Both tests run side by side
+/// in the random shard, and with one tally keyed by the configuration the
+/// first to end emptied the other's sum: the native's slowedMarker read 0 in
+/// one loaded sanitizer run in four while its seeds stalled.
+let randomScavengesNative = ScavengeTally()
 
 /// Run one program under one configuration: its answer, or nil after
 /// recording why not.
 @discardableResult
 func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false) throws -> Int64? {
     let rt = try config.runtime(p, native: native)
+    let tally = native ? randomScavengesNative : randomScavenges
     let root = rt.spawn("root")
     if config == .offloadCollection {
         // The shell's part: main turns until everything has terminated.
@@ -634,13 +641,13 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         // Module 7: the `scavenge` primitive collects the caller's nursery
         // without stopping the world.
         let yc = rt.vm.youngCounters
-        randomScavenges.add(config, rt.vm.nurseryCounters.scavenges + yc.collectionsLocal + yc.collectionsOffloaded)
+        tally.add(config, rt.vm.nurseryCounters.scavenges + yc.collectionsLocal + yc.collectionsOffloaded)
     case .cycleEveryScavenge, .markingAlwaysOn:
         // Cycles started: under ThreadSanitizer with busy loops the
         // utility-QoS marker of ten small programs may finish none (module
         // 7's loaded sanitizer run); the verifier checks every final mark
         // that does run.
-        randomScavenges.add(config, rt.vm.markingCounters.cycles)
+        tally.add(config, rt.vm.markingCounters.cycles)
         #expect(rt.vm.markingCounters.missed == 0)
     case .relocateEveryLiveBlock:
         // A selection needs a cycle's final mark, and ten small programs
@@ -666,16 +673,16 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         // snapshot): module 8's image is larger and pinned, so in some runs
         // of 100 seeds every selected block held only pinned image objects
         // and nothing moved (KAJO_RELOC_DEBUG prints both).
-        randomScavenges.add(config, r.blocksSelected)
+        tally.add(config, r.blocksSelected)
         #expect(rt.vm.markingCounters.missed == 0 && r.parksWhileRelocating == 0 && r.verifierFailures == 0)
     case .scavengeEveryAllocation: #expect(rt.vm.nurseryCounters.scavenges > 10)
     case .stwScavenge: #expect(!rt.vm.hasYoungCollection)
     case .exhaustedReserve, .exhaustedReserveOffload:
-        randomScavenges.add(config, rt.vm.nurseryCounters.exhaustedScavenges)
+        tally.add(config, rt.vm.nurseryCounters.exhaustedScavenges)
     case .slowedMarker:
         // Stalls started (asserted over the configuration's seeds, not per
         // seed: a small program may not stall), none unjustified.
-        randomScavenges.add(config, rt.vm.stallLog?.all.count ?? 0)
+        tally.add(config, rt.vm.stallLog?.all.count ?? 0)
         // Gate reliability, part 1 (fault C): each seed's stalls, which
         // engine, when (ms of this process), beside each take below.
         print("stall-diag random slowedMarker stalls native=\(native) seed=\(p.seed) stalls=\(rt.vm.stallLog?.all.count ?? 0) at=\(now() / 1_000_000)")
@@ -685,11 +692,11 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         // Every store took the young slow path, cycles or not.
         let calls = (0..<(config.workers + 2)).reduce(UInt64(0)) { $0 &+ rt.vm.youngWorkerCounters($1).deletionBarrierCalls }
         #expect(calls > 0, "seed \(p.seed)")
-        randomScavenges.add(config, rt.vm.markingCounters.cycles)
+        tally.add(config, rt.vm.markingCounters.cycles)
         #expect(rt.vm.markingCounters.missed == 0)
     case .backgroundCollection, .offloadCollection, .roundEveryPoll:
         let yc = rt.vm.youngCounters
-        randomScavenges.add(config, yc.collectionsLocal + yc.collectionsOffloaded)
+        tally.add(config, yc.collectionsLocal + yc.collectionsOffloaded)
         if ProcessInfo.processInfo.environment["KAJO_RANDOM_DEBUG"] != nil {
             print("seed \(p.seed) \(config): \(yc) scavenges \(rt.vm.nurseryCounters.scavenges) young \(rt.vm.nurseryCounters.youngAllocations)")
         }
@@ -763,7 +770,7 @@ func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
     // per configuration (KAJO_NATIVE_SEEDS overrides).
     let n = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "") ?? min(randomSeedCount(config), 100)
     _ = randomNative.take(config)
-    let before = randomScavenges.take(config)
+    let before = randomScavengesNative.take(config)
     if config == .slowedMarker { print("stall-diag random slowedMarker start native=true value=\(before) at=\(now() / 1_000_000)") }
     for s in 0..<UInt64(n) {
         let p = randomProgram(randomSeedBase &+ s)
@@ -777,7 +784,7 @@ func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
     let c = randomNative.take(config)
     // Allocation stalls: the slowed marker's stalls over the seeds, natively too.
     if config == .slowedMarker {
-        let taken = randomScavenges.take(config)
+        let taken = randomScavengesNative.take(config)
         print("stall-diag random slowedMarker take native=true value=\(taken) at=\(now() / 1_000_000)")
         #expect(taken > 0)
     }

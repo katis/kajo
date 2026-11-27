@@ -402,3 +402,29 @@ leaves nothing; 136 checks ok (`work/after/check-tier-test.txt`). The same
 three checks against the starting `gates-lib.sh`
 (`broken/B-start-gates-lib.txt`): all three fail ("end leftover-killed
 rc=124 3s" with no count; the child was killed by the test's own cleanup).
+
+Before the tier, through `gl_gate` on d4126d4 (`work/pre/gates.log`):
+`ios-check` rc=0 16 s leftover=0 ("warnings=0 errors=0"; the close's wait
+adds `pthread_cond_timedwait_relative_np`), `apps` rc=0 140 s leftover=0
+(xcodebuild leaves nothing tagged behind).
+
+### Part 4: C, the thin test (its own commit)
+
+The native engine's random programs keep their own tally,
+`randomScavengesNative`, beside the interpreter's `randomScavenges`;
+`runRandom` adds to the one of its engine and each test takes only its
+own. The assertion `> 0` is unchanged; nothing is driven, no seed added.
+After (`work/after/`, plain, the conditions of part 1's three rules):
+
+| condition | native fails after | interpreted fails after | the native alone |
+|---|--:|--:|--:|
+| F | 0 of 5 | 0 of 5 | |
+| F2 | 0 of 5 | 0 of 5 | |
+| F3 | 0 of 5 | 0 of 5 | 0 of 3 (passes 3 of 3) |
+
+The native take now reads its own seeds' sum (F3: 4, 5, 3, 5, 4, against 0
+in the failing runs before). The same fix covers the interpreted
+`exhaustedReserveOffload` failure of the part-1 loaded run (the native's
+first take of a configuration no longer empties the interpreter's). Under
+the bar's item 4, F3 is the condition of record: 3 of 5 before on 71f2706
+(not "forced" by the rule's 4 of 5), 0 of 5 after.
