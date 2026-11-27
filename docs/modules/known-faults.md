@@ -318,3 +318,110 @@ not, under the rule's three times: the overrun is not the
 acknowledgement's. The next step, under the rule, is a turn profile by
 phase (the poll interval and the slice's end), not the acknowledgement's
 place; nothing is changed here.
+
+### Part 2: the Delay timers (nothing built but tests)
+
+The queue is not built (part 1). `Tests/KajoVMTests/Processes/DelayQueueTests.swift`:
+`aDelayFiresWhileTheGlobalQueueIsFull` (the guard; its lateness through
+`printMargin` as `delay.globalQueueFull`, ceiling 1000 ms; it passed 3 of 3
+on the starting code and cannot fail there) and
+`theLatenessCounterNotesEveryDelay`. `DelayEndTests` are unchanged and pass.
+No idle-wakeup measurement was needed: nothing that runs changed.
+
+### Part 3: the Symbols (item 2)
+
+`Machine.internSlow` (`ObjectModel/Strings.swift`): `growBucket` answers
+`grown`, `noRoom` or `atLargest`. At `atLargest`, outside the intern lock
+and holding no Symbol (as before, a Symbol made for nothing is discarded
+first), `bucketAtLargest` decides with the allocation stalls' own rule: a
+background worker stalls for the collector, resource `symbols`
+(`StallResource.symbols`, no sweep stop for it: the holes come with the
+final mark's weak slots), the stall starting a cycle when none runs; a
+stall a cycle justified, the main and the host worker, and a VM with no
+marker thread take one full collection in a stop, counted as a fallback of
+cause `symbols` (`FullCause.symbols`) with its requester, avoided when the
+bucket has a hole in the stop. The insert then looks again; it fails only
+when the bucket had no hole in the stop right after a full collection (a
+table full of live Symbols). The first version looked again once and then
+failed: in the short reproduction other workers took the holes first and 2
+of 16 000 failed after three justified stalls; the rule is now "a
+collection left it full", which is a fact, not a count.
+
+Nothing changed under the intern lock or in the order of the lookups, the
+growth or the publication, so the model (`models/Sources/SymbolInterningModel`)
+is unchanged: waiting outside the lock is what `allocateOld` already did
+on the same path.
+
+New run-line fields: `stallsSymbols`, `stallSymbolsMs`, `fallbacksSymbols`.
+Test switches: `VMTestSwitches.symbolBucketMax` (not a broken variant: a
+bucket's largest size, so 4096 Symbols fill the table) and
+`symbolFullFailsAtOnce` (the broken variant, the starting code's path), with
+rows in `SwitchTableTests`. `SymbolTable.grownBucketSize(_:max:)`.
+
+Tests (`Tests/KajoVMTests/ObjectModel/SymbolTableFullTests.swift`, buckets
+of 4): eight Processes on seven background workers intern and drop 16 000
+Symbols, none fails (36 to 93 stalls, 0 or 1 justified, 0 unjustified
+fallbacks; 3 runs); with no marker 9 to 11 full collections of cause
+`symbols`, none fails; the broken variant fails 12 044 of 16 000 (the
+starting code with `maxBucket = 4`: 12 044, `part1/item2/short-before/`);
+2850 live Symbols past the room still fail (215 nil answers) after one
+collection each. The full program by hand on the fix
+(`work/item2/symbols-8-fix1.txt`, release, 8 workers):
+`checksum=0 symbolsInterned=8000000 primitiveFailures=0 cycles=1 cyclesDone=1
+stalls=1 stallsSymbols=1 stallSymbolsMs=14.258 fallbacks=0 oldEndMB=134.4`,
+236 s (the bucket scans at four million Symbols, not in this module).
+
+### Part 4: items 3 to 6
+
+- Item 3. `Smalltalk retireSourceOf:` takes a replaced or removed method's
+  source out of the sources table and keeps it in a `WeakIdentityTable`
+  (new, `kernel/Collections/`: keys weak, values strong, pruned when a
+  record is added, a scan, an optional limit) for as long as something
+  holds the method; `sourceOf:` reads it there when the table has none;
+  `retiredSourceCount`. `compile:classified:` and `removeSelector:` retire
+  instead of forgetting. `addSelector:withMethod:` and `removeSelector:` run
+  the primitive and the pragma index's note inside one `Smalltalk
+  registry:` block, the lock the index's readers take.
+- Item 4. `TypeService class>>run` drains under `on: Error do:`; the
+  error is counted (`errors`) and its text kept (`lastError`), the Process
+  goes on; `isAlive`. The changes of the failed recheck are not checked
+  again until they change (said in `errors`' comment).
+- Item 5. Primitive 147's refusal for a class held on another Process's
+  stack names the Process and the method of the frame whose words hold
+  it: "the Process 4 holds KFRemovable on its stack
+  (KFHolder>>hold:until:): try again when it has let go"
+  (`frameHolding` in `ObjectModel/LiveClasses.swift`, which walks the
+  caller links and answers nil, naming the Process only, when they do not
+  lead there).
+- Item 6. `Compiler class>>frameVariablesOf:` keeps each method's frame
+  variables in a `WeakIdentityTable` of at most 1024 methods, found outside
+  `Smalltalk registry:` and kept under it; the old body is
+  `findFrameVariablesOf:`.
+
+Tests: `kernel/Tests/KnownFaultsTest.class.st` (six tests, with
+`KnownFaultsSample`) and `TypeServiceTest>>testAnErrorInARecheckIsCountedAndTheServiceGoesOn`.
+On the starting kernel (`part1/new-tests-before/`, 5 runs) the six fail or
+error 6 of 6 each run (the retired-count test errors: its selector is new);
+after, 270 of 270 kernel tests pass in release at `verify=off` and at
+`verify=all` (`work/kt/`), and the three TypeService tests pass. The
+scratch forcing tests after (`work/forcing-after/`, 5 runs): 3a, 3b, 4, 5,
+6 pass 5 of 5; 3c's scratch version compared the pragma's keyword with the
+method's selector (a test bug, fixed in the committed test) and read
+`#(#kfMark)`, one pragma found, against `#()` before. Item 6 after: new stop
+1.8 ms against 38.6 before, warm 1.75 (release).
+
+### Before the tier
+
+- `just arc-check` on 7bc4db9: "OK: no retain or release on the checked
+  paths; the dispatch loop is one jump table" (`work/pre/arc-check.txt`).
+- The aligned A/B against 7ba9643 (`work/pre/ab/table.md`, five runs a
+  side, checksums the same): time 0.956 to 1.012, cycles 0.991 to 1.004,
+  instructions 0.999 to 1.006 on every kernel at 1 and 8 workers. Nothing
+  on the dispatch loop, the send or the allocation fast path changed.
+- The changed and new Swift tests once under ThreadSanitizer with twelve
+  busy loops at full size (`work/tsan-changed/`): every one passed, 0
+  reports; `liveSymbolsPastTheTablesRoomStillFail` took 62 s there (4.3 s
+  plain), the stalled test 10.8 s. The kernel parts there: one Delay 96.5
+  ms late (part 2), none 100 ms late.
+- `TypeCheckerTests.theTypesPackageBuildsAndItsTestsPass` counts 34 SUnit
+  tests now (33 before; the new TypeService test).

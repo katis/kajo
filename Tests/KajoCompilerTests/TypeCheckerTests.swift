@@ -22,7 +22,7 @@ let typesProjectImage: [UInt8] = {
 let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
 
 @Suite(.serialized) struct TypeCheckerTests {
-    /// Check time: under the sanitizer in the weekly run only (its 33
+    /// Check time: under the sanitizer in the weekly run only (its 34
     /// SUnit tests on the development image took 1132 to 1532 s there with
     /// twelve loops and ended the compiler tests' shard); every tier's plain
     /// gate runs it, and the Smalltalk tier's tools-test runs the same tests.
@@ -40,7 +40,7 @@ let typesWait: Double = compilerTestsUnderThreadSanitizer ? 3600 : 600
             print("types-tests \(name) total=\(report.total) passed=\(report.passed) body_s=\(String(format: "%.1f", Date().timeIntervalSince(t0)))")
             total += report.total
         }
-        #expect(total == 33)
+        #expect(total == 34)
     }
 
     /// Check time: under the sanitizer in the weekly run only (its

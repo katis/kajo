@@ -55,7 +55,7 @@ let sizedTests: [String: SizedTest] = [
         tier: "the plain gate only (47 s); under the sanitizer the whole-image check took 1047 s",
         full: "every gate, the sanitizer's included"),
     "TypeCheckerTests.theTypesPackage": SizedTest(
-        claim: "the types package builds without warnings and its 33 SUnit tests pass in the development image",
+        claim: "the types package builds without warnings and its 34 SUnit tests pass in the development image",
         tier: "the plain gate only (29 s); under the sanitizer and twelve loops 1132 to 1532 s, the end of the compiler tests' shard",
         full: "every gate, the sanitizer's included"),
 ]
