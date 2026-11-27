@@ -222,3 +222,99 @@ run line carries `delaysFired`, `delayLateMeanMs`, `delayLateMaxMs`,
 `delayLateSumUs`, `delayLateMaxUs`, `delaysLate10ms`, `delaysLate100ms`;
 `kajo test` prints them on a line of its own and each kernel test part on its
 `kernel part N:` line.
+
+### Part 1: what was measured and reproduced (before any fix)
+
+Every number below names its file under `~/kajo-scratch/known-faults/`.
+The starting code was built in a scratch copy of 183b5db (7ba9643 plus the
+counter), `work/src-183b5db/`. The forcing tests of items 3 to 6 are
+scratch SUnit classes (`part1/forcing/KnownFaults/`), built into an image
+of that copy's kernel and types and run by `kajo test`.
+
+**Item 1, the Delay timers.** Lateness is fired minus due.
+
+| setting | Delays | mean ms | max ms | 10 ms late | 100 ms late | file |
+|---|--:|--:|--:|--:|--:|---|
+| A alone, `kajo run`, 8 workers, 5 runs | 800 each | 3.6 to 4.7 | 10.1 | 15 to 56 | 0 | `part1/item1/ab-before.txt` |
+| B twelve busy loops, 5 runs | 800 each | 3.2 to 4.2 | 11.5 to 18.3 | 20 to 47 | 0 | same |
+| C kernel tests, 3 parts | 9 to 1031 a part | 1.0 to 2.3 | 5.0 | 0 | 0 | `part1/item1/kernel-parts-3.txt` |
+| C kernel tests, 6 parts | 0 to 1300 a part | 1.2 to 1.7 | 5.2 | 0 | 0 | `part1/item1/kernel-parts-6.txt` |
+| D `tsan-load` (rc=0, 2548 s, 0 reports) | 128 to 1409 a part | 1.0 to 2.0 | 22.7 | 2 | 0 | `part1/item1/tsan-load/` |
+
+Alone the lateness tops out at 10.1 ms in every run: that is GCD's timer
+leeway (coalescing), not a queue waiting for a thread. The forcing test
+(`aDelayFiresWhileTheGlobalQueueIsFull`: the default global queue held full
+by 48 spinning blocks and a canary that has not run, a 50 ms Delay) passed
+3 of 3 on the starting code (`part1/item1/full-queue-before/`): the Delay
+fired 1.1 to 5.7 ms late while the canary still waited. The host's timers
+on the same queue never fired in 20 s on 0b53285; a Delay's do. Why the two
+differ is not established (both are `asyncAfter` on `DispatchQueue.global()`).
+
+Under the rule this is neither "fix" (no Delay 100 ms late, the forcing
+test passes on the starting code) nor "not a fault" (D's maximum, 22.7 ms,
+is above the 20 ms the rule set for it): the rule did not decide. Decided
+here: nothing is built, because the one condition that would justify the
+queue, a Delay waiting behind a full global queue, does not happen; the
+counter stays on the run line and in the gates, and the forcing test stays
+in the suite as a guard. The queue as written (`VMLife.timers`, a serial
+queue per VM at user-initiated) is kept in `work/queue-not-built.patch`.
+Open question 1 is answered by that: neither shape.
+
+**Item 2, eight workers and a million Symbols each.** Reproduced on the
+starting code with the failure caught (`part1/item2/symbols-8.txt`, release,
+`--workers 8 --slice-ms 0`, 104 s): every worker's `asSymbol` failed, the
+first failures summing to 4 012 060 (about 501 500 each), with
+`symbolsInterned=4012052 primitiveFailures=8 cycles=0 cyclesDone=0
+fallbacks=0 stalls=0 weakSlotsNiled=0 oldEndMB=207.7 internBucketFilled=51`.
+The table is 1024 buckets of at most 4095 slots (4 193 280); a Symbol is
+old at birth and a dead one's weak slot is nil only after a collection has
+marked; 208 MB of old space started no cycle, and the first bucket to reach
+4095 slots failed the primitive (`growBucket`, "the bucket is at its
+largest"). A missing trigger, so "fix" under the rule, and the fix needs no
+change under the intern lock (part 3). The short reproduction: buckets of at
+most 4 slots, eight Processes of 2000 Symbols each, on the starting code with
+only `maxBucket = 4` changed (`part1/item2/short-before/`): 12 044 of 16 000
+failed, `cycles=0`, 3 of 3.
+
+**Items 3 to 5** (`part1/forcing/before/`, 5 runs; item 4 3 runs):
+
+| item | forcing test | starting code |
+|---|---|---|
+| 3a | a held method replaced, its source read | nil, 5 of 5 |
+| 3b | a held method removed, its source read | nil, 5 of 5 |
+| 3c | a pragma reader at the install (hook after primitive 97, 2 s) | `#()`, 5 of 5 |
+| 4 | a recheck that raises (a change naming 42), then a valid change, in `kajo test` | Process ended (`alive=false`), the change never checked, 3 of 3 |
+| 5 | another Process holds the class in a temporary while it waits | "another Process holds KFRemovable on its stack: try again when it has let go", 5 of 5 |
+
+So 3, 4 and 5 are "fix".
+
+**Item 6, a frames reply.** A stop over 35 frames of 33 methods
+(`part1/item6/`; cold is the first reply, warm the second in the same stop,
+new stop the first reply of a second stop over the same frames, compile the
+time of `Compiler frameVariablesOf:` alone over the 33 methods):
+
+| build | cold | warm | new stop | compile |
+|---|--:|--:|--:|--:|
+| release | 38.1 to 38.8 ms | 1.7 to 1.8 | 38.1 to 38.6 | 36.2 to 36.4 |
+| debug | 0.93 to 1.05 s | 0.042 to 0.043 | 0.96 to 1.06 | 1.00 to 1.14 |
+| ThreadSanitizer (debug, verify=all) | 26.5 to 27.3 s | 1.25 to 1.28 | 26.7 to 27.3 | 26.1 to 27.0 |
+
+A new stop takes 21 to 23 times the warm reply and compiling is 94 to 98
+percent of it: "fix" (the variables kept per method across stops).
+
+**Item 7, measured only** (`part1/item7/`, `part1/item7.out`; the
+turn-overrun test in the scratch copy's debug build, 100 runs alone, then
+100 under twelve busy loops; the three largest turns of each run by CPU
+overrun past the 1 ms budget):
+
+| | runs passed | median of the maxima | largest | largest turns with acks > 0: past 0.1 ms | with acks = 0: past 0.1 ms |
+|---|--:|--:|--:|--:|--:|
+| alone | 100 of 100 | 0.020 ms | 0.081 ms | 0 of 9 | 0 of 291 |
+| loaded | 100 of 100 | 0.076 ms | 0.169 ms | 9 of 72 (12.5 %) | 17 of 228 (7.5 %) |
+
+No run passed 0.2 ms (check time's one failure in 100 was 0.219). Turns
+that acknowledged a round pass 0.1 ms 1.7 times as often as turns that did
+not, under the rule's three times: the overrun is not the
+acknowledgement's. The next step, under the rule, is a turn profile by
+phase (the poll interval and the slice's end), not the acknowledgement's
+place; nothing is changed here.
