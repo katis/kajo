@@ -214,3 +214,106 @@ Build the recommended option; bring the decisions back.
    only.
 5. The lost block-buffered output: leave it, with the sample as the
    evidence (recommended), or run the shards under a pseudo-terminal.
+
+## As built
+
+Built 2026-11-27 by one build agent from 71f2706, swift.org 6.4.2 through
+swiftly first on PATH (`swift` and `clang` both
+`~/.swiftly/bin`). Work files and every raw output:
+`~/kajo-scratch/gate-reliability/`.
+
+### Part 1: measured, instrumented, reproduced (before any fix)
+
+**A, the close.** The instrument: `Sources/KajoVM/Shell/CloseWait.swift`.
+`VM.liveProcesses()` reads every live Process inside the VM under the
+scheduler lock (id, state, priority, affinity, the worker running it,
+whether a termination is requested, the class of what it waits on, its top
+eight frames), and `waitUntilAllTerminatedReporting(quietNs:)` replaces the
+close's untimed wait: still unbounded in this part, it wakes on the done
+condition or every 20 ms on the closing thread only, and after 5 s with no
+termination and no change in the live count prints the live Processes on
+stderr once (`kajo-close-wait`). `KAJO_CLOSE_TRACE=1` prints each close's
+wait (`kajo-close-trace waited=<ms>`).
+
+How the host terminates (read in `Processes/Scheduling.swift`): a ready or
+waiting Process ends at once, with no unwinding; a running one is asked to
+and ends at its next budget check, every 1024 polls. `VM.terminateAll` takes
+one snapshot of the live records and terminates those. A Process made after
+the snapshot is terminated by nobody.
+
+Five shapes (`Tests/KajoCompilerTests/CloseWaitTests.swift`), each a close on
+a thread of its own with a watchdog of 120 s, under `part1/A/rule.txt`
+(17:52:11, copied with its time), five plain runs on a scratch tree of
+71f2706 with only the test file added (`part1/A/start.out`, `start/`) and
+five on the instrumented tree (`head.out`, `head/`):
+
+| shape | start: close did not return | head |
+|---|--:|--:|
+| Processes waiting for ever, one inside a Mutex (position 2) | 0 of 5 | 0 of 5 |
+| main-affine Processes, one never run, one waiting (position 1) | 0 of 5 | 0 of 5 |
+| a running Process forking waiters in rounds of 50 | **5 of 5** | 2 of 5 |
+| a running Process forking main-affine Processes | 1 of 5 | 1 of 5 |
+| a Mutex held by a Process the close terminates, waiters forked late | 3 of 5 | 1 of 5 |
+
+Forced under the rule: the forking waiters. In every hang the instrument
+named only Processes made after the snapshot: 35, 6 and 1 waiters
+`waiting ... waitingOn=Semaphore frames=[UndefinedObject>>[] <
+BlockClosure>>forkedValue]`, 11 `ready ... main ... (not started)`, and one
+`waiting ... frames=[Mutex>>[] < BlockClosure>>ensure: < Mutex>>critical: <
+...]` behind a Mutex whose owner the close had terminated inside its
+critical block. Starting positions 1 and 2 are wrong as causes on their own:
+the host ends a waiting or a main-affine Process at once, turn or no turn.
+They take part only with a Process made after the snapshot (a main-affine
+one no turn will run, a waiter on a Mutex left held). The tools' path has
+that shape: `DevProtocol serve` forks a request Process per request, which
+takes the protocol's lock first, and a request Process forks the reaper.
+Which Process the hung tools test waited for is still not known: a flood of
+300 requests in ten shells closed while the protocol took them returned 10
+of 10 (`part1/A/protocol-head-run1.txt`, plain, no load).
+
+**B, the kill.** A stand-in package (`work/hangpkg`: a suite `ToolsTests`
+whose one test sleeps for ever and writes its pid, parent and process group)
+under the real `scripts/test-bundles.sh` (`KAJO_SWIFT` names
+`scripts/hang-swift.sh`, the real swift over that package) through
+`gates-lib.sh`'s own `gl_gate` with a bound of 60 s
+(`scripts/b-repro.sh`, `part1/B/start.out`): the gate ended rc=124 at 60 s,
+and the test helper (`swiftpm-testing-helper`) was alive afterwards with
+parent 1 and its own process group (`pid=72358 ppid=72343 pgid=72358`
+when it started under `swift test` 72343; after the gate `72358 1 72358`).
+Starting position 4 is right: `swift test` starts the helper in a process
+group of its own, and `gtimeout` signals its own group only. The survivor
+was killed by pid.
+
+**C, the thin test.** Instrumented with prints in
+`Tests/KajoVMTests/Workers/RandomPrograms.swift`: every slowedMarker seed's
+stalls with its engine and time, and each test's start and take. The first
+exploration (`part1/C/explore-1.txt`, plain, both tests side by side as in
+the random shard, 10 seeds each) found the cause, which is neither of the
+brief's readings: `randomScavenges` is one tally keyed by the
+configuration's name, shared by `randomProgramsAgreeWithTheirModel` and
+`randomProgramsAgreeWithTheirModelNatively`, which Swift Testing runs side
+by side. The interpreted test's take read 83 (its own 52 and the native's
+first five seeds' 31) and the native's take 19. Whichever ends first empties
+the key and the other sums only its seeds after that; the native fails when
+its seeds after the interpreted take stalled 0 times. Alone (the known
+faults' count) nothing takes from it. Starting position 5 is wrong: nothing
+has to be driven; the seeds stall.
+
+Counted under three rules, each written and copied before its runs
+(`part1/C/rule.txt` 17:56:58, `rule-2.txt` 18:16:55, `rule-3.txt`): native
+seeds 81 to 84 stall 3, 0, 0, 0 (`explore-native100.txt`), and the
+interpreted twin's seed count places its take inside the native's run.
+
+| condition | start: native fails | head | the native alone on start |
+|---|--:|--:|--:|
+| F: KAJO_SEEDS=3 | 2 of 5 | 1 of 5 | 0 of 3 |
+| F2: KAJO_SEEDS=7 | 0 of 5 | 0 of 5 | 0 of 3 |
+| F3: KAJO_SEEDS=5 | 3 of 5 | 4 of 5 | 0 of 3 |
+
+No condition reached the rules' "forced" (4 of 5 on start); rule 3 said no
+fourth would be tried. The race is shown by the prints:
+`part1/C/head/run-5.txt` (native seed 81 added 3, the interpreted take read
+8 nine milliseconds later, the native take 0) and `f2-head/run-1.txt` (the
+other direction: the native take read 19, the interpreted take 2). Under F2
+the interpreted test is the one at risk, which is why it was never seen to
+fail: its later seeds stall.

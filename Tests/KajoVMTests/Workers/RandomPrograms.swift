@@ -676,6 +676,9 @@ func runRandom(_ p: RandomProgram, _ config: RandomConfig, native: Bool = false)
         // Stalls started (asserted over the configuration's seeds, not per
         // seed: a small program may not stall), none unjustified.
         randomScavenges.add(config, rt.vm.stallLog?.all.count ?? 0)
+        // Gate reliability, part 1 (fault C): each seed's stalls, which
+        // engine, when (ms of this process), beside each take below.
+        print("stall-diag random slowedMarker stalls native=\(native) seed=\(p.seed) stalls=\(rt.vm.stallLog?.all.count ?? 0) at=\(now() / 1_000_000)")
         #expect(rt.vm.markingCounters.unjustifiedFallbacks == 0 && rt.vm.markingCounters.missed == 0,
                 "seed \(p.seed): \(fallbackSummary(rt.vm.fallbackLog))")
     case .youngBarrierAlwaysOn:
@@ -712,6 +715,7 @@ let randomSeedBase = UInt64(ProcessInfo.processInfo.environment["KAJO_SEED_BASE"
 func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
     // KAJO_RANDOM_ONLY=<configuration> runs one configuration (debugging).
     if let only = ProcessInfo.processInfo.environment["KAJO_RANDOM_ONLY"], only != config.rawValue { return }
+    if config == .slowedMarker { print("stall-diag random slowedMarker start native=false at=\(now() / 1_000_000)") }
     var failed: [UInt64] = []
     for s in 0..<UInt64(randomSeedCount(config)) {
         let p = randomProgram(randomSeedBase &+ s)
@@ -729,7 +733,9 @@ func randomProgramsAgreeWithTheirModel(_ config: RandomConfig) throws {
         .youngBarrierAlwaysOn, .slowedMarker].contains(config) {
         // Small programs: not every seed scavenges (or completes a marking
         // cycle, or moves an object), the configuration must.
-        #expect(randomScavenges.take(config) > 0)
+        let taken = randomScavenges.take(config)
+        if config == .slowedMarker { print("stall-diag random slowedMarker take native=false value=\(taken) at=\(now() / 1_000_000)") }
+        #expect(taken > 0)
     }
     #expect(failed.isEmpty, "failing seeds: \(failed)")
 }
@@ -757,7 +763,8 @@ func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
     // per configuration (KAJO_NATIVE_SEEDS overrides).
     let n = Int(ProcessInfo.processInfo.environment["KAJO_NATIVE_SEEDS"] ?? "") ?? min(randomSeedCount(config), 100)
     _ = randomNative.take(config)
-    _ = randomScavenges.take(config)
+    let before = randomScavenges.take(config)
+    if config == .slowedMarker { print("stall-diag random slowedMarker start native=true value=\(before) at=\(now() / 1_000_000)") }
     for s in 0..<UInt64(n) {
         let p = randomProgram(randomSeedBase &+ s)
         let v = try runRandom(p, config, native: true)
@@ -769,7 +776,11 @@ func randomProgramsAgreeWithTheirModelNatively(_ config: RandomConfig) throws {
     }
     let c = randomNative.take(config)
     // Allocation stalls: the slowed marker's stalls over the seeds, natively too.
-    if config == .slowedMarker { #expect(randomScavenges.take(config) > 0) }
+    if config == .slowedMarker {
+        let taken = randomScavenges.take(config)
+        print("stall-diag random slowedMarker take native=true value=\(taken) at=\(now() / 1_000_000)")
+        #expect(taken > 0)
+    }
     print("random programs \(config) native: \(n) seeds from \(randomSeedBase), failing \(failed), \(c.named.map { "\($0.name)=\($0.value)" }.joined(separator: " "))")
     #expect(c.nativeSends > 0 && c.nativeReturns > 0)
     #expect(failed.isEmpty, "failing seeds: \(failed)")

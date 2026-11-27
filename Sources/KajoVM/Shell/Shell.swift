@@ -461,7 +461,7 @@ public final class ShellVM: @unchecked Sendable {
         closed.store(true, ordering: .relaxed)
         if started {
             vm.terminateAll()
-            vm.waitUntilAllTerminated()
+            vm.waitUntilAllTerminatedReporting(quietNs: 5_000_000_000)
             vm.shutdown()
         }
         afterShutdownForTests?()
