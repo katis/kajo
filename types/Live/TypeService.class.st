@@ -16,7 +16,9 @@ Class {
 		'events',
 		'lastChange',
 		'lastRechecked',
-		'lastPassUs'
+		'lastPassUs',
+		'errors',
+		'lastError'
 	]
 }
 
@@ -34,6 +36,12 @@ TypeService class >> diagnosticsAt: aKey [
 ]
 
 { #category : #accessing }
+TypeService class >> errors [
+	"How many rechecks ended in an error (the known faults, item 4): each is counted and its text kept (lastError), and the service's Process lives on and drains what comes next. The changes of a recheck that failed are not checked again until they change."
+	^ errors ifNil: [0]
+]
+
+{ #category : #accessing }
 TypeService class >> events [
 	"How many diagnostics.changed events the rechecks made (whether or not a session heard them)."
 	^ events ifNil: [0]
@@ -46,8 +54,20 @@ TypeService class >> hasResultFor: aKey [
 ]
 
 { #category : #accessing }
+TypeService class >> isAlive [
+	"The service runs and its Process has not ended."
+	^ process notNil and: [process isTerminated not]
+]
+
+{ #category : #accessing }
 TypeService class >> isRunning [
 	^ process notNil
+]
+
+{ #category : #accessing }
+TypeService class >> lastError [
+	"The text of the last recheck's error, or nil."
+	^ lastError
 ]
 
 { #category : #accessing }
@@ -281,11 +301,19 @@ TypeService class >> emitChanged: keys [
 ]
 
 { #category : #running }
+TypeService class >> noteError: anError [
+	lock critical: [
+		errors := self errors + 1.
+		lastError := [anError messageText] on: Error do: [:e | anError class name]]
+]
+
+{ #category : #running }
 TypeService class >> run [
 	"The service's Process: one drain per wake-up; between them it waits on its Semaphore, untimed."
 	[true] whileTrue: [
 		semaphore wait.
-		self drain]
+		"An error in a recheck is counted and kept, and the Process goes on (the known faults, item 4: in a batch host it ended the Process and later changes queued with nothing to drain them; in a development image it stopped it for the debugger). drain's ensure: block has run by the time the handler answers."
+		[self drain] on: Error do: [:e | self noteError: e. e return: nil]]
 ]
 
 { #category : #running }
@@ -307,6 +335,8 @@ TypeService class >> startCheckingAll: aBoolean [
 	waiters := OrderedCollection new.
 	passes := 0.
 	events := 0.
+	errors := 0.
+	lastError := nil.
 	checker := TypeChecker new.
 	semaphore := Semaphore new.
 	Smalltalk changeListener: self.

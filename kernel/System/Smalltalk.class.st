@@ -12,7 +12,8 @@ Class {
 		'resumes',
 		'registryLock',
 		'classTypes',
-		'changeListener'
+		'changeListener',
+		'retired'
 	]
 }
 
@@ -733,6 +734,23 @@ Smalltalk class >> replaceSources: anAssociationList of: aBehavior [
 ]
 
 { #category : #sources }
+Smalltalk class >> retireSourceOf: aCompiledMethod [
+	"A replaced or removed method leaves the sources table, and its source is kept beside it for as long as something holds the method (the known faults, item 3, docs/modules/known-faults.md: a reader that had found the method before it went, a debugger's frame or a tools request, read nil). A WeakIdentityTable: a record whose method was collected is dropped when another method retires. Answers the source, or nil."
+	^ self registry: [ | src |
+		src := sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d removeKey: aCompiledMethod ifAbsent: [nil]]].
+		src isNil ifFalse: [
+			retired isNil ifTrue: [retired := WeakIdentityTable new].
+			retired at: aCompiledMethod put: src].
+		src]
+]
+
+{ #category : #sources }
+Smalltalk class >> retiredSourceCount [
+	"How many retired methods still have their source kept: those something holds."
+	^ self registry: [retired isNil ifTrue: [0] ifFalse: [retired liveCount]]
+]
+
+{ #category : #sources }
 Smalltalk class >> signatureOf: aSelector in: aBehavior [
 	"aBehavior's signature without a method of aSelector (Types 2): {the pattern's text. its category. its package or nil}, or nil."
 	^ (self typesOf: aBehavior theNonMetaClass) ifNotNil: [:t | t signatureAt: aSelector meta: aBehavior isMeta]
@@ -740,8 +758,11 @@ Smalltalk class >> signatureOf: aSelector in: aBehavior [
 
 { #category : #sources }
 Smalltalk class >> sourceOf: aCompiledMethod [
-	^ self registry: [
-		sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d at: aCompiledMethod ifAbsent: [nil]]]]
+	"The source of a method, installed or retired (a replaced or removed method something still holds: retireSourceOf:)."
+	^ self registry: [ | src |
+		src := sources isNil ifFalse: [(sources at: aCompiledMethod methodClass ifAbsent: [nil]) ifNotNil: [:d | d at: aCompiledMethod ifAbsent: [nil]]].
+		(src isNil and: [retired notNil]) ifTrue: [src := retired at: aCompiledMethod ifAbsent: [nil]].
+		src]
 ]
 
 { #category : #sources }

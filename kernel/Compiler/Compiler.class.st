@@ -11,6 +11,9 @@ Class {
 		'doit',
 		'pendingBindings',
 		'scopes'
+	],
+	#classInstVars : [
+		'frameVariables'
 	]
 }
 
@@ -766,7 +769,7 @@ Compiler class >> evaluate: aString in: aContext [
 ]
 
 { #category : #debugging }
-Compiler class >> frameVariablesOf: aCompiledMethod [
+Compiler class >> findFrameVariablesOf: aCompiledMethod [
 	"The named variables of a frame of aCompiledMethod (a method or a block method), each {name. frame index (tempAt:). index in the temp vector held there, or nil}, from compiling its home method's source again with the scopes kept (module 9b). Empty when there is no source."
 	| home src c code target |
 	home := aCompiledMethod homeMethod.
@@ -779,6 +782,19 @@ Compiler class >> frameVariablesOf: aCompiledMethod [
 	target := self code: code matching: home find: aCompiledMethod.
 	target isNil ifTrue: [^ #()].
 	^ ((c scopes at: target ifAbsent: [^ #()]) frameVariables)
+]
+
+{ #category : #debugging }
+Compiler class >> frameVariablesOf: aCompiledMethod [
+	"The named variables of a frame of aCompiledMethod (findFrameVariablesOf:), found once per method for as long as the method lives (the known faults, item 6, docs/modules/known-faults.md: every new stop compiled each frame's method again, 26.6 of a 26.7 s frames reply over 33 methods under the sanitizer, 0.96 of 1.0 s in a debug build). A method's variables never change: a change makes a new method. Found outside Smalltalk registry: and kept under it (two Processes may find the same method's at once; both answers are the same), in a WeakIdentityTable of at most 1024 methods."
+	| found vars |
+	found := Smalltalk registry: [frameVariables isNil ifFalse: [frameVariables at: aCompiledMethod ifAbsent: [nil]]].
+	found isNil ifFalse: [^ found].
+	vars := self findFrameVariablesOf: aCompiledMethod.
+	Smalltalk registry: [
+		frameVariables isNil ifTrue: [frameVariables := WeakIdentityTable new limit: 1024; yourself].
+		frameVariables at: aCompiledMethod put: vars].
+	^ vars
 ]
 
 { #category : #debugging }

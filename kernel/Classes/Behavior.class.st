@@ -122,7 +122,8 @@ Behavior >> compile: aString classified: aCategoryOrNil [
 		oldCategory isNil
 			ifTrue: [Smalltalk forgetCategoryOf: method selector in: self]
 			ifFalse: [Smalltalk noteCategory: oldCategory of: method selector in: self]].
-	old ifNotNil: [:m | Smalltalk forgetSourceOf: m].
+	"The replaced method's source is retired, not forgotten: a reader that holds the old method still reads it (the known faults, item 3)."
+	old ifNotNil: [:m | Smalltalk retireSourceOf: m].
 	Smalltalk forgetSignatureOf: method selector in: self.
 	DevProtocol noteChangeOf: method selector in: self.
 	Smalltalk noteChange: #method of: method selector in: self.
@@ -252,13 +253,14 @@ Behavior >> >> aSymbol [
 
 { #category : #methods }
 Behavior >> addSelector: aSymbol withMethod: aCompiledMethod [
-	"Install a method (verified by the VM against this class) and note its pragmas."
+	"Install a method (verified by the VM against this class) and note its pragmas, both under Smalltalk registry:, the lock the pragma index's readers take: a reader never finds the method installed and its pragmas not yet noted (the known faults, item 3)."
 	| old result |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
-	old := self compiledMethodAt: aSymbol ifAbsent: [nil].
-	result := self primAddSelector: aSymbol withMethod: aCompiledMethod.
-	result isString ifTrue: [^ self error: result].
-	Pragma noteRemoved: old; noteInstalled: aCompiledMethod
+	Smalltalk registry: [
+		old := self compiledMethodAt: aSymbol ifAbsent: [nil].
+		result := self primAddSelector: aSymbol withMethod: aCompiledMethod.
+		result isString ifFalse: [Pragma noteRemoved: old; noteInstalled: aCompiledMethod]].
+	result isString ifTrue: [^ self error: result]
 ]
 
 { #category : #methods }
@@ -322,11 +324,15 @@ Behavior >> primRemoveSelector: aSymbol [
 Behavior >> removeSelector: aSymbol [
 	| old result |
 	Smalltalk isReleaseImage ifTrue: [^ InstallForbidden new behavior: self selector: aSymbol; signal].
-	old := self compiledMethodAt: aSymbol ifAbsent: [^ nil].
-	result := self primRemoveSelector: aSymbol.
+	"The removal and the pragma index under the registry as the install's are; the source is retired, not forgotten: a reader that holds the method still reads it (the known faults, item 3)."
+	Smalltalk registry: [
+		old := self compiledMethodAt: aSymbol ifAbsent: [nil].
+		old isNil ifFalse: [
+			result := self primRemoveSelector: aSymbol.
+			result isString ifFalse: [Pragma noteRemoved: old]]].
+	old isNil ifTrue: [^ nil].
 	result isString ifTrue: [^ self error: result].
-	Pragma noteRemoved: old.
-	Smalltalk forgetSourceOf: old.
+	Smalltalk retireSourceOf: old.
 	Smalltalk forgetCategoryOf: aSymbol in: self.
 	Smalltalk notePackage: nil of: aSymbol in: self.
 	Smalltalk noteChange: #methodRemoved of: aSymbol in: self.

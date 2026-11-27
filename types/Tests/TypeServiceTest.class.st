@@ -56,6 +56,25 @@ TypeServiceTest >> tearDown [
 ]
 
 { #category : #tests }
+TypeServiceTest >> testAnErrorInARecheckIsCountedAndTheServiceGoesOn [
+	"The known faults, item 4 (docs/modules/known-faults.md): a change whose recheck raises an error (it names no behavior) is counted with its text, and the service's Process lives on and checks the next change. On 7ba9643, in a batch host, the error ended the Process and the next change was never checked, 3 of 3 (the module's part 1; this test needs the accessors the fix added)."
+	| passes |
+	TypeService startCheckingAll: false.
+	self waitIdle.
+	TypeService noteChange: #method of: #knownFaultsNothing in: 42.
+	self waitIdle.
+	self assert: TypeService errors equals: 1.
+	self assert: TypeService lastError notNil.
+	self assert: TypeService isAlive.
+	passes := TypeService passes.
+	Smalltalk readTonel: self probeText.
+	self waitIdle.
+	self assert: TypeService isAlive.
+	self assert: TypeService passes equals: passes + 1.
+	self assert: TypeService errors equals: 1
+]
+
+{ #category : #tests }
 TypeServiceTest >> testIdleHoldsNoTimerAndWorkAfterIdlingIsChecked [
 	| delays passes |
 	delays := Delay pendingCount.

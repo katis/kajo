@@ -351,6 +351,29 @@ private func runningMethod(_ m: Machine, skipping: Oop = .none, _ touched: (Oop)
     return nil
 }
 
+/// The method of the frame whose words hold stack index `index` (the
+/// known faults, item 5): the innermost frame whose receiver slot is at or
+/// below it, walked from (`fp`, `hdr`) through the caller links. nil when
+/// the links do not lead there (a Process on its first slice has no frame
+/// set up yet: its saved pc is -1) or a link is not a stack index.
+private func frameHolding(_ m: Machine, _ base: UnsafeMutablePointer<UInt64>, top: Int, fp: Int, hdr: Int, index: Int) -> Oop? {
+    var fp = fp, hdr = hdr
+    for _ in 0..<100_000 {
+        guard fp >= 0, hdr >= fp, hdr + Frame.callerHdr <= top else { return nil }
+        if fp <= index {
+            let meth = unsafe Oop(raw: base[hdr + Frame.method])
+            return m.isMethodObject(meth) ? meth : nil
+        }
+        let cfp = unsafe Oop(raw: base[hdr + Frame.callerFP]), chdr = unsafe Oop(raw: base[hdr + Frame.callerHdr])
+        guard cfp.isSmallInteger, chdr.isSmallInteger, cfp.raw != Frame.hostFP else { return nil }
+        let nfp = cfp.smallIntegerValue.asInt, nhdr = chdr.smallIntegerValue.asInt
+        guard nfp < fp else { return nil }
+        fp = nfp
+        hdr = nhdr
+    }
+    return nil
+}
+
 // MARK: - 146: redefine (reshape, recompile, pool)
 
 /// One behavior whose instances change shape: its index, its object, its
@@ -719,10 +742,19 @@ private func removeClass(_ m: Machine, _ cls: Oop, obsoleteName: Oop, roots: () 
             let r = unsafe records(vm, i)
             let p = unsafe r.pointee.process
             guard p != .none, p != me, let base = unsafe r.pointee.base else { continue }
-            let top = unsafe r.pointee.runningOn >= 0 ? vm.worker(r.pointee.runningOn).pointee.interp.regs.sp
+            let running = unsafe r.pointee.runningOn >= 0
+            let top = unsafe running ? vm.worker(r.pointee.runningOn).pointee.interp.regs.sp
                 : om.load(p, ProcessLayout.sp).smallIntegerValue.asInt
-            if top >= 0, (0...top).contains(where: { unsafe base[$0] == cls.raw }) {
-                return .failure(Refusal("another Process holds \(name) on its stack: try again when it has let go"))
+            if top >= 0, let k = (0...top).first(where: { unsafe base[$0] == cls.raw }) {
+                // The known faults, item 5: the refusal names the Process and
+                // the method of the frame whose words hold the class.
+                let id = om.load(p, ProcessLayout.id)
+                let fp = unsafe running ? vm.worker(r.pointee.runningOn).pointee.interp.regs.fp
+                    : om.load(p, ProcessLayout.fp).smallIntegerValue.asInt
+                let hdr = unsafe running ? vm.worker(r.pointee.runningOn).pointee.interp.regs.hdr
+                    : om.load(p, ProcessLayout.hdr).smallIntegerValue.asInt
+                let frame = unsafe frameHolding(m, base, top: top, fp: fp, hdr: hdr, index: k).map { " (\(m.methodLabel($0)))" } ?? ""
+                return .failure(Refusal("the Process \(id.isSmallInteger ? "\(id.smallIntegerValue)" : "?") holds \(name) on its stack\(frame): try again when it has let go"))
             }
         }
     }
