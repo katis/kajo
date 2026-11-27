@@ -3,6 +3,15 @@ import Testing
 @testable import KajoCompiler
 @testable import KajoVM
 
+/// Gate reliability (docs/modules/gate-reliability.md): a close that gave up
+/// on a live Process fails the test that closed. Installed by the helpers
+/// that make shells (`openShell`, `LocalTools`).
+let closeCheck: Void = {
+    ShellVM.liveAtCloseHook.withLock { hook in
+        hook = { r in Issue.record("a close gave up with \(r.liveProcesses.count) Processes alive: \(r)") }
+    }
+}()
+
 /// A class file in Tonel from a header and methods (`Foo >> bar [ ... ]`).
 func tonel(_ name: String, _ superclass: String? = "Object", ivars: [String] = [], classIvars: [String] = [], classVars: [String] = [],
            type: String? = nil, _ methods: String) -> (file: String, text: [UInt8]) {

@@ -117,6 +117,7 @@ func openShell(_ shell: TestShell, image: [UInt8] = shellImage, workers: Int = 2
     o.heapMiB = 256
     o.workers = workers
     let vm = try ShellVM(image: image, options: o, callbacks: shell.callbacks)
+    _ = closeCheck
     vm.start()
     return vm
 }

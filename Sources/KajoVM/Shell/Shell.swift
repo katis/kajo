@@ -277,16 +277,30 @@ public struct ShellCloseReport: Sendable, Equatable, CustomStringConvertible {
     /// External signals queued after the workers' last drain (an event's,
     /// a request's, a Delay's), freed undelivered.
     public let undeliveredSignals: Int
+    /// Gate reliability (docs/modules/gate-reliability.md): the Processes
+    /// still alive when the close's wait gave up, after `ShellVM`'s quiet
+    /// bound with no Process ending. The VM was shut down and destroyed
+    /// with them; any above none is a fault to fix (a test that closes
+    /// fails on it).
+    public let liveProcesses: [ShellLiveProcess]
+    /// Processes made after the close's first termination round (a fork
+    /// by a Process still running then) and terminated by a later round.
+    public let lateProcesses: Int
 
-    public init(destroyed: Bool, pendingRoots: Int = 0, timersPending: Int = 0, undeliveredSignals: Int = 0) {
+    public init(destroyed: Bool, pendingRoots: Int = 0, timersPending: Int = 0, undeliveredSignals: Int = 0,
+                liveProcesses: [ShellLiveProcess] = [], lateProcesses: Int = 0) {
         self.destroyed = destroyed
         self.pendingRoots = pendingRoots
         self.timersPending = timersPending
         self.undeliveredSignals = undeliveredSignals
+        self.liveProcesses = liveProcesses
+        self.lateProcesses = lateProcesses
     }
 
     public var description: String {
         "destroyed=\(destroyed) pendingRoots=\(pendingRoots) timersPending=\(timersPending) undeliveredSignals=\(undeliveredSignals)"
+            + " lateProcesses=\(lateProcesses) liveProcesses=\(liveProcesses.count)"
+            + liveProcesses.map { "; \($0)" }.joined()
     }
 }
 
@@ -453,15 +467,45 @@ public final class ShellVM: @unchecked Sendable {
     /// has not fallen. Set by the reproducing test only under
     /// `KAJO_BROKEN_SHELL_CLOSE=1`.
     var brokenOldWaitSeconds: Double? = nil
+    /// Gate reliability: the close's quiet bound, seconds with no Process
+    /// ending after which it gives up waiting, names the Processes still
+    /// alive and destroys anyway. Tests make it shorter.
+    var closeQuietSeconds: Double = 5
+    /// Gate reliability: the broken variant, the untimed wait of the
+    /// starting code put back (`KAJO_BROKEN_CLOSE_WAIT=1`, by hand only).
+    var brokenUntimedWait = false
+    /// Tests: sees every report that names a live Process (a test bundle
+    /// installs one that records an issue), on the closing thread.
+    static let liveAtCloseHook = Mutex<(@Sendable (ShellCloseReport) -> Void)?>(nil)
+    /// Tests: this shell's close is meant to give up (the bound's own
+    /// test); the hook is not called for it.
+    var expectsLiveAtClose = false
 
     private func closeOnce() -> ShellCloseReport {
         closeLock.lock()
         defer { closeLock.unlock() }
         if closed.load(ordering: .relaxed) { return ShellCloseReport(destroyed: false) }
         closed.store(true, ordering: .relaxed)
+        var live: [ShellLiveProcess] = [], late = 0
         if started {
-            vm.terminateAll()
-            vm.waitUntilAllTerminatedReporting(quietNs: 5_000_000_000)
+            if brokenUntimedWait {
+                vm.terminateAll()
+                vm.waitUntilAllTerminated()
+            } else {
+                // Gate reliability: rounds of termination until none is
+                // alive, or the quiet bound; then destroyed anyway, and said.
+                let w = vm.terminateAllAndWait(quietNs: UInt64(closeQuietSeconds * 1e9))
+                live = w.live
+                late = w.late
+                if ProcessInfo.processInfo.environment["KAJO_CLOSE_TRACE"] != nil {
+                    FileHandle.standardError.write(Data("kajo-close-trace waited=\(Double(w.waitedNs / 100_000) / 10)ms late=\(late) live=\(live.count)\n".utf8))
+                }
+                if !live.isEmpty {
+                    let text = "kajo: close gave up after \(closeQuietSeconds) s with no Process ending; \(live.count) alive, destroyed anyway\n"
+                        + live.map { "kajo:   \($0)\n" }.joined()
+                    FileHandle.standardError.write(Data(text.utf8))
+                }
+            }
             vm.shutdown()
         }
         afterShutdownForTests?()
@@ -478,8 +522,10 @@ public final class ShellVM: @unchecked Sendable {
         let pending = max(0, vm.pendingRootCount - fin)
         let end = vm.destroy()
         image.destroy()
-        return ShellCloseReport(destroyed: true, pendingRoots: pending, timersPending: end.timersPending,
-                                undeliveredSignals: end.undeliveredSignals)
+        let report = ShellCloseReport(destroyed: true, pendingRoots: pending, timersPending: end.timersPending,
+                                      undeliveredSignals: end.undeliveredSignals, liveProcesses: live, lateProcesses: late)
+        if !live.isEmpty, !expectsLiveAtClose, let hook = ShellVM.liveAtCloseHook.withLock({ $0 }) { hook(report) }
+        return report
     }
 
     /// The uptime clock events are stamped on, in nanoseconds.

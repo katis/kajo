@@ -258,8 +258,9 @@ public enum Headless {
         vm.waitUntilTerminated(p)
         let error = vm.error(of: p)
         let answer = vm.result(of: p)
-        vm.terminateAll()
-        vm.waitUntilAllTerminated()
+        // Gate reliability: rounds of termination with a quiet bound, not
+        // one snapshot and an untimed wait (docs/modules/gate-reliability.md).
+        vm.endAllProcesses("kajo test")
         // gc events: the pauses, stamped with their start on the wall clock.
         let offsetNs = Int64(clock_gettime_nsec_np(CLOCK_REALTIME)) - Int64(nanoseconds())
         var scavenges = 0, full = 0, other = 0
@@ -532,8 +533,7 @@ extension Headless {
         }
         let ms = Double(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) / 1e6
         let waiting = vm.liveProcessCount
-        vm.terminateAll()
-        vm.waitUntilAllTerminated()
+        vm.endAllProcesses("the resumed image's run")
         vm.shutdown()
         var sum: Int64 = 0, ended = 0
         var checksum: Result<Int64, Failure> = .success(0)

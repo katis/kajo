@@ -317,3 +317,63 @@ fourth would be tried. The race is shown by the prints:
 other direction: the native take read 19, the interpreted take 2). Under F2
 the interpreted test is the one at risk, which is why it was never seen to
 fail: its later seeds stall.
+
+The loaded sanitizer run of part 1 (`part1/tsan-load/`, the gate's own
+`tsan-load` through `gl_gate` on 22fb102 with the forcing tests in the tree
+and the sampling watcher, `KAJO_CLOSE_TRACE=1`): rc=1 in 2620 s, 0
+sanitizer reports; the forcing test of the forking waiters hung its close
+(the instrument named 20 waiters forked after the snapshot), the watcher
+sampled only the VM and compiler shards' long runs, and the tools shard did
+not hang. 89 closes waited p50 1.0 ms, p99 143 ms, at most 253 ms: a quiet
+bound of 5 s needs no sanitizer value of its own. A second failure in it is
+fault C's other direction: the interpreted
+`randomProgramsAgreeWithTheirModel` with `exhaustedReserveOffload` read
+"taken > 0" false. The native test's first `take` of a configuration
+empties the interpreted test's sum of the same configuration while it runs;
+a reading (no print for that configuration), the same shared key.
+
+### Part 2: A, the close (its own commit)
+
+`ShellVM.close` no longer calls `VM.terminateAll` and the untimed
+`waitUntilAllTerminated`. `VM.terminateAllAndWait(quietNs:)`
+(`Shell/CloseWait.swift`, the closing thread only) terminates in rounds:
+each round takes the live records and terminates every one in one entry
+into the VM (`terminateLive`, so no collection frees a Process between the
+snapshot and its termination), then waits up to 20 ms on the done condition.
+A Process made after a round is terminated by the next. It ends when none
+is alive, or when for the quiet bound (`ShellVM.closeQuietSeconds`, 5 s) no
+Process has ended and the live count has not changed; then it answers the
+Processes still alive, the shell prints them on stderr ("kajo: close gave up
+after 5.0 s with no Process ending; N alive, destroyed anyway"), shuts down
+and destroys anyway. `ShellCloseReport` gained `liveProcesses` (a
+`ShellLiveProcess` each: id, state, priority, main affinity, worker,
+termination requested, what it waits on, top frames) and `lateProcesses`
+(made after the first round, terminated by a later one). In the test bundle
+a report naming a live Process records an issue for the test that closed
+(`ShellVM.liveAtCloseHook`, installed by `openShell` and `LocalTools`;
+`expectsLiveAtClose` exempts the bound's own test). No VM thread gained a
+timed wait; nothing under the core directories changed.
+
+The same one-snapshot-and-an-untimed-wait was at two ends of a headless run
+(`kajo test` after its entry point answered, and a resumed image's run in
+`Headless.swift`); both now call `VM.endAllProcesses`, the same rounds and
+bound, which says on stderr what it gave up on.
+
+Not bounded: `VM.shutdown` joins the worker threads, and a worker held in a
+host callback (primitive 164's client op, a blocking region) is joined when
+the callback returns. The bound's test shows it: the close gave up at 0.5 s
+and returned at 3.0 s, when its callback let go.
+
+Tests (`Tests/KajoCompilerTests/CloseWaitTests.swift`): the five shapes now
+assert the close returns, destroys and leaves no Process alive; plain, 14 of
+14 with `ShellCloseTests` and `ClosedShellCallsTests`
+(`work/after/A-tests-1.txt`): "forking waiters: 0.028 s ... lateProcesses=4
+liveProcesses=0", and the bound's test
+`aCloseWithAProcessThatCannotEndGivesUpAndSaysWhich`: "close-bound: 3.014 s
+destroyed=true ... liveProcesses=1; process 1 running priority=1 runningOn=1
+terminateRequested frames=[]". The broken variant (`KAJO_BROKEN_CLOSE_WAIT=1`,
+`ShellVM.brokenUntimedWait`, the starting code's wait, by hand,
+`broken/A-untimed-wait.txt`): "forking waiters: close did not return in 120
+s; 32 live: process 164 waiting priority=1 runningOn=-1 waitingOn=Semaphore
+frames=[UndefinedObject>>[] < BlockClosure>>forkedValue]; ...". Starting
+position 3 is built with the cause removed (rounds) and the bound as the net.

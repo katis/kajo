@@ -225,6 +225,7 @@ final class LocalTools: @unchecked Sendable, CustomReflectable, CustomStringConv
         o.heapMiB = 512
         o.workers = 2
         vm = try ShellVM(image: image, options: o, callbacks: c)
+        _ = closeCheck
         let v = vm
         host.setSink { e in
             switch e.kind {
